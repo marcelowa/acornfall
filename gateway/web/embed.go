@@ -4,4 +4,5 @@ package web
 import "embed"
 
 //go:embed index.html app.js style.css markdown.js
+//go:embed vendor
 var Files embed.FS

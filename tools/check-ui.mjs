@@ -141,26 +141,87 @@ try {
 	const clipped = toolHeights.filter((item) => item.output > 8 && item.card < item.output);
 	check("tool cards are at least as tall as their output", clipped.length === 0, JSON.stringify(clipped));
 
-	// 5. Formatted replies toggle, and formatting is real markup.
+	// 5. Markdown rendering, exercised through the real sanitizer in a real
+	// browser. jsdom would not do: DOMPurify leans on the host parser, and the host
+	// parser is where mXSS lives.
+	const markdown = await page.evaluate(async () => {
+		const { renderMarkdown } = await import("/markdown.js");
+		return {
+			script: renderMarkdown("Look: <script>alert(1)<\/script>"),
+			handler: renderMarkdown('<img src=x onerror=alert(1)>'),
+			jsLink: renderMarkdown("[click](javascript:alert(1))"),
+			image: renderMarkdown("![tracker](https://example.com/pixel.png)"),
+			table: renderMarkdown("| a | b |\n| --- | ---: |\n| 1 | 2 |"),
+			code: renderMarkdown("```js\nconst x = 1;\n```"),
+			plainCode: renderMarkdown("```\nplain\n```"),
+			strong: renderMarkdown("**bold**"),
+			list: renderMarkdown("- one\n- two"),
+			link: renderMarkdown("[docs](https://example.com)"),
+			break: renderMarkdown("one\ntwo"),
+		};
+	});
+	check("markdown renders emphasis", markdown.strong.includes("<strong>"), markdown.strong);
+	check("markdown renders lists", markdown.list.includes("<li>"), markdown.list);
+	check("markdown renders tables", markdown.table.includes("<table>"), markdown.table);
+	check("single newlines stay line breaks", markdown.break.includes("<br"), markdown.break);
+	check("links are hardened", markdown.link.includes('rel="noreferrer'), markdown.link);
+
+	check("syntax highlighting runs", markdown.code.includes("hljs-"), markdown.code.slice(0, 120));
+	check("an unknown language still renders as code", markdown.plainCode.includes("<pre>"), markdown.plainCode);
+
+	check("raw script tags do not survive", !markdown.script.includes("<script"), markdown.script);
+	check("the script text is still visible", markdown.script.includes("&lt;script&gt;"), markdown.script);
+	// Raw HTML is escaped rather than sanitised, so the tag cannot become an element
+	// and its handler never exists as an attribute. The words remain visible, which
+	// is the point: a reply cannot quietly inject markup.
+	check("raw html does not become an element", !markdown.handler.includes("<img"), markdown.handler);
+	check("its text is still shown", markdown.handler.includes("&lt;img"), markdown.handler);
+	check("javascript: links lose their href", !markdown.jsLink.includes("javascript:"), markdown.jsLink);
+	check("images are refused", !markdown.image.includes("<img"), markdown.image);
+
+	// 6. The format toggle is a button, and it changes what is rendered.
 	const before = await page.evaluate(() => {
 		const reply = document.querySelector("#transcript .turn.assistant");
-		return reply === null ? null : { html: reply.innerHTML, markdown: reply.classList.contains("markdown") };
+		return reply === null
+			? null
+			: {
+					html: reply.innerHTML,
+					label: document.querySelector("#toggle-format").textContent,
+					pressed: document.querySelector("#toggle-format").getAttribute("aria-pressed"),
+					source: reply.querySelector("[data-copy]")?.dataset.copy,
+				};
 	});
 	if (before === null) {
 		check("a reply exists to format", false, "no assistant turn in the transcript");
 	} else {
-		check("replies render as markdown by default", before.markdown, "no markdown class");
-		await page.click("#formatted");
-		const plain = await page.evaluate(() => {
-			const reply = document.querySelector("#transcript .turn.assistant");
-			return { html: reply.innerHTML, markdown: reply.classList.contains("markdown") };
-		});
-		check("unchecking shows unformatted text", !plain.markdown, "still markdown");
-		check("the two modes differ", plain.html !== before.html);
-		await page.click("#formatted");
+		check("replies are formatted by default", before.pressed === "true" && before.label === "Formatted", before.label);
+		await page.click("#toggle-format");
+		const plain = await page.evaluate(() => ({
+			html: document.querySelector("#transcript .turn.assistant").innerHTML,
+			label: document.querySelector("#toggle-format").textContent,
+		}));
+		check("the toggle switches to unformatted", plain.label === "Unformatted", plain.label);
+		check("the two modes render differently", plain.html !== before.html);
+		await page.click("#toggle-format");
 		const restored = await page.evaluate(() => document.querySelector("#transcript .turn.assistant").innerHTML);
-		check("re-checking restores formatted output", restored === before.html);
+		check("switching back restores formatted output", restored === before.html);
 	}
+
+	// 7. Copy puts the source on the clipboard, not the rendered text.
+	const copyResult = await page.evaluate(async () => {
+		const button = document.querySelector("#transcript .turn.assistant [data-copy]");
+		if (button === null) return { present: false };
+		button.click();
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		return { present: true, text: button.textContent, payload: decodeURIComponent(button.dataset.copy) };
+	});
+	check("assistant replies offer a copy control", copyResult.present);
+	check("copying reports success", copyResult.text === "✓", `button shows ${copyResult.text}`);
+	check(
+		"the copied payload looks like source",
+		!copyResult.payload.includes("<p>") && !copyResult.payload.includes("<div"),
+		copyResult.payload.slice(0, 80),
+	);
 
 	// 6. The settings sheet holds providers and defaults, and closes.
 	await page.click("#connect");

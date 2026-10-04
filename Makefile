@@ -12,7 +12,7 @@ URL ?= http://$(ADDR)
 INSECURE ?= 1
 OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 
-.PHONY: help deps build typecheck check ui run dev fmt clean
+.PHONY: help deps build typecheck check ui vendor run dev fmt clean
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -28,14 +28,11 @@ typecheck: ## typecheck the worker and check the client against its markup
 	cd worker && bun run typecheck
 	node scripts/check-client.mjs
 	node scripts/check-context.mjs
-	node scripts/check-markdown.mjs
-	node scripts/check-markdown.mjs
 	cd gateway && go test ./...
 
 check: ## verify the client, the worker, and the resolution rules
 	node scripts/check-client.mjs
 	node scripts/check-context.mjs
-	node scripts/check-markdown.mjs
 	cd worker && bun run typecheck
 	cd gateway && go test ./...
 
@@ -47,6 +44,9 @@ dev: build ## run with the scripted dev provider (no api key needed)
 
 ui: ## check the client in a real browser (needs a running gateway)
 	cd tools && bun run check-ui.mjs $(URL)
+
+vendor: ## regenerate the vendored browser bundles (marked, DOMPurify, highlight.js)
+	cd tools && bun run vendor.mjs
 
 fmt: ## format Go sources
 	cd gateway && gofmt -w .

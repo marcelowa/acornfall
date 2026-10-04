@@ -947,22 +947,38 @@ button.small {
 	border-radius: 5px;
 }
 
-.markdown pre.code {
+.markdown .code-block {
+	position: relative;
 	margin: 0 0 8px;
-	padding: 10px 12px;
+}
+
+.markdown .code-block pre {
+	margin: 0;
+	padding: 12px;
 	border-radius: var(--radius-sm);
 	background: var(--neutral-900);
-	color: var(--neutral-100);
 	overflow: auto;
 	max-height: 420px;
 }
 
-.markdown pre.code code {
+.markdown .code-block code {
 	background: none;
 	padding: 0;
-	color: inherit;
+	font-family: var(--mono);
 	font-size: 12px;
 	white-space: pre;
+	color: var(--neutral-100);
+}
+
+.markdown .code-lang {
+	position: absolute;
+	top: 6px;
+	right: 8px;
+	font-family: var(--mono);
+	font-size: 10px;
+	color: var(--neutral-500);
+	text-transform: lowercase;
+	pointer-events: none;
 }
 
 .markdown table {
@@ -1000,8 +1016,63 @@ button.small {
 	color: var(--brand-500);
 }
 
-.composer-modes {
+
+/* The transcript's own header: the conversation name and the format toggle. */
+.transcript-bar {
 	display: flex;
-	gap: 16px;
-	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 20px;
+	border-bottom: 1px solid var(--neutral-200);
+	background: var(--neutral-0);
+	min-height: 37px;
+}
+
+.transcript-bar .subtle {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font);
+	font-size: 12px;
+}
+
+#toggle-format[aria-pressed="true"] {
+	background: var(--brand-50);
+	border-color: var(--brand-100);
+	color: var(--brand-500);
+}
+
+.turn.assistant {
+	padding-right: 34px;
+}
+
+/* Copy controls sit out of the way until the block is hovered. */
+button.icon.copy {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	opacity: 0;
+	transition: opacity 120ms ease;
+	color: var(--neutral-500);
+	font-size: 12px;
+}
+
+.turn:hover button.icon.copy,
+.tool:hover button.icon.copy,
+button.icon.copy.copied {
+	opacity: 1;
+}
+
+button.icon.copy.copied {
+	color: var(--success-400);
+}
+
+.tool {
+	position: relative;
+}
+
+.tool button.icon.copy {
+	top: 6px;
+	right: 6px;
 }

@@ -22,7 +22,8 @@ const els = {
 	composer: el("composer"),
 	input: el("input"),
 	steer: el("steer"),
-	formatted: el("formatted"),
+	toggleFormat: el("toggle-format"),
+	conversationTitle: el("conversation-title"),
 	send: el("send"),
 	abort: el("abort"),
 	connect: el("connect"),
@@ -112,8 +113,40 @@ function toolCard({ name, args, output, status, isError }) {
 			<span class="tool-name">${escapeHtml(name)}</span>
 			<span class="tool-status">${escapeHtml(isError ? "error" : status)}</span>
 		</div>
-		${body ? `<pre>${escapeHtml(body)}</pre>` : ""}
+		${body ? `<pre>${escapeHtml(body)}</pre>${copyButton(body, "Copy output")}` : ""}
 	</div>`;
+}
+
+/** A copy control is added to text a user would plausibly want out of the app. */
+function copyButton(text, label) {
+	return `<button class="icon copy" data-copy="${encodeURIComponent(text)}" type="button" title="${escapeHtml(label)}">⧉</button>`;
+}
+
+/** Clipboard access needs a secure context; the fallback keeps it working over http. */
+async function copyText(button, text) {
+	try {
+		if (navigator.clipboard?.writeText) {
+			await navigator.clipboard.writeText(text);
+		} else {
+			const scratch = document.createElement("textarea");
+			scratch.value = text;
+			scratch.style.position = "fixed";
+			scratch.style.opacity = "0";
+			document.body.appendChild(scratch);
+			scratch.select();
+			document.execCommand("copy");
+			scratch.remove();
+		}
+		button.textContent = "✓";
+		button.classList.add("copied");
+	} catch (error) {
+		button.textContent = "×";
+		setStatus(`copy failed: ${error.message ?? error}`, "offline");
+	}
+	setTimeout(() => {
+		button.textContent = "⧉";
+		button.classList.remove("copied");
+	}, 1200);
 }
 
 // A provider failure is a committed assistant entry with no content and a
@@ -143,9 +176,12 @@ function renderEntry(entry, calls, forkAt) {
 			const text = (entry.model ?? []).map((item) => textOf(item.content)).join("\n").trim();
 			if (!text) return "";
 			// The reply is markdown; the user's own words are left exactly as typed.
-			return formattedReplies
-				? `<div class="turn assistant markdown">${renderMarkdown(text)}</div>`
-				: `<div class="turn assistant">${escapeHtml(text)}</div>`;
+			const rendered = formattedReplies
+				? `<div class="markdown">${renderMarkdown(text)}</div>`
+				: `<div class="plain">${escapeHtml(text)}</div>`;
+			// Copy takes the markdown source, not the rendered text: pasting markup
+			// into a document is more useful than pasting flattened prose.
+			return `<div class="turn assistant">${rendered}${copyButton(text, "Copy reply")}</div>`;
 		}
 		case "pi.tool-result": {
 			const message = (entry.model ?? [])[0] ?? {};
@@ -169,7 +205,17 @@ function renderEntry(entry, calls, forkAt) {
 	}
 }
 
+function renderFormatToggle() {
+	els.toggleFormat.textContent = formattedReplies ? "Formatted" : "Unformatted";
+	els.toggleFormat.title = formattedReplies
+		? "Showing rendered markdown; click for the raw text"
+		: "Showing raw text; click to render markdown";
+	els.toggleFormat.setAttribute("aria-pressed", String(formattedReplies));
+}
+
 function render() {
+	renderFormatToggle();
+	els.conversationTitle.textContent = state?.conversation?.title ?? "";
 	const entries = view?.entries ?? [];
 	const current = live();
 	const liveMessage = current.generation?.message;
@@ -248,6 +294,9 @@ function render() {
 
 	const emptyConnect = document.getElementById("empty-connect");
 	if (emptyConnect !== null) emptyConnect.addEventListener("click", () => openSheet("providers"));
+	for (const button of els.transcript.querySelectorAll("[data-copy]")) {
+		button.addEventListener("click", () => void copyText(button, decodeURIComponent(button.dataset.copy)));
+	}
 	for (const button of els.transcript.querySelectorAll("[data-fork-at]")) {
 		button.addEventListener("click", () =>
 			void forkConversation(button.dataset.forkAt, forkSource.get(button.dataset.forkAt)),
@@ -1167,8 +1216,8 @@ els.input.addEventListener("input", () => {
 	els.input.style.height = `${Math.min(els.input.scrollHeight, 200)}px`;
 });
 
-els.formatted.addEventListener("change", () => {
-	formattedReplies = els.formatted.checked;
+els.toggleFormat.addEventListener("click", () => {
+	formattedReplies = !formattedReplies;
 	writePref(PREFS.formatted, formattedReplies);
 	render();
 });
@@ -1258,7 +1307,7 @@ async function boot() {
 		return;
 	}
 	renderConversations();
-	els.formatted.checked = formattedReplies;
+	renderFormatToggle();
 	buildInspector();
 	setupSplitters();
 	renderAgentPicker();

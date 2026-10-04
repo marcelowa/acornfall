@@ -5,6 +5,7 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>Acornfall</title>
 		<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%233b8fd9'/%3E%3Cpath d='M16 7c3 4 3 8 0 12-3-4-3-8 0-12z' fill='white'/%3E%3C/svg%3E" />
+		<link rel="stylesheet" href="/vendor/highlight.css" />
 		<link rel="stylesheet" href="/style.css" />
 		<script>
 			// Panel geometry is read before the first paint, otherwise a saved width
@@ -58,6 +59,10 @@
 			<div class="splitter" id="split-rail" role="separator" aria-label="Resize conversations panel"></div>
 
 			<section class="conversation">
+				<div class="transcript-bar">
+					<span class="subtle" id="conversation-title"></span>
+					<button class="ghost small" id="toggle-format" type="button">Formatted</button>
+				</div>
 				<div class="transcript" id="transcript"></div>
 				<form class="composer" id="composer">
 					<textarea
@@ -66,16 +71,10 @@
 						placeholder="Ask, or tell it what to do. Enter sends, Shift+Enter adds a line."
 					></textarea>
 					<div class="composer-row">
-						<div class="composer-modes">
-							<label class="mode">
-								<input type="checkbox" id="steer" checked />
-								<span>Steer into the running turn</span>
-							</label>
-							<label class="mode">
-								<input type="checkbox" id="formatted" checked />
-								<span>Formatted replies</span>
-							</label>
-						</div>
+						<label class="mode">
+							<input type="checkbox" id="steer" checked />
+							<span>Steer into the running turn</span>
+						</label>
 						<div class="composer-buttons">
 							<button class="ghost" id="abort" type="button" hidden>Abort</button>
 							<button class="primary" id="send" type="submit">Send</button>

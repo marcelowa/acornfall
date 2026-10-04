@@ -8,3 +8,4 @@ settings.json
 .DS_Store
 .acornfall/*.sqlite
 .acornfall/*.sqlite-*
+tools/node_modules/
