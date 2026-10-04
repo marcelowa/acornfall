@@ -30,9 +30,45 @@ type Command struct {
 	Agent          *ModelBinding `json:"agent,omitempty"`
 	Text           string        `json:"text,omitempty"`
 	WhenBusy       WhenBusy      `json:"whenBusy,omitempty"`
+	AuthID         string        `json:"authId,omitempty"`
+	ProviderID     string        `json:"providerId,omitempty"`
+	AuthType       string        `json:"authType,omitempty"`
+	PromptID       string        `json:"promptId,omitempty"`
+	Value          string        `json:"value,omitempty"`
+	Cancelled      bool          `json:"cancelled,omitempty"`
 }
 
 func (c Command) Marshal() ([]byte, error) { return json.Marshal(c) }
+
+// AuthEventKind enumerates the login interaction events, a 1:1 projection of
+// pi-ai's AuthPrompt and AuthEvent.
+type AuthEvent struct {
+	Kind             string       `json:"kind"`
+	PromptID         string       `json:"promptId,omitempty"`
+	PromptType       string       `json:"promptType,omitempty"`
+	Message          string       `json:"message,omitempty"`
+	Placeholder      string       `json:"placeholder,omitempty"`
+	Options          []AuthOption `json:"options,omitempty"`
+	URL              string       `json:"url,omitempty"`
+	Links            []AuthLink   `json:"links,omitempty"`
+	Instructions     string       `json:"instructions,omitempty"`
+	UserCode         string       `json:"userCode,omitempty"`
+	VerificationURI  string       `json:"verificationUri,omitempty"`
+	IntervalSeconds  int          `json:"intervalSeconds,omitempty"`
+	ExpiresInSeconds int          `json:"expiresInSeconds,omitempty"`
+	ProviderID       string       `json:"providerId,omitempty"`
+}
+
+type AuthOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type AuthLink struct {
+	URL   string `json:"url"`
+	Label string `json:"label,omitempty"`
+}
 
 // Frame is an unprompted message from the worker to control.
 type Frame struct {
@@ -46,6 +82,8 @@ type Frame struct {
 	Value          json.RawMessage `json:"value,omitempty"`
 	SubmissionID   string          `json:"submissionId,omitempty"`
 	Status         string          `json:"status,omitempty"`
+	AuthID         string          `json:"authId,omitempty"`
+	Event          *AuthEvent      `json:"event,omitempty"`
 }
 
 // ModelInfo is one model available under an authenticated provider.

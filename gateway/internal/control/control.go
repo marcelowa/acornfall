@@ -5,6 +5,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -13,6 +14,10 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
+
+// ErrNoProvider means the install has no usable credential yet. It is a state,
+// not a failure: the UI has to be reachable so the user can connect one.
+var ErrNoProvider = errors.New("no authenticated provider")
 
 const RootConversationID = "root"
 
@@ -91,7 +96,13 @@ func (c *Control) Open(ctx context.Context) error {
 	}
 	c.applyDescribe(describe)
 
+	// An unauthenticated install still serves the UI, so a provider can be
+	// connected from it. Only a real worker failure is fatal here.
 	binding, err := c.defaultBinding(describe)
+	if errors.Is(err, ErrNoProvider) {
+		workerpool.Log("no provider connected yet; open the UI to connect one")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -126,6 +137,71 @@ func (c *Control) State() State {
 }
 
 // SetAgent applies a model binding and selects it for the session.
+// Refresh re-reads the worker's provider catalog and adopts a usable agent
+// binding when the current one is missing or no longer available.
+func (c *Control) Refresh(ctx context.Context) error {
+	var describe protocol.Describe
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+		return err
+	}
+	c.applyDescribe(describe)
+
+	c.mu.RLock()
+	current := c.agent
+	c.mu.RUnlock()
+	if current.ModelID != "" && c.isAvailable(describe, current) {
+		return nil
+	}
+	binding, err := c.defaultBinding(describe)
+	if err != nil {
+		return err
+	}
+	return c.SetAgent(ctx, binding)
+}
+
+// Login runs a provider login flow in the worker. It returns as soon as the
+// flow starts: the interaction arrives as `auth` frames, and a device flow can
+// take minutes.
+func (c *Control) Login(ctx context.Context, providerID, authType string) error {
+	authID := fmt.Sprintf("auth-%d", c.nextSub+1)
+	c.mu.Lock()
+	c.nextSub++
+	c.mu.Unlock()
+
+	go func() {
+		_, err := c.worker.Call(context.WithoutCancel(ctx), protocol.Command{
+			Type:       "login",
+			AuthID:     authID,
+			ProviderID: providerID,
+			AuthType:   authType,
+		})
+		if err != nil {
+			workerpool.Log("login %s failed: %v", providerID, err)
+		}
+		if refreshErr := c.Refresh(context.WithoutCancel(ctx)); refreshErr != nil {
+			workerpool.Log("refresh after login: %v", refreshErr)
+		}
+		c.publish(protocol.Frame{Type: "state"})
+	}()
+	return nil
+}
+
+// AnswerAuth answers one login prompt. Cancelled rejects it.
+func (c *Control) AnswerAuth(ctx context.Context, authID, promptID, value string, cancelled bool) error {
+	return c.worker.CallInto(ctx, protocol.Command{
+		Type:      "auth_answer",
+		AuthID:    authID,
+		PromptID:  promptID,
+		Value:     value,
+		Cancelled: cancelled,
+	}, nil)
+}
+
+// CancelAuth aborts a running login flow.
+func (c *Control) CancelAuth(ctx context.Context, authID string) error {
+	return c.worker.CallInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
+}
+
 func (c *Control) SetAgent(ctx context.Context, binding protocol.ModelBinding) error {
 	if err := c.worker.CallInto(ctx, protocol.Command{
 		Type:           "open",
@@ -188,23 +264,27 @@ func (c *Control) Unsubscribe(id int) {
 }
 
 func (c *Control) onFrame(frame protocol.Frame) {
+	c.publish(frame)
+}
+
+// publish fans one frame out to attached clients. A view frame is a complete
+// value, so the newest supersedes any undelivered older one; a slow client loses
+// frames, never state.
+func (c *Control) publish(frame protocol.Frame) {
 	c.mu.Lock()
 	if frame.Type == "view" {
 		c.seq = frame.Seq
-		value := frame.Value
-		c.lastView = append(c.lastView[:0], value...)
+		c.lastView = append(c.lastView[:0], frame.Value...)
 	}
 	subscribers := make([]chan protocol.Frame, 0, len(c.subscribers))
 	for _, channel := range c.subscribers {
 		subscribers = append(subscribers, channel)
 	}
-	update := frame.Type == "view"
+	coalesce := frame.Type == "view"
 	c.mu.Unlock()
 
 	for _, channel := range subscribers {
-		if update {
-			// A view frame is a complete value, so the newest one supersedes any
-			// undelivered older one: a slow client loses frames, never state.
+		if coalesce {
 			select {
 			case channel <- frame:
 			default:
@@ -260,7 +340,7 @@ func (c *Control) defaultBinding(describe protocol.Describe) (protocol.ModelBind
 		return protocol.ModelBinding{Provider: provider.ID, ModelID: provider.Models[0].ID}, nil
 	}
 	return protocol.ModelBinding{}, fmt.Errorf(
-		"no authenticated provider: run `acornfall provider add <provider> <api-key>` or set --model",
+		"%w: run `acornfall provider add <provider> <api-key>` or connect one in the UI", ErrNoProvider,
 	)
 }
 

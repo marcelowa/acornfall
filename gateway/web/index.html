@@ -22,6 +22,7 @@
 					<select id="model"></select>
 				</label>
 				<span class="pill" id="status">connecting</span>
+				<button class="ghost" id="connect" type="button">Providers</button>
 				<button class="ghost" id="toggle-inspector" type="button">Inspector</button>
 			</div>
 		</header>
@@ -69,5 +70,15 @@
 		</main>
 
 		<script type="module" src="/app.js"></script>
+
+		<div class="sheet-backdrop" id="sheet" hidden>
+			<section class="sheet">
+				<header class="sheet-head">
+					<h1 id="sheet-title">Connect a provider</h1>
+					<button class="ghost" id="sheet-close" type="button">Close</button>
+				</header>
+				<div class="sheet-body" id="sheet-body"></div>
+			</section>
+		</div>
 	</body>
 </html>

@@ -30,8 +30,21 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/abort", s.abort)
 	mux.HandleFunc("POST /api/agent", s.agent)
 	mux.HandleFunc("GET /api/usage", s.usage)
-	mux.Handle("GET /", http.FileServerFS(s.static))
+	mux.HandleFunc("POST /api/providers/login", s.login)
+	mux.HandleFunc("POST /api/providers/refresh", s.refresh)
+	mux.HandleFunc("POST /api/auth/answer", s.authAnswer)
+	mux.HandleFunc("POST /api/auth/cancel", s.authCancel)
+	mux.Handle("GET /", noCache(http.FileServerFS(s.static)))
 	return mux
+}
+
+// noCache keeps a reload honest while the client has no build step and no
+// content hashes: a stale bundle is indistinguishable from a broken one.
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
@@ -125,6 +138,77 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, binding)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ProviderID string `json:"providerId"`
+		AuthType   string `json:"authType"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.ProviderID == "" {
+		http.Error(w, "providerId is required", http.StatusBadRequest)
+		return
+	}
+	authType := body.AuthType
+	switch authType {
+	case "oauth", "api_key":
+	case "":
+		authType = "api_key"
+	default:
+		http.Error(w, "authType must be api_key or oauth", http.StatusBadRequest)
+		return
+	}
+	if err := s.control.Login(r.Context(), body.ProviderID, authType); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
+	if err := s.control.Refresh(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AuthID    string `json:"authId"`
+		PromptID  string `json:"promptId"`
+		Value     string `json:"value"`
+		Cancelled bool   `json:"cancelled"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.PromptID == "" {
+		http.Error(w, "promptId is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.control.AnswerAuth(r.Context(), body.AuthID, body.PromptID, body.Value, body.Cancelled); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "answered"})
+}
+
+func (s *Server) authCancel(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AuthID string `json:"authId"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.control.CancelAuth(r.Context(), body.AuthID); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {

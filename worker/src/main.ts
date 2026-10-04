@@ -23,6 +23,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
+import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import { devProvider } from "./devprovider.ts";
 import { CommandQueue, type Command, type DescribeData, emit, log } from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
@@ -181,6 +182,18 @@ async function main(): Promise<void> {
 			log("dropped unparseable command", error);
 			return;
 		}
+		// Login answers arrive while a login is in flight, so they bypass the queue:
+		// queueing them behind the login they answer would deadlock.
+		if (command.type === "auth_answer") {
+			resolveAuthAnswer(command.promptId, command.value, command.cancelled === true);
+			emit({ type: "response", id: command.id, ok: true });
+			return;
+		}
+		if (command.type === "auth_cancel") {
+			cancelAuth(command.authId);
+			emit({ type: "response", id: command.id, ok: true });
+			return;
+		}
 		queue.push(async () => {
 			try {
 				const data = await handle(command);
@@ -257,6 +270,8 @@ async function handle(command: Command): Promise<unknown> {
 			await root.abort(CONTEXT);
 			return undefined;
 		}
+		case "login":
+			return await login(models, command.authId, command.providerId, command.authType);
 		case "usage":
 			return await harness.usage(CONTEXT);
 		case "shutdown":
