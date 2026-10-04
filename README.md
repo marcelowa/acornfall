@@ -102,9 +102,11 @@ make dev
 - **Agent definitions** with a global/workspace/agent overlay, and an explain view
   showing which layer contributed what. See `docs/adr/0004-resource-overlay.md`.
 - **Delegation**: `delegate` hands a task to a subagent and waits; `subagent` starts one
-  that keeps working while you answer and reports back when it is done, waking the
-  parent conversation to act on it. Ownership, depth limits, and a wake budget are
-  configurable in the overlay and visible in the inspector's Delegation card. See
+  that keeps working while you answer and reports back when it is done, waking the parent
+  to act on it. `peer: true` creates a *normal* conversation instead — it appears in your
+  rail marked as agent-created, outlives its creator, and can have subagents of its own.
+  Ownership, depth, peer ceilings, reachability, and the wake budget are configurable in
+  the overlay and visible in the inspector's Delegation card. See
   `docs/adr/0008-delegation.md`.
 - Provider connect/disconnect from the UI, 42 providers, 60+ models each where the key allows.
 - Crash resume: `kill` the worker and restart; the run continues from its last commit.

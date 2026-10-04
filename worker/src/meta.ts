@@ -17,6 +17,11 @@ export type ConversationMeta = {
 	definition?: string;
 	/** Conversations this one created, so a subagent list needs no scan. */
 	children?: string[];
+	/**
+	 * The conversation that created this one, when something other than the user did.
+	 * A peer is ownerless, so this is the only trace of where it came from.
+	 */
+	createdBy?: string;
 };
 
 export const ConversationMetaDoc = defineDoc<ConversationMeta>({

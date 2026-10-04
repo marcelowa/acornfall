@@ -61,6 +61,8 @@ type Conversation struct {
 	Children []string `json:"children,omitempty"`
 	Model    string   `json:"model,omitempty"`
 	Thinking string   `json:"thinking,omitempty"`
+	// CreatedBy marks a peer: a normal conversation an agent created.
+	CreatedBy string `json:"createdBy,omitempty"`
 }
 
 // State is everything the UI needs to render before any frame arrives.
@@ -1287,6 +1289,7 @@ func toConversations(infos []protocol.ConversationInfo) []Conversation {
 			Children:    info.Children,
 			Model:       info.Model,
 			Thinking:    info.Thinking,
+			CreatedBy:   info.CreatedBy,
 		})
 	}
 	return conversations

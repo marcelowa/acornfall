@@ -249,6 +249,7 @@ async function listConversations(): Promise<ConversationInfo[]> {
 				// not manage, which is every subagent.
 				...(effectiveModel === undefined ? {} : { model: `${effectiveModel.provider}/${effectiveModel.modelId}` }),
 				...(effectiveThinking === undefined ? {} : { thinking: String(effectiveThinking) }),
+				...(meta?.createdBy === undefined ? {} : { createdBy: meta.createdBy }),
 				...(meta?.children === undefined || meta.children.length === 0
 					? {}
 					: { children: meta.children }),

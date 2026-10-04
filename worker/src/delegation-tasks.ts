@@ -33,6 +33,8 @@ export type Subagent = {
 	conversationId: ConversationId;
 	/** Answers already reported: several messages can end in one answer, reported once. */
 	reported: EntryId[];
+	/** A peer is ownerless, so it appears in the rail and outlives its creator. */
+	peer: boolean;
 };
 
 export type DelegationState = {
@@ -73,8 +75,13 @@ export type ReporterInput = {
 	name: string;
 	conversationId: ConversationId;
 	message: string;
-	/** Steering reaches a busy subagent at its next step; a follow-up waits for its answer. */
+	/** Steering reaches a busy conversation at its next step; a follow-up waits for its answer. */
 	followUp: boolean;
+	/**
+	 * Whether the answer comes back to this conversation at all. A subagent reports;
+	 * a peer does not, because a peer is a normal conversation the user also reads.
+	 */
+	report: boolean;
 };
 
 export type ReporterState = { phase: "deliver" } | { phase: "report"; report?: string };
@@ -135,7 +142,7 @@ export function reporterTask(deps: DelegationDeps) {
 			},
 			report: async (reporter, runtime, context) => {
 				const report = reporter.state.checkpoint.report;
-				if (report !== undefined) {
+				if (report !== undefined && reporter.input.report) {
 					// Read the budget, then spend it. Two reporters for one conversation
 					// could in principle both read before either writes, which costs at
 					// most an extra wake-up: the budget is a guard, not an invariant, and

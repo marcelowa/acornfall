@@ -37,6 +37,18 @@ export interface Delegation {
 	 * stops a chain of agents from talking to each other indefinitely.
 	 */
 	maxWakes: number;
+	/**
+	 * Which conversations this one may address. "known" is its own children, the peers
+	 * it created, and its parent; "any" reaches every conversation in the workspace,
+	 * which is what a hub conversation wants and what a leaf should not have.
+	 */
+	address: "known" | "any";
+	/**
+	 * How many conversations agents may create in a workspace, in total. Each
+	 * conversation is limited by maxPeers, but peers can create peers, so without a
+	 * workspace-wide ceiling the graph grows by a factor at every level.
+	 */
+	maxPeersTotal: number;
 }
 
 export const DEFAULT_DELEGATION: Delegation = {
@@ -46,6 +58,8 @@ export const DEFAULT_DELEGATION: Delegation = {
 	maxDepth: 1,
 	maxPeers: 2,
 	maxWakes: 12,
+	address: "known",
+	maxPeersTotal: 8,
 };
 
 export interface Contributions {
@@ -107,6 +121,8 @@ const KNOWN_KEYS = new Set([
 	"max-depth",
 	"max-peers",
 	"max-wakes",
+	"address",
+	"max-peers-total",
 ]);
 
 /** `delegation: spawn, peers` — a list, so the two permissions read separately. */
@@ -185,6 +201,8 @@ async function loadConfig(path: string, label: LayerName): Promise<{ contributio
 		if (typeof raw.maxDepth === "number") policy.maxDepth = raw.maxDepth;
 		if (typeof raw.maxPeers === "number") policy.maxPeers = raw.maxPeers;
 		if (typeof raw.maxWakes === "number") policy.maxWakes = raw.maxWakes;
+		if (raw.address === "known" || raw.address === "any") policy.address = raw.address;
+		if (typeof raw.maxPeersTotal === "number") policy.maxPeersTotal = raw.maxPeersTotal;
 		contributions.delegation = policy;
 	}
 	if (Array.isArray(source.skills)) contributions.skills = source.skills.map(String);
@@ -217,6 +235,16 @@ async function loadAgentDir(directory: string, layer: "global" | "workspace"): P
 		if (values["max-depth"] !== undefined) delegation.maxDepth = parseCount(values["max-depth"], "max-depth");
 		if (values["max-peers"] !== undefined) delegation.maxPeers = parseCount(values["max-peers"], "max-peers");
 		if (values["max-wakes"] !== undefined) delegation.maxWakes = parseCount(values["max-wakes"], "max-wakes");
+		if (values["max-peers-total"] !== undefined) {
+			delegation.maxPeersTotal = parseCount(values["max-peers-total"], "max-peers-total");
+		}
+		if (values.address !== undefined) {
+			const address = values.address.trim().toLowerCase();
+			if (address !== "known" && address !== "any") {
+				throw new Error(`address must be "known" or "any", got ${values.address}`);
+			}
+			delegation.address = address;
+		}
 		if (Object.keys(delegation).length > 0) contributions.delegation = delegation;
 		agents.push({
 			name,

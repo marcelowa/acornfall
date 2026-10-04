@@ -1,6 +1,6 @@
 # ADR 0008 — Delegation and conversation addressing
 
-Status: accepted, foreground and background implemented
+Status: accepted, implemented, including peers
 Date: 2026-10-04
 
 ## Problem
@@ -156,16 +156,65 @@ instead, plus a named definition's instructions when one is given:
 > You are the subagent "lister". Another conversation started you; answer its requests
 > directly, and say what you did.
 
+## Peers: a conversation an agent creates without owning
+
+A subagent is owned and invisible. A **peer** is ownerless: it appears in your rail, it
+outlives the conversation that made it, and it can create peers and subagents of its own.
+It is how a conversation bootstraps something for you rather than for itself.
+
+`spawn` takes `peer: true`. The three differences that matter:
+
+| | subagent | peer |
+|---|---|---|
+| ownership | an anchor task owns it | ownerless |
+| in your rail | no | yes, marked as created by another conversation |
+| delegation tools | denied | keeps them, so it can have its own |
+| reports back | yes | no, unless you ask (`report: true`) |
+| counts toward depth | yes | no, which is why it may spawn |
+
+That last row is the requested rule again: a child cannot spawn children because it
+sits at `maxDepth`, while a peer is at depth 0 and may.
+
+An ownerless conversation does not inherit the creator's agent the way a task-owned one
+does, so a peer explicitly copies the model, thinking level, and instructions from the
+creator's stored configuration. Tools are not copied — the stored form is names and
+`configure` takes registrations — so a peer gets the full registered tool set. That is a
+real difference from its creator and it is written down rather than discovered.
+
+### Peers can make peers, so the workspace needs a ceiling
+
+Watch what a single delegation produced:
+
+```
+162 → spawn peer "notes" → 894
+894 → spawn peer "intro" → 911        ← a peer, creating a peer
+```
+
+`maxPeers` limits one conversation to two peers, but each peer may make two more, so the
+graph multiplies at every level. `max-peers-total` (default 8) caps agent-created
+conversations per workspace, enforced by counting them, and verified by lowering it to
+the current count:
+
+```
+workspacetest was not started: agents have made 3 conversations in this workspace
+of max-peers-total 2.
+```
+
+### Addressing is a permission, not a lookup
+
+A conversation can address what it created, its own children, and its parent: the
+conversations it has a reason to know about. Anything else needs `address: any`, which is
+a deliberate choice for a hub conversation and the wrong default for a leaf. Refusals say
+why, so the model can adapt instead of retrying.
+
 ## What is not built yet
 
-- **Peer creation.** `peers: true` is parsed, resolved, and reported, but no tool
-  creates a peer yet. When it does, an agent will be able to write to your rail, which
-  is why the provenance marker and `maxPeers` matter.
 - **Messages between conversations appear as `pi.user` entries.** The report text is
   prefixed (`[subagent lister finished] …`), which is what the model needs, and a human
   reads it correctly enough — but it is a text convention, not a structured field. A
   custom entry alongside it would let the UI render a chip instead of relying on the
-  prefix.
+  prefix. This matters more now that peers exist, because a peer's transcript shows the
+  creator's message as if the user had typed it.
 - **A tool phase that throws is now logged** (`onReport`) rather than silently
   vanishing. Before that, a reporter that failed left no trace at all: the run simply
   never continued.

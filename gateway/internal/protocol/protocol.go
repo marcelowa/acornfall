@@ -179,6 +179,9 @@ type ConversationInfo struct {
 	// only accurate source for it.
 	Model    string `json:"model,omitempty"`
 	Thinking string `json:"thinking,omitempty"`
+	// CreatedBy is set when a conversation created this one without owning it: a peer,
+	// which appears in the rail and therefore needs to say where it came from.
+	CreatedBy string `json:"createdBy,omitempty"`
 }
 
 // ProviderInfo is one model provider and its auth state.

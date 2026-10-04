@@ -364,7 +364,27 @@ try {
 	// textContent has no whitespace between a <dt> label and its <dd> value.
 	check("the delegation section reports the policy", /depth\s*\d+\s*of max\s*\d+/.test(sections.delegation), sections.delegation.slice(0, 120));
 	check("the delegation section names its limit", /children\s*\d+\s*of max\s*\d+/.test(sections.delegation), sections.delegation.slice(0, 120));
-	check("the subagents section renders", sections.subagents.length > 0, "empty");
+	check("the created-here section renders", sections.subagents.length > 0, "empty");
+
+	// A conversation an agent created is not the same as one of yours, and the rail
+	// has to say so rather than presenting it as a peer of your own conversations.
+	const peers = await page.evaluate(async () => {
+		const state = await (await fetch("/api/state")).json();
+		const created = state.conversations.filter((c) => c.createdBy);
+		const rail = [...document.querySelectorAll("#conversation-list .conversation-item")];
+		return {
+			created: created.map((c) => c.id),
+			marked: created
+				.filter((c) => c.parent === undefined || c.parent === "")
+				.filter((c) => rail.some((row) => row.dataset.id === c.id && row.querySelector(".dot.peer") !== null))
+				.length,
+			inRail: created.filter((c) => rail.some((row) => row.dataset.id === c.id)).length,
+		};
+	});
+	if (peers.inRail > 0) {
+		check("an agent-created conversation is marked in the rail", peers.marked === peers.inRail, JSON.stringify(peers));
+	}
+	check("the policy reports the workspace peer count", /peers here\s*\d+\s*of max\s*\d+/.test(sections.delegation), sections.delegation.slice(0, 200));
 
 	check("no errors after the delegation checks", problems.length === 0, problems.join("; "));
 

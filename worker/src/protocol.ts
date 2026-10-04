@@ -90,6 +90,8 @@ export interface ConversationInfo {
 	/** The agent this conversation actually runs, from its committed configuration. */
 	model?: string;
 	thinking?: string;
+	/** Set when a conversation created this one without owning it: a peer. */
+	createdBy?: string;
 }
 
 /** Provider auth prompts, a 1:1 projection of pi-ai's AuthPrompt and AuthEvent. */

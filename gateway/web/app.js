@@ -325,7 +325,7 @@ function render() {
 const SECTIONS = [
 	{ key: "agent", title: "Agent", tools: [{ action: "reload-agents", label: "Reload files" }] },
 	{ key: "delegation", title: "Delegation" },
-	{ key: "subagents", title: "Subagents" },
+	{ key: "subagents", title: "Created here" },
 	{ key: "context", title: "Context sent" },
 	{ key: "run", title: "Run" },
 	{ key: "usage", title: "Usage" },
@@ -503,9 +503,11 @@ function renderDelegation() {
 	].filter(Boolean);
 	const rows = [
 		["may", allowed.length === 0 ? "nothing" : allowed.join(", ")],
+		["address", policy.delegation.address === "any" ? "any conversation" : "only conversations it knows"],
 		["depth", `${policy.depth} of max ${policy.delegation.maxDepth}`],
 		["children", `${policy.children} of max ${policy.delegation.maxChildren}`],
-		["peers", `max ${policy.delegation.maxPeers}`],
+		["peers here", `${policy.peersTotal ?? 0} of max ${policy.delegation.maxPeersTotal}`],
+		["wakes", `max ${policy.delegation.maxWakes}`],
 	];
 	target.innerHTML =
 		`<div class="delta">${
@@ -516,13 +518,15 @@ function renderDelegation() {
 			.join("")}</dl>`;
 }
 
-/** The conversations this one created, which is what a subagent is. */
+/** What this conversation created: subagents it owns, and peers it does not. */
 function renderSubagents() {
 	const target = bodies.get("subagents");
 	const active = activeId();
 	const conversations = state?.conversations ?? [];
 	const mine = conversations.find((conversation) => conversation.id === active);
-	const children = conversations.filter((conversation) => conversation.parent === active);
+	const children = conversations.filter(
+		(conversation) => conversation.parent === active || conversation.createdBy === active,
+	);
 	const parent = mine?.parent ? conversations.find((conversation) => conversation.id === mine.parent) : undefined;
 
 	const link = (conversation, label) =>
@@ -530,6 +534,7 @@ function renderSubagents() {
 	const row = (conversation) => `<div class="subagent">
 		<span class="dot ${conversation.running ? "running" : ""}"></span>
 		<span class="subagent-title">${escapeHtml(conversation.title)}</span>
+		<span class="badge">${conversation.parent === active ? "subagent" : "peer"}</span>
 		<span class="id">${escapeHtml(conversation.id)} · ${formatTokens(conversation.tokens)}</span>
 		${link(conversation, "Open")}
 	</div>`;
@@ -1001,6 +1006,9 @@ function conversationRow(conversation, active, deleted) {
 		: unread
 			? `<span class="dot unread" title="new since you last looked"></span>`
 			: "";
+	const peer = conversation.createdBy
+		? `<span class="dot peer" title="created by conversation ${escapeHtml(conversation.createdBy)}"></span>`
+		: "";
 	const spend = conversation.tokens
 		? `<span class="id" title="${escapeHtml(formatTokens(conversation.tokens))}${conversation.cost ? ` · $${conversation.cost.toFixed(4)}` : ""}">${escapeHtml(
 				conversation.id,
@@ -1009,6 +1017,7 @@ function conversationRow(conversation, active, deleted) {
 	return `<div class="conversation-item" data-active="${conversation.id === active}" data-id="${escapeHtml(conversation.id)}">
 		<button class="conversation-select" data-conversation="${escapeHtml(conversation.id)}" type="button">
 			<span class="title">${escapeHtml(conversation.title)}</span>
+			${peer}
 			${mark}
 			${spend}
 		</button>
