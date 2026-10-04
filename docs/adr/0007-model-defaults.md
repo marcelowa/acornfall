@@ -85,18 +85,34 @@ Step 3 is not hypothetical. `kimi-k3` offers only `max`, so a request for `off` 
 nothing below it; the honest answer is the level the model has, not a setting that
 silently does nothing.
 
-### Where specificity loses, and why
+### When two layers disagree and the model can do neither
 
-Step 1 can let a *supported* lower-specificity value win over an *unsupported*
-higher-specificity one — a definition saying `medium` on a model offering only `off, high`
-yields the install default rather than a clamped approximation of `medium`. This is the
-one place the "a choice made one layer down beats a global one" rule does not hold.
+The one case worth spelling out, because it is the only place the "a choice one layer
+down beats a global one" rule does not hold:
 
-It is that way deliberately: a preference the model cannot express is not a weaker
-version of the intent, it is an unavailable one, and a supported value from a broader
-layer is a defensible answer where an approximation of the original is a guess. The
-alternative — always clamp the most specific preference — is a one-line change if it
-turns out to match intent better in practice.
+```
+the definition says:      thinking: medium
+the install default says: thinking: high
+the model offers only:    off, high              ← nothing in between
+```
+
+The definition's `medium` is impossible. Two answers are defensible:
+
+| Answer | Reasoning |
+|---|---|
+| **`high`** | take the install default, a value someone actually chose |
+| `off` | ignore the default and approximate `medium` downward |
+
+Acornfall answers `high`. The reason is what `off` *means*: not thinking at all. On a
+scale with a gap, "step down from medium" does not land on slightly-less-thinking, it
+falls past `low` and `minimal` into `off` — so the approximation is not a weaker
+`medium`, it is the opposite of it. A supported value from a broader layer is a real
+setting; an approximation across a gap is a guess that can invert the intent.
+
+This is narrow. When the model can do what the definition says, the definition wins
+outright. When there is no install default, there is nothing to fall back to and step 2
+approximates as usual. `resolveThinking` and its tests carry both variants, so preferring
+the alternative is a change to which expectation is correct, not a redesign.
 
 ### Why the choice is still recorded
 
