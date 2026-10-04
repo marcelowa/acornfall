@@ -32,6 +32,7 @@ export type Command =
 	| { id: string; type: "abort"; conversationId: string }
 	| { id: string; type: "agents" }
 	| { id: string; type: "policy"; conversationId: string }
+	| { id: string; type: "messages"; conversationId: string }
 	| { id: string; type: "reload" }
 	| { id: string; type: "login"; authId: string; providerId: string; authType: "api_key" | "oauth" }
 	| { id: string; type: "logout"; providerId: string }
@@ -114,7 +115,14 @@ export type AuthEvent =
 export type Frame =
 	| { type: "response"; id: string; ok: true; data?: unknown }
 	| { type: "response"; id: string; ok: false; error: string }
-	| { type: "view"; conversationId: string; seq: number; value: unknown }
+	| {
+			type: "view";
+			conversationId: string;
+			seq: number;
+			value: unknown;
+			/** Our own annotation: the view mounts only durable's documents. */
+			acornfall?: { senders: Record<string, { conversationId: string; name?: string; kind: string }> };
+	  }
 	| { type: "submission"; conversationId: string; submissionId: string; status: string }
 	| { type: "auth"; authId: string; event: AuthEvent };
 

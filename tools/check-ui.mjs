@@ -322,7 +322,35 @@ try {
 
 	check("still no JavaScript errors after interacting", problems.length === 0, problems.join("; "));
 
-	// 8. The rail shows live state, and a subagent is not a peer.
+	// 8. A message from another conversation is attributed, not shown as the user's.
+	//    It arrives as a pi.user entry because that is what starts a run, so the
+	//    interface has to say who sent it or a peer's transcript lies about you.
+	const attribution = await page.evaluate(async () => {
+		const state = await (await fetch("/api/state")).json();
+		const active = state.conversation?.id;
+		const doc = await (await fetch(`/api/conversations/${active}/messages`)).json();
+		const ids = Object.keys(doc.state?.senders ?? {});
+		const rendered = [...document.querySelectorAll("#transcript .turn")].map((turn) => ({
+			agent: turn.classList.contains("agent-message"),
+			user: turn.classList.contains("user"),
+			label: turn.querySelector(".agent-message-head")?.textContent ?? "",
+		}));
+		return { ids: ids.length, agentMessages: rendered.filter((r) => r.agent), plainUser: rendered.filter((r) => r.user) };
+	});
+	if (attribution.ids > 0) {
+		check(
+			"a message from another conversation is not styled as the user's",
+			attribution.agentMessages.length > 0,
+			`${attribution.ids} attributed entries but no agent-message element`,
+		);
+		check(
+			"it names its sender",
+			attribution.agentMessages.every((m) => /conversation \d+/.test(m.label)),
+			JSON.stringify(attribution.agentMessages.map((m) => m.label)),
+		);
+	}
+
+	// 9. The rail shows live state, and a subagent is not a peer.
 	const rail = await page.evaluate(() =>
 		[...document.querySelectorAll("#conversation-list .conversation-item")].map((row) => ({
 			id: row.dataset.id,
@@ -350,7 +378,7 @@ try {
 	}
 	check("per-conversation spend is reported", listed.spend > 0, "no conversation reports tokens");
 
-	// 9. The delegation and subagent sections exist and read from state.
+	// 10. The delegation and created-here sections exist and read from state.
 	await page.evaluate(() => {
 		for (const details of document.querySelectorAll("#inspector details.card")) {
 			if (["delegation", "subagents"].includes(details.dataset.section)) details.open = true;

@@ -49,6 +49,35 @@ export type DelegationState = {
 	wakes: number;
 };
 
+/** Who sent each user-visible entry: the conversations that talked to this one. */
+export type MessageSender = {
+	/** The conversation that sent it. */
+	conversationId: string;
+	/** The name its sender gave it, for a subagent or peer. */
+	name?: string;
+	kind: "task" | "send" | "report";
+};
+
+export type MessagesState = {
+	/** Keyed by entry id, so the UI never has to guess from the text. */
+	senders: Record<string, MessageSender>;
+};
+
+/**
+ * A message between conversations is admitted as a `pi.user` entry, because that is
+ * what starts a run — there is no other way to wake a conversation. This document is
+ * the missing half: which of those entries were not the user's.
+ */
+export const MessagesDoc = defineDoc<MessagesState>({
+	kind: "acornfall.messages",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	// A fork inherits who said what: the messages are inherited with it.
+	fork: "initial",
+	initial: () => ({ senders: {} }),
+});
+
 export const DelegationDoc = defineDoc<DelegationState>({
 	kind: "acornfall.delegation",
 	version: 1,
@@ -98,10 +127,14 @@ export function reporterTask(deps: DelegationDeps) {
 		phases: {
 			deliver: async (reporter, runtime, context) => {
 				const { name, conversationId, message, followUp } = reporter.input;
+				const target = String(conversationId);
+				const sender = String(runtime.conversationId);
 				const subagent = await runtime.conversation(conversationId, context);
 				const request = {
 					type: "input",
-					content: message,
+					// The model needs to know this is another conversation talking, not its
+					// user. The interface learns the same thing from the document below.
+					content: `[from conversation ${sender}] ${message}`,
 					whenBusy: followUp ? ("followUp" as const) : ("steer" as const),
 				} as const;
 				const submission = await subagent!.submit(
@@ -109,6 +142,24 @@ export function reporterTask(deps: DelegationDeps) {
 					context,
 				);
 				const settled = await submission.wait(context);
+				// `entry` is the admitted input, so provenance is recorded against the exact
+				// entry rather than inferred later from its text.
+				const placed = "entry" in settled && settled.entry !== undefined ? settled.entry : undefined;
+				if (placed !== undefined) {
+					await runtime.commit(async (tx) => {
+						const messages = await tx.doc(MessagesDoc, conversationId);
+						messages.senders[String(placed)] = {
+							conversationId: sender,
+							name,
+							kind: followUp ? "send" : "task",
+						};
+						return undefined;
+					}, context);
+					// Writing our document does not advance durable's view, because the view
+					// mounts only its own documents: without this the interface would never
+					// learn that the entry it just rendered was not the user's.
+					deps.notify?.(target);
+				}
 
 				// One commit decides the report and records the answer as delivered, so a
 				// restart mid-flight cannot report the same answer twice.
@@ -137,7 +188,7 @@ export function reporterTask(deps: DelegationDeps) {
 					const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as
 						| AssistantMessage
 						| undefined;
-					return next(`[subagent ${name} finished] ${textOf(answer)}`);
+					return next(`[from subagent ${name}] ${textOf(answer)}`);
 				}, context);
 			},
 			report: async (reporter, runtime, context) => {
@@ -166,7 +217,7 @@ export function reporterTask(deps: DelegationDeps) {
 					// current answer otherwise: the parent continues on its own, without a
 					// human in the loop, which is the point of a background subagent.
 					const parent = await runtime.conversation(runtime.conversationId, context);
-					await parent!.submit(
+					const submission = await parent!.submit(
 						{
 							type: "input",
 							content: text,
@@ -175,6 +226,22 @@ export function reporterTask(deps: DelegationDeps) {
 						},
 						context,
 					);
+					// Wait for it to be placed so the report can be attributed too: an answer
+					// arriving in a parent's transcript looks exactly like the user asking.
+					const settled = await submission.wait(context);
+					const placed = "entry" in settled && settled.entry !== undefined ? settled.entry : undefined;
+					if (placed !== undefined) {
+						await runtime.commit(async (tx) => {
+							const messages = await tx.doc(MessagesDoc, runtime.conversationId);
+							messages.senders[String(placed)] = {
+								conversationId: String(reporter.input.conversationId),
+								name: reporter.input.name,
+								kind: "report",
+							};
+							return undefined;
+						}, context);
+						deps.notify?.(String(runtime.conversationId));
+					}
 				}
 				await runtime.commit(
 					() => ({ status: "terminal", outcome: { status: "completed", result: null } }),

@@ -92,8 +92,11 @@ type Frame struct {
 	Value          json.RawMessage `json:"value,omitempty"`
 	SubmissionID   string          `json:"submissionId,omitempty"`
 	Status         string          `json:"status,omitempty"`
-	AuthID         string          `json:"authId,omitempty"`
-	Event          *AuthEvent      `json:"event,omitempty"`
+	// Our own annotation on a view frame: the worker's documents are not mounted in
+	// durable's view, so anything of ours travels beside the value.
+	Acornfall json.RawMessage `json:"acornfall,omitempty"`
+	AuthID    string          `json:"authId,omitempty"`
+	Event     *AuthEvent      `json:"event,omitempty"`
 }
 
 // LayerTrace records which layer contributed what, so a resolved agent can be

@@ -39,6 +39,7 @@ import { loadCatalog, resolveAgent, type Catalog, type ResolvedAgent } from "./c
 import { devProvider } from "./devprovider.ts";
 import { conversationIdOf, ConversationMetaDoc } from "./meta.ts";
 import { delegationExtension, policyFor } from "./delegation.ts";
+import { MessagesDoc } from "./delegation-tasks.ts";
 import {
 	CommandQueue,
 	type Command,
@@ -153,7 +154,9 @@ const harness = await Harness.open(
 
 // Registered after the harness opens: the delegation tools need it to read a
 // child's answer, and the registry accepts installs while running.
-registry.install(delegationExtension({ harness, storage, catalog: () => catalog }));
+registry.install(
+	delegationExtension({ harness, storage, catalog: () => catalog, notify: refreshView }),
+);
 
 /** Live handles by conversation id; created on first use. */
 const handles = new Map<string, Conversation>();
@@ -312,14 +315,57 @@ async function describe(): Promise<DescribeData> {
 	};
 }
 
+/**
+ * View frames, serialized per conversation and carrying our own annotation.
+ *
+ * The view mounts only durable's documents, so anything of ours the interface needs —
+ * here, which user-visible entries were sent by another conversation — travels beside
+ * the value. The chain keeps sequence numbers in order when a frame's annotation has to
+ * be read asynchronously.
+ */
+const viewChains = new Map<string, Promise<void>>();
+// The last view per conversation, so a change to our own documents can be announced
+// without re-reading the view or waiting for durable to commit something it mounts.
+const lastViewValue = new Map<string, unknown>();
+
+/** Re-emit a conversation's current view so its annotation is current. */
+function refreshView(conversationId: string): void {
+	if (!subscriptions.has(conversationId)) return;
+	const value = lastViewValue.get(conversationId);
+	if (value === undefined) return;
+	enqueueView(conversationId, value);
+}
+
+function enqueueView(conversationId: string, value: unknown): void {
+	lastViewValue.set(conversationId, value);
+	const previous = viewChains.get(conversationId) ?? Promise.resolve();
+	const next = previous.then(async () => {
+		const messages = await harness
+			.snapshot(MessagesDoc, conversationIdOf(conversationId), CONTEXT)
+			.catch((error: unknown) => {
+				// Never swallow this: a silent failure here is why attribution looked
+				// like it was never recorded.
+				log(`senders read failed for ${conversationId}:`, error);
+				return undefined;
+			});
+		const senders = messages?.senders ?? {};
+		emit({
+			type: "view",
+			conversationId,
+			seq: nextSeq(conversationId),
+			value,
+			...(Object.keys(senders).length === 0 ? {} : { acornfall: { senders } }),
+		});
+	});
+	viewChains.set(conversationId, next);
+}
+
 async function attach(conversationId: string): Promise<void> {
 	const conversation = await conversationFor(conversationId);
 	subscriptions.get(conversationId)?.dispose();
 	const view = await conversation.viewState(CONTEXT);
-	emit({ type: "view", conversationId, seq: nextSeq(conversationId), value: view.value });
-	view.subscribe((value) => {
-		emit({ type: "view", conversationId, seq: nextSeq(conversationId), value });
-	});
+	enqueueView(conversationId, view.value);
+	view.subscribe((value) => enqueueView(conversationId, value));
 	subscriptions.set(conversationId, { dispose: () => view.dispose() });
 }
 
@@ -563,6 +609,10 @@ async function handle(command: Command): Promise<unknown> {
 			const conversation = await conversationFor(command.conversationId);
 			await conversation.abort(CONTEXT);
 			return undefined;
+		}
+		case "messages": {
+			const state = await harness.snapshot(MessagesDoc, conversationIdOf(command.conversationId), CONTEXT);
+			return { conversationId: command.conversationId, state: state ?? null };
 		}
 		case "policy": {
 			const view = await policyFor({ harness, storage, catalog: () => catalog }, command.conversationId, CONTEXT);

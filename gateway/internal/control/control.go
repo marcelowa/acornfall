@@ -116,11 +116,14 @@ type Control struct {
 	nextSub         int
 }
 
-// cachedView is the last full view per conversation, so switching back is
-// instant rather than waiting for the worker's next frame.
+// cachedView is the last full view per conversation, so switching back is instant
+// rather than waiting for the worker's next frame. The annotation is cached with it:
+// a view frame is more than its value, and dropping the annotation on the way to a
+// newly attached client is invisible until attribution quietly stops working.
 type cachedView struct {
-	value []byte
-	seq   int64
+	value      []byte
+	annotation json.RawMessage
+	seq        int64
 }
 
 func New(opts Options) *Control {
@@ -232,6 +235,12 @@ func (c *Control) conversationSignature() string {
 		fmt.Fprintf(&builder, "%s:%t:%s:%.0f|", info.ID, info.Running, info.LastEntryID, info.Tokens)
 	}
 	return builder.String()
+}
+
+// WorkerCall is an escape hatch for small read-only commands, so a diagnostic does
+// not need a method and an endpoint of its own.
+func (c *Control) WorkerCall(ctx context.Context, kind, conversationID string) (json.RawMessage, error) {
+	return c.worker.Call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
 }
 
 // Policy reports what a conversation may do with other conversations, resolved
@@ -1046,6 +1055,7 @@ func (c *Control) Subscribe() (int, <-chan protocol.Frame, *protocol.Frame) {
 			ConversationID: c.active,
 			Seq:            cached.seq,
 			Value:          append([]byte(nil), cached.value...),
+			Acornfall:      append(json.RawMessage(nil), cached.annotation...),
 		}
 		initial = &frame
 	}
@@ -1081,8 +1091,9 @@ func (c *Control) publish(frame protocol.Frame) {
 	c.mu.Lock()
 	if frame.Type == "view" {
 		c.views[frame.ConversationID] = cachedView{
-			value: append([]byte(nil), frame.Value...),
-			seq:   frame.Seq,
+			value:      append([]byte(nil), frame.Value...),
+			annotation: append(json.RawMessage(nil), frame.Acornfall...),
+			seq:        frame.Seq,
 		}
 	}
 	subscribers := make([]chan protocol.Frame, 0, len(c.subscribers))

@@ -146,6 +146,26 @@ async function copyText(button, text) {
 // A provider failure is a committed assistant entry with no content and a
 // stopReason of error. Rendering it as an empty bubble would hide the only
 // explanation the user gets.
+/**
+ * A message another conversation sent. It arrives as a `pi.user` entry because that is
+ * what starts a run, so the interface has to say who it is from — otherwise a peer's
+ * transcript attributes another agent's words to the user.
+ */
+function renderAgentMessage(text, sender) {
+	const label = `${sender.name ? `${escapeHtml(sender.name)} · ` : ""}conversation ${escapeHtml(sender.conversationId)}`;
+	const verb = sender.kind === "report" ? "reported" : "asked";
+	// The prefix the sender wrote is for the model; showing it to a person is noise.
+	const body = text.replace(/^\[from (conversation \d+|subagent [^\]]+)\]\s*/, "");
+	return `<div class="turn agent-message">
+		<div class="agent-message-head">${label} ${verb}</div>
+		<div class="markdown">${renderMarkdown(body)}</div>
+		<div class="turn-tools">
+			<button class="ghost small" data-open="${escapeHtml(sender.conversationId)}" type="button">Open ${escapeHtml(sender.conversationId)}</button>
+			<button class="ghost small" data-copy="${encodeURIComponent(text)}" type="button">Copy</button>
+		</div>
+	</div>`;
+}
+
 function failureOf(message) {
 	if (message.stopReason !== "error" && message.stopReason !== "aborted") return null;
 	const detail = message.errorMessage ?? (message.stopReason === "aborted" ? "aborted" : "the model call failed");
@@ -157,6 +177,10 @@ function renderEntry(entry, calls, forkAt) {
 		case "pi.user": {
 			const text = (entry.model ?? []).map((message) => textOf(message.content)).join("\n").trim();
 			if (!text) return "";
+			// Another conversation's words arrive here because an input is what starts a
+			// run. Rendering them as the user's bubble would attribute them to you.
+			const sender = senders.get(activeId())?.[String(entry.id)];
+			if (sender !== undefined) return renderAgentMessage(text, sender);
 			const button =
 				forkAt === null
 					? ""
@@ -294,6 +318,9 @@ function render() {
 	for (const button of els.transcript.querySelectorAll("[data-copy]")) {
 		button.addEventListener("click", () => void copyText(button, decodeURIComponent(button.dataset.copy)));
 	}
+	for (const button of els.transcript.querySelectorAll("[data-open]")) {
+		button.addEventListener("click", () => void openConversation(button.dataset.open));
+	}
 	for (const button of els.transcript.querySelectorAll("[data-format]")) {
 		button.addEventListener("click", () => {
 			const key = button.dataset.format;
@@ -359,6 +386,9 @@ function writePref(key, value) {
 const openSections = new Set(readPref(PREFS.sections, []));
 // Which entry each conversation was last read at, so "unread" means something.
 const seenCursors = new Map(Object.entries(readPref("acornfall.seen", {})));
+// Entry ids sent by another conversation, per conversation. The worker annotates each
+// view frame with this, because durable's view mounts only its own documents.
+const senders = new Map();
 // Panes showing their raw source. Per pane, and deliberately not persisted: it is
 // a reading decision about one reply, not a preference about the app.
 const rawPanes = new Set();
@@ -1282,6 +1312,7 @@ function connect() {
 		if (frame.type === "view") {
 			if (frame.conversationId !== activeId()) return;
 			view = frame.value;
+			senders.set(frame.conversationId, frame.acornfall?.senders ?? {});
 			state.seq = frame.seq;
 			render();
 			return;

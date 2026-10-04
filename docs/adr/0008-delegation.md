@@ -207,6 +207,48 @@ conversations it has a reason to know about. Anything else needs `address: any`,
 a deliberate choice for a hub conversation and the wrong default for a leaf. Refusals say
 why, so the model can adapt instead of retrying.
 
+## Attribution: those `pi.user` entries are not yours
+
+A message between conversations has to be admitted as an input, because an input is what
+starts a run — there is no other way to wake a conversation. So a delegated task, and a
+subagent's report, both land as `pi.user` entries. The model reads them fine (they carry
+a `[from conversation 162]` or `[from subagent prov2]` prefix), but a transcript the
+*user* reads attributed another agent's words to them. In a peer that is worse, because a
+peer's transcript is one people actually read.
+
+Fixed by recording provenance rather than inferring it:
+
+- A submission's settled record carries the **entry id** it placed (`settled.entry`), so
+  the sender is recorded against the exact entry instead of being guessed from its text.
+- A per-conversation `acornfall.messages` document maps entry id → sender
+  (`{conversationId, name, kind: task | send | report}`).
+- The interface renders an attributed entry as an agent message: an amber block naming
+  the sender, markdown-rendered, with a link to open that conversation. The prefix stays
+  in the text for the model and is stripped for the reader.
+
+### Two things this took
+
+**Durable's view mounts only its own documents.** `acornfall.messages` is not among
+`pi.agent`, `pi.live`, `pi.inbox`, `pi.usage`, so the interface cannot see it through the
+view. The worker therefore annotates each view frame: `{type: "view", value, acornfall:
+{senders}}`. Ours travels beside theirs.
+
+**A commit that touches only our documents produces no view frame.** The mount does not
+observe them, so the frame carrying the entry is emitted *before* the provenance is
+written, and nothing announces the write. The first version recorded the provenance
+correctly and the interface never learned it — the feature looked broken while the data
+was right. The reporter now asks the worker to re-emit that conversation's view after
+recording, which is what `DelegationDeps.notify` exists for.
+
+**Control cached a frame by its value alone.** The cached `{value, seq}` is what a newly
+attached client is handed, so the annotation was dropped for exactly the client that had
+just connected — the case a browser reload hits every time. The annotation is cached
+alongside the value now, and the reasoning is in the comment: a view frame is more than
+its value.
+
+`GET /api/conversations/{id}/messages` exposes the document, so attribution can be
+checked without opening a browser. That endpoint is how the last of these was found.
+
 ## What is not built yet
 
 - **Messages between conversations appear as `pi.user` entries.** The report text is

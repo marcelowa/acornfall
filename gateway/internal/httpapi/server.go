@@ -32,6 +32,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/conversations/{id}/hide", s.hideConversation)
 	mux.HandleFunc("POST /api/conversations/{id}/fork", s.forkConversation)
 	mux.HandleFunc("GET /api/conversations/{id}/policy", s.policy)
+	mux.HandleFunc("GET /api/conversations/{id}/messages", s.messagesDoc)
 	mux.HandleFunc("GET /api/agents", s.agents)
 	mux.HandleFunc("POST /api/agents/reload", s.reload)
 	mux.HandleFunc("GET /api/stream", s.stream)
@@ -253,6 +254,19 @@ func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) policy(w http.ResponseWriter, r *http.Request) {
 	view, err := s.control.Policy(r.Context(), r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(view)
+}
+
+// messagesDoc exposes which entries were sent by another conversation, for debugging
+// attribution without opening a browser.
+func (s *Server) messagesDoc(w http.ResponseWriter, r *http.Request) {
+	view, err := s.control.WorkerCall(r.Context(), "messages", r.PathValue("id"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
