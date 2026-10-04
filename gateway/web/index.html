@@ -66,10 +66,16 @@
 						placeholder="Ask, or tell it what to do. Enter sends, Shift+Enter adds a line."
 					></textarea>
 					<div class="composer-row">
-						<label class="mode">
-							<input type="checkbox" id="steer" checked />
-							<span>Steer into the running turn</span>
-						</label>
+						<div class="composer-modes">
+							<label class="mode">
+								<input type="checkbox" id="steer" checked />
+								<span>Steer into the running turn</span>
+							</label>
+							<label class="mode">
+								<input type="checkbox" id="formatted" checked />
+								<span>Formatted replies</span>
+							</label>
+						</div>
 						<div class="composer-buttons">
 							<button class="ghost" id="abort" type="button" hidden>Abort</button>
 							<button class="primary" id="send" type="submit">Send</button>

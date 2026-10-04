@@ -122,7 +122,47 @@ try {
 	);
 	check("restoring brings the other sections back", restoredCards > 1, `${restoredCards} visible`);
 
-	// 4. The settings sheet holds providers and defaults, and closes.
+	// 4. Nothing in the transcript is squashed. A scrolling flex column lets the
+	// browser compress items with overflow:hidden to zero; a long conversation is
+	// all it takes.
+	const squashed = await page.evaluate(() =>
+		[...document.querySelectorAll("#transcript > *")]
+			.filter((child) => child.getBoundingClientRect().height < 8)
+			.map((child) => `${child.className}: ${Math.round(child.getBoundingClientRect().height)}px`),
+	);
+	check("no transcript item is squashed", squashed.length === 0, squashed.join(", "));
+
+	const toolHeights = await page.evaluate(() =>
+		[...document.querySelectorAll("#transcript .tool")].map((tool) => ({
+			card: Math.round(tool.getBoundingClientRect().height),
+			output: tool.querySelector("pre") ? Math.round(tool.querySelector("pre").getBoundingClientRect().height) : 0,
+		})),
+	);
+	const clipped = toolHeights.filter((item) => item.output > 8 && item.card < item.output);
+	check("tool cards are at least as tall as their output", clipped.length === 0, JSON.stringify(clipped));
+
+	// 5. Formatted replies toggle, and formatting is real markup.
+	const before = await page.evaluate(() => {
+		const reply = document.querySelector("#transcript .turn.assistant");
+		return reply === null ? null : { html: reply.innerHTML, markdown: reply.classList.contains("markdown") };
+	});
+	if (before === null) {
+		check("a reply exists to format", false, "no assistant turn in the transcript");
+	} else {
+		check("replies render as markdown by default", before.markdown, "no markdown class");
+		await page.click("#formatted");
+		const plain = await page.evaluate(() => {
+			const reply = document.querySelector("#transcript .turn.assistant");
+			return { html: reply.innerHTML, markdown: reply.classList.contains("markdown") };
+		});
+		check("unchecking shows unformatted text", !plain.markdown, "still markdown");
+		check("the two modes differ", plain.html !== before.html);
+		await page.click("#formatted");
+		const restored = await page.evaluate(() => document.querySelector("#transcript .turn.assistant").innerHTML);
+		check("re-checking restores formatted output", restored === before.html);
+	}
+
+	// 6. The settings sheet holds providers and defaults, and closes.
 	await page.click("#connect");
 	await page.waitForSelector("#sheet:not([hidden])", { visible: true, timeout: 5000 });
 	const tabs = await page.evaluate(() =>

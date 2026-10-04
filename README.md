@@ -85,6 +85,9 @@ make dev
 - **Delete is a tombstone**, not a row delete: storage is append-only, so a deleted
   conversation keeps its transcript and is restorable from the rail.
 - Streaming transcript with tool cards, live tool output, and a running/idle indicator.
+- **Formatted replies**: assistant text renders as Markdown (headings, lists, tables,
+  fenced code, links) with a toggle back to the raw text. Tool output stays monospace
+  with terminal escape codes stripped.
 - **Steering**: type while a turn runs. The message queues visibly, then joins the
   running work after the current tool round.
 - Abort, model switching, a thinking level populated from what the model actually
@@ -142,6 +145,12 @@ make ui            # drives the real client in headless chromium (needs a runnin
 make build         # gateway build
 make dev           # dev provider + gateway, workspace = current directory
 ```
+
+The Markdown renderer in `gateway/web/markdown.js` **escapes the source once, up front**,
+and every later step operates on escaped text. Model output and tool output are
+untrusted — a tool result can contain anything a file or a command produced — so raw
+HTML must never survive, and link targets are scheme-checked rather than passed through.
+`scripts/check-markdown.mjs` exists mostly to keep that true.
 
 `make ui` exists because two bugs shipped that curl could not see: an element looked up
 but never declared, and a modal whose visibility an author rule silently overrode. It

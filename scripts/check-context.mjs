@@ -9,7 +9,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const source = await readFile(join(here, "..", "gateway", "web", "app.js"), "utf8");
+const raw = await readFile(join(here, "..", "gateway", "web", "app.js"), "utf8");
+
+// The client's only import is replaced with stubs: new Function cannot parse an
+// import statement, and this check is about the fold, not about rendering. The
+// renderer has its own tests in check-markdown.mjs.
+const source = raw.replace(
+	/^import .*from "\.\/markdown\.js";$/m,
+	'const escape = (value) => String(value ?? "");\nconst renderMarkdown = (value) => String(value ?? "");\nconst stripAnsi = (value) => String(value ?? "");',
+);
 
 /** Minimal DOM so the module can evaluate; only the fold is exercised. */
 const node = () => ({

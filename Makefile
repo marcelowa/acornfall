@@ -28,11 +28,14 @@ typecheck: ## typecheck the worker and check the client against its markup
 	cd worker && bun run typecheck
 	node scripts/check-client.mjs
 	node scripts/check-context.mjs
+	node scripts/check-markdown.mjs
+	node scripts/check-markdown.mjs
 	cd gateway && go test ./...
 
 check: ## verify the client, the worker, and the resolution rules
 	node scripts/check-client.mjs
 	node scripts/check-context.mjs
+	node scripts/check-markdown.mjs
 	cd worker && bun run typecheck
 	cd gateway && go test ./...
 

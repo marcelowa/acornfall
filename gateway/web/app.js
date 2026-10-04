@@ -1,5 +1,6 @@
 // Acornfall client. No framework and no build step: committed state arrives as
 // whole view frames over SSE, so rendering is a pure function of the last frame.
+import { escapeHtml as escape, renderMarkdown, stripAnsi } from "./markdown.js";
 
 // Fails loudly when the client and the markup drift apart, instead of
 // deferring the mistake to a property access on undefined.
@@ -21,6 +22,7 @@ const els = {
 	composer: el("composer"),
 	input: el("input"),
 	steer: el("steer"),
+	formatted: el("formatted"),
 	send: el("send"),
 	abort: el("abort"),
 	connect: el("connect"),
@@ -47,8 +49,7 @@ const forkSource = new Map();
 // it takes over the body regardless of the selected view.
 const sheet = { open: false, view: "providers", query: "", flow: null };
 
-const escapeHtml = (value) =>
-	String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+const escapeHtml = escape;
 
 const textOf = (content) => {
 	if (typeof content === "string") return content;
@@ -102,7 +103,7 @@ function toolCalls(entries, liveMessage) {
 function toolCard({ name, args, output, status, isError }) {
 	const body = [
 		args === undefined ? "" : `$ ${JSON.stringify(args, null, 2)}`,
-		output ? `\n${output}` : "",
+		output ? `\n${stripAnsi(output)}` : "",
 	]
 		.join("\n")
 		.trim();
@@ -140,7 +141,11 @@ function renderEntry(entry, calls, forkAt) {
 			const failure = failureOf(message);
 			if (failure !== null) return `<div class="turn error">${escapeHtml(failure)}</div>`;
 			const text = (entry.model ?? []).map((item) => textOf(item.content)).join("\n").trim();
-			return text ? `<div class="turn assistant">${escapeHtml(text)}</div>` : "";
+			if (!text) return "";
+			// The reply is markdown; the user's own words are left exactly as typed.
+			return formattedReplies
+				? `<div class="turn assistant markdown">${renderMarkdown(text)}</div>`
+				: `<div class="turn assistant">${escapeHtml(text)}</div>`;
 		}
 		case "pi.tool-result": {
 			const message = (entry.model ?? [])[0] ?? {};
@@ -206,7 +211,13 @@ function render() {
 	const streaming = textOf(liveMessage?.content).trim();
 	const streamingFailure = liveMessage ? failureOf(liveMessage) : null;
 	if (streamingFailure !== null) html.push(`<div class="turn error">${escapeHtml(streamingFailure)}</div>`);
-	else if (streaming) html.push(`<div class="turn assistant live">${escapeHtml(streaming)}</div>`);
+	else if (streaming) {
+		html.push(
+			formattedReplies
+				? `<div class="turn assistant live markdown">${renderMarkdown(streaming)}</div>`
+				: `<div class="turn assistant live">${escapeHtml(streaming)}</div>`,
+		);
+	}
 
 	const retry = current.generation?.retry;
 	if (retry) {
@@ -267,6 +278,7 @@ const PREFS = {
 	rail: "acornfall.rail",
 	inspector: "acornfall.inspector",
 	sections: "acornfall.sections",
+	formatted: "acornfall.formatted",
 };
 
 function readPref(key, fallback) {
@@ -287,6 +299,7 @@ function writePref(key, value) {
 }
 
 const openSections = new Set(readPref(PREFS.sections, []));
+let formattedReplies = readPref(PREFS.formatted, true);
 const bodies = new Map();
 
 function buildInspector() {
@@ -1154,6 +1167,12 @@ els.input.addEventListener("input", () => {
 	els.input.style.height = `${Math.min(els.input.scrollHeight, 200)}px`;
 });
 
+els.formatted.addEventListener("change", () => {
+	formattedReplies = els.formatted.checked;
+	writePref(PREFS.formatted, formattedReplies);
+	render();
+});
+
 els.steer.addEventListener("change", () => {
 	els.send.textContent = isBusy() && els.steer.checked ? "Steer" : "Send";
 });
@@ -1239,6 +1258,7 @@ async function boot() {
 		return;
 	}
 	renderConversations();
+	els.formatted.checked = formattedReplies;
 	buildInspector();
 	setupSplitters();
 	renderAgentPicker();
