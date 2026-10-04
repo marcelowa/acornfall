@@ -75,10 +75,14 @@ make dev
 
 ## What works
 
+- **Multiple conversations** per workspace: a list in the left rail, with a real id from
+  the harness and a title derived from the first message. See
+  [ADR 0005](docs/adr/0005-multi-conversation.md).
 - Streaming transcript with tool cards, live tool output, and a running/idle indicator.
 - **Steering**: type while a turn runs. The message queues visibly, then joins the
   running work after the current tool round.
-- Abort, model switching, thinking level, and per-turn usage.
+- Abort, model switching, a thinking level populated from what the model actually
+  supports, and per-turn usage.
 - **Context inspector**: the prompt sections and tool schemas the last request was
   actually sent, estimated tokens per section, and what changed since the previous
   request.
@@ -116,9 +120,9 @@ without restarting anything. Resolution rules and their rationale are in
 
 ## What does not exist yet
 
-Memory, MCP, codemode, subagents, multi-session, multi-user, triggers, versioned
-agent definitions, and sandboxing beyond the host process. `docs/adr/` holds the
-designs they will land against.
+Memory, MCP, codemode, subagents, multi-user, triggers, versioned agent definitions,
+renaming or deleting a conversation, forking from the UI, and sandboxing beyond the host
+process. `docs/adr/` holds the designs they will land against.
 
 ## Development
 

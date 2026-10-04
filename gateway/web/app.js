@@ -14,6 +14,9 @@ const els = {
 	status: el("status"),
 	model: el("model"),
 	agent: el("agent"),
+	thinking: el("thinking"),
+	rail: el("new-conversation"),
+	conversationList: el("conversation-list"),
 	transcript: el("transcript"),
 	composer: el("composer"),
 	input: el("input"),
@@ -39,6 +42,9 @@ const els = {
 let state = null;
 let view = null;
 let sources = null;
+
+/** The conversation everything is scoped to; ids are the harness's own, opaque. */
+const activeId = () => state?.conversation?.id ?? "";
 
 // The provider connection sheet. `flow` is null while browsing the catalog.
 const sheet = { open: false, query: "", flow: null };
@@ -237,6 +243,7 @@ function renderInspector() {
 	const current = live();
 	const resolved = state?.resolved;
 	facts(els.agentFacts, [
+		["conversation", `${activeId()} · ${state?.conversation?.title ?? ""}`],
 		["definition", resolved?.name ?? "default"],
 		["source", resolved?.source || "(layered defaults only)"],
 		["harness", state?.harness],
@@ -397,7 +404,9 @@ async function refreshUsage() {
 
 async function loadState() {
 	state = await (await fetch("/api/state")).json();
+	renderConversations();
 	renderAgentPicker();
+	renderThinking();
 	renderModelPicker();
 	render();
 	if (sheet.open) renderSheet();
@@ -633,6 +642,65 @@ function renderModelPicker() {
 }
 
 /** Definitions come from the overlay: global, then workspace, with workspace winning. */
+function renderConversations() {
+	const conversations = state?.conversations ?? [];
+	const active = activeId();
+	els.conversationList.innerHTML = conversations
+		.map(
+			(conversation) => `<button class="conversation-item" type="button"
+				data-conversation="${escapeHtml(conversation.id)}"
+				aria-current="${conversation.id === active}">
+				<span>${escapeHtml(conversation.title)}</span>
+				<span class="id">${escapeHtml(conversation.id)}${conversation.root ? " ·root" : ""}</span>
+			</button>`,
+		)
+		.join("");
+	for (const button of els.conversationList.querySelectorAll("[data-conversation]")) {
+		button.addEventListener("click", () => void selectConversation(button.dataset.conversation));
+	}
+}
+
+async function selectConversation(id) {
+	if (id === activeId()) return;
+	// Clear first: the new transcript arrives as a snapshot frame from the worker.
+	view = null;
+	state.conversation = { id, title: "" };
+	render();
+	try {
+		await post(`/api/conversations/${id}/select`);
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+		// The optimistic switch was wrong: put the real state back.
+		await loadState().catch(() => {});
+	}
+}
+
+async function newConversation() {
+	try {
+		await post("/api/conversations");
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+	}
+}
+
+/** Levels come from the model, so the picker never offers one the model cannot do. */
+function renderThinking() {
+	const binding = state?.agent ?? {};
+	const provider = (state?.providers ?? []).find((item) => item.id === binding.provider);
+	const model = provider?.models?.find((item) => item.id === binding.modelId);
+	const levels = model?.thinkingLevels ?? [];
+	const options = [`<option value=""${binding.thinkingLevel ? "" : " selected"}>default</option>`];
+	for (const level of levels) {
+		options.push(
+			`<option value="${escapeHtml(level)}"${level === binding.thinkingLevel ? " selected" : ""}>${escapeHtml(level)}</option>`,
+		);
+	}
+	els.thinking.innerHTML = options.join("");
+	els.thinking.disabled = levels.length === 0;
+}
+
 function renderAgentPicker() {
 	const agents = state?.agents ?? [];
 	const current = state?.agent?.definition ?? "";
@@ -659,6 +727,7 @@ function connect() {
 	sources.addEventListener("frame", (event) => {
 		const frame = JSON.parse(event.data);
 		if (frame.type === "view") {
+			if (frame.conversationId !== activeId()) return;
 			view = frame.value;
 			state.seq = frame.seq;
 			render();
@@ -694,7 +763,7 @@ els.composer.addEventListener("submit", async (event) => {
 	els.input.value = "";
 	els.input.style.height = "auto";
 	try {
-		await post("/api/messages", { text, whenBusy });
+		await post(`/api/conversations/${activeId()}/messages`, { text, whenBusy });
 	} catch (error) {
 		els.input.value = text;
 		setStatus(String(error.message ?? error), "offline");
@@ -719,7 +788,7 @@ els.steer.addEventListener("change", () => {
 
 els.abort.addEventListener("click", async () => {
 	try {
-		await post("/api/abort");
+		await post(`/api/conversations/${activeId()}/abort`);
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
 	}
@@ -733,7 +802,12 @@ els.model.addEventListener("change", async () => {
 	const [provider, modelId] = els.model.value.split("/");
 	if (!provider || !modelId) return;
 	try {
-		await post("/api/agent", { provider, modelId, definition: state?.agent?.definition ?? "" });
+		await post(`/api/conversations/${activeId()}/agent`, {
+			provider,
+			modelId,
+			thinkingLevel: state?.agent?.thinkingLevel ?? "",
+			definition: state?.agent?.definition ?? "",
+		});
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -744,7 +818,18 @@ els.model.addEventListener("change", async () => {
 // an explicit picker choice still wins until the next definition change.
 els.agent.addEventListener("change", async () => {
 	try {
-		await post("/api/agent", { definition: els.agent.value });
+		await post(`/api/conversations/${activeId()}/agent`, { definition: els.agent.value });
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+	}
+});
+
+els.rail.addEventListener("click", () => void newConversation());
+
+els.thinking.addEventListener("change", async () => {
+	try {
+		await post(`/api/conversations/${activeId()}/agent`, { thinkingLevel: els.thinking.value });
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -789,7 +874,9 @@ async function boot() {
 		setStatus("gateway unreachable", "offline");
 		return;
 	}
+	renderConversations();
 	renderAgentPicker();
+	renderThinking();
 	renderModelPicker();
 	render();
 	connect();

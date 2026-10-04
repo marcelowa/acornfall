@@ -25,12 +25,20 @@ func New(ctl *control.Control, static fs.FS) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/state", s.state)
+	mux.HandleFunc("GET /api/conversations", s.conversations)
+	mux.HandleFunc("POST /api/conversations", s.createConversation)
+	mux.HandleFunc("POST /api/conversations/{id}/select", s.selectConversation)
 	mux.HandleFunc("GET /api/agents", s.agents)
 	mux.HandleFunc("POST /api/agents/reload", s.reload)
 	mux.HandleFunc("GET /api/stream", s.stream)
-	mux.HandleFunc("POST /api/messages", s.messages)
-	mux.HandleFunc("POST /api/abort", s.abort)
-	mux.HandleFunc("POST /api/agent", s.agent)
+	mux.HandleFunc("POST /api/conversations/{id}/messages", s.messages)
+	mux.HandleFunc("POST /api/conversations/{id}/abort", s.abort)
+	mux.HandleFunc("POST /api/conversations/{id}/agent", s.agent)
+	// Conversation-less routes from the single-conversation build; they target the
+	// active conversation so existing scripts keep working.
+	mux.HandleFunc("POST /api/messages", s.legacyMessages)
+	mux.HandleFunc("POST /api/abort", s.legacyAbort)
+	mux.HandleFunc("POST /api/agent", s.legacyAgent)
 	mux.HandleFunc("GET /api/usage", s.usage)
 	mux.HandleFunc("POST /api/providers/login", s.login)
 	mux.HandleFunc("POST /api/providers/logout", s.logout)
@@ -113,6 +121,10 @@ func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
+	s.messagesFor(w, r, r.PathValue("id"))
+}
+
+func (s *Server) messagesFor(w http.ResponseWriter, r *http.Request, conversationID string) {
 	var body struct {
 		Text     string            `json:"text"`
 		WhenBusy protocol.WhenBusy `json:"whenBusy"`
@@ -129,7 +141,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "whenBusy must be steer, followUp or reject", http.StatusBadRequest)
 		return
 	}
-	if err := s.control.Prompt(r.Context(), strings.TrimSpace(body.Text), when); err != nil {
+	if err := s.control.Prompt(r.Context(), conversationID, strings.TrimSpace(body.Text), when); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -137,7 +149,11 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
-	if err := s.control.Abort(r.Context()); err != nil {
+	s.abortFor(w, r, r.PathValue("id"))
+}
+
+func (s *Server) abortFor(w http.ResponseWriter, r *http.Request, conversationID string) {
+	if err := s.control.Abort(r.Context(), conversationID); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -145,21 +161,56 @@ func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
+	s.agentFor(w, r, r.PathValue("id"))
+}
+
+func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID string) {
 	var binding protocol.ModelBinding
 	if !decode(w, r, &binding) {
 		return
 	}
-	if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
-		http.Error(w, "provide a definition, a provider/modelId, or both", http.StatusBadRequest)
-		return
-	}
-	// Selecting a definition alone is valid: the definition may name its own model,
-	// and otherwise the current one stands.
+	// An empty definition is a valid request: it means "the layered defaults".
+	// The definition may name its own model; otherwise the current one stands.
+	// Only a half-specified model is an error.
 	if (binding.Provider == "") != (binding.ModelID == "") {
 		http.Error(w, "provider and modelId must be given together", http.StatusBadRequest)
 		return
 	}
-	if err := s.control.SetAgent(r.Context(), binding); err != nil {
+	if err := s.control.SetAgent(r.Context(), conversationID, binding); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+// Conversation-less routes from the single-conversation build. They target the
+// active conversation, so older clients and shell history keep working.
+func (s *Server) legacyMessages(w http.ResponseWriter, r *http.Request) {
+	s.messagesFor(w, r, s.control.ActiveConversation())
+}
+
+func (s *Server) legacyAbort(w http.ResponseWriter, r *http.Request) {
+	s.abortFor(w, r, s.control.ActiveConversation())
+}
+
+func (s *Server) legacyAgent(w http.ResponseWriter, r *http.Request) {
+	s.agentFor(w, r, s.control.ActiveConversation())
+}
+
+func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.control.State().Conversations)
+}
+
+func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
+	if err := s.control.Create(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+func (s *Server) selectConversation(w http.ResponseWriter, r *http.Request) {
+	if err := s.control.Select(r.Context(), r.PathValue("id")); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

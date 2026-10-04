@@ -1,5 +1,9 @@
-// Package control owns the domain: workspace, session, agent binding, worker
-// lifecycle, and the fan-out of worker frames to attached clients.
+// Package control owns the domain: the workspace, its conversations, agent
+// bindings, provider credentials, worker lifecycle, and the fan-out of worker
+// frames to attached clients.
+//
+// A conversation id is the harness's own id, stringified, and is opaque here.
+// See docs/adr/0005-multi-conversation.md.
 package control
 
 import (
@@ -19,67 +23,77 @@ import (
 // not a failure: the UI has to be reachable so the user can connect one.
 var ErrNoProvider = errors.New("no authenticated provider")
 
-const RootConversationID = "root"
-
 // Options configures one Control instance, which owns exactly one workspace.
 type Options struct {
 	Workspace     string
 	DataDir       string
 	WorkerCommand []string
 	WorkerDir     string
-	// Model is the default "provider/modelId". Empty selects the stored
-	// selection, then the first model of the first authenticated provider.
+	// Model is the default "provider/modelId" for a conversation that has none.
 	Model string
-	// SettingsPath persists the session's agent binding across restarts.
+	// SettingsPath persists the active conversation and per-conversation agents.
 	SettingsPath string
 }
 
-// Session is a conversation as the user sees it.
-type Session struct {
+// Conversation is one transcript, as the UI lists it.
+type Conversation struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+	Root  bool   `json:"root"`
 }
 
 // State is everything the UI needs to render before any frame arrives.
 type State struct {
-	Workspace    string                  `json:"workspace"`
-	Harness      string                  `json:"harness"`
-	Capabilities protocol.Capabilities   `json:"capabilities"`
-	Session      Session                 `json:"session"`
-	Agent        protocol.ModelBinding   `json:"agent"`
-	Resolved     *protocol.ResolvedAgent `json:"resolved,omitempty"`
-	Agents       []protocol.AgentSummary `json:"agents"`
-	Skills       []protocol.SkillSummary `json:"skills"`
-	Defaults     []protocol.LayerTrace   `json:"defaults"`
-	Providers    []protocol.ProviderInfo `json:"providers"`
-	Seq          int64                   `json:"seq"`
+	Workspace     string                  `json:"workspace"`
+	Harness       string                  `json:"harness"`
+	Capabilities  protocol.Capabilities   `json:"capabilities"`
+	Conversation  *Conversation           `json:"conversation,omitempty"`
+	Conversations []Conversation          `json:"conversations"`
+	Agent         protocol.ModelBinding   `json:"agent"`
+	Resolved      *protocol.ResolvedAgent `json:"resolved,omitempty"`
+	Agents        []protocol.AgentSummary `json:"agents"`
+	Skills        []protocol.SkillSummary `json:"skills"`
+	Defaults      []protocol.LayerTrace   `json:"defaults"`
+	Providers     []protocol.ProviderInfo `json:"providers"`
+	Seq           int64                   `json:"seq"`
 }
 
 type Control struct {
 	opts   Options
 	worker *workerpool.Worker
 
-	mu          sync.RWMutex
-	describe    protocol.Describe
-	agent       protocol.ModelBinding
-	resolved    *protocol.ResolvedAgent
-	agents      protocol.AgentsData
-	seq         int64
-	lastView    []byte
-	providers   []protocol.ProviderInfo
-	subscribers map[int]chan protocol.Frame
-	nextSub     int
+	mu            sync.RWMutex
+	describe      protocol.Describe
+	conversations []protocol.ConversationInfo
+	active        string
+	agents        map[string]protocol.ModelBinding
+	resolved      map[string]*protocol.ResolvedAgent
+	agentsData    protocol.AgentsData
+	providers     []protocol.ProviderInfo
+	views         map[string]cachedView
+	subscribers   map[int]chan protocol.Frame
+	nextSub       int
+}
+
+// cachedView is the last full view per conversation, so switching back is
+// instant rather than waiting for the worker's next frame.
+type cachedView struct {
+	value []byte
+	seq   int64
 }
 
 func New(opts Options) *Control {
 	return &Control{
 		opts:        opts,
+		agents:      map[string]protocol.ModelBinding{},
+		resolved:    map[string]*protocol.ResolvedAgent{},
+		views:       map[string]cachedView{},
 		subscribers: map[int]chan protocol.Frame{},
-		agent:       protocol.ModelBinding{Provider: "opencode-go", ModelID: ""},
 	}
 }
 
-// Open starts the worker, resolves a default model, and attaches to the session.
+// Open starts the worker, reads the catalog, and attaches to the active
+// conversation, creating the root conversation if the storage is empty.
 func (c *Control) Open(ctx context.Context) error {
 	command := c.opts.WorkerCommand
 	if len(command) == 0 {
@@ -102,20 +116,33 @@ func (c *Control) Open(ctx context.Context) error {
 	}
 	c.applyDescribe(describe)
 
-	// An unauthenticated install still serves the UI, so a provider can be
-	// connected from it. Only a real worker failure is fatal here.
 	if _, err := c.Agents(ctx); err != nil {
 		return fmt.Errorf("read agent catalog: %w", err)
 	}
-	binding, err := c.defaultBinding(describe)
-	if errors.Is(err, ErrNoProvider) {
-		workerpool.Log("no provider connected yet; open the UI to connect one")
+	conversations, err := c.listConversations(ctx)
+	if err != nil {
+		return fmt.Errorf("list conversations: %w", err)
+	}
+	if len(conversations) == 0 {
+		if err := c.Create(ctx); err != nil {
+			return fmt.Errorf("create first conversation: %w", err)
+		}
 		return nil
 	}
-	if err != nil {
+
+	active := c.loadPersistedActive()
+	if !hasConversation(conversations, active) {
+		active = defaultConversation(conversations)
+	}
+	if err := c.Select(ctx, active); err != nil {
 		return err
 	}
-	return c.SetAgent(ctx, binding)
+	// No conversation has an agent yet and no provider is connected is a normal
+	// first run, not a failure.
+	if err := c.adoptModel(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
+		return err
+	}
+	return nil
 }
 
 func (c *Control) Close() {
@@ -134,32 +161,140 @@ func (c *Control) Describe() protocol.Describe {
 func (c *Control) State() State {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return State{
-		Workspace:    c.opts.Workspace,
-		Harness:      c.describe.Provider,
-		Capabilities: c.describe.Capabilities,
-		Session:      Session{ID: RootConversationID, Title: baseName(c.opts.Workspace)},
-		Agent:        c.agent,
-		Resolved:     c.resolved,
-		Agents:       c.agents.Agents,
-		Skills:       c.agents.Skills,
-		Defaults:     c.agents.Defaults,
-		Providers:    c.providers,
-		Seq:          c.seq,
+	state := State{
+		Workspace:     c.opts.Workspace,
+		Harness:       c.describe.Provider,
+		Capabilities:  c.describe.Capabilities,
+		Conversations: toConversations(c.conversations),
+		Agent:         c.agents[c.active],
+		Resolved:      c.resolved[c.active],
+		Agents:        c.agentsData.Agents,
+		Skills:        c.agentsData.Skills,
+		Defaults:      c.agentsData.Defaults,
+		Providers:     c.providers,
+		Seq:           c.views[c.active].seq,
 	}
+	for index := range state.Conversations {
+		if state.Conversations[index].ID == c.active {
+			conversation := state.Conversations[index]
+			state.Conversation = &conversation
+			break
+		}
+	}
+	return state
 }
 
-// Refresh re-reads the worker's provider catalog and adopts a usable agent
-// binding when the current one is missing or no longer available.
-func (c *Control) Refresh(ctx context.Context) error {
-	var describe protocol.Describe
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+// Select attaches to one conversation, detaching the previous one so frames
+// describe a single transcript.
+func (c *Control) Select(ctx context.Context, conversationID string) error {
+	if conversationID == "" {
+		return errors.New("conversation id is required")
+	}
+	c.mu.RLock()
+	previous := c.active
+	c.mu.RUnlock()
+	if previous == conversationID {
+		return nil
+	}
+	if previous != "" {
+		if _, err := c.worker.Call(ctx, protocol.Command{Type: "detach", ConversationID: previous}); err != nil {
+			workerpool.Log("detach %s: %v", previous, err)
+		}
+	}
+	if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 		return err
 	}
-	c.applyDescribe(describe)
+	c.mu.Lock()
+	c.active = conversationID
+	c.mu.Unlock()
+	c.persist()
+	// Attaching to a conversation that has no model yet would fail on its next
+	// prompt, so selecting one is where it gets an agent.
+	if err := c.adoptModel(ctx, conversationID); err != nil && !errors.Is(err, ErrNoProvider) {
+		return err
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
 
+// Create makes a new conversation and selects it.
+func (c *Control) Create(ctx context.Context) error {
+	var response struct {
+		ConversationID string `json:"conversationId"`
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "create"}, &response); err != nil {
+		return err
+	}
+	if response.ConversationID == "" {
+		return errors.New("worker returned no conversation id")
+	}
+	if _, err := c.listConversations(ctx); err != nil {
+		return err
+	}
+	if err := c.Select(ctx, response.ConversationID); err != nil {
+		return err
+	}
+	// A conversation with no model cannot run: give it the default one now rather
+	// than failing on its first prompt.
+	if err := c.adoptModel(ctx, response.ConversationID); err != nil && !errors.Is(err, ErrNoProvider) {
+		return err
+	}
+	return nil
+}
+
+// SetAgent applies a binding to one conversation. The worker resolves the
+// definition and returns it, so the UI can explain the result.
+func (c *Control) SetAgent(ctx context.Context, conversationID string, binding protocol.ModelBinding) error {
+	var response struct {
+		Agent protocol.ResolvedAgent `json:"agent"`
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{
+		Type:           "open",
+		ConversationID: conversationID,
+		Agent:          &binding,
+	}, &response); err != nil {
+		return err
+	}
+
+	// Selecting a definition with no explicit model adopts the definition's model,
+	// and otherwise keeps the model already in use. A later explicit picker choice
+	// still beats the definition.
 	c.mu.RLock()
-	current := c.agent
+	previous := c.agents[conversationID]
+	c.mu.RUnlock()
+	if binding.Provider == "" || binding.ModelID == "" {
+		if parts := strings.SplitN(response.Agent.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			binding.Provider, binding.ModelID = parts[0], parts[1]
+		} else {
+			binding.Provider, binding.ModelID = previous.Provider, previous.ModelID
+		}
+	}
+	// A partial update on a conversation that has no model yet still needs one,
+	// otherwise the next prompt has nothing to run.
+	if binding.Provider == "" || binding.ModelID == "" {
+		if fallback, err := c.defaultBinding(c.Describe()); err == nil {
+			binding.Provider, binding.ModelID = fallback.Provider, fallback.ModelID
+		}
+	}
+	if binding.ThinkingLevel == "" {
+		binding.ThinkingLevel = response.Agent.Thinking
+	}
+
+	c.mu.Lock()
+	c.agents[conversationID] = binding
+	resolved := response.Agent
+	c.resolved[conversationID] = &resolved
+	c.mu.Unlock()
+	c.persist()
+	return nil
+}
+
+// adoptModel gives a conversation an agent binding when it has none and a
+// provider is available.
+func (c *Control) adoptModel(ctx context.Context, conversationID string) error {
+	c.mu.RLock()
+	describe := c.describe
+	current := c.agents[conversationID]
 	c.mu.RUnlock()
 	if current.ModelID != "" && c.isAvailable(describe, current) {
 		return nil
@@ -168,16 +303,69 @@ func (c *Control) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.SetAgent(ctx, binding)
+	return c.SetAgent(ctx, conversationID, binding)
+}
+
+// Agents returns the overlay catalog: every definition and what it resolves to.
+func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
+	var data protocol.AgentsData
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "agents"}, &data); err != nil {
+		return protocol.AgentsData{}, err
+	}
+	c.mu.Lock()
+	c.agentsData = data
+	c.mu.Unlock()
+	return data, nil
+}
+
+// Reload re-reads definitions and config from disk, then re-applies every
+// conversation's binding so an edited file takes effect without a restart.
+func (c *Control) Reload(ctx context.Context) error {
+	if _, err := c.worker.Call(ctx, protocol.Command{Type: "reload"}); err != nil {
+		return err
+	}
+	if _, err := c.Agents(ctx); err != nil {
+		return err
+	}
+	c.mu.RLock()
+	bindings := make(map[string]protocol.ModelBinding, len(c.agents))
+	for id, binding := range c.agents {
+		bindings[id] = binding
+	}
+	c.mu.RUnlock()
+	for id, binding := range bindings {
+		if binding.ModelID == "" && binding.Definition == "" {
+			continue
+		}
+		if err := c.SetAgent(ctx, id, binding); err != nil {
+			return err
+		}
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
+// Refresh re-reads the worker's provider catalog and adopt a usable agent
+// binding for the active conversation when the current one is unusable.
+func (c *Control) Refresh(ctx context.Context) error {
+	var describe protocol.Describe
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+		return err
+	}
+	c.applyDescribe(describe)
+	if active := c.activeConversation(); active != "" {
+		return c.adoptModel(ctx, active)
+	}
+	return nil
 }
 
 // Login runs a provider login flow in the worker. It returns as soon as the
 // flow starts: the interaction arrives as `auth` frames, and a device flow can
 // take minutes.
 func (c *Control) Login(ctx context.Context, providerID, authType string) error {
-	authID := fmt.Sprintf("auth-%d", c.nextSub+1)
 	c.mu.Lock()
 	c.nextSub++
+	authID := fmt.Sprintf("auth-%d", c.nextSub)
 	c.mu.Unlock()
 
 	go func() {
@@ -198,21 +386,24 @@ func (c *Control) Login(ctx context.Context, providerID, authType string) error 
 	return nil
 }
 
-// Logout forgets one provider's stored credential and re-adopts a binding, so a
+// Logout forgets one provider's stored credential and re-adopts bindings, so a
 // revoked key cannot keep spending and the picker cannot keep offering it.
 func (c *Control) Logout(ctx context.Context, providerID string) error {
 	if _, err := c.worker.Call(ctx, protocol.Command{Type: "logout", ProviderID: providerID}); err != nil {
 		return err
 	}
-	// Drop the binding first, then let Refresh adopt whatever is still usable.
 	c.mu.Lock()
-	if c.agent.Provider == providerID {
-		c.agent = protocol.ModelBinding{}
+	for id, binding := range c.agents {
+		if binding.Provider == providerID {
+			c.agents[id] = protocol.ModelBinding{}
+			delete(c.resolved, id)
+		}
 	}
 	c.mu.Unlock()
 	if err := c.Refresh(ctx); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
+	c.persist()
 	c.publish(protocol.Frame{Type: "state"})
 	return nil
 }
@@ -233,102 +424,28 @@ func (c *Control) CancelAuth(ctx context.Context, authID string) error {
 	return c.worker.CallInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
 }
 
-// SetAgent applies a model binding and selects it for the session. The worker
-// resolves the definition and returns it, so the UI can explain the result.
-func (c *Control) SetAgent(ctx context.Context, binding protocol.ModelBinding) error {
-	var response struct {
-		Agent protocol.ResolvedAgent `json:"agent"`
-	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
-		Type:           "open",
-		ConversationID: RootConversationID,
-		Agent:          &binding,
-	}, &response); err != nil {
-		return err
-	}
-	// Selecting a definition with no explicit model adopts the definition's model,
-	// and otherwise keeps the model already in use. A later explicit picker choice
-	// still beats the definition.
-	c.mu.RLock()
-	previous := c.agent
-	c.mu.RUnlock()
-	if binding.Provider == "" || binding.ModelID == "" {
-		if parts := strings.SplitN(response.Agent.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			binding.Provider, binding.ModelID = parts[0], parts[1]
-		} else {
-			binding.Provider, binding.ModelID = previous.Provider, previous.ModelID
-		}
-	}
-	if binding.ThinkingLevel == "" {
-		binding.ThinkingLevel = response.Agent.Thinking
-	}
-	c.mu.Lock()
-	c.agent = binding
-	resolved := response.Agent
-	c.resolved = &resolved
-	c.mu.Unlock()
-	c.persist(binding)
-	return nil
-}
-
-// Agents returns the overlay catalog: every definition and what it resolves to.
-func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
-	var data protocol.AgentsData
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "agents"}, &data); err != nil {
-		return protocol.AgentsData{}, err
-	}
-	c.mu.Lock()
-	c.agents = data
-	c.mu.Unlock()
-	return data, nil
-}
-
-// Reload re-reads definitions and config from disk, then re-applies the current
-// binding so an edited file takes effect without a restart.
-func (c *Control) Reload(ctx context.Context) error {
-	if _, err := c.worker.Call(ctx, protocol.Command{Type: "reload"}); err != nil {
-		return err
-	}
-	if _, err := c.Agents(ctx); err != nil {
-		return err
-	}
-	c.mu.RLock()
-	binding := c.agent
-	c.mu.RUnlock()
-	if binding.ModelID != "" || binding.Definition != "" {
-		if err := c.SetAgent(ctx, binding); err != nil {
-			return err
-		}
-	}
-	c.publish(protocol.Frame{Type: "state"})
-	return nil
-}
-
-func (c *Control) Prompt(ctx context.Context, text string, when protocol.WhenBusy) error {
+func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy) error {
 	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("empty message")
+		return errors.New("empty message")
 	}
 	return c.worker.CallInto(ctx, protocol.Command{
 		Type:           "prompt",
-		ConversationID: RootConversationID,
+		ConversationID: conversationID,
 		Text:           text,
 		WhenBusy:       when,
 	}, nil)
 }
 
-func (c *Control) Abort(ctx context.Context) error {
-	return c.worker.CallInto(ctx, protocol.Command{
-		Type:           "abort",
-		ConversationID: RootConversationID,
-	}, nil)
+func (c *Control) Abort(ctx context.Context, conversationID string) error {
+	return c.worker.CallInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
 }
 
 func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
 	return c.worker.Call(ctx, protocol.Command{Type: "usage"})
 }
 
-// Subscribe attaches a client. It returns the current view frame, if any, so a
-// late joiner starts from committed state and never from an empty screen.
+// Subscribe attaches a client. It returns the active conversation's current
+// view, if any, so a late joiner starts from committed state.
 func (c *Control) Subscribe() (int, <-chan protocol.Frame, *protocol.Frame) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -336,9 +453,15 @@ func (c *Control) Subscribe() (int, <-chan protocol.Frame, *protocol.Frame) {
 	c.nextSub++
 	channel := make(chan protocol.Frame, 1)
 	c.subscribers[id] = channel
+
 	var initial *protocol.Frame
-	if c.lastView != nil {
-		frame := c.lastViewFrame()
+	if cached, ok := c.views[c.active]; ok && cached.value != nil {
+		frame := protocol.Frame{
+			Type:           "view",
+			ConversationID: c.active,
+			Seq:            cached.seq,
+			Value:          append([]byte(nil), cached.value...),
+		}
 		initial = &frame
 	}
 	return id, channel, initial
@@ -352,6 +475,18 @@ func (c *Control) Unsubscribe(id int) {
 
 func (c *Control) onFrame(frame protocol.Frame) {
 	c.publish(frame)
+	// Titles are derived from the first user message, so a settled run is the
+	// moment a conversation's name can change.
+	if frame.Type == "submission" {
+		go func() {
+			ctx := context.Background()
+			if _, err := c.listConversations(ctx); err != nil {
+				workerpool.Log("refresh conversation list: %v", err)
+				return
+			}
+			c.publish(protocol.Frame{Type: "state"})
+		}()
+	}
 }
 
 // publish fans one frame out to attached clients. A view frame is a complete
@@ -360,8 +495,10 @@ func (c *Control) onFrame(frame protocol.Frame) {
 func (c *Control) publish(frame protocol.Frame) {
 	c.mu.Lock()
 	if frame.Type == "view" {
-		c.seq = frame.Seq
-		c.lastView = append(c.lastView[:0], frame.Value...)
+		c.views[frame.ConversationID] = cachedView{
+			value: append([]byte(nil), frame.Value...),
+			seq:   frame.Seq,
+		}
 	}
 	subscribers := make([]chan protocol.Frame, 0, len(c.subscribers))
 	for _, channel := range c.subscribers {
@@ -393,13 +530,23 @@ func (c *Control) publish(frame protocol.Frame) {
 	}
 }
 
-func (c *Control) lastViewFrame() protocol.Frame {
-	return protocol.Frame{
-		Type:           "view",
-		ConversationID: RootConversationID,
-		Seq:            c.seq,
-		Value:          append([]byte(nil), c.lastView...),
+func (c *Control) listConversations(ctx context.Context) ([]protocol.ConversationInfo, error) {
+	var data struct {
+		Conversations []protocol.ConversationInfo `json:"conversations"`
 	}
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "conversations"}, &data); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.conversations = data.Conversations
+	c.mu.Unlock()
+	return data.Conversations, nil
+}
+
+func (c *Control) activeConversation() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.active
 }
 
 func (c *Control) applyDescribe(describe protocol.Describe) {
@@ -416,9 +563,6 @@ func (c *Control) defaultBinding(describe protocol.Describe) (protocol.ModelBind
 			return protocol.ModelBinding{}, fmt.Errorf("--model must be provider/modelId, got %q", model)
 		}
 		return protocol.ModelBinding{Provider: parts[0], ModelID: parts[1]}, nil
-	}
-	if stored, ok := c.loadPersistedAgent(); ok && c.isAvailable(describe, stored) {
-		return stored, nil
 	}
 	for _, provider := range describe.Providers {
 		if !provider.Authenticated || len(provider.Models) == 0 {
@@ -446,32 +590,50 @@ func (c *Control) isAvailable(describe protocol.Describe, binding protocol.Model
 }
 
 type persistedSettings struct {
-	Agent protocol.ModelBinding `json:"agent"`
+	Active string                           `json:"active,omitempty"`
+	Agents map[string]protocol.ModelBinding `json:"agents,omitempty"`
 }
 
-func (c *Control) loadPersistedAgent() (protocol.ModelBinding, bool) {
+func (c *Control) loadPersistedActive() string {
 	if c.opts.SettingsPath == "" {
-		return protocol.ModelBinding{}, false
+		return ""
 	}
 	payload, err := os.ReadFile(c.opts.SettingsPath)
 	if err != nil {
-		return protocol.ModelBinding{}, false
+		return ""
 	}
 	var settings persistedSettings
 	if err := json.Unmarshal(payload, &settings); err != nil {
-		return protocol.ModelBinding{}, false
+		return ""
 	}
-	if settings.Agent.Provider == "" || settings.Agent.ModelID == "" {
-		return protocol.ModelBinding{}, false
+	if settings.Agents != nil {
+		c.mu.Lock()
+		for id, binding := range settings.Agents {
+			if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
+				continue
+			}
+			c.agents[id] = binding
+		}
+		c.mu.Unlock()
 	}
-	return settings.Agent, true
+	return settings.Active
 }
 
-func (c *Control) persist(binding protocol.ModelBinding) {
+func (c *Control) persist() {
 	if c.opts.SettingsPath == "" {
 		return
 	}
-	payload, err := json.MarshalIndent(persistedSettings{Agent: binding}, "", "  ")
+	c.mu.RLock()
+	settings := persistedSettings{Active: c.active, Agents: map[string]protocol.ModelBinding{}}
+	for id, binding := range c.agents {
+		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
+			continue
+		}
+		settings.Agents[id] = binding
+	}
+	c.mu.RUnlock()
+
+	payload, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return
 	}
@@ -482,13 +644,41 @@ func (c *Control) persist(binding protocol.ModelBinding) {
 	_ = os.Rename(temp, c.opts.SettingsPath)
 }
 
-func baseName(path string) string {
-	trimmed := strings.TrimRight(path, "/")
-	if trimmed == "" {
-		return path
+func toConversations(infos []protocol.ConversationInfo) []Conversation {
+	conversations := make([]Conversation, 0, len(infos))
+	for _, info := range infos {
+		conversations = append(conversations, Conversation{ID: info.ID, Title: info.Title, Root: info.Root})
 	}
-	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
-		return trimmed[index+1:]
+	return conversations
+}
+
+func hasConversation(infos []protocol.ConversationInfo, id string) bool {
+	if id == "" {
+		return false
 	}
-	return trimmed
+	for _, info := range infos {
+		if info.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultConversation prefers the root conversation, so an upgrade lands on the
+// history it already has.
+func defaultConversation(infos []protocol.ConversationInfo) string {
+	for _, info := range infos {
+		if info.Root {
+			return info.ID
+		}
+	}
+	if len(infos) > 0 {
+		return infos[0].ID
+	}
+	return ""
+}
+
+// ActiveConversation is the id the gateway is currently attached to.
+func (c *Control) ActiveConversation() string {
+	return c.activeConversation()
 }

@@ -1,9 +1,12 @@
 /**
  * Acornfall harness worker.
  *
- * One worker owns one Harness over one storage: a workspace's sessions and all
- * the subagent conversations they spawn. It speaks the JSONL protocol in
+ * One worker owns one Harness over one storage: a workspace's conversations and
+ * all the subagent conversations they spawn. It speaks the JSONL protocol in
  * src/protocol.ts and never talks to the UI or to our database.
+ *
+ * A conversation id is pi-durable's own id, stringified. This layer never invents
+ * one; control treats it as opaque.
  */
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -11,12 +14,16 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { Conversation, ToolRegistration } from "@earendil-works/pi-durable";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
 import {
+	type Conversation,
+	type ConversationId,
 	createRegistry,
 	defineExtension,
 	Harness,
+	ROOT_CONVERSATION_ID,
 	section,
+	type ToolRegistration,
 	type HarnessSettings,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -27,10 +34,19 @@ import { FileCredentialStore } from "./credentials.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import { loadCatalog, resolveAgent, type Catalog, type ResolvedAgent } from "./config.ts";
 import { devProvider } from "./devprovider.ts";
-import { CommandQueue, type Command, type DescribeData, emit, log } from "./protocol.ts";
+import {
+	CommandQueue,
+	type Command,
+	type ConversationInfo,
+	type DescribeData,
+	emit,
+	log,
+} from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
 
 const CONTEXT = BACKGROUND_CONTEXT;
+const TITLE_SCAN_LIMIT = 20;
+const TITLE_MAX = 64;
 
 const PREAMBLE = [
 	"You are Acornfall, a personal assistant with tools.",
@@ -59,11 +75,8 @@ function parseArgs(argv: readonly string[]): Args {
 			values.set(key, "true");
 			continue;
 		}
-		if (key === "skill") {
-			skills.push(next);
-		} else {
-			values.set(key, next);
-		}
+		if (key === "skill") skills.push(next);
+		else values.set(key, next);
 		index += 1;
 	}
 	const workspace = resolve(values.get("workspace") ?? process.cwd());
@@ -87,10 +100,11 @@ const discoveredSkills = await loadSkills(args.skills);
 
 // The overlay. Reloaded on demand so editing a definition does not need a restart.
 let catalog: Catalog = await loadCatalog(args.dataDir, args.workspace);
-let activeAgent: ResolvedAgent = resolveAgent(catalog, undefined);
-const activeSkillFilter = (): readonly string[] | null => activeAgent.skills;
 
-// A scripted stand-in provider, so the full path works without an api key.
+// Skills are filtered per conversation, because two conversations can run
+// different agents at once.
+const skillFilterByConversation = new Map<string, readonly string[] | null>();
+
 if (process.env.ACORNFALL_DEV_PROVIDER === "1") {
 	const dev = devProvider();
 	models.setProvider(dev.provider);
@@ -98,7 +112,9 @@ if (process.env.ACORNFALL_DEV_PROVIDER === "1") {
 
 const registry = createRegistry();
 registry.install(CodingTools);
-registry.install(skillsExtension(discoveredSkills, activeSkillFilter));
+registry.install(
+	skillsExtension(discoveredSkills, (conversationId) => skillFilterByConversation.get(conversationId) ?? null),
+);
 registry.install(
 	defineExtension({
 		name: "acornfall-prompt",
@@ -112,34 +128,97 @@ const env = ({ cwd }: { readonly cwd?: string }) => new NodeExecutionEnv({ cwd: 
 const storage = await openNodeSqliteStorage(args.storage);
 const harness = await Harness.open(storage, { models, registry, settings, env }, CONTEXT);
 
-const conversationSubscriptions = new Map<string, { dispose: () => void }>();
-let seq = 0;
+/** Live handles by conversation id; created on first use. */
+const handles = new Map<string, Conversation>();
+const subscriptions = new Map<string, { dispose: () => void }>();
+const seqs = new Map<string, number>();
+/** The agent each conversation runs, so a switch back restores it. */
+const agentByConversation = new Map<string, ResolvedAgent>();
 
-function nextSeq(): number {
-	seq += 1;
-	return seq;
+function nextSeq(conversationId: string): number {
+	const next = (seqs.get(conversationId) ?? 0) + 1;
+	seqs.set(conversationId, next);
+	return next;
 }
 
-async function describe(): Promise<DescribeData> {	const providers: DescribeData["providers"] = [];
+async function conversationFor(id: string): Promise<Conversation> {
+	const existing = handles.get(id);
+	if (existing !== undefined) return existing;
+	const numeric = Number(id);
+	if (!Number.isInteger(numeric) || numeric <= 0) throw new Error(`invalid conversation id ${id}`);
+	const handle = await harness.conversation(numeric as ConversationId, CONTEXT);
+	if (handle === undefined) throw new Error(`no conversation ${id}`);
+	handles.set(id, handle);
+	return handle;
+}
+
+/** Titles are derived: durable records carry an id and ownership, not a name. */
+async function titleOf(id: string, conversation: Conversation): Promise<string> {
+	const page = await conversation.entries({}, TITLE_SCAN_LIMIT, undefined, CONTEXT);
+	for (const entry of page.items) {
+		if (entry.kind !== "pi.user") continue;
+		const message = (entry.model ?? [])[0] as { content?: unknown } | undefined;
+		const text =
+			typeof message?.content === "string"
+				? message.content
+				: Array.isArray(message?.content)
+					? message.content
+							.filter((block): block is { type: "text"; text: string } =>
+								typeof block === "object" && block !== null && (block as { type?: string }).type === "text",
+							)
+							.map((block) => block.text)
+							.join(" ")
+					: "";
+		const trimmed = text.replace(/\s+/g, " ").trim();
+		if (trimmed.length > 0) {
+			return trimmed.length > TITLE_MAX ? `${trimmed.slice(0, TITLE_MAX - 1)}…` : trimmed;
+		}
+	}
+	return "New conversation";
+}
+
+async function listConversations(): Promise<ConversationInfo[]> {
+	const found: ConversationInfo[] = [];
+	let cursor: Parameters<typeof storage.scanConversations>[2];
+	for (;;) {
+		const page = await storage.scanConversations({}, 50, cursor, CONTEXT);
+		for (const record of page.items) {
+			// Only conversations the user owns: a subagent's transcript has an owner edge.
+			if (record.owner !== undefined) continue;
+			const id = String(record.id);
+			const conversation = await conversationFor(id);
+			found.push({
+				id,
+				title: await titleOf(id, conversation),
+				root: record.id === ROOT_CONVERSATION_ID,
+			});
+		}
+		if (page.next === undefined) break;
+		cursor = page.next;
+	}
+	// Newest first; ids are monotonic.
+	return found.sort((a, b) => Number(b.id) - Number(a.id));
+}
+
+async function describe(): Promise<DescribeData> {
+	const providers: DescribeData["providers"] = [];
 	for (const provider of models.getProviders()) {
 		const check = await models.checkAuth(provider.id).catch(() => undefined);
 		const authenticated = check !== undefined;
-		const modelsForProvider = authenticated
-			? await models
-					.getAvailable(provider.id)
-					.catch(() => [])
-					.then((list) => list.map((model) => ({
-						id: model.id,
-						name: model.name ?? model.id,
-						contextWindow: model.contextWindow,
-					})))
+		const list = authenticated
+			? await models.getAvailable(provider.id).catch(() => [])
 			: [];
 		providers.push({
 			id: provider.id,
 			name: provider.name ?? provider.id,
 			authenticated,
 			...(check?.source === undefined ? {} : { source: check.source }),
-			models: modelsForProvider,
+			models: list.map((model) => ({
+				id: model.id,
+				name: model.name ?? model.id,
+				contextWindow: model.contextWindow,
+				thinkingLevels: getSupportedThinkingLevels(model) as string[],
+			})),
 		});
 	}
 	providers.sort((a, b) => Number(b.authenticated) - Number(a.authenticated) || a.id.localeCompare(b.id));
@@ -150,48 +229,16 @@ async function describe(): Promise<DescribeData> {	const providers: DescribeData
 		capabilities: { steer: true, subagents: false, sandbox: "local-process" },
 	};
 }
-async function bind(conversationId: string, conversation: Conversation): Promise<void> {
-	conversationSubscriptions.get(conversationId)?.dispose();
+
+async function attach(conversationId: string): Promise<void> {
+	const conversation = await conversationFor(conversationId);
+	subscriptions.get(conversationId)?.dispose();
 	const view = await conversation.viewState(CONTEXT);
-	emit({ type: "view", conversationId, seq: nextSeq(), value: view.value });
+	emit({ type: "view", conversationId, seq: nextSeq(conversationId), value: view.value });
 	view.subscribe((value) => {
-		emit({ type: "view", conversationId, seq: nextSeq(), value });
+		emit({ type: "view", conversationId, seq: nextSeq(conversationId), value });
 	});
-	conversationSubscriptions.set(conversationId, { dispose: () => view.dispose() });
-}
-
-/** One resolved agent application: definition first, explicit choices second. */
-async function applyAgent(input: {
-	definition?: string | undefined;
-	provider: string;
-	modelId: string;
-	thinkingLevel?: string | undefined;
-	instructions?: string | undefined;
-}): Promise<{ resolved: ResolvedAgent; model: { provider: string; modelId: string } }> {
-	if (root === undefined) throw new Error("worker is not ready");
-	const resolved = resolveAgent(catalog, input.definition);
-	activeAgent = resolved;
-
-	// An explicit provider/modelId is the user's choice in the picker and beats
-	// the definition; the definition beats nothing.
-	const fromDefinition = resolved.model?.split("/");
-	const provider = input.provider || fromDefinition?.[0] || "";
-	const modelId = input.modelId || fromDefinition?.[1] || "";
-
-	const instructions = [resolved.instructions, input.instructions ?? ""]
-		.filter((text) => text.trim().length > 0)
-		.join("\n\n");
-
-	await root.configure(
-		{
-			...(provider && modelId ? { model: { provider, modelId } } : {}),
-			thinkingLevel: thinkingLevelFor(input.thinkingLevel ?? resolved.thinking),
-			instructions,
-			tools: toolFilter(resolved),
-		},
-		CONTEXT,
-	);
-	return { resolved, model: { provider, modelId } };
+	subscriptions.set(conversationId, { dispose: () => view.dispose() });
 }
 
 const THINKING_LEVELS = new Set<ModelThinkingLevel>([
@@ -223,9 +270,7 @@ function toolsByName(): Map<string, ToolRegistration> {
 function resolveTool(byName: Map<string, ToolRegistration>, name: string, agent: string): ToolRegistration {
 	const tool = byName.get(name);
 	if (tool === undefined) {
-		throw new Error(
-			`agent "${agent}" names unknown tool "${name}"; registered: ${[...byName.keys()].join(", ")}`,
-		);
+		throw new Error(`agent "${agent}" names unknown tool "${name}"; registered: ${[...byName.keys()].join(", ")}`);
 	}
 	return tool;
 }
@@ -245,14 +290,52 @@ function toolFilter(resolved: ResolvedAgent): readonly ToolRegistration[] | { re
 	return null;
 }
 
-/** One root conversation per workspace storage in v0. */
-let root: Conversation | undefined;
+/** One resolved agent application: definition first, explicit choices second. */
+async function applyAgent(
+	conversationId: string,
+	input: {
+		definition?: string | undefined;
+		provider: string;
+		modelId: string;
+		thinkingLevel?: string | undefined;
+		instructions?: string | undefined;
+	},
+): Promise<{ resolved: ResolvedAgent; model: { provider: string; modelId: string } }> {
+	const conversation = await conversationFor(conversationId);
+	const resolved = resolveAgent(catalog, input.definition);
+	agentByConversation.set(conversationId, resolved);
+	skillFilterByConversation.set(conversationId, resolved.skills);
+
+	// An explicit provider/modelId is the user's choice in the picker and beats
+	// the definition; the definition beats nothing.
+	const fromDefinition = resolved.model?.split("/");
+	const provider = input.provider || fromDefinition?.[0] || "";
+	const modelId = input.modelId || fromDefinition?.[1] || "";
+
+	const instructions = [resolved.instructions, input.instructions ?? ""]
+		.filter((text) => text.trim().length > 0)
+		.join("\n\n");
+
+	await conversation.configure(
+		{
+			...(provider && modelId ? { model: { provider, modelId } } : {}),
+			thinkingLevel: thinkingLevelFor(input.thinkingLevel ?? resolved.thinking),
+			instructions,
+			tools: toolFilter(resolved),
+		},
+		CONTEXT,
+	);
+	return { resolved, model: { provider, modelId } };
+}
 
 async function main(): Promise<void> {
 	await harness.resume();
-	root = await harness.root(CONTEXT);
-	await bind("root", root);
-	log(`worker ready workspace=${args.workspace}`);
+	// The root conversation exists in every install and is adopted as the first
+	// conversation, so an upgrade keeps its history.
+	const root = await harness.root(CONTEXT);
+	handles.set(String(root.id), root);
+	await attach(String(root.id));
+	log(`worker ready workspace=${args.workspace} conversation=${root.id}`);
 
 	const queue = new CommandQueue();
 	const lines = createInterface({ input: process.stdin, terminal: false });
@@ -298,7 +381,6 @@ async function main(): Promise<void> {
 		});
 	});
 
-	// Closing stdin means "finish the queue, then stop". The gateway keeps it open.
 	lines.on("close", () => {
 		queue.push(shutdown);
 	});
@@ -308,18 +390,65 @@ async function handle(command: Command): Promise<unknown> {
 	switch (command.type) {
 		case "describe":
 			return await describe();
+		case "conversations":
+			return { conversations: await listConversations() };
+		case "create": {
+			const created = await harness.createConversation({ ownership: { kind: "ownerless" } }, CONTEXT);
+			handles.set(String(created.id), created);
+			return { conversationId: String(created.id) };
+		}
 		case "open": {
-			if (root === undefined) throw new Error("worker is not ready");
-			const applied = await applyAgent({
+			const applied = await applyAgent(command.conversationId, {
 				definition: command.agent.definition,
 				provider: command.agent.provider,
 				modelId: command.agent.modelId,
 				thinkingLevel: command.agent.thinkingLevel,
 				instructions: command.agent.instructions,
 			});
-			return { conversationId: "root", agent: applied.resolved, model: applied.model };
+			return { conversationId: command.conversationId, agent: applied.resolved, model: applied.model };
 		}
-		case "agents": {
+		case "attach":
+			await attach(command.conversationId);
+			return { conversationId: command.conversationId, seq: seqs.get(command.conversationId) ?? 0 };
+		case "detach":
+			subscriptions.get(command.conversationId)?.dispose();
+			subscriptions.delete(command.conversationId);
+			return undefined;
+		case "prompt": {
+			const conversation = await conversationFor(command.conversationId);
+			const submission = await conversation.submit(
+				{
+					type: "input",
+					content: command.text,
+					whenBusy: command.whenBusy ?? "followUp",
+					requestId: crypto.randomUUID(),
+				},
+				CONTEXT,
+			);
+			void submission.wait(CONTEXT).then(
+				(settled) =>
+					emit({
+						type: "submission",
+						conversationId: command.conversationId,
+						submissionId: String(submission.id),
+						status: settled.status,
+					}),
+				(error: Error) =>
+					emit({
+						type: "submission",
+						conversationId: command.conversationId,
+						submissionId: String(submission.id),
+						status: `error: ${error.message}`,
+					}),
+			);
+			return { submissionId: String(submission.id), disposition: "started" };
+		}
+		case "abort": {
+			const conversation = await conversationFor(command.conversationId);
+			await conversation.abort(CONTEXT);
+			return undefined;
+		}
+		case "agents":
 			return {
 				defaults: catalog.defaults,
 				skills: discoveredSkills.map((skill) => ({ name: skill.name, description: skill.description })),
@@ -331,56 +460,9 @@ async function handle(command: Command): Promise<unknown> {
 					resolved: resolveAgent(catalog, agent.name),
 				})),
 			};
-		}
-		case "reload": {
+		case "reload":
 			catalog = await loadCatalog(args.dataDir, args.workspace);
 			return { agents: catalog.agents.length };
-		}
-		case "attach": {
-			if (root === undefined) throw new Error("worker is not ready");
-			await bind(command.conversationId, root);
-			return { conversationId: command.conversationId, seq };
-		}
-		case "detach":
-			conversationSubscriptions.get(command.conversationId)?.dispose();
-			conversationSubscriptions.delete(command.conversationId);
-			return undefined;
-		case "prompt": {
-			if (root === undefined) throw new Error("worker is not ready");
-			const submission = await root.submit(
-				{
-					type: "input",
-					content: command.text,
-					whenBusy: command.whenBusy ?? "followUp",
-					requestId: crypto.randomUUID(),
-				},
-				CONTEXT,
-			);
-			void submission
-				.wait(CONTEXT)
-				.then(
-					(settled) =>
-						emit({
-							type: "submission",
-							conversationId: command.conversationId,
-							submissionId: String(submission.id),
-							status: settled.status,
-						}),
-					(error: Error) =>
-						emit({
-							type: "submission",
-							conversationId: command.conversationId,
-							submissionId: String(submission.id),
-							status: `error: ${error.message}`,
-						}),
-				);
-			return { submissionId: String(submission.id), disposition: "started" };
-		}
-		case "abort": {
-			if (root === undefined) throw new Error("worker is not ready");
-			await root.abort(CONTEXT);
-			return undefined;
-		}
 		case "login":
 			return await login(models, command.authId, command.providerId, command.authType);
 		case "logout":

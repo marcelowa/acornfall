@@ -2,6 +2,9 @@
  * Worker wire protocol. See docs/adr/0002-layers-and-protocol.md.
  *
  * JSONL on stdin/stdout, one object per line, LF-framed. stderr is diagnostics.
+ *
+ * A conversation id on the wire is the harness's own id, stringified, and is
+ * opaque to control: this layer never invents one.
  */
 
 export type WhenBusy = "steer" | "followUp" | "reject";
@@ -11,23 +14,25 @@ export interface ModelBinding {
 	modelId: string;
 	thinkingLevel?: string;
 	instructions?: string;
-	/** Agent definition name; empty or absent selects the defaults only. */
+	/** Agent definition name; empty or absent selects the layered defaults only. */
 	definition?: string;
 }
 
 export type Command =
 	| { id: string; type: "describe" }
-	| { id: string; type: "open"; conversationId?: string; agent: ModelBinding }
+	| { id: string; type: "conversations" }
+	| { id: string; type: "create" }
+	| { id: string; type: "open"; conversationId: string; agent: ModelBinding }
 	| { id: string; type: "attach"; conversationId: string }
 	| { id: string; type: "detach"; conversationId: string }
 	| { id: string; type: "prompt"; conversationId: string; text: string; whenBusy?: WhenBusy }
 	| { id: string; type: "abort"; conversationId: string }
+	| { id: string; type: "agents" }
+	| { id: string; type: "reload" }
 	| { id: string; type: "login"; authId: string; providerId: string; authType: "api_key" | "oauth" }
 	| { id: string; type: "logout"; providerId: string }
 	| { id: string; type: "auth_answer"; authId: string; promptId: string; value?: string; cancelled?: boolean }
 	| { id: string; type: "auth_cancel"; authId: string }
-	| { id: string; type: "agents" }
-	| { id: string; type: "reload" }
 	| { id: string; type: "usage" }
 	| { id: string; type: "shutdown" };
 
@@ -35,6 +40,8 @@ export interface ProviderModelInfo {
 	id: string;
 	name: string;
 	contextWindow?: number;
+	/** Thinking levels this model actually supports; ["off"] means it cannot reason. */
+	thinkingLevels: string[];
 }
 
 export interface ProviderInfo {
@@ -54,6 +61,15 @@ export interface DescribeData {
 		subagents: boolean;
 		sandbox: string;
 	};
+}
+
+/** One conversation as the UI lists it. The id is the harness's own, stringified. */
+export interface ConversationInfo {
+	id: string;
+	/** First user message, truncated; "New conversation" before the first one. */
+	title: string;
+	/** True for the root conversation, which exists in every install. */
+	root: boolean;
 }
 
 /** Provider auth prompts, a 1:1 projection of pi-ai's AuthPrompt and AuthEvent. */

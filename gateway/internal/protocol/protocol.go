@@ -139,6 +139,17 @@ type ModelInfo struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	ContextWindow int    `json:"contextWindow,omitempty"`
+	// ThinkingLevels are the levels this model actually supports; ["off"] means
+	// it cannot reason at all, so the UI never offers a level that is a lie.
+	ThinkingLevels []string `json:"thinkingLevels,omitempty"`
+}
+
+// ConversationInfo is one conversation as the worker lists it. The id is the
+// harness's own, stringified, and is opaque to this layer.
+type ConversationInfo struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Root  bool   `json:"root"`
 }
 
 // ProviderInfo is one model provider and its auth state.

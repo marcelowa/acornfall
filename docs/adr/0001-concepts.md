@@ -13,7 +13,7 @@ are marked below.
 |---|---|---|
 | **Harness** | One open storage plus the machinery that runs agents on it. | worker |
 | **Storage** | The durable backend holding conversations, entries, documents, tasks. | worker (path chosen by control) |
-| **Conversation** | A transcript. A stateless handle, compared by id. | worker |
+| **Conversation** | One transcript. A stateless handle, compared by id. Its id is the harness's own, and is opaque to control. | worker |
 | **Entry** | One immutable transcript record (`pi.user`, `pi.assistant`, `pi.tool-result`, `pi.system`, `pi.reset`, custom kinds). | worker |
 | **Commit** | An atomic write. Nothing is shown before it is stored. | worker |
 | **Document** | Typed JSON state committed beside the transcript (`pi.agent`, `pi.live`, `pi.inbox`, `pi.usage`). | worker |
@@ -25,25 +25,27 @@ are marked below.
 | **Agent** | Resolved: model, thinking level, extensions, tools, instructions, cwd. Stored as names; resolved per request. | worker |
 | **View / watch** | Committed structural state, plus the operations of each commit. | worker → gateway |
 | **Usage** | Token and cost totals per provider/model and per tool. | worker → control |
-| **Workspace** | *(ours)* A folder plus metadata. Persistent. Surfaces sessions. | control |
-| **Session** | *(ours)* One conversation, as the user sees it. | control |
+| **Workspace** | *(ours)* A folder plus metadata. Owns one worker and its conversations. | control |
 | **Worker** | *(ours)* The process owning one Harness. | control |
-| **Attachment** | *(ours)* A live subscription of one client to one session's frames. | gateway |
+| **Attachment** | *(ours)* A client's live subscription to one conversation's frames. | gateway |
 
 ## The three mappings that decide the shape
 
-**Session = Conversation.** A session is not a process, a storage, or an agent. It is
-one transcript. Everything the user thinks of as "a chat" maps to a Conversation id.
+**A conversation is the unit the user sees.** It is not a process, a storage, or an
+agent, and it is not called a session: that word meant two different things here —
+a transcript and something process-shaped — which is how a hardcoded placeholder id
+survived review. Everything the user thinks of as "a chat" is a Conversation id.
 
-**Workspace = one Worker = one Harness = one Storage.** All of a workspace's sessions,
-and all subagent conversations they spawn, live in one SQLite storage, because task
-ownership and the task graph require it. A worker crash therefore affects every session
-in the workspace, and every one of them resumes from its last commit: the cost is
-recovery latency, not lost work. Per-session workers are a later knob, not a v0 one.
+**Workspace = one Worker = one Harness = one Storage.** All of a workspace's
+conversations, and all the subagent conversations they spawn, live in one SQLite
+storage, because task ownership and the task graph require it. A worker crash therefore
+affects every conversation in the workspace, and every one of them resumes from its last
+commit: the cost is recovery latency, not lost work.
 
 **Subagent = child Conversation owned by a Task.** Delegation is not a separate
 subsystem; it is `tx.createConversation({ ownership: { kind: "task", taskId } })`.
-Durability, abort cascades, and restart safety come from the ownership model.
+Ownership is also the discriminator that keeps subagent chatter out of the user's
+conversation list: a user conversation has no owner edge.
 
 ## Invariants
 
@@ -54,13 +56,17 @@ Durability, abort cascades, and restart safety come from the ownership model.
 3. **Stored agent configuration is names, never code.** Conversations store extension
    names and model refs; the registry resolves them at use. Reload and upgrade cannot
    rewrite history.
-4. **The agent resolves per request, not per session.** Changing a conversation's model,
-   tools, or cwd applies from the next request and can reach calls already in flight.
+4. **The agent resolves per request, not per conversation.** Changing a conversation's
+   model, tools, or cwd applies from the next request and can reach calls already in
+   flight.
+5. **A conversation id belongs to the harness.** Control treats it as opaque, so a
+   replacement worker with a different id shape needs no change above it. Inventing a
+   local label for it is how two identities for one thing get into a codebase.
 
 ## Consequences
 
-- Our session list, transcript rendering, and fork come from durable's view, not from a
-  second store we maintain.
+- Our conversation list, transcript rendering, and fork come from durable's view, not
+  from a second store we maintain.
 - Control owns no transcript. It owns identity, resources, credentials, and policy.
 - Anything we add must answer "is this durable, or is this a live frame?" before it is
   designed.

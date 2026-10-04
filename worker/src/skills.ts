@@ -103,18 +103,23 @@ export function renderSkills(skills: readonly Skill[], allowed: readonly string[
 }
 
 /**
- * The skill set is a live function, not a captured array: an agent definition
- * changes which skills are offered, and the next request must see that without
- * a reload.
+ * The skill set is resolved per request from the conversation's agent, not
+ * captured at install time: two conversations can run different agents with
+ * different skills at the same time.
  */
-export function skillsExtension(skills: readonly Skill[], allowed: () => readonly string[] | null) {
-	const permitted = (): readonly Skill[] => {
-		const names = allowed();
+export function skillsExtension(
+	skills: readonly Skill[],
+	allowedFor: (conversationId: string) => readonly string[] | null,
+) {
+	const permitted = (conversationId: string): readonly Skill[] => {
+		const names = allowedFor(conversationId);
 		return names === null ? skills : skills.filter((skill) => names.includes(skill.name));
 	};
 	return defineExtension({
 		name: "acornfall-skills",
-		sections: [section("skills", () => renderSkills(skills, allowed()))],
+		sections: [
+			section("skills", (input) => renderSkills(skills, allowedFor(String(input.conversationId)))),
+		],
 		tools: [
 			defineTool({
 				name: "skill",
@@ -124,8 +129,8 @@ export function skillsExtension(skills: readonly Skill[], allowed: () => readonl
 					name: Type.String({ description: "Skill name, as listed in the skills section" }),
 					args: Type.Optional(Type.String({ description: "Optional request or arguments for the skill" })),
 				}),
-				execute: async (args) => {
-					const available = permitted();
+				execute: async (args, api) => {
+					const available = permitted(String(api.conversationId));
 					const skill = available.find((candidate) => candidate.name === args.name);
 					if (skill === undefined) {
 						const names = available.map((candidate) => candidate.name).join(", ");

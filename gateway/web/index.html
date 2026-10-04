@@ -25,6 +25,10 @@
 					<span class="label">Model</span>
 					<select id="model"></select>
 				</label>
+				<label class="field">
+					<span class="label">Thinking</span>
+					<select id="thinking"></select>
+				</label>
 				<span class="pill" id="status">connecting</span>
 				<button class="ghost" id="connect" type="button">Providers</button>
 				<button class="ghost" id="toggle-inspector" type="button">Inspector</button>
@@ -32,6 +36,11 @@
 		</header>
 
 		<main>
+			<nav class="rail">
+				<button class="primary full" id="new-conversation" type="button">New conversation</button>
+				<div class="rail-list" id="conversation-list"></div>
+			</nav>
+
 			<section class="conversation">
 				<div class="transcript" id="transcript"></div>
 				<form class="composer" id="composer">
