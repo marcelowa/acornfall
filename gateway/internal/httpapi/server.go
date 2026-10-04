@@ -28,6 +28,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/conversations", s.conversations)
 	mux.HandleFunc("POST /api/conversations", s.createConversation)
 	mux.HandleFunc("POST /api/conversations/{id}/select", s.selectConversation)
+	mux.HandleFunc("POST /api/conversations/{id}/rename", s.renameConversation)
+	mux.HandleFunc("POST /api/conversations/{id}/hide", s.hideConversation)
+	mux.HandleFunc("POST /api/conversations/{id}/fork", s.forkConversation)
 	mux.HandleFunc("GET /api/agents", s.agents)
 	mux.HandleFunc("POST /api/agents/reload", s.reload)
 	mux.HandleFunc("GET /api/stream", s.stream)
@@ -184,6 +187,52 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
 	if err := s.control.Create(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+func (s *Server) renameConversation(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Title string `json:"title"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.control.Rename(r.Context(), r.PathValue("id"), body.Title); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+func (s *Server) hideConversation(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Hidden bool `json:"hidden"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.control.Hide(r.Context(), r.PathValue("id"), body.Hidden); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+func (s *Server) forkConversation(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		At string `json:"at"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.At == "" {
+		http.Error(w, "at is required (the entry id to fork from)", http.StatusBadRequest)
+		return
+	}
+	if err := s.control.Fork(r.Context(), r.PathValue("id"), body.At); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

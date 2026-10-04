@@ -75,9 +75,13 @@ make dev
 
 ## What works
 
-- **Multiple conversations** per workspace: a list in the left rail, with a real id from
-  the harness and a title derived from the first message. See
-  [ADR 0005](docs/adr/0005-multi-conversation.md).
+- **Multiple conversations** per workspace in the left rail, with a real id from the
+  harness. Rename, branch, and delete from the rail; see
+  [ADR 0005](docs/adr/0005-multi-conversation.md) and
+  [ADR 0006](docs/adr/0006-conversation-lifecycle.md). Branches fork *before* a user
+  turn and hand that message back to the composer for editing.
+- **Delete is a tombstone**, not a row delete: storage is append-only, so a deleted
+  conversation keeps its transcript and is restorable from the rail.
 - Streaming transcript with tool cards, live tool output, and a running/idle indicator.
 - **Steering**: type while a turn runs. The message queues visibly, then joins the
   running work after the current tool round.

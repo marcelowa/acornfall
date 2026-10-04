@@ -22,6 +22,9 @@ export type Command =
 	| { id: string; type: "describe" }
 	| { id: string; type: "conversations" }
 	| { id: string; type: "create" }
+	| { id: string; type: "rename"; conversationId: string; title: string }
+	| { id: string; type: "hide"; conversationId: string; hidden: boolean }
+	| { id: string; type: "fork"; conversationId: string; at: string }
 	| { id: string; type: "open"; conversationId: string; agent: ModelBinding }
 	| { id: string; type: "attach"; conversationId: string }
 	| { id: string; type: "detach"; conversationId: string }
@@ -66,10 +69,12 @@ export interface DescribeData {
 /** One conversation as the UI lists it. The id is the harness's own, stringified. */
 export interface ConversationInfo {
 	id: string;
-	/** First user message, truncated; "New conversation" before the first one. */
+	/** The given name, or the first user message truncated; "New conversation" before either. */
 	title: string;
 	/** True for the root conversation, which exists in every install. */
 	root: boolean;
+	/** Hidden conversations are listed so they can be restored, never dropped. */
+	hidden: boolean;
 }
 
 /** Provider auth prompts, a 1:1 projection of pi-ai's AuthPrompt and AuthEvent. */

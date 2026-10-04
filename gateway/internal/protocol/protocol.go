@@ -32,12 +32,17 @@ type Command struct {
 	Agent          *ModelBinding `json:"agent,omitempty"`
 	Text           string        `json:"text,omitempty"`
 	WhenBusy       WhenBusy      `json:"whenBusy,omitempty"`
-	AuthID         string        `json:"authId,omitempty"`
-	ProviderID     string        `json:"providerId,omitempty"`
-	AuthType       string        `json:"authType,omitempty"`
-	PromptID       string        `json:"promptId,omitempty"`
-	Value          string        `json:"value,omitempty"`
-	Cancelled      bool          `json:"cancelled,omitempty"`
+	Title          string        `json:"title,omitempty"`
+	// No omitempty: `false` is a value here, and omitting it turns a restore into
+	// a no-op that still reports success.
+	Hidden     bool   `json:"hidden"`
+	At         string `json:"at,omitempty"`
+	AuthID     string `json:"authId,omitempty"`
+	ProviderID string `json:"providerId,omitempty"`
+	AuthType   string `json:"authType,omitempty"`
+	PromptID   string `json:"promptId,omitempty"`
+	Value      string `json:"value,omitempty"`
+	Cancelled  bool   `json:"cancelled,omitempty"`
 }
 
 func (c Command) Marshal() ([]byte, error) { return json.Marshal(c) }
@@ -150,6 +155,9 @@ type ConversationInfo struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	Root  bool   `json:"root"`
+	// Hidden conversations are tombstoned, not deleted: storage is append-only,
+	// so the UI filters them and can always bring one back.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // ProviderInfo is one model provider and its auth state.

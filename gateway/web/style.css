@@ -207,11 +207,33 @@ button.full {
 }
 
 .conversation-item {
+	display: flex;
+	align-items: center;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+}
+
+.conversation-item:hover {
+	background: var(--neutral-100);
+}
+
+.conversation-item[data-active="true"] {
+	background: var(--brand-50);
+	border-color: var(--brand-100);
+}
+
+.conversation-item[data-active="true"] .conversation-select {
+	color: var(--brand-500);
+	font-weight: 500;
+}
+
+.conversation-select {
+	flex: 1;
+	min-width: 0;
 	text-align: left;
 	background: transparent;
-	border: 1px solid transparent;
+	border: none;
 	padding: 7px 9px;
-	border-radius: var(--radius-sm);
 	font-size: 13px;
 	color: var(--neutral-700);
 	line-height: 1.35;
@@ -220,22 +242,86 @@ button.full {
 	align-items: baseline;
 }
 
-.conversation-item:hover {
-	background: var(--neutral-100);
+.conversation-select .title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.conversation-item[aria-current="true"] {
-	background: var(--brand-50);
-	border-color: var(--brand-100);
-	color: var(--brand-500);
-	font-weight: 500;
-}
-
-.conversation-item .id {
+.conversation-select .id {
 	font-family: var(--mono);
 	font-size: 10px;
 	color: var(--neutral-500);
 	margin-left: auto;
+	flex-shrink: 0;
+}
+
+.row-actions {
+	display: none;
+	gap: 2px;
+	padding-right: 4px;
+}
+
+.conversation-item:hover .row-actions,
+.conversation-item[data-active="true"] .row-actions {
+	display: flex;
+}
+
+button.icon {
+	background: transparent;
+	border: none;
+	color: var(--neutral-500);
+	font-size: 13px;
+	line-height: 1;
+	padding: 4px 5px;
+	border-radius: 6px;
+}
+
+button.icon:hover {
+	background: var(--neutral-200);
+	color: var(--neutral-900);
+}
+
+.row-input {
+	width: 100%;
+	font: inherit;
+	font-size: 13px;
+	padding: 6px 8px;
+	border: 1px solid var(--brand-300);
+	border-radius: var(--radius-sm);
+}
+
+.deleted summary {
+	cursor: pointer;
+	padding: 6px 9px;
+	font-size: 12px;
+	color: var(--neutral-500);
+}
+
+.deleted .conversation-item .title {
+	color: var(--neutral-500);
+	text-decoration: line-through;
+}
+
+.turn.user {
+	position: relative;
+}
+
+button.branch {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	color: rgba(255, 255, 255, 0.75);
+	opacity: 0;
+}
+
+.turn.user:hover button.branch {
+	opacity: 1;
+}
+
+button.branch:hover {
+	background: rgba(255, 255, 255, 0.2);
+	color: white;
 }
 
 .conversation {

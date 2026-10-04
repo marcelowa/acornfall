@@ -45,6 +45,8 @@ let sources = null;
 
 /** The conversation everything is scoped to; ids are the harness's own, opaque. */
 const activeId = () => state?.conversation?.id ?? "";
+/** Text of the message each branch point precedes, so a fork can offer it back. */
+const forkSource = new Map();
 
 // The provider connection sheet. `flow` is null while browsing the catalog.
 const sheet = { open: false, query: "", flow: null };
@@ -126,11 +128,16 @@ function failureOf(message) {
 	return `${message.provider ?? "provider"}/${message.model ?? "model"}: ${detail}`;
 }
 
-function renderEntry(entry, calls) {
+function renderEntry(entry, calls, forkAt) {
 	switch (entry.kind) {
 		case "pi.user": {
 			const text = (entry.model ?? []).map((message) => textOf(message.content)).join("\n").trim();
-			return text ? `<div class="turn user">${escapeHtml(text)}</div>` : "";
+			if (!text) return "";
+			const button =
+				forkAt === null
+					? ""
+					: `<button class="icon branch" data-fork-at="${escapeHtml(forkAt)}" title="Branch a new conversation from before this message">⑂</button>`;
+			return `<div class="turn user">${escapeHtml(text)}${button}</div>`;
 		}
 		case "pi.assistant": {
 			const message = (entry.model ?? [])[0] ?? {};
@@ -168,7 +175,18 @@ function render() {
 	const calls = toolCalls(entries, liveMessage);
 	const html = [];
 
-	for (const entry of entries) html.push(renderEntry(entry, calls));
+	// A branch keeps everything before this message, so it forks at the entry
+	// that precedes each user turn, not at the turn itself.
+	forkSource.clear();
+	for (let index = 0; index < entries.length; index += 1) {
+		const entry = entries[index];
+		const previous = index > 0 ? entries[index - 1] : undefined;
+		const forkAt = entry.kind === "pi.user" && previous !== undefined ? String(previous.id) : null;
+		if (forkAt !== null) {
+			forkSource.set(forkAt, (entry.model ?? []).map((message) => textOf(message.content)).join("\n").trim());
+		}
+		html.push(renderEntry(entry, calls, forkAt));
+	}
 
 	const settled = new Set(
 		entries
@@ -223,6 +241,11 @@ function render() {
 
 	const emptyConnect = document.getElementById("empty-connect");
 	if (emptyConnect !== null) emptyConnect.addEventListener("click", () => openSheet());
+	for (const button of els.transcript.querySelectorAll("[data-fork-at]")) {
+		button.addEventListener("click", () =>
+			void forkConversation(button.dataset.forkAt, forkSource.get(button.dataset.forkAt)),
+		);
+	}
 
 	const busy = isBusy();
 	setStatus(busy ? "running" : "idle", busy ? "busy" : "idle");
@@ -642,21 +665,102 @@ function renderModelPicker() {
 }
 
 /** Definitions come from the overlay: global, then workspace, with workspace winning. */
+function conversationRow(conversation, active, deleted) {
+	const actions = deleted
+		? `<button class="icon" data-restore="${escapeHtml(conversation.id)}" title="Restore">↺</button>`
+		: `<button class="icon" data-rename="${escapeHtml(conversation.id)}" title="Rename">✎</button>
+			<button class="icon" data-hide="${escapeHtml(conversation.id)}" title="Delete">×</button>`;
+	return `<div class="conversation-item" data-active="${conversation.id === active}" data-id="${escapeHtml(conversation.id)}">
+		<button class="conversation-select" data-conversation="${escapeHtml(conversation.id)}" type="button">
+			<span class="title">${escapeHtml(conversation.title)}</span>
+			<span class="id">${escapeHtml(conversation.id)}${conversation.root ? " ·root" : ""}</span>
+		</button>
+		<span class="row-actions">${actions}</span>
+	</div>`;
+}
+
 function renderConversations() {
-	const conversations = state?.conversations ?? [];
+	const all = state?.conversations ?? [];
 	const active = activeId();
-	els.conversationList.innerHTML = conversations
-		.map(
-			(conversation) => `<button class="conversation-item" type="button"
-				data-conversation="${escapeHtml(conversation.id)}"
-				aria-current="${conversation.id === active}">
-				<span>${escapeHtml(conversation.title)}</span>
-				<span class="id">${escapeHtml(conversation.id)}${conversation.root ? " ·root" : ""}</span>
-			</button>`,
-		)
-		.join("");
+	const visible = all.filter((conversation) => !conversation.hidden);
+	const deleted = all.filter((conversation) => conversation.hidden);
+	els.conversationList.innerHTML =
+		visible.map((conversation) => conversationRow(conversation, active, false)).join("") +
+		(deleted.length === 0
+			? ""
+			: `<details class="deleted"><summary>Deleted (${deleted.length})</summary>
+				${deleted.map((conversation) => conversationRow(conversation, active, true)).join("")}
+			</details>`);
+
 	for (const button of els.conversationList.querySelectorAll("[data-conversation]")) {
 		button.addEventListener("click", () => void selectConversation(button.dataset.conversation));
+	}
+	for (const button of els.conversationList.querySelectorAll("[data-hide]")) {
+		button.addEventListener("click", () => void hideConversation(button.dataset.hide, true));
+	}
+	for (const button of els.conversationList.querySelectorAll("[data-restore]")) {
+		button.addEventListener("click", () => void hideConversation(button.dataset.restore, false));
+	}
+	for (const button of els.conversationList.querySelectorAll("[data-rename]")) {
+		button.addEventListener("click", () => beginRename(button.dataset.rename));
+	}
+}
+
+/** Rename in place: the row becomes an input, Enter commits, Escape reverts. */
+function beginRename(id) {
+	const row = els.conversationList.querySelector(`.conversation-item[data-id="${CSS.escape(id)}"]`);
+	if (row === null) return;
+	const current = (state?.conversations ?? []).find((conversation) => conversation.id === id)?.title ?? "";
+	row.innerHTML = `<input class="row-input" value="${escapeHtml(current)}" />`;
+	const input = row.querySelector("input");
+	input.focus();
+	input.setSelectionRange(input.value.length, input.value.length);
+	input.addEventListener("keydown", (event) => {
+		if (event.key === "Escape") {
+			renderConversations();
+			return;
+		}
+		if (event.key !== "Enter") return;
+		event.preventDefault();
+		void renameConversation(id, input.value);
+	});
+	input.addEventListener("blur", () => renderConversations());
+}
+
+async function renameConversation(id, title) {
+	try {
+		await post(`/api/conversations/${id}/rename`, { title });
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+		renderConversations();
+	}
+}
+
+async function hideConversation(id, hidden) {
+	try {
+		await post(`/api/conversations/${id}/hide`, { hidden });
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+	}
+}
+
+async function forkConversation(at, text) {
+	try {
+		await post(`/api/conversations/${activeId()}/fork`, { at });
+		view = null;
+		await loadState();
+		// The fork has the same history minus the message that was branched from,
+		// so hand that message back for editing.
+		if (text) {
+			els.input.value = text;
+			els.input.focus();
+			els.input.style.height = "auto";
+			els.input.style.height = `${Math.min(els.input.scrollHeight, 200)}px`;
+		}
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
 	}
 }
 

@@ -40,6 +40,8 @@ type Conversation struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	Root  bool   `json:"root"`
+	// Hidden conversations are tombstoned, not deleted; the UI can restore them.
+	Hidden bool `json:"hidden"`
 }
 
 // State is everything the UI needs to render before any frame arrives.
@@ -212,6 +214,97 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 	// prompt, so selecting one is where it gets an agent.
 	if err := c.adoptModel(ctx, conversationID); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
+// Rename gives a conversation a name. The name is committed into the
+// conversation itself, so it is durable and travels with the transcript.
+func (c *Control) Rename(ctx context.Context, conversationID, title string) error {
+	if strings.TrimSpace(title) == "" {
+		return errors.New("title is required")
+	}
+	if _, err := c.worker.Call(ctx, protocol.Command{
+		Type:           "rename",
+		ConversationID: conversationID,
+		Title:          title,
+	}); err != nil {
+		return err
+	}
+	if _, err := c.listConversations(ctx); err != nil {
+		return err
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
+// Hide tombstones a conversation. Nothing is removed: storage is append-only, so
+// a hidden conversation keeps its transcript and can be restored.
+func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) error {
+	if _, err := c.worker.Call(ctx, protocol.Command{
+		Type:           "hide",
+		ConversationID: conversationID,
+		Hidden:         hidden,
+	}); err != nil {
+		return err
+	}
+	conversations, err := c.listConversations(ctx)
+	if err != nil {
+		return err
+	}
+	// Hiding what you are looking at has to move you somewhere.
+	if hidden && c.activeConversation() == conversationID {
+		if next := firstVisible(conversations); next != "" {
+			if err := c.Select(ctx, next); err != nil {
+				return err
+			}
+		} else if err := c.Create(ctx); err != nil {
+			return err
+		}
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
+// Fork branches a conversation at an entry. The fork inherits the transcript up
+// to that entry and the agent in effect at that point.
+func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
+	var response struct {
+		ConversationID string `json:"conversationId"`
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{
+		Type:           "fork",
+		ConversationID: conversationID,
+		At:             at,
+	}, &response); err != nil {
+		return err
+	}
+	if response.ConversationID == "" {
+		return errors.New("worker returned no conversation id")
+	}
+
+	c.mu.RLock()
+	parent := c.bindings[conversationID]
+	parentResolved := c.resolved[conversationID]
+	c.mu.RUnlock()
+	if parent.Provider != "" || parent.Definition != "" {
+		c.mu.Lock()
+		c.bindings[response.ConversationID] = parent
+		c.resolved[response.ConversationID] = parentResolved
+		c.mu.Unlock()
+	}
+
+	if _, err := c.listConversations(ctx); err != nil {
+		return err
+	}
+	if err := c.Select(ctx, response.ConversationID); err != nil {
+		return err
+	}
+	if parent.Provider == "" && parent.Definition == "" {
+		if err := c.adoptModel(ctx, response.ConversationID); err != nil && !errors.Is(err, ErrNoProvider) {
+			return err
+		}
 	}
 	c.publish(protocol.Frame{Type: "state"})
 	return nil
@@ -647,7 +740,12 @@ func (c *Control) persist() {
 func toConversations(infos []protocol.ConversationInfo) []Conversation {
 	conversations := make([]Conversation, 0, len(infos))
 	for _, info := range infos {
-		conversations = append(conversations, Conversation{ID: info.ID, Title: info.Title, Root: info.Root})
+		conversations = append(conversations, Conversation{
+			ID:     info.ID,
+			Title:  info.Title,
+			Root:   info.Root,
+			Hidden: info.Hidden,
+		})
 	}
 	return conversations
 }
@@ -658,10 +756,19 @@ func hasConversation(infos []protocol.ConversationInfo, id string) bool {
 	}
 	for _, info := range infos {
 		if info.ID == id {
-			return true
+			return !info.Hidden
 		}
 	}
 	return false
+}
+
+func firstVisible(infos []protocol.ConversationInfo) string {
+	for _, info := range infos {
+		if !info.Hidden {
+			return info.ID
+		}
+	}
+	return ""
 }
 
 // defaultConversation prefers the root conversation, so an upgrade lands on the
@@ -672,8 +779,5 @@ func defaultConversation(infos []protocol.ConversationInfo) string {
 			return info.ID
 		}
 	}
-	if len(infos) > 0 {
-		return infos[0].ID
-	}
-	return ""
+	return firstVisible(infos)
 }

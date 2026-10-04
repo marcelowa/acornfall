@@ -17,7 +17,7 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
 import {
 	type Conversation,
-	type ConversationId,
+	type EntryId,
 	createRegistry,
 	defineExtension,
 	Harness,
@@ -34,6 +34,7 @@ import { FileCredentialStore } from "./credentials.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import { loadCatalog, resolveAgent, type Catalog, type ResolvedAgent } from "./config.ts";
 import { devProvider } from "./devprovider.ts";
+import { conversationIdOf, ConversationMetaDoc } from "./meta.ts";
 import {
 	CommandQueue,
 	type Command,
@@ -127,7 +128,21 @@ const settings: HarnessSettings = { toolExecution: "parallel" };
 const env = ({ cwd }: { readonly cwd?: string }) => new NodeExecutionEnv({ cwd: cwd ?? args.workspace });
 
 const storage = await openNodeSqliteStorage(args.storage);
-const harness = await Harness.open(storage, { models, registry, settings, env }, CONTEXT);
+const harness = await Harness.open(
+	storage,
+	{
+		models,
+		registry,
+		settings,
+		env,
+		// Runs in every commit that creates or forks a conversation, so metadata
+		// exists from the first entry and a fork inherits its parent's naming rules.
+		conversationCreated: async (tx, conversation) => {
+			await tx.doc(ConversationMetaDoc, conversation.id);
+		},
+	},
+	CONTEXT,
+);
 
 /** Live handles by conversation id; created on first use. */
 const handles = new Map<string, Conversation>();
@@ -143,16 +158,23 @@ function nextSeq(conversationId: string): number {
 async function conversationFor(id: string): Promise<Conversation> {
 	const existing = handles.get(id);
 	if (existing !== undefined) return existing;
-	const numeric = Number(id);
-	if (!Number.isInteger(numeric) || numeric <= 0) throw new Error(`invalid conversation id ${id}`);
-	const handle = await harness.conversation(numeric as ConversationId, CONTEXT);
+	const handle = await harness.conversation(conversationIdOf(id), CONTEXT);
 	if (handle === undefined) throw new Error(`no conversation ${id}`);
 	handles.set(id, handle);
 	return handle;
 }
 
-/** Titles are derived: durable records carry an id and ownership, not a name. */
-async function titleOf(id: string, conversation: Conversation): Promise<string> {
+/** A given name wins; otherwise the first user message is the name. */
+async function nameOf(id: string, conversation: Conversation): Promise<{ title: string; hidden: boolean }> {
+	const meta = await harness.snapshot(ConversationMetaDoc, conversationIdOf(id), CONTEXT);
+	const given = meta?.title?.trim() ?? "";
+	return {
+		title: given.length > 0 ? given : await deriveTitle(conversation),
+		hidden: meta?.hidden === true,
+	};
+}
+
+async function deriveTitle(conversation: Conversation): Promise<string> {
 	const page = await conversation.entries({}, TITLE_SCAN_LIMIT, undefined, CONTEXT);
 	for (const entry of page.items) {
 		if (entry.kind !== "pi.user") continue;
@@ -186,17 +208,24 @@ async function listConversations(): Promise<ConversationInfo[]> {
 			if (record.owner !== undefined) continue;
 			const id = String(record.id);
 			const conversation = await conversationFor(id);
-			found.push({
-				id,
-				title: await titleOf(id, conversation),
-				root: record.id === ROOT_CONVERSATION_ID,
-			});
+			const { title, hidden } = await nameOf(id, conversation);
+			found.push({ id, title, hidden, root: record.id === ROOT_CONVERSATION_ID });
 		}
 		if (page.next === undefined) break;
 		cursor = page.next;
 	}
 	// Newest first; ids are monotonic.
 	return found.sort((a, b) => Number(b.id) - Number(a.id));
+}
+
+/** Writes metadata through the conversation's own commit, so it is durable. */
+async function setMeta(id: string, patch: { title?: string; hidden?: boolean }): Promise<void> {
+	const conversation = await conversationFor(id);
+	await conversation.commit(async (tx) => {
+		const meta = await tx.doc(ConversationMetaDoc, conversationIdOf(id));
+		if (patch.title !== undefined) meta.title = patch.title;
+		if (patch.hidden !== undefined) meta.hidden = patch.hidden;
+	}, CONTEXT);
 }
 
 async function describe(): Promise<DescribeData> {
@@ -413,6 +442,26 @@ async function handle(command: Command): Promise<unknown> {
 				instructions: command.agent.instructions,
 			});
 			return { conversationId: command.conversationId, agent: applied.resolved, model: applied.model };
+		}
+		case "rename": {
+			const title = command.title.trim();
+			await setMeta(command.conversationId, { title });
+			return { conversationId: command.conversationId, title };
+		}
+		case "hide":
+			await setMeta(command.conversationId, { hidden: command.hidden });
+			return { conversationId: command.conversationId, hidden: command.hidden };
+		case "fork": {
+			const conversation = await conversationFor(command.conversationId);
+			const forked = await conversation.fork(
+				Number(command.at) as EntryId,
+				{ ownership: { kind: "ownerless" } },
+				CONTEXT,
+			);
+			handles.set(String(forked.id), forked);
+			const parent = await nameOf(command.conversationId, conversation);
+			await setMeta(String(forked.id), { title: `Fork of ${parent.title}` });
+			return { conversationId: String(forked.id) };
 		}
 		case "attach":
 			await attach(command.conversationId);
