@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
@@ -80,6 +81,11 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	headers.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
+	// How long the browser should wait before reconnecting.
+	if _, err := w.Write([]byte("retry: 3000\n\n")); err != nil {
+		return
+	}
+
 	id, frames, initial := s.control.Subscribe()
 	defer s.control.Unsubscribe(id)
 
@@ -93,10 +99,21 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
+	// A comment line is ignored by EventSource but proves the transport is alive: with
+	// nothing written for minutes, a hidden tab comes back to a connection that is dead
+	// and not yet detected.
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-ticker.C:
+			if _, err := w.Write([]byte(": keepalive\n\n")); err != nil {
+				return
+			}
+			flusher.Flush()
 		case frame := <-frames:
 			if err := writeEvent(w, "frame", frame); err != nil {
 				return

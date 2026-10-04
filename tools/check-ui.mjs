@@ -363,12 +363,29 @@ try {
 
 	const listed = await page.evaluate(async () => {
 		const state = await (await fetch("/api/state")).json();
+		const created = state.conversations.filter((c) => c.createdBy);
+		const rail = [...document.querySelectorAll("#conversation-list .conversation-item")];
 		return {
 			total: state.conversations.length,
 			subagents: state.conversations.filter((c) => c.parent).map((c) => c.id),
 			spend: state.conversations.filter((c) => c.tokens > 0).length,
+			// Identity belongs in text next to the id, like "·root"; a third coloured dot
+			// beside running and unread would be three meanings for one shape.
+			peersTagged: created.filter((c) => {
+				const row = rail.find((r) => r.dataset.id === c.id);
+				return row !== undefined && /·peer/.test(row.textContent);
+			}).length,
+			peerDots: document.querySelectorAll("#conversation-list .dot.peer").length,
+			stateDots: document.querySelectorAll("#conversation-list .dot").length,
 		};
 	});
+	if (listed.peersTagged > 0) {
+		check(
+			"an agent-created conversation is tagged in text, not by a third dot",
+			listed.peerDots === 0,
+			JSON.stringify({ tagged: listed.peersTagged, peerDots: listed.peerDots }),
+		);
+	}
 	if (listed.subagents.length > 0) {
 		check(
 			"subagent conversations stay out of the rail",
@@ -409,9 +426,6 @@ try {
 			inRail: created.filter((c) => rail.some((row) => row.dataset.id === c.id)).length,
 		};
 	});
-	if (peers.inRail > 0) {
-		check("an agent-created conversation is marked in the rail", peers.marked === peers.inRail, JSON.stringify(peers));
-	}
 	check("the policy reports the workspace peer count", /peers here\s*\d+\s*of max\s*\d+/.test(sections.delegation), sections.delegation.slice(0, 200));
 
 	check("no errors after the delegation checks", problems.length === 0, problems.join("; "));

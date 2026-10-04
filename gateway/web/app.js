@@ -71,6 +71,12 @@ async function post(path, body) {
 }
 
 function setStatus(text, stateName) {
+	if (state && state.workerUp === false) {
+		els.status.textContent = "harness down";
+		els.status.dataset.state = "offline";
+		els.status.title = state.workerError ?? "";
+		return;
+	}
 	els.status.textContent = text;
 	if (stateName) els.status.dataset.state = stateName;
 	else delete els.status.dataset.state;
@@ -1036,18 +1042,16 @@ function conversationRow(conversation, active, deleted) {
 		: unread
 			? `<span class="dot unread" title="new since you last looked"></span>`
 			: "";
-	const peer = conversation.createdBy
-		? `<span class="dot peer" title="created by conversation ${escapeHtml(conversation.createdBy)}"></span>`
-		: "";
-	const spend = conversation.tokens
-		? `<span class="id" title="${escapeHtml(formatTokens(conversation.tokens))}${conversation.cost ? ` · $${conversation.cost.toFixed(4)}` : ""}">${escapeHtml(
-				conversation.id,
-			)}</span>`
-		: `<span class="id">${escapeHtml(conversation.id)}${conversation.root ? " ·root" : ""}</span>`;
+	// Identity is text, like "·root" already was; a second coloured dot next to the
+	// running and unread ones would be three meanings for one shape.
+	const tags = [conversation.root ? "root" : null, conversation.createdBy ? "peer" : null].filter(Boolean);
+	const label = `${escapeHtml(conversation.id)}${tags.length === 0 ? "" : ` ·${tags.join(" ·")}`}`;
+	const spend = `<span class="id" title="${escapeHtml(
+		conversation.createdBy ? `created by conversation ${conversation.createdBy}` : "",
+	)}${conversation.tokens ? `${formatTokens(conversation.tokens)}${conversation.cost ? ` · $${conversation.cost.toFixed(4)}` : ""}` : ""}">${label}</span>`;
 	return `<div class="conversation-item" data-active="${conversation.id === active}" data-id="${escapeHtml(conversation.id)}">
 		<button class="conversation-select" data-conversation="${escapeHtml(conversation.id)}" type="button">
 			<span class="title">${escapeHtml(conversation.title)}</span>
-			${peer}
 			${mark}
 			${spend}
 		</button>
@@ -1299,15 +1303,31 @@ function renderAgentPicker() {
 
 /* ---------- stream ---------- */
 
+// The stream is not trusted to stay alive: a hidden tab comes back to a connection
+// that may be dead but not yet reported, and nothing arrives to say so.
+let lastEventAt = 0;
+let watchdog = 0;
+
 function connect() {
 	if (sources) sources.close();
+	lastEventAt = Date.now();
 	sources = new EventSource("/api/stream");
+	// Every event, including the server's keepalive, proves the transport is alive.
+	sources.addEventListener("message", () => {
+		lastEventAt = Date.now();
+	});
+	sources.addEventListener("open", () => {
+		lastEventAt = Date.now();
+		void loadState();
+	});
 	sources.addEventListener("state", (event) => {
+		lastEventAt = Date.now();
 		state = JSON.parse(event.data);
 		renderModelPicker();
 		render();
 	});
 	sources.addEventListener("frame", (event) => {
+		lastEventAt = Date.now();
 		const frame = JSON.parse(event.data);
 		if (frame.type === "view") {
 			if (frame.conversationId !== activeId()) return;
@@ -1332,10 +1352,36 @@ function connect() {
 	sources.addEventListener("error", () => {
 		setStatus("reconnecting", "offline");
 	});
-	sources.addEventListener("open", () => {
-		setStatus(isBusy() ? "running" : "idle", isBusy() ? "busy" : "idle");
-	});
+	startWatchdog();
 }
+
+/**
+ * Reconnect when the stream has gone quiet for longer than the server's keepalive.
+ * An EventSource that is dead without having fired an error would otherwise leave the
+ * interface showing state that stopped being true minutes ago.
+ */
+function startWatchdog() {
+	clearInterval(watchdog);
+	watchdog = setInterval(() => {
+		const silent = Date.now() - lastEventAt;
+		if (silent > 40000) {
+			setStatus("reconnecting", "offline");
+			connect();
+			return;
+		}
+	}, 10000);
+}
+
+document.addEventListener("visibilitychange", () => {
+	if (document.visibilityState !== "visible") return;
+	// Coming back to a hidden tab: ask for the truth, and reconnect if the stream has
+	// been silent, because a background tab is exactly where a connection dies quietly.
+	if (Date.now() - lastEventAt > 20000) {
+		connect();
+		return;
+	}
+	void loadState();
+});
 
 /* ---------- input ---------- */
 

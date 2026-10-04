@@ -109,7 +109,10 @@ make dev
   the overlay and visible in the inspector's Delegation card. See
   `docs/adr/0008-delegation.md`.
 - Provider connect/disconnect from the UI, 42 providers, 60+ models each where the key allows.
-- Crash resume: `kill` the worker and restart; the run continues from its last commit.
+- **Recovery**: if the harness process dies the gateway says so ("harness down" with the
+  reason), restarts it with backoff, and resumes every run from its last commit — about
+  two seconds. The stream sends a keepalive and the client reconnects on its own.
+  See [ADR 0009](docs/adr/0009-liveness-and-recovery.md).
 - Credentials live in `~/.acornfall/credentials.json` (0600), never in the worker's home.
 
 ## Write an agent

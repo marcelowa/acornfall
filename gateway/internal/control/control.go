@@ -85,12 +85,16 @@ type State struct {
 	// to change it.
 	Subagent bool `json:"subagent"`
 	// Policy is what this conversation may do with other conversations.
-	Policy    json.RawMessage         `json:"policy,omitempty"`
-	Agents    []protocol.AgentSummary `json:"agents"`
-	Skills    []protocol.SkillSummary `json:"skills"`
-	Defaults  []protocol.LayerTrace   `json:"defaults"`
-	Providers []protocol.ProviderInfo `json:"providers"`
-	Seq       int64                   `json:"seq"`
+	Policy json.RawMessage `json:"policy,omitempty"`
+	// WorkerUp is false when the harness process is gone. Without it a dead backend is
+	// indistinguishable from an idle one, because everything here is served from cache.
+	WorkerUp    bool                    `json:"workerUp"`
+	WorkerError string                  `json:"workerError,omitempty"`
+	Agents      []protocol.AgentSummary `json:"agents"`
+	Skills      []protocol.SkillSummary `json:"skills"`
+	Defaults    []protocol.LayerTrace   `json:"defaults"`
+	Providers   []protocol.ProviderInfo `json:"providers"`
+	Seq         int64                   `json:"seq"`
 }
 
 type Control struct {
@@ -101,6 +105,11 @@ type Control struct {
 	describe      protocol.Describe
 	conversations []protocol.ConversationInfo
 	active        string
+	workerUp      bool
+	workerError   string
+	// One notification per death, drained by the single supervisor loop. A restart loop
+	// per death would compound: every failed attempt is another death.
+	workerExited chan struct{}
 	// bindings holds only explicit choices, made in a conversation. A conversation
 	// with no entry here follows the definition's model or defaultModel.
 	bindings        map[string]protocol.ModelBinding
@@ -128,34 +137,23 @@ type cachedView struct {
 
 func New(opts Options) *Control {
 	return &Control{
-		opts:        opts,
-		bindings:    map[string]protocol.ModelBinding{},
-		resolved:    map[string]*protocol.ResolvedAgent{},
-		views:       map[string]cachedView{},
-		subscribers: map[int]chan protocol.Frame{},
+		workerExited: make(chan struct{}, 1),
+		opts:         opts,
+		bindings:     map[string]protocol.ModelBinding{},
+		resolved:     map[string]*protocol.ResolvedAgent{},
+		views:        map[string]cachedView{},
+		subscribers:  map[int]chan protocol.Frame{},
 	}
 }
 
 // Open starts the worker, reads the catalog, and attaches to the active
 // conversation, creating the root conversation if the storage is empty.
 func (c *Control) Open(ctx context.Context) error {
-	command := c.opts.WorkerCommand
-	if len(command) == 0 {
-		command = []string{"bun", "run", "src/main.ts"}
-	}
-	worker := workerpool.New(workerpool.Config{
-		Command: command[0],
-		Args:    command[1:],
-		Dir:     c.opts.WorkerDir,
-	})
-	worker.OnFrame(c.onFrame)
-	if err := worker.Start(ctx); err != nil {
-		return fmt.Errorf("start worker: %w", err)
-	}
-	c.worker = worker
-
 	var describe protocol.Describe
-	if err := worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+	if err := c.startWorker(ctx); err != nil {
+		return err
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return fmt.Errorf("describe worker: %w", err)
 	}
 	c.applyDescribe(describe)
@@ -176,6 +174,8 @@ func (c *Control) Open(ctx context.Context) error {
 		if err := c.Create(ctx); err != nil {
 			return fmt.Errorf("create first conversation: %w", err)
 		}
+		go c.watchConversations(ctx)
+		go c.supervise(ctx)
 		return nil
 	}
 
@@ -192,7 +192,146 @@ func (c *Control) Open(ctx context.Context) error {
 		return err
 	}
 	go c.watchConversations(ctx)
+	go c.supervise(ctx)
 	return nil
+}
+
+// startWorker launches the harness process and arranges for its death to be noticed.
+func (c *Control) startWorker(ctx context.Context) error {
+	command := c.opts.WorkerCommand
+	if len(command) == 0 {
+		command = []string{"bun", "run", "src/main.ts"}
+	}
+	worker := workerpool.New(workerpool.Config{Command: command[0], Args: command[1:], Dir: c.opts.WorkerDir})
+	worker.OnFrame(c.onFrame)
+	if err := worker.Start(ctx); err != nil {
+		return fmt.Errorf("start worker: %w", err)
+	}
+	c.mu.Lock()
+	c.worker = worker
+	c.workerUp = true
+	c.workerError = ""
+	c.mu.Unlock()
+	worker.OnExit(func(err error) { c.workerDied(err) })
+	return nil
+}
+
+// supervise owns the worker's lifecycle so restarts cannot multiply. It is the only
+// reader of workerExited, so there is exactly one backoff loop however often the
+// process dies.
+func (c *Control) supervise(ctx context.Context) {
+	failures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.workerExited:
+		}
+		failures += 1
+		if failures > 5 {
+			// Give up rather than burn the machine on a crash loop. The state still says
+			// the harness is down, so the interface is honest about it.
+			c.mu.Lock()
+			c.workerError = "the harness process could not be restarted"
+			c.mu.Unlock()
+			c.publish(protocol.Frame{Type: "state"})
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(60 * time.Second):
+				failures = 0
+				continue
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Duration(failures) * time.Second):
+		}
+		if err := c.startWorker(ctx); err != nil {
+			workerpool.Log("worker restart %d failed: %v", failures, err)
+			// The failed process never started, so nothing will announce it.
+			select {
+			case c.workerExited <- struct{}{}:
+			default:
+			}
+			continue
+		}
+		if err := c.recoverWithWorker(ctx); err != nil {
+			workerpool.Log("worker restart %d could not be resumed: %v", failures, err)
+			continue
+		}
+		workerpool.Log("worker restarted and resumed")
+		failures = 0
+	}
+}
+
+// workerDied is the difference between a quiet conversation and a dead backend. Without
+// it the gateway keeps serving a cached view and everything looks idle and healthy.
+func (c *Control) workerDied(err error) {
+	reason := "the harness process ended"
+	if err != nil {
+		reason = fmt.Sprintf("the harness process ended: %v", err)
+	}
+	c.mu.Lock()
+	c.workerUp = false
+	c.workerError = reason
+	c.mu.Unlock()
+	workerpool.Log("worker died: %s", reason)
+	c.publish(protocol.Frame{Type: "state"})
+	// The supervisor restarts: work is committed before it is shown, so a fresh process
+	// resumes every run from its last commit.
+	select {
+	case c.workerExited <- struct{}{}:
+	default:
+	}
+}
+
+// recoverWithWorker re-reads what the new process knows and re-attaches the conversation
+// a client is looking at, so a restart is invisible apart from the pause.
+func (c *Control) recoverWithWorker(ctx context.Context) error {
+	var describe protocol.Describe
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+		return err
+	}
+	c.applyDescribe(describe)
+	if _, err := c.Agents(ctx); err != nil {
+		return err
+	}
+	active := c.activeConversation()
+	if active != "" {
+		var response struct {
+			ConversationID string `json:"conversationId"`
+		}
+		if err := c.worker.CallInto(ctx, protocol.Command{
+			Type:           "attach",
+			ConversationID: active,
+		}, &response); err != nil {
+			return err
+		}
+	} else if err := c.createFirstConversation(ctx); err != nil {
+		return err
+	}
+	if _, err := c.listConversations(ctx); err != nil {
+		return err
+	}
+	if active == "" {
+		c.mu.RLock()
+		active = c.active
+		c.mu.RUnlock()
+	}
+	if active != "" {
+		if err := c.ensureConversation(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
+			workerpool.Log("re-apply agent after restart: %v", err)
+		}
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
+// createFirstConversation is the empty-install path, shared by Open and recovery.
+func (c *Control) createFirstConversation(ctx context.Context) error {
+	return c.Create(ctx)
 }
 
 // watchConversations keeps the rail honest about runs happening elsewhere. A run
@@ -307,6 +446,8 @@ func (c *Control) State() State {
 		DefaultThinking: c.defaultThinking,
 		DefaultAgent:    c.defaultAgent,
 		Policy:          c.policy,
+		WorkerUp:        c.workerUp,
+		WorkerError:     c.workerError,
 		Inherited: Inherited{
 			Model:    c.bindings[c.active].Provider == "",
 			Thinking: c.bindings[c.active].ThinkingLevel == "",

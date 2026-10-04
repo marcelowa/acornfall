@@ -39,10 +39,40 @@ type Worker struct {
 
 	frameMu sync.RWMutex
 	handler func(protocol.Frame)
+
+	exitMu  sync.RWMutex
+	onExit  func(error)
+	exited  chan struct{}
+	waitErr error
 }
 
 func New(config Config) *Worker {
-	return &Worker{config: config, pending: map[string]chan protocol.Frame{}}
+	return &Worker{config: config, pending: map[string]chan protocol.Frame{}, exited: make(chan struct{})}
+}
+
+// OnExit registers the single observer of this process's end. Control needs it: a dead
+// worker is otherwise indistinguishable from a quiet one, because every read control
+// serves comes from its own cache.
+func (w *Worker) OnExit(handler func(error)) {
+	w.exitMu.Lock()
+	defer w.exitMu.Unlock()
+	w.onExit = handler
+}
+
+// Exited is closed once the process has ended and been reaped.
+func (w *Worker) Exited() <-chan struct{} { return w.exited }
+
+// WaitErr reports why the process ended, once it has.
+func (w *Worker) WaitErr() error { return w.waitErr }
+
+// Alive reports whether the process is still running.
+func (w *Worker) Alive() bool {
+	select {
+	case <-w.exited:
+		return false
+	default:
+		return true
+	}
 }
 
 // OnFrame registers the single consumer of unprompted frames. Call before Start.
@@ -83,6 +113,19 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.stdin = stdin
 	go w.readStdout(stdout)
 	go w.readStderr(stderr)
+	// Reap the process and announce it once, however it ended.
+	go func() {
+		waitErr := cmd.Wait()
+		w.exitMu.Lock()
+		w.waitErr = waitErr
+		handler := w.onExit
+		w.exitMu.Unlock()
+		close(w.exited)
+		w.fail(errors.New("worker process ended"))
+		if handler != nil {
+			handler(waitErr)
+		}
+	}()
 	return nil
 }
 
@@ -136,7 +179,7 @@ func (w *Worker) CallInto(ctx context.Context, command protocol.Command, out any
 	return json.Unmarshal(data, out)
 }
 
-// Close sends shutdown and waits briefly for an orderly exit.
+// Close sends shutdown and waits briefly for the process to end.
 func (w *Worker) Close() {
 	w.mu.Lock()
 	if w.closed {
@@ -154,18 +197,13 @@ func (w *Worker) Close() {
 	if cmd == nil {
 		return
 	}
-	done := make(chan struct{})
-	go func() {
-		_ = cmd.Wait()
-		close(done)
-	}()
 	select {
-	case <-done:
+	case <-w.exited:
 	case <-time.After(5 * time.Second):
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		<-done
+		<-w.exited
 	}
 }
 
@@ -195,6 +233,7 @@ func (w *Worker) readStdout(stdout io.Reader) {
 			handler(frame)
 		}
 	}
+	// Settle waiters; the reaper announces the exit.
 	w.fail(errors.New("worker stdout closed"))
 }
 

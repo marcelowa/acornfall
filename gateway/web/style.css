@@ -1096,10 +1096,6 @@ button.small {
 	background: var(--success-400, #2f9e6e);
 }
 
-/* A conversation an agent created, which is not the same as one of yours. */
-.dot.peer {
-	background: var(--warning-400, #d99b2b);
-}
 
 @keyframes pulse {
 	0%, 100% { opacity: 1; }
