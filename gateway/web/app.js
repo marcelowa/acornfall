@@ -15,7 +15,6 @@ const els = {
 	model: el("model"),
 	agent: el("agent"),
 	thinking: el("thinking"),
-	defaults: el("defaults"),
 	rail: el("new-conversation"),
 	conversationList: el("conversation-list"),
 	transcript: el("transcript"),
@@ -26,18 +25,13 @@ const els = {
 	abort: el("abort"),
 	connect: el("connect"),
 	sheet: el("sheet"),
-	sheetTitle: el("sheet-title"),
 	sheetBody: el("sheet-body"),
 	sheetClose: el("sheet-close"),
 	inspector: el("inspector"),
 	toggleInspector: el("toggle-inspector"),
-	agentFacts: el("agent-facts"),
-	agentLayers: el("agent-layers"),
-	reloadAgents: el("reload-agents"),
-	context: el("context"),
-	runFacts: el("run-facts"),
-	usage: el("usage"),
-	raw: el("raw"),
+	main: el("main"),
+	splitRail: el("split-rail"),
+	splitInspector: el("split-inspector"),
 };
 
 let state = null;
@@ -49,8 +43,9 @@ const activeId = () => state?.conversation?.id ?? "";
 /** Text of the message each branch point precedes, so a fork can offer it back. */
 const forkSource = new Map();
 
-// The provider connection sheet. `flow` is null while browsing the catalog.
-const sheet = { open: false, query: "", flow: null };
+// The settings sheet. `flow` is null unless a login is in progress, in which case
+// it takes over the body regardless of the selected view.
+const sheet = { open: false, view: "providers", query: "", flow: null };
 
 const escapeHtml = (value) =>
 	String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -241,7 +236,7 @@ function render() {
 	if (pinnedToBottom) els.transcript.scrollTop = els.transcript.scrollHeight;
 
 	const emptyConnect = document.getElementById("empty-connect");
-	if (emptyConnect !== null) emptyConnect.addEventListener("click", () => openSheet());
+	if (emptyConnect !== null) emptyConnect.addEventListener("click", () => openSheet("providers"));
 	for (const button of els.transcript.querySelectorAll("[data-fork-at]")) {
 		button.addEventListener("click", () =>
 			void forkConversation(button.dataset.forkAt, forkSource.get(button.dataset.forkAt)),
@@ -253,6 +248,163 @@ function render() {
 	els.abort.hidden = !busy;
 	els.send.textContent = busy && els.steer.checked ? "Steer" : "Send";
 	renderInspector();
+}
+
+/* ---------- inspector ---------- */
+
+// Sections are data, not markup, so open state, maximize state, and the render
+// gate cannot drift apart from each other.
+const SECTIONS = [
+	{ key: "agent", title: "Agent", tools: [{ action: "reload-agents", label: "Reload files" }] },
+	{ key: "context", title: "Context sent" },
+	{ key: "run", title: "Run" },
+	{ key: "usage", title: "Usage" },
+	{ key: "view", title: "View" },
+];
+
+// UI preferences belong to the browser, not to the install.
+const PREFS = {
+	rail: "acornfall.rail",
+	inspector: "acornfall.inspector",
+	sections: "acornfall.sections",
+};
+
+function readPref(key, fallback) {
+	try {
+		const raw = localStorage.getItem(key);
+		return raw === null ? fallback : JSON.parse(raw);
+	} catch (error) {
+		return fallback;
+	}
+}
+
+function writePref(key, value) {
+	try {
+		localStorage.setItem(key, JSON.stringify(value));
+	} catch (error) {
+		/* a private window throws; a lost preference is not worth a broken UI */
+	}
+}
+
+const openSections = new Set(readPref(PREFS.sections, []));
+const bodies = new Map();
+
+function buildInspector() {
+	els.inspector.innerHTML = SECTIONS.map(
+		(section) => `<details class="card" data-section="${section.key}"${openSections.has(section.key) ? " open" : ""}>
+			<summary>
+				<span class="section-title">${escapeHtml(section.title)}</span>
+				<span class="section-tools">
+					${(section.tools ?? [])
+						.map(
+							(tool) =>
+								`<button class="ghost small" data-action="${tool.action}" type="button">${escapeHtml(tool.label)}</button>`,
+						)
+						.join("")}
+					<button class="icon" data-max="${section.key}" title="Maximize">⤢</button>
+				</span>
+			</summary>
+			<div class="card-body" data-body="${section.key}"></div>
+		</details>`,
+	).join("");
+
+	for (const section of SECTIONS) {
+		const element = els.inspector.querySelector(`[data-body="${section.key}"]`);
+		if (element === null) throw new Error(`inspector section ${section.key} has no body`);
+		bodies.set(section.key, element);
+	}
+	for (const details of els.inspector.querySelectorAll("details.card")) {
+		details.addEventListener("toggle", () => {
+			const key = details.dataset.section;
+			if (details.open) openSections.add(key);
+			else openSections.delete(key);
+			writePref(PREFS.sections, [...openSections]);
+			renderInspector();
+		});
+	}
+	// A click on a header control must not also collapse the section.
+	for (const control of els.inspector.querySelectorAll("summary button")) {
+		control.addEventListener("click", (event) => event.stopPropagation());
+	}
+	for (const button of els.inspector.querySelectorAll("[data-max]")) {
+		button.addEventListener("click", () => toggleMaximize(button.dataset.max));
+	}
+	const reload = els.inspector.querySelector('[data-action="reload-agents"]');
+	if (reload !== null) {
+		reload.addEventListener("click", () => void reloadAgents(reload));
+	}
+}
+
+/** One section at a time can take the whole sidebar; the rest collapse to headers. */
+function toggleMaximize(key) {
+	const target = els.inspector.querySelector(`details[data-section="${key}"]`);
+	if (target === null) return;
+	const wasMaximized = target.classList.contains("maximized");
+	for (const details of els.inspector.querySelectorAll("details.card")) {
+		details.classList.remove("maximized");
+		const button = details.querySelector("[data-max]");
+		if (button !== null) button.setAttribute("title", "Maximize");
+	}
+	els.inspector.classList.toggle("focused", !wasMaximized);
+	if (!wasMaximized) {
+		target.classList.add("maximized");
+		target.open = true;
+		openSections.add(key);
+		writePref(PREFS.sections, [...openSections]);
+		target.querySelector("[data-max]")?.setAttribute("title", "Restore");
+	}
+	renderInspector();
+}
+
+async function reloadAgents(button) {
+	button.textContent = "Reloading…";
+	try {
+		await post("/api/agents/reload");
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+	}
+	button.textContent = "Reload files";
+}
+
+/* ---------- panel geometry ---------- */
+
+function setupSplitters() {
+	const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+	const drag = (handle, pref, property, compute) => {
+		handle.addEventListener("pointerdown", (event) => {
+			event.preventDefault();
+			handle.setPointerCapture(event.pointerId);
+			handle.classList.add("dragging");
+			document.body.classList.add("resizing");
+
+			const move = (moveEvent) => {
+				document.documentElement.style.setProperty(property, `${compute(moveEvent)}px`);
+			};
+			const stop = () => {
+				handle.classList.remove("dragging");
+				document.body.classList.remove("resizing");
+				handle.removeEventListener("pointermove", move);
+				handle.removeEventListener("pointerup", stop);
+				handle.removeEventListener("pointercancel", stop);
+				const applied = Number.parseInt(
+					getComputedStyle(document.documentElement).getPropertyValue(property),
+					10,
+				);
+				if (!Number.isNaN(applied)) writePref(PREFS[pref], applied);
+			};
+			handle.addEventListener("pointermove", move);
+			handle.addEventListener("pointerup", stop);
+			handle.addEventListener("pointercancel", stop);
+		});
+	};
+
+	drag(els.splitRail, "rail", "--rail-w", (event) =>
+		clamp(event.clientX - els.main.getBoundingClientRect().left, 170, 460),
+	);
+	drag(els.splitInspector, "inspector", "--inspector-w", (event) =>
+		clamp(els.main.getBoundingClientRect().right - event.clientX, 260, 760),
+	);
 }
 
 function facts(target, pairs) {
@@ -268,33 +420,41 @@ function thinkingLabel() {
 	return requested ? `${applied} (asked for ${requested})` : applied;
 }
 
+/** Closed sections are not rendered: the raw view alone is 20 KB of JSON. */
 function renderInspector() {
 	if (els.inspector.hidden) return;
 	const current = live();
 	const resolved = state?.resolved;
-	facts(els.agentFacts, [
-		["conversation", `${activeId()} · ${state?.conversation?.title ?? ""}`],
-		["definition", resolved?.name ?? "default"],
-		["source", resolved?.source || "(layered defaults only)"],
-		["harness", state?.harness],
-		["model", `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`],
-		// The applied level is what runs; when the model could not express the
-		// request, say what was asked for instead of appearing to ignore it.
-		["thinking", thinkingLabel()],
-		["sandbox", state?.capabilities?.sandbox],
-	]);
-	renderDefaults();
-	renderLayers(resolved);
-	renderContext();
-	facts(els.runFacts, [
-		["state", isBusy() ? "running" : "idle"],
-		["attempt", current.generation?.attempt],
-		["tools", (current.tools ?? []).length || undefined],
-		["queued", (view?.docs?.["pi.inbox"]?.items ?? []).length || undefined],
-		["retry", current.generation?.retry?.error],
-		["seq", state?.seq],
-	]);
-	els.raw.textContent = view ? JSON.stringify(view, null, 2).slice(0, 8000) : "—";
+
+	if (openSections.has("agent")) {
+		facts(bodies.get("agent"), [
+			["conversation", `${activeId()} · ${state?.conversation?.title ?? ""}`],
+			["definition", resolved?.name ?? "default"],
+			["source", resolved?.source || "(layered defaults only)"],
+			["harness", state?.harness],
+			["model", `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`],
+			// The applied level is what runs; when the model could not express the
+			// request, say what was asked for instead of appearing to ignore it.
+			["thinking", thinkingLabel()],
+			["sandbox", state?.capabilities?.sandbox],
+		]);
+		renderLayers(resolved);
+	}
+	if (openSections.has("context")) renderContext();
+	if (openSections.has("run")) {
+		facts(bodies.get("run"), [
+			["state", isBusy() ? "running" : "idle"],
+			["attempt", current.generation?.attempt],
+			["tools", (current.tools ?? []).length || undefined],
+			["queued", (view?.docs?.["pi.inbox"]?.items ?? []).length || undefined],
+			["retry", current.generation?.retry?.error],
+			["seq", state?.seq],
+		]);
+	}
+	if (openSections.has("usage")) void refreshUsage();
+	if (openSections.has("view")) {
+		bodies.get("view").innerHTML = `<pre>${escapeHtml(view ? JSON.stringify(view, null, 2).slice(0, 20000) : "—")}</pre>`;
+	}
 }
 
 /** Which layer set what, so a surprising prompt is explainable rather than guessed. */
@@ -315,7 +475,7 @@ function renderLayers(resolved) {
 			</details>`,
 		)
 		.join("");
-	els.agentLayers.innerHTML =
+	bodies.get("agent").innerHTML =
 		`<div class="delta">skills: ${escapeHtml(skills)}<br />tools: ${escapeHtml(tools)}</div>` +
 		(layerRows || `<div class="delta">no config or definition files</div>`);
 }
@@ -368,7 +528,7 @@ function renderContext() {
 	const entries = view?.entries ?? [];
 	const requests = contextHistory(entries);
 	if (requests.length === 0) {
-		els.context.innerHTML = `<div class="delta">nothing sent yet</div>`;
+		bodies.get("context").innerHTML = `<div class="delta">nothing sent yet</div>`;
 		return;
 	}
 	const latest = requests[requests.length - 1];
@@ -404,7 +564,7 @@ function renderContext() {
 
 	const totalTokens = [...latest.sections.values()].reduce((sum, text) => sum + estimate(text), 0);
 	const usage = lastUsage(entries);
-	els.context.innerHTML = `
+	bodies.get("context").innerHTML = `
 		<div class="delta">
 			request ${requests.length} · entry ${escapeHtml(latest.entryId)}
 			${latest.previousId === null ? " · first" : ` · previous ${escapeHtml(latest.previousId)}`}<br />
@@ -427,9 +587,9 @@ function lastUsage(entries) {
 async function refreshUsage() {
 	try {
 		const usage = await (await fetch("/api/usage")).json();
-		els.usage.textContent = JSON.stringify(usage, null, 2);
+		bodies.get("usage").innerHTML = `<pre>${escapeHtml(JSON.stringify(usage, null, 2))}</pre>`;
 	} catch (error) {
-		els.usage.textContent = String(error);
+		bodies.get("usage").innerHTML = `<pre>${escapeHtml(String(error))}</pre>`;
 	}
 }
 
@@ -445,8 +605,12 @@ async function loadState() {
 	if (sheet.open) renderSheet();
 }
 
-function openSheet() {
+function openSheet(view) {
 	sheet.open = true;
+	// Providers only matter until one is connected; after that the defaults are
+	// what someone opens settings to change.
+	const connected = (state?.providers ?? []).some((provider) => provider.authenticated);
+	sheet.view = view ?? (connected ? "defaults" : "providers");
 	els.sheet.hidden = false;
 	renderSheet();
 }
@@ -480,8 +644,15 @@ function providerRow(provider) {
 }
 
 function renderSheet() {
+	for (const tab of document.querySelectorAll(".sheet-tabs .tab")) {
+		tab.setAttribute("aria-selected", String(tab.dataset.view === sheet.view));
+	}
 	if (sheet.flow) return renderFlow();
-	els.sheetTitle.textContent = "Connect a provider";
+	if (sheet.view === "defaults") return renderDefaults();
+	renderProviders();
+}
+
+function renderProviders() {
 	const query = sheet.query.toLowerCase();
 	const providers = (state?.providers ?? []).filter(
 		(provider) =>
@@ -524,7 +695,6 @@ async function logoutProvider(providerId, button) {
 
 function renderFlow() {
 	const flow = sheet.flow;
-	els.sheetTitle.textContent = `Connect ${flow.providerName}`;
 	const lines = flow.log.map((entry) => {
 		if (entry.kind === "device_code") {
 			return `<div class="device-code">${escapeHtml(entry.code)}</div>
@@ -548,7 +718,9 @@ function renderFlow() {
 		</form>`
 		: "";
 
-	els.sheetBody.innerHTML = `<div class="auth-log">${lines}</div>${promptHtml}`;
+	els.sheetBody.innerHTML =
+		`<p class="provider-meta">Connecting ${escapeHtml(flow.providerName)}</p>` +
+		`<div class="auth-log">${lines}</div>${promptHtml}`;
 
 	const form = document.getElementById("prompt-form");
 	if (form) {
@@ -820,12 +992,16 @@ function renderThinking() {
  * default, whether this conversation follows it, and a way to adopt what is
  * running here as the new default.
  */
+/**
+ * Defaults are configuration, not live state, so they live in the settings sheet
+ * beside provider connection rather than in the inspector.
+ */
 function renderDefaults() {
 	const model = `${state?.defaultModel?.provider ?? ""}/${state?.defaultModel?.modelId ?? ""}`;
 	const rows = [
 		{
 			label: "model",
-			value: model === "/" ? "—" : model,
+			value: model === "/" ? "unset" : model,
 			inherited: state?.inherited?.model,
 			current: `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`,
 			action: "model",
@@ -833,7 +1009,7 @@ function renderDefaults() {
 		},
 		{
 			label: "thinking",
-			value: state?.defaultThinking || "—",
+			value: state?.defaultThinking || "unset",
 			inherited: state?.inherited?.thinking,
 			current: state?.agent?.thinkingLevel || "",
 			action: "thinking",
@@ -848,26 +1024,40 @@ function renderDefaults() {
 			clearable: true,
 		},
 	];
-	els.defaults.innerHTML = rows
-		.map((row) => {
-			const adopt = row.current && row.current !== row.value
-				? `<button class="ghost small" data-adopt="${row.action}" data-value="${escapeHtml(row.current)}" type="button">Use current</button>`
-				: "";
-			const clear = row.clearable && row.value !== "—" && row.value !== "layered defaults"
-				? `<button class="ghost small" data-adopt="${row.action}" data-value="" type="button">Clear</button>`
-				: "";
-			return `<div class="default-row">
-				<span class="provider-meta">${escapeHtml(row.label)}</span>
-				<span class="default-value" title="${row.inherited ? "this conversation follows the default" : "this conversation chose its own"}">${escapeHtml(row.value)}${row.inherited ? "" : " *"}</span>
-				<span class="row-actions">${adopt}${clear}</span>
-			</div>`;
-		})
-		.join("");
+	els.sheetBody.innerHTML = `
+		<p class="provider-meta">A conversation that chose its own value keeps it. Everything else
+			follows these, and a definition that names a model or level beats them.</p>
+		${rows
+			.map((row) => {
+				const adopt =
+					row.current && row.current !== row.value
+						? `<button class="ghost small" data-adopt="${row.action}" data-value="${escapeHtml(row.current)}" type="button">Use current</button>`
+						: "";
+				const clear =
+					row.clearable && row.value !== "unset" && row.value !== "layered defaults" && row.value !== "/"
+						? `<button class="ghost small" data-adopt="${row.action}" data-value="" type="button">Clear</button>`
+						: "";
+				const marker = row.inherited ? "" : `<span class="badge">chosen here</span>`;
+				return `<div class="provider">
+					<div>
+						<div class="provider-name">${escapeHtml(row.label)}</div>
+						<div class="provider-meta">${escapeHtml(row.value)}</div>
+					</div>
+					<div class="provider-actions">${marker}${adopt}${clear}</div>
+				</div>`;
+			})
+			.join("")}
+		<button class="ghost" id="open-agents" type="button">Reload agent definition files</button>`;
 
-	for (const button of els.defaults.querySelectorAll("[data-adopt]")) {
+	for (const button of els.sheetBody.querySelectorAll("[data-adopt]")) {
 		button.addEventListener("click", () => void adoptDefault(button.dataset.adopt, button.dataset.value));
 	}
+	const reload = document.getElementById("open-agents");
+	if (reload !== null) {
+		reload.addEventListener("click", () => void reloadAgents(reload));
+	}
 }
+
 
 async function adoptDefault(kind, value) {
 	const body =
@@ -978,7 +1168,7 @@ els.abort.addEventListener("click", async () => {
 
 els.model.addEventListener("change", async () => {
 	if (els.model.value === "") {
-		openSheet();
+		openSheet("providers");
 		return;
 	}
 	const [provider, modelId] = els.model.value.split("/");
@@ -1013,19 +1203,16 @@ els.thinking.addEventListener("change", async () => {
 	}
 });
 
-els.reloadAgents.addEventListener("click", async () => {
-	els.reloadAgents.textContent = "Reloading…";
-	try {
-		await post("/api/agents/reload");
-		await loadState();
-	} catch (error) {
-		setStatus(String(error.message ?? error), "offline");
-	}
-	els.reloadAgents.textContent = "Reload files";
-});
 
 els.connect.addEventListener("click", () => openSheet());
 els.sheetClose.addEventListener("click", () => closeSheet());
+for (const tab of document.querySelectorAll(".sheet-tabs .tab")) {
+	tab.addEventListener("click", () => {
+		sheet.view = tab.dataset.view;
+		sheet.flow = null;
+		renderSheet();
+	});
+}
 els.sheet.addEventListener("click", (event) => {
 	if (event.target === els.sheet) closeSheet();
 });
@@ -1052,6 +1239,8 @@ async function boot() {
 		return;
 	}
 	renderConversations();
+	buildInspector();
+	setupSplitters();
 	renderAgentPicker();
 	renderThinking();
 	renderModelPicker();

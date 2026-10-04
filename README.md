@@ -18,6 +18,7 @@ another worker, not changing the control plane.
 | `gateway/` | Go: transport edge, control plane, worker supervision, embedded client. |
 | `worker/` | bun: the Harness, its registry (tools, skills), and credentials. |
 | `gateway/web/` | Client. No build step: plain ES modules, served from the binary. |
+| `tools/` | Browser-driven checks. |
 
 ## Requirements
 
@@ -136,10 +137,17 @@ process. `docs/adr/` holds the designs they will land against.
 ## Development
 
 ```bash
-make typecheck     # worker typecheck
+make check         # client/markup drift, the context fold, worker types, go test
+make ui            # drives the real client in headless chromium (needs a running gateway)
 make build         # gateway build
 make dev           # dev provider + gateway, workspace = current directory
 ```
+
+`make ui` exists because two bugs shipped that curl could not see: an element looked up
+but never declared, and a modal whose visibility an author rule silently overrode. It
+checks that the panels resize and remember their width, that inspector sections start
+closed and persist, that maximize collapses the others, and that the settings sheet
+starts hidden — then reloads and confirms the preferences came back.
 
 The worker protocol is defined once per language — `worker/src/protocol.ts` and
 `gateway/internal/protocol/protocol.go` — and documented in `docs/adr/0002-layers-and-protocol.md`.

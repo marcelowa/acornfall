@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const source = await readFile(join(here, "..", "gateway", "web", "app.js"), "utf8");
 
-/** Minimal DOM so the module can evaluate; nothing here is exercised. */
+/** Minimal DOM so the module can evaluate; only the fold is exercised. */
 const node = () => ({
 	addEventListener() {},
 	querySelectorAll: () => [],
@@ -21,15 +21,27 @@ const node = () => ({
 		return "";
 	},
 	textContent: "",
-	style: {},
+	style: { setProperty() {} },
 	dataset: {},
 	hidden: false,
 	focus() {},
 	setSelectionRange() {},
+	classList: { add() {}, remove() {}, toggle() {} },
 });
 
 const global = globalThis;
-global.document = { getElementById: node, addEventListener() {}, querySelector: node };
+global.document = {
+	getElementById: node,
+	addEventListener() {},
+	querySelector: node,
+	querySelectorAll: () => [],
+	documentElement: node(),
+};
+global.localStorage = {
+	getItem: () => null,
+	setItem() {},
+};
+global.getComputedStyle = () => ({ getPropertyValue: () => "" });
 global.fetch = () => new Promise(() => {});
 global.EventSource = class {
 	addEventListener() {}

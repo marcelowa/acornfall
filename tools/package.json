@@ -1,0 +1,9 @@
+{
+  "name": "@acornfall/tools",
+  "private": true,
+  "type": "module",
+  "description": "Development checks that need a browser.",
+  "devDependencies": {
+    "puppeteer-core": "^25.0.0"
+  }
+}

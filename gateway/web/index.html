@@ -6,6 +6,21 @@
 		<title>Acornfall</title>
 		<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%233b8fd9'/%3E%3Cpath d='M16 7c3 4 3 8 0 12-3-4-3-8 0-12z' fill='white'/%3E%3C/svg%3E" />
 		<link rel="stylesheet" href="/style.css" />
+		<script>
+			// Panel geometry is read before the first paint, otherwise a saved width
+			// arrives after the layout has already been drawn once.
+			(function () {
+				try {
+					var rail = localStorage.getItem("acornfall.rail");
+					var inspector = localStorage.getItem("acornfall.inspector");
+					var root = document.documentElement;
+					if (rail) root.style.setProperty("--rail-w", rail + "px");
+					if (inspector) root.style.setProperty("--inspector-w", inspector + "px");
+				} catch (error) {
+					/* a private window with no storage is not a failure */
+				}
+			})();
+		</script>
 	</head>
 	<body>
 		<header class="topbar">
@@ -30,16 +45,17 @@
 					<select id="thinking"></select>
 				</label>
 				<span class="pill" id="status">connecting</span>
-				<button class="ghost" id="connect" type="button">Providers</button>
+				<button class="ghost" id="connect" type="button">Settings</button>
 				<button class="ghost" id="toggle-inspector" type="button">Inspector</button>
 			</div>
 		</header>
 
-		<main>
+		<main id="main">
 			<nav class="rail">
 				<button class="primary full" id="new-conversation" type="button">New conversation</button>
 				<div class="rail-list" id="conversation-list"></div>
 			</nav>
+			<div class="splitter" id="split-rail" role="separator" aria-label="Resize conversations panel"></div>
 
 			<section class="conversation">
 				<div class="transcript" id="transcript"></div>
@@ -62,48 +78,23 @@
 				</form>
 			</section>
 
-			<aside class="inspector" id="inspector">
-				<div class="card">
-					<h2>Defaults</h2>
-					<div id="defaults"></div>
-				</div>
-				<div class="card">
-					<h2>
-						Agent
-						<button class="ghost small" id="reload-agents" type="button">Reload files</button>
-					</h2>
-					<dl id="agent-facts"></dl>
-					<div id="agent-layers"></div>
-				</div>
-				<div class="card">
-					<h2>Context sent</h2>
-					<div id="context"></div>
-				</div>
-				<div class="card">
-					<h2>Run</h2>
-					<dl id="run-facts"></dl>
-				</div>
-				<div class="card">
-					<h2>Usage</h2>
-					<pre id="usage">—</pre>
-				</div>
-				<div class="card">
-					<h2>View</h2>
-					<pre id="raw">—</pre>
-				</div>
-			</aside>
+			<div class="splitter" id="split-inspector" role="separator" aria-label="Resize inspector panel"></div>
+			<aside class="inspector" id="inspector"></aside>
 		</main>
-
-		<script type="module" src="/app.js"></script>
 
 		<div class="sheet-backdrop" id="sheet" hidden>
 			<section class="sheet">
 				<header class="sheet-head">
-					<h1 id="sheet-title">Connect a provider</h1>
+					<div class="sheet-tabs">
+						<button class="tab" data-view="providers" type="button">Providers</button>
+						<button class="tab" data-view="defaults" type="button">Defaults</button>
+					</div>
 					<button class="ghost" id="sheet-close" type="button">Close</button>
 				</header>
 				<div class="sheet-body" id="sheet-body"></div>
 			</section>
 		</div>
+
+		<script type="module" src="/app.js"></script>
 	</body>
 </html>
