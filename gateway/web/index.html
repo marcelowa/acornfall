@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Acornfall</title>
+		<link rel="stylesheet" href="/style.css" />
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="brand">
+				<span class="mark"></span>
+				<div>
+					<div class="title">Acornfall</div>
+					<div class="subtle" id="workspace">connecting…</div>
+				</div>
+			</div>
+			<div class="topbar-actions">
+				<label class="field">
+					<span class="label">Model</span>
+					<select id="model"></select>
+				</label>
+				<span class="pill" id="status">connecting</span>
+				<button class="ghost" id="toggle-inspector" type="button">Inspector</button>
+			</div>
+		</header>
+
+		<main>
+			<section class="conversation">
+				<div class="transcript" id="transcript"></div>
+				<form class="composer" id="composer">
+					<textarea
+						id="input"
+						rows="1"
+						placeholder="Ask, or tell it what to do. Enter sends, Shift+Enter adds a line."
+					></textarea>
+					<div class="composer-row">
+						<label class="mode">
+							<input type="checkbox" id="steer" checked />
+							<span>Steer into the running turn</span>
+						</label>
+						<div class="composer-buttons">
+							<button class="ghost" id="abort" type="button" hidden>Abort</button>
+							<button class="primary" id="send" type="submit">Send</button>
+						</div>
+					</div>
+				</form>
+			</section>
+
+			<aside class="inspector" id="inspector">
+				<div class="card">
+					<h2>Agent</h2>
+					<dl id="agent-facts"></dl>
+				</div>
+				<div class="card">
+					<h2>Run</h2>
+					<dl id="run-facts"></dl>
+				</div>
+				<div class="card">
+					<h2>Usage</h2>
+					<pre id="usage">—</pre>
+				</div>
+				<div class="card">
+					<h2>View</h2>
+					<pre id="raw">—</pre>
+				</div>
+			</aside>
+		</main>
+
+		<script type="module" src="/app.js"></script>
+	</body>
+</html>

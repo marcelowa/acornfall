@@ -1,0 +1,8 @@
+bin/
+node_modules/
+*.sqlite
+*.sqlite-*
+credentials.json
+credentials.json.lock
+settings.json
+.DS_Store
