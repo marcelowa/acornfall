@@ -38,6 +38,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/conversations/{id}/abort", s.abort)
 	mux.HandleFunc("POST /api/conversations/{id}/agent", s.agent)
 	mux.HandleFunc("POST /api/default-model", s.setDefaultModel)
+	mux.HandleFunc("POST /api/default-thinking", s.setDefaultThinking)
+	mux.HandleFunc("POST /api/default-agent", s.setDefaultAgent)
 	mux.HandleFunc("GET /api/usage", s.usage)
 	mux.HandleFunc("POST /api/providers/login", s.login)
 	mux.HandleFunc("POST /api/providers/logout", s.logout)
@@ -181,6 +183,34 @@ func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID
 		ThinkingLevel: body.ThinkingLevel,
 		Definition:    body.Definition,
 	}); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+func (s *Server) setDefaultThinking(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Level string `json:"level"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.control.SetDefaultThinking(r.Context(), body.Level); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+func (s *Server) setDefaultAgent(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Definition string `json:"definition"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.control.SetDefaultAgent(r.Context(), body.Definition); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

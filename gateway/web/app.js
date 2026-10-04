@@ -15,7 +15,7 @@ const els = {
 	model: el("model"),
 	agent: el("agent"),
 	thinking: el("thinking"),
-	makeDefault: el("make-default"),
+	defaults: el("defaults"),
 	rail: el("new-conversation"),
 	conversationList: el("conversation-list"),
 	transcript: el("transcript"),
@@ -271,14 +271,11 @@ function renderInspector() {
 		["definition", resolved?.name ?? "default"],
 		["source", resolved?.source || "(layered defaults only)"],
 		["harness", state?.harness],
-		[
-			"model",
-			`${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}${state?.modelInherited ? " (default)" : " (chosen here)"}`,
-		],
-		["default model", `${state?.defaultModel?.provider ?? "—"}/${state?.defaultModel?.modelId ?? ""}`],
+		["model", `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`],
 		["thinking", resolved?.thinking ?? state?.agent?.thinkingLevel ?? "default"],
 		["sandbox", state?.capabilities?.sandbox],
 	]);
+	renderDefaults();
 	renderLayers(resolved);
 	renderContext();
 	facts(els.runFacts, [
@@ -435,7 +432,6 @@ async function loadState() {
 	renderConversations();
 	renderAgentPicker();
 	renderThinking();
-	renderDefaultModel();
 	renderModelPicker();
 	render();
 	if (sheet.open) renderSheet();
@@ -811,15 +807,72 @@ function renderThinking() {
 	els.thinking.disabled = levels.length === 0;
 }
 
-/** The default is what a conversation with no model of its own runs. */
-function renderDefaultModel() {
-	const fallback = state?.defaultModel ?? {};
-	const current = `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`;
-	const isDefault = fallback.provider && current === `${fallback.provider}/${fallback.modelId}`;
-	els.makeDefault.disabled = !state?.agent?.modelId || isDefault;
-	els.makeDefault.title = isDefault
-		? "New conversations already use this model"
-		: `New conversations run ${fallback.provider ?? "?"}/${fallback.modelId ?? "?"}`;
+/**
+ * Defaults apply to conversations that never chose. Each row shows the current
+ * default, whether this conversation follows it, and a way to adopt what is
+ * running here as the new default.
+ */
+function renderDefaults() {
+	const model = `${state?.defaultModel?.provider ?? ""}/${state?.defaultModel?.modelId ?? ""}`;
+	const rows = [
+		{
+			label: "model",
+			value: model === "/" ? "—" : model,
+			inherited: state?.inherited?.model,
+			current: `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`,
+			action: "model",
+			clearable: false,
+		},
+		{
+			label: "thinking",
+			value: state?.defaultThinking || "—",
+			inherited: state?.inherited?.thinking,
+			current: state?.agent?.thinkingLevel || "",
+			action: "thinking",
+			clearable: true,
+		},
+		{
+			label: "agent",
+			value: state?.defaultAgent || "layered defaults",
+			inherited: state?.inherited?.agent,
+			current: state?.agent?.definition || "",
+			action: "agent",
+			clearable: true,
+		},
+	];
+	els.defaults.innerHTML = rows
+		.map((row) => {
+			const adopt = row.current && row.current !== row.value
+				? `<button class="ghost small" data-adopt="${row.action}" data-value="${escapeHtml(row.current)}" type="button">Use current</button>`
+				: "";
+			const clear = row.clearable && row.value !== "—" && row.value !== "layered defaults"
+				? `<button class="ghost small" data-adopt="${row.action}" data-value="" type="button">Clear</button>`
+				: "";
+			return `<div class="default-row">
+				<span class="provider-meta">${escapeHtml(row.label)}</span>
+				<span class="default-value" title="${row.inherited ? "this conversation follows the default" : "this conversation chose its own"}">${escapeHtml(row.value)}${row.inherited ? "" : " *"}</span>
+				<span class="row-actions">${adopt}${clear}</span>
+			</div>`;
+		})
+		.join("");
+
+	for (const button of els.defaults.querySelectorAll("[data-adopt]")) {
+		button.addEventListener("click", () => void adoptDefault(button.dataset.adopt, button.dataset.value));
+	}
+}
+
+async function adoptDefault(kind, value) {
+	const body =
+		kind === "model" ? { provider: state?.agent?.provider ?? "", modelId: state?.agent?.modelId ?? "" }
+		: kind === "thinking" ? { level: value }
+		: { definition: value };
+	const path = kind === "model" ? "/api/default-model" : kind === "thinking" ? "/api/default-thinking" : "/api/default-agent";
+	try {
+		await post(path, body);
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+	}
 }
 
 function renderAgentPicker() {
@@ -923,12 +976,7 @@ els.model.addEventListener("change", async () => {
 	const [provider, modelId] = els.model.value.split("/");
 	if (!provider || !modelId) return;
 	try {
-		await post(`/api/conversations/${activeId()}/agent`, {
-			provider,
-			modelId,
-			thinkingLevel: state?.agent?.thinkingLevel ?? "",
-			definition: state?.agent?.definition ?? "",
-		});
+		await post(`/api/conversations/${activeId()}/agent`, { provider, modelId });
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -947,18 +995,6 @@ els.agent.addEventListener("change", async () => {
 });
 
 els.rail.addEventListener("click", () => void newConversation());
-
-els.makeDefault.addEventListener("click", async () => {
-	try {
-		await post("/api/default-model", {
-			provider: state?.agent?.provider ?? "",
-			modelId: state?.agent?.modelId ?? "",
-		});
-		await loadState();
-	} catch (error) {
-		setStatus(String(error.message ?? error), "offline");
-	}
-});
 
 els.thinking.addEventListener("change", async () => {
 	try {
@@ -1010,7 +1046,6 @@ async function boot() {
 	renderConversations();
 	renderAgentPicker();
 	renderThinking();
-	renderDefaultModel();
 	renderModelPicker();
 	render();
 	connect();

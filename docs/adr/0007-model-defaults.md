@@ -1,4 +1,4 @@
-# ADR 0007 — Model resolution and the install default
+# ADR 0007 — Resolution and the install defaults
 
 Status: accepted, implemented
 Date: 2026-10-04
@@ -34,10 +34,51 @@ The worker is always told a concrete model. Control resolves, the worker applies
 worker's own rule ("an explicit provider/modelId beats the definition") therefore agrees
 with control's rather than competing with it, because control only passes what won.
 
+## Three defaults, one mechanism
+
+`model`, `thinking`, and `agent` all resolve the same way: **what this conversation
+chose → what its definition says → the install default**. Three fields, one order, no
+special cases. Each is settable on its own:
+
+```
+POST /api/default-model     { provider, modelId }
+POST /api/default-thinking  { level }        // empty clears
+POST /api/default-agent     { definition }   // empty means the layered defaults
+```
+
+The inspector's **Defaults** card shows all three, marks the ones the active
+conversation follows with an asterisk, and offers "Use current" to adopt what is running
+here. Clearing is offered where it means something: a model default cannot be cleared
+because there would be nothing to fall back to.
+
+Each picker sends only its own field. `AgentChange` uses pointers precisely so that
+choosing a model does not also pin the agent and the thinking level that the conversation
+was inheriting — a bug this shipped with, because the picker was echoing back everything
+it saw in `State.Agent`.
+
+## Thinking level is clamped, not passed through
+
+A level is only meaningful relative to a model. `minimax-m3` declares
+`["off","minimal","low","medium","high"]`; asking for `max` is not a request the provider
+can honour, and passing it through would either be ignored or rejected.
+
+Control therefore clamps the resolved level down to the highest level the resolved model
+supports, and reports what it actually applied. Setting the install default to `max`
+against that model yields `high`, visibly, rather than a setting that silently does
+nothing.
+
+The levels come from `getSupportedThinkingLevels(model)` in the worker's catalog, which
+is also what populates the picker, so the UI cannot offer a level the clamp would then
+take away.
+
+Clamping has to run against the **resolved** model, not the explicit one. An inheriting
+conversation has no explicit model — which is exactly the case where clamping matters
+most, and exactly the case the first implementation missed.
+
 ## The default
 
-`settings.json` gains `defaultModel`, set with `POST /api/default-model` or the **Make
-default** button beside the model picker. Changing it re-applies to every *inheriting*
+`settings.json` stores `defaultModel`, `defaultThinking`, and `defaultAgent`; changes
+re-apply to every inheriting conversation immediately. Changing it re-applies to every *inheriting*
 conversation immediately, so the change is visible without a restart, and it does not
 touch conversations that chose their own model.
 
@@ -80,8 +121,9 @@ site.
 
 ## Still missing
 
-- The default is per install, not per workspace. With more than one workspace they would
-  want their own, and the setting belongs beside the workspace rather than the data dir.
-- Per-agent defaults beyond what a definition can express (for example a default thinking
-  level for the install).
-- No model allowlist: an agent definition can name any model the credentials reach.
+- The defaults are per install, not per workspace. With more than one workspace they
+  would want their own, and the settings belong beside the workspace rather than the data
+  dir.
+- No allowlist: an agent definition can name any model the credentials reach.
+- A default agent that disappears (renamed or deleted file) is dropped with a log line on
+  reload, but nothing tells the user in the UI that it happened.

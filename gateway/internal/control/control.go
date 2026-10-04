@@ -36,6 +36,13 @@ type Options struct {
 	SettingsPath string
 }
 
+// Inherited reports which fields the active conversation left to the defaults.
+type Inherited struct {
+	Model    bool `json:"model"`
+	Thinking bool `json:"thinking"`
+	Agent    bool `json:"agent"`
+}
+
 // Conversation is one transcript, as the UI lists it.
 type Conversation struct {
 	ID    string `json:"id"`
@@ -54,15 +61,17 @@ type State struct {
 	Conversations []Conversation          `json:"conversations"`
 	Agent         protocol.ModelBinding   `json:"agent"`
 	Resolved      *protocol.ResolvedAgent `json:"resolved,omitempty"`
-	// DefaultModel is what a conversation with no explicit model runs.
-	DefaultModel protocol.ModelBinding `json:"defaultModel"`
-	// ModelInherited is true when the active conversation never chose a model.
-	ModelInherited bool                    `json:"modelInherited"`
-	Agents         []protocol.AgentSummary `json:"agents"`
-	Skills         []protocol.SkillSummary `json:"skills"`
-	Defaults       []protocol.LayerTrace   `json:"defaults"`
-	Providers      []protocol.ProviderInfo `json:"providers"`
-	Seq            int64                   `json:"seq"`
+	// Defaults apply to conversations that never chose, and to new ones.
+	DefaultModel    protocol.ModelBinding `json:"defaultModel"`
+	DefaultThinking string                `json:"defaultThinking"`
+	DefaultAgent    string                `json:"defaultAgent"`
+	// Inherited says, per field, that this conversation never chose it.
+	Inherited Inherited               `json:"inherited"`
+	Agents    []protocol.AgentSummary `json:"agents"`
+	Skills    []protocol.SkillSummary `json:"skills"`
+	Defaults  []protocol.LayerTrace   `json:"defaults"`
+	Providers []protocol.ProviderInfo `json:"providers"`
+	Seq       int64                   `json:"seq"`
 }
 
 type Control struct {
@@ -75,14 +84,16 @@ type Control struct {
 	active        string
 	// bindings holds only explicit choices, made in a conversation. A conversation
 	// with no entry here follows the definition's model or defaultModel.
-	bindings     map[string]protocol.ModelBinding
-	defaultModel protocol.ModelBinding
-	resolved     map[string]*protocol.ResolvedAgent
-	catalog      protocol.AgentsData
-	providers    []protocol.ProviderInfo
-	views        map[string]cachedView
-	subscribers  map[int]chan protocol.Frame
-	nextSub      int
+	bindings        map[string]protocol.ModelBinding
+	defaultModel    protocol.ModelBinding
+	defaultThinking string
+	defaultAgent    string
+	resolved        map[string]*protocol.ResolvedAgent
+	catalog         protocol.AgentsData
+	providers       []protocol.ProviderInfo
+	views           map[string]cachedView
+	subscribers     map[int]chan protocol.Frame
+	nextSub         int
 }
 
 // cachedView is the last full view per conversation, so switching back is
@@ -174,6 +185,13 @@ func (c *Control) Describe() protocol.Describe {
 }
 
 func (c *Control) State() State {
+	// The effective binding is computed before the snapshot lock, because
+	// inputsFor takes its own and nested read locks are not re-entrant here.
+	c.mu.RLock()
+	active := c.active
+	c.mu.RUnlock()
+	inputs := c.inputsFor(active)
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	state := State{
@@ -182,16 +200,22 @@ func (c *Control) State() State {
 		Capabilities:  c.describe.Capabilities,
 		Conversations: toConversations(c.conversations),
 		// Agent is the effective binding, so pickers show what will actually run;
-		// ModelInherited says whether this conversation chose it.
-		Agent:          effectiveFrom(c.bindings[c.active], c.defaultModel, c.resolved[c.active]),
-		Resolved:       c.resolved[c.active],
-		DefaultModel:   c.defaultModel,
-		ModelInherited: c.bindings[c.active].Provider == "",
-		Agents:         c.catalog.Agents,
-		Skills:         c.catalog.Skills,
-		Defaults:       c.catalog.Defaults,
-		Providers:      c.providers,
-		Seq:            c.views[c.active].seq,
+		// Inherited says which parts of it this conversation chose itself.
+		Agent:           inputs.effective(),
+		Resolved:        c.resolved[c.active],
+		DefaultModel:    c.defaultModel,
+		DefaultThinking: c.defaultThinking,
+		DefaultAgent:    c.defaultAgent,
+		Inherited: Inherited{
+			Model:    c.bindings[c.active].Provider == "",
+			Thinking: c.bindings[c.active].ThinkingLevel == "",
+			Agent:    c.bindings[c.active].Definition == "",
+		},
+		Agents:    c.catalog.Agents,
+		Skills:    c.catalog.Skills,
+		Defaults:  c.catalog.Defaults,
+		Providers: c.providers,
+		Seq:       c.views[c.active].seq,
 	}
 	for index := range state.Conversations {
 		if state.Conversations[index].ID == c.active {
@@ -415,42 +439,193 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, change Ag
 // effective resolves what a conversation actually runs: an explicit choice, then
 // the definition's model, then the install default. Control decides this rather
 // than leaving it to the worker, so "is this model inherited?" has one answer.
-func (c *Control) effective(conversationID string, explicit protocol.ModelBinding) (protocol.ModelBinding, error) {
+// resolveInputs is everything the resolution needs, read under one lock so the
+// resolver itself never takes one. Nested read locks are not re-entrant here.
+type resolveInputs struct {
+	explicit        protocol.ModelBinding
+	fallbackModel   protocol.ModelBinding
+	defaultThinking string
+	defaultAgent    string
+	resolved        *protocol.ResolvedAgent
+	levels          []string
+}
+
+// effectiveModel resolves the model alone: what this conversation chose, then what
+// its definition names, then the install default.
+func (in resolveInputs) effectiveModel() (string, string) {
+	if in.explicit.Provider != "" && in.explicit.ModelID != "" {
+		return in.explicit.Provider, in.explicit.ModelID
+	}
+	if in.resolved != nil {
+		if parts := strings.SplitN(in.resolved.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			return parts[0], parts[1]
+		}
+	}
+	return in.fallbackModel.Provider, in.fallbackModel.ModelID
+}
+
+// effective folds the three fields, each with the same order: what this
+// conversation chose, then what its definition says, then the install default. A
+// definition beating the install default is deliberate — a choice made one layer
+// down should not be overridden by a global one.
+func (in resolveInputs) effective() protocol.ModelBinding {
+	effective := in.explicit
+	effective.Provider, effective.ModelID = in.effectiveModel()
+
+	if effective.ThinkingLevel == "" {
+		if in.resolved != nil {
+			effective.ThinkingLevel = in.resolved.Thinking
+		}
+		if effective.ThinkingLevel == "" {
+			effective.ThinkingLevel = in.defaultThinking
+		}
+		// A level the chosen model cannot do is not a level. Clamp down rather
+		// than passing something the provider will ignore or reject.
+		effective.ThinkingLevel = clampThinking(in.levels, effective.ThinkingLevel)
+	}
+
+	if effective.Definition == "" {
+		effective.Definition = in.defaultAgent
+	}
+	return effective
+}
+
+func (c *Control) inputsFor(conversationID string) resolveInputs {
 	c.mu.RLock()
-	resolved := c.resolved[conversationID]
-	fallback := c.defaultModel
+	inputs := resolveInputs{
+		explicit:        c.bindings[conversationID],
+		fallbackModel:   c.defaultModel,
+		defaultThinking: c.defaultThinking,
+		defaultAgent:    c.defaultAgent,
+		resolved:        c.resolved[conversationID],
+	}
 	c.mu.RUnlock()
-	effective := effectiveFrom(explicit, fallback, resolved)
+	// Clamp against the model that will actually run: an inheriting conversation
+	// has no explicit model, which is exactly when clamping matters most.
+	provider, modelID := inputs.effectiveModel()
+	inputs.levels = c.supportedThinking(provider, modelID)
+	return inputs
+}
+
+func (c *Control) effective(conversationID string, explicit protocol.ModelBinding) (protocol.ModelBinding, error) {
+	inputs := c.inputsFor(conversationID)
+	inputs.explicit = explicit
+	effective := inputs.effective()
 	if effective.Provider == "" || effective.ModelID == "" {
 		return effective, fmt.Errorf("%w: connect a provider or set a default model", ErrNoProvider)
 	}
 	return effective, nil
 }
 
-// effectiveFrom is the resolution order itself: an explicit choice, then the
-// definition's model, then the install default. An empty thinking level is left
-// alone, because "whatever the definition says" is the worker's to resolve.
-func effectiveFrom(
-	explicit protocol.ModelBinding,
-	fallback protocol.ModelBinding,
-	resolved *protocol.ResolvedAgent,
-) protocol.ModelBinding {
-	effective := explicit
-	if effective.Provider != "" && effective.ModelID != "" {
-		return effective
+// thinkingLevels is the ordered scale, weakest first.
+var thinkingLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// clampThinking returns the highest level at or below the requested one that the
+// model supports. Empty means the model has no opinion, so the request stands.
+func clampThinking(levels []string, requested string) string {
+	if requested == "" || len(levels) == 0 {
+		return requested
 	}
-	if resolved != nil {
-		if parts := strings.SplitN(resolved.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			effective.Provider, effective.ModelID = parts[0], parts[1]
-			return effective
+	supported := make(map[string]bool, len(levels))
+	for _, level := range levels {
+		supported[level] = true
+	}
+	if supported[requested] {
+		return requested
+	}
+	best := ""
+	for _, level := range thinkingLevels {
+		if level == requested {
+			break
+		}
+		if supported[level] {
+			best = level
 		}
 	}
-	effective.Provider, effective.ModelID = fallback.Provider, fallback.ModelID
-	return effective
+	if best == "" && supported["off"] {
+		return "off"
+	}
+	return best
 }
 
-// SetDefaultModel changes what conversations without an explicit model run, and
-// re-applies it so the change reaches them without a restart.
+// supportedThinking reads the levels a model declares, from the worker's catalog.
+func (c *Control) supportedThinking(provider, modelID string) []string {
+	if provider == "" || modelID == "" {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, info := range c.providers {
+		if info.ID != provider {
+			continue
+		}
+		for _, model := range info.Models {
+			if model.ID == modelID {
+				return model.ThinkingLevels
+			}
+		}
+	}
+	return nil
+}
+
+// SetDefaultThinking changes the level used when neither the conversation nor its
+// definition names one. It is validated against the scale, not against one model:
+// control clamps per model when it applies.
+func (c *Control) SetDefaultThinking(ctx context.Context, level string) error {
+	if level != "" && !contains(thinkingLevels, level) {
+		return fmt.Errorf("unknown thinking level %q; expected one of %s", level, strings.Join(thinkingLevels, ", "))
+	}
+	c.mu.Lock()
+	c.defaultThinking = level
+	c.mu.Unlock()
+	return c.reapplyInheriting(ctx)
+}
+
+// SetDefaultAgent changes which definition conversations run when they have none
+// of their own. An empty name means the layered defaults only.
+func (c *Control) SetDefaultAgent(ctx context.Context, name string) error {
+	if name != "" {
+		c.mu.RLock()
+		found := false
+		for _, agent := range c.catalog.Agents {
+			if agent.Name == name {
+				found = true
+				break
+			}
+		}
+		c.mu.RUnlock()
+		if !found {
+			return fmt.Errorf("no agent definition named %q", name)
+		}
+	}
+	c.mu.Lock()
+	c.defaultAgent = name
+	c.mu.Unlock()
+	return c.reapplyInheriting(ctx)
+}
+
+// reapplyInheriting re-applies every conversation that still follows the defaults,
+// so a change to them is visible without a restart. Conversations that chose keep
+// their choice.
+func (c *Control) reapplyInheriting(ctx context.Context) error {
+	c.mu.RLock()
+	ids := make([]string, 0, len(c.conversations))
+	for _, conversation := range c.conversations {
+		ids = append(ids, conversation.ID)
+	}
+	c.mu.RUnlock()
+	var firstErr error
+	for _, id := range ids {
+		if err := c.reapply(ctx, id); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	c.persist()
+	c.publish(protocol.Frame{Type: "state"})
+	return firstErr
+}
+
+// SetDefaultModel changes what conversations without an explicit model run.
 func (c *Control) SetDefaultModel(ctx context.Context, provider, modelID string) error {
 	if provider == "" || modelID == "" {
 		return errors.New("provider and modelId are required")
@@ -461,30 +636,7 @@ func (c *Control) SetDefaultModel(ctx context.Context, provider, modelID string)
 	c.mu.Lock()
 	c.defaultModel = protocol.ModelBinding{Provider: provider, ModelID: modelID}
 	c.mu.Unlock()
-
-	// Every conversation that never chose follows the new default.
-	c.mu.RLock()
-	inheriting := make([]string, 0, len(c.bindings))
-	for id, binding := range c.bindings {
-		if binding.Provider == "" {
-			inheriting = append(inheriting, id)
-		}
-	}
-	active := c.active
-	c.mu.RUnlock()
-	for _, id := range inheriting {
-		if err := c.reapply(ctx, id); err != nil {
-			return err
-		}
-	}
-	if active != "" && !contains(inheriting, active) {
-		if err := c.reapply(ctx, active); err != nil {
-			return err
-		}
-	}
-	c.persist()
-	c.publish(protocol.Frame{Type: "state"})
-	return nil
+	return c.reapplyInheriting(ctx)
 }
 
 // ensureDefault gives the install a default model when it has none or when the
@@ -575,33 +727,24 @@ func (c *Control) Reload(ctx context.Context) error {
 	if _, err := c.Agents(ctx); err != nil {
 		return err
 	}
-	c.mu.RLock()
-	bindings := make(map[string]protocol.ModelBinding, len(c.bindings))
-	for id, binding := range c.bindings {
-		bindings[id] = binding
-	}
-	c.mu.RUnlock()
-	for id := range bindings {
-		if err := c.reapply(ctx, id); err != nil {
-			return err
+	// A definition may have been renamed or removed: stop pointing at one that is
+	// gone rather than failing every conversation that inherited it.
+	c.mu.Lock()
+	if c.defaultAgent != "" {
+		stillThere := false
+		for _, agent := range c.catalog.Agents {
+			if agent.Name == c.defaultAgent {
+				stillThere = true
+				break
+			}
+		}
+		if !stillThere {
+			workerpool.Log("default agent %q is gone; falling back to the layered defaults", c.defaultAgent)
+			c.defaultAgent = ""
 		}
 	}
-	c.mu.RLock()
-	known := make([]string, 0, len(c.conversations))
-	for _, conversation := range c.conversations {
-		known = append(known, conversation.ID)
-	}
-	c.mu.RUnlock()
-	for _, id := range known {
-		if _, ok := bindings[id]; ok {
-			continue
-		}
-		if err := c.reapply(ctx, id); err != nil && !errors.Is(err, ErrNoProvider) {
-			return err
-		}
-	}
-	c.publish(protocol.Frame{Type: "state"})
-	return nil
+	c.mu.Unlock()
+	return c.reapplyInheriting(ctx)
 }
 
 // Refresh re-reads the worker's provider catalog and adopt a usable agent
@@ -854,9 +997,11 @@ func (c *Control) isAvailable(describe protocol.Describe, binding protocol.Model
 }
 
 type persistedSettings struct {
-	Active       string                           `json:"active,omitempty"`
-	DefaultModel protocol.ModelBinding            `json:"defaultModel,omitempty"`
-	Agents       map[string]protocol.ModelBinding `json:"agents,omitempty"`
+	Active          string                           `json:"active,omitempty"`
+	DefaultModel    protocol.ModelBinding            `json:"defaultModel,omitempty"`
+	DefaultThinking string                           `json:"defaultThinking,omitempty"`
+	DefaultAgent    string                           `json:"defaultAgent,omitempty"`
+	Agents          map[string]protocol.ModelBinding `json:"agents,omitempty"`
 }
 
 // loadSettings reads our own state: the default model, the active conversation,
@@ -882,6 +1027,10 @@ func (c *Control) loadSettings() string {
 		}
 		c.mu.Unlock()
 	}
+	c.mu.Lock()
+	c.defaultThinking = settings.DefaultThinking
+	c.defaultAgent = settings.DefaultAgent
+	c.mu.Unlock()
 	if settings.Agents != nil {
 		c.mu.Lock()
 		for id, binding := range settings.Agents {
@@ -901,9 +1050,11 @@ func (c *Control) persist() {
 	}
 	c.mu.RLock()
 	settings := persistedSettings{
-		Active:       c.active,
-		DefaultModel: c.defaultModel,
-		Agents:       map[string]protocol.ModelBinding{},
+		Active:          c.active,
+		DefaultModel:    c.defaultModel,
+		DefaultThinking: c.defaultThinking,
+		DefaultAgent:    c.defaultAgent,
+		Agents:          map[string]protocol.ModelBinding{},
 	}
 	for id, binding := range c.bindings {
 		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {

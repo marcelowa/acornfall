@@ -88,8 +88,9 @@ make dev
   running work after the current tool round.
 - Abort, model switching, a thinking level populated from what the model actually
   supports, and per-turn usage.
-- **A default model** for new conversations, settable from the UI. Conversations that
-  never chose a model inherit it; conversations that did keep theirs. See
+- **Defaults** for model, thinking level, and agent, settable from the inspector.
+  Conversations that never chose inherit them; conversations that did keep theirs, and a
+  definition that names a model or level beats the install default. See
   [ADR 0007](docs/adr/0007-model-defaults.md).
 - **Context inspector**: the prompt sections and tool schemas the last request was
   actually sent, estimated tokens per section, and what changed since the previous

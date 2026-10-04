@@ -753,3 +753,36 @@ button.small {
 	border: 1px solid var(--neutral-200);
 	border-radius: var(--radius-sm);
 }
+
+.default-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 0;
+	border-bottom: 1px solid var(--neutral-100);
+	font-size: 12px;
+}
+
+.default-row:last-child {
+	border-bottom: none;
+}
+
+.default-row .provider-meta {
+	width: 62px;
+	flex-shrink: 0;
+}
+
+.default-value {
+	font-family: var(--mono);
+	font-size: 11px;
+	color: var(--neutral-700);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.default-row .row-actions {
+	display: flex;
+	margin-left: auto;
+	gap: 4px;
+}
