@@ -161,6 +161,24 @@ type ConversationInfo struct {
 	// Hidden conversations are tombstoned, not deleted: storage is append-only,
 	// so the UI filters them and can always bring one back.
 	Hidden bool `json:"hidden,omitempty"`
+	// Running is read from committed state, so a run that survived a restart still
+	// reports as running and a background run is never invisible.
+	Running bool `json:"running,omitempty"`
+	// LastEntryID is the client's unread cursor.
+	LastEntryID string `json:"lastEntryId,omitempty"`
+	// Committed spend, so an unattended run is never invisible in cost.
+	Tokens float64 `json:"tokens,omitempty"`
+	Cost   float64 `json:"cost,omitempty"`
+	// Parent is set when another conversation created this one, which is what makes
+	// it a subagent rather than a peer.
+	Parent string `json:"parent,omitempty"`
+	// Children are the conversations this one created.
+	Children []string `json:"children,omitempty"`
+	// Model and Thinking are what the conversation actually runs, read from its
+	// stored configuration. A subagent is configured by its creator, so this is the
+	// only accurate source for it.
+	Model    string `json:"model,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
 }
 
 // ProviderInfo is one model provider and its auth state.

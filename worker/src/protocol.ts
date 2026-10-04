@@ -31,6 +31,7 @@ export type Command =
 	| { id: string; type: "prompt"; conversationId: string; text: string; whenBusy?: WhenBusy }
 	| { id: string; type: "abort"; conversationId: string }
 	| { id: string; type: "agents" }
+	| { id: string; type: "policy"; conversationId: string }
 	| { id: string; type: "reload" }
 	| { id: string; type: "login"; authId: string; providerId: string; authType: "api_key" | "oauth" }
 	| { id: string; type: "logout"; providerId: string }
@@ -75,6 +76,20 @@ export interface ConversationInfo {
 	root: boolean;
 	/** Hidden conversations are listed so they can be restored, never dropped. */
 	hidden: boolean;
+	/** True while a run is live. Read from committed state, so it survives a restart. */
+	running: boolean;
+	/** Newest committed entry: the client's unread cursor. */
+	lastEntryId: string;
+	/** Committed spend, so a background run is never invisible in cost. */
+	tokens: number;
+	cost: number;
+	/** Set when this conversation was created by another one. */
+	parent?: string;
+	/** Conversations this one created, for the subagent list. */
+	children?: string[];
+	/** The agent this conversation actually runs, from its committed configuration. */
+	model?: string;
+	thinking?: string;
 }
 
 /** Provider auth prompts, a 1:1 projection of pi-ai's AuthPrompt and AuthEvent. */

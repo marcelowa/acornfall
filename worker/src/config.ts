@@ -14,6 +14,34 @@ import { join } from "node:path";
 
 export type LayerName = "global" | "workspace" | "agent";
 
+/**
+ * What a conversation may do with other conversations. Ownership decides lifetime;
+ * this decides permission, and the two are separate on purpose.
+ *
+ * Depth is what stops a hierarchy from growing: a top-level conversation is depth
+ * 0 and may create children at depth 1, and a conversation at depth >= maxDepth may
+ * not create children at all. Creating peers is not restricted this way, because a
+ * peer is not in the ownership chain — which is exactly the requested rule: a child
+ * cannot spawn children, but it can make siblings.
+ */
+export interface Delegation {
+	/** May create a conversation it owns, which it can wait for and abort. */
+	spawn: boolean;
+	/** May create a normal conversation, which appears in the rail and outlives it. */
+	peers: boolean;
+	maxChildren: number;
+	maxDepth: number;
+	maxPeers: number;
+}
+
+export const DEFAULT_DELEGATION: Delegation = {
+	spawn: true,
+	peers: true,
+	maxChildren: 4,
+	maxDepth: 1,
+	maxPeers: 2,
+};
+
 export interface Contributions {
 	model?: string;
 	thinking?: string;
@@ -21,6 +49,8 @@ export interface Contributions {
 	skills?: string[];
 	allowTools?: string[];
 	denyTools?: string[];
+	/** Replaces wholesale: a partially specified policy would be ambiguous. */
+	delegation?: Partial<Delegation>;
 }
 
 export interface AgentDefinition {
@@ -41,6 +71,7 @@ export interface LayerTrace {
 }
 
 export interface ResolvedAgent {
+	delegation: Delegation;
 	name: string;
 	description: string;
 	source: string;
@@ -65,7 +96,31 @@ const KNOWN_KEYS = new Set([
 	"skills",
 	"allow-tools",
 	"deny-tools",
+	"delegation",
+	"max-children",
+	"max-depth",
+	"max-peers",
 ]);
+
+/** `delegation: spawn, peers` — a list, so the two permissions read separately. */
+function parseDelegation(raw: string): Partial<Delegation> {
+	const parts = parseList(raw).map((part) => part.toLowerCase());
+	if (parts.includes("none")) return { spawn: false, peers: false };
+	const policy: Partial<Delegation> = {};
+	if (parts.some((part) => part === "spawn" || part === "both" || part === "all")) policy.spawn = true;
+	if (parts.some((part) => part === "peers" || part === "peer" || part === "both" || part === "all")) policy.peers = true;
+	if (!parts.some((part) => part === "spawn" || part === "both" || part === "all" || part === "none")) policy.spawn = false;
+	if (!parts.some((part) => part === "peers" || part === "peer" || part === "both" || part === "all" || part === "none")) {
+		policy.peers = false;
+	}
+	return policy;
+}
+
+function parseCount(raw: string, key: string): number {
+	const value = Number.parseInt(raw, 10);
+	if (!Number.isInteger(value) || value < 0) throw new Error(`${key} must be a non-negative integer, got ${raw}`);
+	return value;
+}
 
 function parseList(raw: string): string[] {
 	return raw
@@ -114,6 +169,16 @@ async function loadConfig(path: string, label: LayerName): Promise<{ contributio
 	if (typeof source.model === "string") contributions.model = source.model;
 	if (typeof source.thinking === "string") contributions.thinking = source.thinking;
 	if (typeof source.instructions === "string") contributions.instructions = source.instructions;
+	if (source.delegation !== undefined && typeof source.delegation === "object") {
+		const raw = source.delegation as Record<string, unknown>;
+		const policy: Partial<Delegation> = {};
+		if (typeof raw.spawn === "boolean") policy.spawn = raw.spawn;
+		if (typeof raw.peers === "boolean") policy.peers = raw.peers;
+		if (typeof raw.maxChildren === "number") policy.maxChildren = raw.maxChildren;
+		if (typeof raw.maxDepth === "number") policy.maxDepth = raw.maxDepth;
+		if (typeof raw.maxPeers === "number") policy.maxPeers = raw.maxPeers;
+		contributions.delegation = policy;
+	}
 	if (Array.isArray(source.skills)) contributions.skills = source.skills.map(String);
 	if (Array.isArray(source.allowTools)) contributions.allowTools = source.allowTools.map(String);
 	if (Array.isArray(source.denyTools)) contributions.denyTools = source.denyTools.map(String);
@@ -138,6 +203,12 @@ async function loadAgentDir(directory: string, layer: "global" | "workspace"): P
 		if (values.skills !== undefined) contributions.skills = parseList(values.skills);
 		if (values["allow-tools"] !== undefined) contributions.allowTools = parseList(values["allow-tools"]);
 		if (values["deny-tools"] !== undefined) contributions.denyTools = parseList(values["deny-tools"]);
+		const delegation: Partial<Delegation> = {};
+		if (values.delegation !== undefined) Object.assign(delegation, parseDelegation(values.delegation));
+		if (values["max-children"] !== undefined) delegation.maxChildren = parseCount(values["max-children"], "max-children");
+		if (values["max-depth"] !== undefined) delegation.maxDepth = parseCount(values["max-depth"], "max-depth");
+		if (values["max-peers"] !== undefined) delegation.maxPeers = parseCount(values["max-peers"], "max-peers");
+		if (Object.keys(delegation).length > 0) contributions.delegation = delegation;
 		agents.push({
 			name,
 			description: values.description ?? "",
@@ -190,6 +261,7 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 	let allowTools: string[] | undefined;
 	const denyTools = new Set<string>();
 	const instructions: string[] = [];
+	let delegation: Partial<Delegation> | undefined;
 
 	for (const { layer, contributes } of layers) {
 		if (contributes.model !== undefined) model = contributes.model;
@@ -200,6 +272,7 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 		if (contributes.skills !== undefined) skills = [...new Set([...(skills ?? []), ...contributes.skills])];
 		if (contributes.allowTools !== undefined) allowTools = contributes.allowTools;
 		if (contributes.denyTools !== undefined) for (const tool of contributes.denyTools) denyTools.add(tool);
+		if (contributes.delegation !== undefined) delegation = { ...delegation, ...contributes.delegation };
 	}
 
 	// A deny always wins over an allow, so a workspace cannot be over-permissioned
@@ -210,6 +283,7 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 		name: definition?.name ?? "default",
 		description: definition?.description ?? "Default assistant",
 		source: definition?.source ?? "",
+		delegation: { ...DEFAULT_DELEGATION, ...delegation },
 		...(model === undefined ? {} : { model }),
 		...(thinking === undefined ? {} : { thinking }),
 		instructions: instructions.join("\n\n"),

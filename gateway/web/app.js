@@ -211,6 +211,12 @@ function renderEntry(entry, calls, forkAt) {
 
 function render() {
 	els.conversationTitle.textContent = state?.conversation?.title ?? "";
+	// Reading a conversation marks it read, which is what clears the dot.
+	const active = (state?.conversations ?? []).find((conversation) => conversation.id === activeId());
+	if (active !== undefined && seenCursors.get(active.id) !== active.lastEntryId) {
+		seenCursors.set(active.id, active.lastEntryId);
+		writePref("acornfall.seen", Object.fromEntries(seenCursors));
+	}
 	const entries = view?.entries ?? [];
 	const current = live();
 	const liveMessage = current.generation?.message;
@@ -318,6 +324,8 @@ function render() {
 // gate cannot drift apart from each other.
 const SECTIONS = [
 	{ key: "agent", title: "Agent", tools: [{ action: "reload-agents", label: "Reload files" }] },
+	{ key: "delegation", title: "Delegation" },
+	{ key: "subagents", title: "Subagents" },
 	{ key: "context", title: "Context sent" },
 	{ key: "run", title: "Run" },
 	{ key: "usage", title: "Usage" },
@@ -349,6 +357,8 @@ function writePref(key, value) {
 }
 
 const openSections = new Set(readPref(PREFS.sections, []));
+// Which entry each conversation was last read at, so "unread" means something.
+const seenCursors = new Map(Object.entries(readPref("acornfall.seen", {})));
 // Panes showing their raw source. Per pane, and deliberately not persisted: it is
 // a reading decision about one reply, not a preference about the app.
 const rawPanes = new Set();
@@ -479,6 +489,69 @@ function facts(target, pairs) {
 		.join("");
 }
 
+/** What this conversation may do to others, and how much of it it has used. */
+function renderDelegation() {
+	const policy = state?.policy;
+	const target = bodies.get("delegation");
+	if (!policy) {
+		target.innerHTML = `<div class="delta">not reported by this worker</div>`;
+		return;
+	}
+	const allowed = [
+		policy.delegation.spawn ? "spawn" : null,
+		policy.delegation.peers ? "peers" : null,
+	].filter(Boolean);
+	const rows = [
+		["may", allowed.length === 0 ? "nothing" : allowed.join(", ")],
+		["depth", `${policy.depth} of max ${policy.delegation.maxDepth}`],
+		["children", `${policy.children} of max ${policy.delegation.maxChildren}`],
+		["peers", `max ${policy.delegation.maxPeers}`],
+	];
+	target.innerHTML =
+		`<div class="delta">${
+			policy.canSpawn ? "delegation allowed" : `blocked: ${escapeHtml(policy.blockedBy ?? "")}`
+		}</div>` +
+		`<dl class="facts">${rows
+			.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`)
+			.join("")}</dl>`;
+}
+
+/** The conversations this one created, which is what a subagent is. */
+function renderSubagents() {
+	const target = bodies.get("subagents");
+	const active = activeId();
+	const conversations = state?.conversations ?? [];
+	const mine = conversations.find((conversation) => conversation.id === active);
+	const children = conversations.filter((conversation) => conversation.parent === active);
+	const parent = mine?.parent ? conversations.find((conversation) => conversation.id === mine.parent) : undefined;
+
+	const link = (conversation, label) =>
+		`<button class="ghost small" data-open="${escapeHtml(conversation.id)}" type="button">${escapeHtml(label)}</button>`;
+	const row = (conversation) => `<div class="subagent">
+		<span class="dot ${conversation.running ? "running" : ""}"></span>
+		<span class="subagent-title">${escapeHtml(conversation.title)}</span>
+		<span class="id">${escapeHtml(conversation.id)} · ${formatTokens(conversation.tokens)}</span>
+		${link(conversation, "Open")}
+	</div>`;
+
+	const parts = [];
+	if (parent) parts.push(`<div class="delta">created by ${escapeHtml(parent.id)} — ${escapeHtml(parent.title)}</div>`);
+	parts.push(children.length === 0 ? `<div class="delta">none</div>` : children.map(row).join(""));
+	target.innerHTML = parts.join("");
+
+	for (const button of target.querySelectorAll("[data-open]")) {
+		button.addEventListener("click", () => void openConversation(button.dataset.open));
+	}
+}
+
+/** Compact enough for a narrow rail: 1234 → 1.2k. */
+function formatTokens(value) {
+	const tokens = Number(value ?? 0);
+	if (tokens < 1000) return `${tokens} tok`;
+	if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}k tok`;
+	return `${(tokens / 1_000_000).toFixed(1)}M tok`;
+}
+
 function thinkingLabel() {
 	const applied = state?.agent?.thinkingLevel || "default";
 	const requested = state?.agent?.thinkingRequested;
@@ -505,6 +578,8 @@ function renderInspector() {
 		]);
 		renderLayers(resolved);
 	}
+	if (openSections.has("delegation")) renderDelegation();
+	if (openSections.has("subagents")) renderSubagents();
 	if (openSections.has("context")) renderContext();
 	if (openSections.has("run")) {
 		facts(bodies.get("run"), [
@@ -917,10 +992,25 @@ function conversationRow(conversation, active, deleted) {
 		? `<button class="icon" data-restore="${escapeHtml(conversation.id)}" title="Restore">↺</button>`
 		: `<button class="icon" data-rename="${escapeHtml(conversation.id)}" title="Rename">✎</button>
 			<button class="icon" data-hide="${escapeHtml(conversation.id)}" title="Delete">×</button>`;
+	// A run belongs to the harness, so a conversation you are not looking at can be
+	// working. Show that, and whether it moved since you last read it.
+	const running = conversation.running;
+	const unread = !active && !deleted && seenCursors.get(conversation.id) !== conversation.lastEntryId;
+	const mark = running
+		? `<span class="dot running" title="running"></span>`
+		: unread
+			? `<span class="dot unread" title="new since you last looked"></span>`
+			: "";
+	const spend = conversation.tokens
+		? `<span class="id" title="${escapeHtml(formatTokens(conversation.tokens))}${conversation.cost ? ` · $${conversation.cost.toFixed(4)}` : ""}">${escapeHtml(
+				conversation.id,
+			)}</span>`
+		: `<span class="id">${escapeHtml(conversation.id)}${conversation.root ? " ·root" : ""}</span>`;
 	return `<div class="conversation-item" data-active="${conversation.id === active}" data-id="${escapeHtml(conversation.id)}">
 		<button class="conversation-select" data-conversation="${escapeHtml(conversation.id)}" type="button">
 			<span class="title">${escapeHtml(conversation.title)}</span>
-			<span class="id">${escapeHtml(conversation.id)}${conversation.root ? " ·root" : ""}</span>
+			${mark}
+			${spend}
 		</button>
 		<span class="row-actions">${actions}</span>
 	</div>`;
@@ -929,7 +1019,11 @@ function conversationRow(conversation, active, deleted) {
 function renderConversations() {
 	const all = state?.conversations ?? [];
 	const active = activeId();
-	const visible = all.filter((conversation) => !conversation.hidden);
+	// A subagent is a conversation but not a peer: it belongs to the conversation
+	// that made it, so the rail lists only conversations without a parent.
+	const visible = all.filter(
+		(conversation) => !conversation.hidden && (conversation.parent === undefined || conversation.parent === ""),
+	);
 	const deleted = all.filter((conversation) => conversation.hidden);
 	els.conversationList.innerHTML =
 		visible.map((conversation) => conversationRow(conversation, active, false)).join("") +
@@ -1009,6 +1103,10 @@ async function forkConversation(at, text) {
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
 	}
+}
+
+async function openConversation(id) {
+	await selectConversation(id);
 }
 
 async function selectConversation(id) {
@@ -1139,6 +1237,15 @@ async function adoptDefault(kind, value) {
 }
 
 function renderAgentPicker() {
+	const locked = state?.subagent === true;
+	els.agent.disabled = locked;
+	els.model.disabled = locked;
+	els.thinking.disabled = locked || (state?.providers ?? []).length === 0;
+	if (locked) {
+		// Shown, not offered: inherited from whatever created this conversation.
+		els.agent.title = "a subagent runs the agent its creator gave it";
+		return;
+	}
 	const agents = state?.agents ?? [];
 	const current = state?.agent?.definition ?? "";
 	const options = [`<option value=""${current === "" ? " selected" : ""}>default</option>`];

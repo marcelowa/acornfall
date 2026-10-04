@@ -13,6 +13,10 @@ export type ConversationMeta = {
 	title: string;
 	/** Hidden conversations stay in storage; they are filtered from the list. */
 	hidden: boolean;
+	/** The agent definition this conversation runs, so delegation can resolve it. */
+	definition?: string;
+	/** Conversations this one created, so a subagent list needs no scan. */
+	children?: string[];
 };
 
 export const ConversationMetaDoc = defineDoc<ConversationMeta>({
@@ -21,7 +25,7 @@ export const ConversationMetaDoc = defineDoc<ConversationMeta>({
 	scope: "conversation",
 	history: "latest",
 	fork: "initial",
-	initial: () => ({ title: "", hidden: false }),
+	initial: () => ({ title: "", hidden: false, children: [] }),
 });
 
 export function conversationIdOf(id: string): ConversationId {

@@ -322,6 +322,52 @@ try {
 
 	check("still no JavaScript errors after interacting", problems.length === 0, problems.join("; "));
 
+	// 8. The rail shows live state, and a subagent is not a peer.
+	const rail = await page.evaluate(() =>
+		[...document.querySelectorAll("#conversation-list .conversation-item")].map((row) => ({
+			id: row.dataset.id,
+			title: row.querySelector(".title")?.textContent ?? "",
+			mark: row.querySelector(".dot")?.className ?? "",
+			usage: row.querySelector(".id")?.textContent ?? "",
+		})),
+	);
+	check("the rail lists conversations", rail.length > 0, `${rail.length} rows`);
+
+	const listed = await page.evaluate(async () => {
+		const state = await (await fetch("/api/state")).json();
+		return {
+			total: state.conversations.length,
+			subagents: state.conversations.filter((c) => c.parent).map((c) => c.id),
+			spend: state.conversations.filter((c) => c.tokens > 0).length,
+		};
+	});
+	if (listed.subagents.length > 0) {
+		check(
+			"subagent conversations stay out of the rail",
+			listed.subagents.every((id) => !rail.some((row) => row.id === id)),
+			`subagents ${listed.subagents.join(", ")} appear in the rail`,
+		);
+	}
+	check("per-conversation spend is reported", listed.spend > 0, "no conversation reports tokens");
+
+	// 9. The delegation and subagent sections exist and read from state.
+	await page.evaluate(() => {
+		for (const details of document.querySelectorAll("#inspector details.card")) {
+			if (["delegation", "subagents"].includes(details.dataset.section)) details.open = true;
+		}
+	});
+	await new Promise((resolve) => setTimeout(resolve, 300));
+	const sections = await page.evaluate(() => ({
+		delegation: document.querySelector('[data-body="delegation"]')?.textContent.trim() ?? "",
+		subagents: document.querySelector('[data-body="subagents"]')?.textContent.trim() ?? "",
+	}));
+	// textContent has no whitespace between a <dt> label and its <dd> value.
+	check("the delegation section reports the policy", /depth\s*\d+\s*of max\s*\d+/.test(sections.delegation), sections.delegation.slice(0, 120));
+	check("the delegation section names its limit", /children\s*\d+\s*of max\s*\d+/.test(sections.delegation), sections.delegation.slice(0, 120));
+	check("the subagents section renders", sections.subagents.length > 0, "empty");
+
+	check("no errors after the delegation checks", problems.length === 0, problems.join("; "));
+
 	// Reload: geometry and open sections must come back.
 	await page.reload({ waitUntil: "networkidle2" });
 	await page.waitForFunction(() => document.querySelector("#status")?.textContent !== "connecting", {

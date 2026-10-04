@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
@@ -50,6 +51,16 @@ type Conversation struct {
 	Root  bool   `json:"root"`
 	// Hidden conversations are tombstoned, not deleted; the UI can restore them.
 	Hidden bool `json:"hidden"`
+	// Running, LastEntryID, Tokens, and Cost are live state for the rail.
+	Running     bool    `json:"running"`
+	LastEntryID string  `json:"lastEntryId"`
+	Tokens      float64 `json:"tokens"`
+	Cost        float64 `json:"cost"`
+	// Parent marks a subagent conversation: created by another conversation.
+	Parent   string   `json:"parent,omitempty"`
+	Children []string `json:"children,omitempty"`
+	Model    string   `json:"model,omitempty"`
+	Thinking string   `json:"thinking,omitempty"`
 }
 
 // State is everything the UI needs to render before any frame arrives.
@@ -66,7 +77,13 @@ type State struct {
 	DefaultThinking string                `json:"defaultThinking"`
 	DefaultAgent    string                `json:"defaultAgent"`
 	// Inherited says, per field, that this conversation never chose it.
-	Inherited Inherited               `json:"inherited"`
+	Inherited Inherited `json:"inherited"`
+	// Subagent is true when the active conversation was created by another one. Its
+	// configuration belongs to that creator, so the UI shows it rather than offering
+	// to change it.
+	Subagent bool `json:"subagent"`
+	// Policy is what this conversation may do with other conversations.
+	Policy    json.RawMessage         `json:"policy,omitempty"`
 	Agents    []protocol.AgentSummary `json:"agents"`
 	Skills    []protocol.SkillSummary `json:"skills"`
 	Defaults  []protocol.LayerTrace   `json:"defaults"`
@@ -91,6 +108,7 @@ type Control struct {
 	resolved        map[string]*protocol.ResolvedAgent
 	catalog         protocol.AgentsData
 	providers       []protocol.ProviderInfo
+	policy          json.RawMessage
 	views           map[string]cachedView
 	subscribers     map[int]chan protocol.Frame
 	nextSub         int
@@ -168,7 +186,56 @@ func (c *Control) Open(ctx context.Context) error {
 	if err := c.ensureConversation(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
+	go c.watchConversations(ctx)
 	return nil
+}
+
+// watchConversations keeps the rail honest about runs happening elsewhere. A run
+// belongs to the harness, not to an attachment, so a conversation you are not
+// looking at can be working. Nothing pushes that news, so it is polled -- and
+// published only when a signature changes, so a quiet workspace stays quiet.
+func (c *Control) watchConversations(ctx context.Context) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !c.hasSubscribers() {
+				continue
+			}
+			before := c.conversationSignature()
+			if _, err := c.listConversations(ctx); err != nil {
+				continue
+			}
+			if c.conversationSignature() != before {
+				c.publish(protocol.Frame{Type: "state"})
+			}
+		}
+	}
+}
+
+func (c *Control) hasSubscribers() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.subscribers) > 0
+}
+
+func (c *Control) conversationSignature() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var builder strings.Builder
+	for _, info := range c.conversations {
+		fmt.Fprintf(&builder, "%s:%t:%s:%.0f|", info.ID, info.Running, info.LastEntryID, info.Tokens)
+	}
+	return builder.String()
+}
+
+// Policy reports what a conversation may do with other conversations, resolved
+// the same way its agent is.
+func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMessage, error) {
+	return c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 }
 
 func (c *Control) Close() {
@@ -191,6 +258,27 @@ func (c *Control) State() State {
 	active := c.active
 	c.mu.RUnlock()
 	inputs := c.inputsFor(active)
+	isChild := c.isSubagent(active)
+	if isChild {
+		// The stored configuration wins for a conversation control does not own.
+		c.mu.RLock()
+		for _, info := range c.conversations {
+			if info.ID != active {
+				continue
+			}
+			if info.Model != "" {
+				parts := strings.SplitN(info.Model, "/", 2)
+				if len(parts) == 2 {
+					inputs.explicit.Provider, inputs.explicit.ModelID = parts[0], parts[1]
+				}
+			}
+			if info.Thinking != "" {
+				inputs.explicit.ThinkingLevel = info.Thinking
+			}
+			break
+		}
+		c.mu.RUnlock()
+	}
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -202,10 +290,12 @@ func (c *Control) State() State {
 		// Agent is the effective binding, so pickers show what will actually run;
 		// Inherited says which parts of it this conversation chose itself.
 		Agent:           inputs.effective(),
+		Subagent:        isChild,
 		Resolved:        c.resolved[c.active],
 		DefaultModel:    c.defaultModel,
 		DefaultThinking: c.defaultThinking,
 		DefaultAgent:    c.defaultAgent,
+		Policy:          c.policy,
 		Inherited: Inherited{
 			Model:    c.bindings[c.active].Provider == "",
 			Thinking: c.bindings[c.active].ThinkingLevel == "",
@@ -251,6 +341,11 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 	c.active = conversationID
 	c.mu.Unlock()
 	c.persist()
+	// Refresh now rather than waiting for the next tick: the response to this call
+	// carries the policy, and a stale policy on a fresh conversation reads as a bug.
+	if _, err := c.listConversations(ctx); err != nil {
+		workerpool.Log("refresh conversations after select: %v", err)
+	}
 	// Attaching to a conversation that has no model yet would fail on its next
 	// prompt, so selecting one is where it gets configured.
 	if err := c.ensureConversation(ctx, conversationID); err != nil && !errors.Is(err, ErrNoProvider) {
@@ -728,11 +823,31 @@ func (c *Control) ensureDefault(ctx context.Context) error {
 func (c *Control) ensureConversation(ctx context.Context, conversationID string) error {
 	c.mu.RLock()
 	explicit := c.bindings[conversationID]
+	for _, info := range c.conversations {
+		if info.ID == conversationID && info.Parent != "" {
+			// A subagent is configured by whatever created it. Re-applying a binding
+			// here would overwrite that with the install default.
+			c.mu.RUnlock()
+			return nil
+		}
+	}
 	c.mu.RUnlock()
 	if explicit.Provider != "" && c.isAvailable(c.Describe(), explicit) {
 		return nil
 	}
 	return c.reapply(ctx, conversationID)
+}
+
+// isSubagent reports whether a conversation was created by another one.
+func (c *Control) isSubagent(conversationID string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, info := range c.conversations {
+		if info.ID == conversationID {
+			return info.Parent != ""
+		}
+	}
+	return false
 }
 
 func (c *Control) reapply(ctx context.Context, conversationID string) error {
@@ -1008,6 +1123,17 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 	c.mu.Lock()
 	c.conversations = data.Conversations
 	c.mu.Unlock()
+
+	// One extra worker call per refresh, for the active conversation only: the
+	// delegation card is always about the conversation in front of you.
+	if active := c.activeConversation(); active != "" {
+		policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: active})
+		if err == nil {
+			c.mu.Lock()
+			c.policy = policy
+			c.mu.Unlock()
+		}
+	}
 	return data.Conversations, nil
 }
 
@@ -1142,22 +1268,32 @@ func toConversations(infos []protocol.ConversationInfo) []Conversation {
 	conversations := make([]Conversation, 0, len(infos))
 	for _, info := range infos {
 		conversations = append(conversations, Conversation{
-			ID:     info.ID,
-			Title:  info.Title,
-			Root:   info.Root,
-			Hidden: info.Hidden,
+			ID:          info.ID,
+			Title:       info.Title,
+			Root:        info.Root,
+			Hidden:      info.Hidden,
+			Running:     info.Running,
+			LastEntryID: info.LastEntryID,
+			Tokens:      info.Tokens,
+			Cost:        info.Cost,
+			Parent:      info.Parent,
+			Children:    info.Children,
+			Model:       info.Model,
+			Thinking:    info.Thinking,
 		})
 	}
 	return conversations
 }
 
+// hasConversation reports whether a conversation is a sensible place to land:
+// present, not tombstoned, and not a subagent's transcript.
 func hasConversation(infos []protocol.ConversationInfo, id string) bool {
 	if id == "" {
 		return false
 	}
 	for _, info := range infos {
 		if info.ID == id {
-			return !info.Hidden
+			return !info.Hidden && info.Parent == ""
 		}
 	}
 	return false
@@ -1165,7 +1301,7 @@ func hasConversation(infos []protocol.ConversationInfo, id string) bool {
 
 func firstVisible(infos []protocol.ConversationInfo) string {
 	for _, info := range infos {
-		if !info.Hidden {
+		if !info.Hidden && info.Parent == "" {
 			return info.ID
 		}
 	}
@@ -1176,7 +1312,7 @@ func firstVisible(infos []protocol.ConversationInfo) string {
 // history it already has.
 func defaultConversation(infos []protocol.ConversationInfo) string {
 	for _, info := range infos {
-		if info.Root {
+		if info.Root && !info.Hidden {
 			return info.ID
 		}
 	}

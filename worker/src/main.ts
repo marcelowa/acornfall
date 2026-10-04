@@ -16,13 +16,16 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
 import {
+	AgentDoc,
 	type Conversation,
 	type EntryId,
 	createRegistry,
 	defineExtension,
 	Harness,
+	LiveDoc,
 	ROOT_CONVERSATION_ID,
 	section,
+	UsageDoc,
 	type ToolRegistration,
 	type HarnessSettings,
 } from "@earendil-works/pi-durable";
@@ -35,6 +38,7 @@ import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import { loadCatalog, resolveAgent, type Catalog, type ResolvedAgent } from "./config.ts";
 import { devProvider } from "./devprovider.ts";
 import { conversationIdOf, ConversationMetaDoc } from "./meta.ts";
+import { delegationExtension, policyFor } from "./delegation.ts";
 import {
 	CommandQueue,
 	type Command,
@@ -144,6 +148,10 @@ const harness = await Harness.open(
 	CONTEXT,
 );
 
+// Registered after the harness opens: the delegation tools need it to read a
+// child's answer, and the registry accepts installs while running.
+registry.install(delegationExtension({ harness, storage, catalog: () => catalog }));
+
 /** Live handles by conversation id; created on first use. */
 const handles = new Map<string, Conversation>();
 const subscriptions = new Map<string, { dispose: () => void }>();
@@ -204,18 +212,60 @@ async function listConversations(): Promise<ConversationInfo[]> {
 	for (;;) {
 		const page = await storage.scanConversations({}, 50, cursor, CONTEXT);
 		for (const record of page.items) {
-			// Only conversations the user owns: a subagent's transcript has an owner edge.
-			if (record.owner !== undefined) continue;
+			// Every conversation is listed, including subagent ones. Ownership is
+			// reported rather than used as a filter: the rail shows conversations
+			// without a parent, and the inspector groups the ones that have one, so
+			// hiding them here would leave the UI unable to show them at all.
 			const id = String(record.id);
 			const conversation = await conversationFor(id);
 			const { title, hidden } = await nameOf(id, conversation);
-			found.push({ id, title, hidden, root: record.id === ROOT_CONVERSATION_ID });
+			const owner = record.owner;
+			const parent = owner === undefined ? undefined : String(owner.conversationId);
+			const [live, usage, meta, agentConfig, newest] = await Promise.all([
+				harness.snapshot(LiveDoc, conversationIdOf(id), CONTEXT).catch(() => undefined),
+				harness.snapshot(UsageDoc, conversationIdOf(id), CONTEXT).catch(() => undefined),
+				harness.snapshot(ConversationMetaDoc, conversationIdOf(id), CONTEXT).catch(() => undefined),
+				harness.snapshot(AgentDoc, conversationIdOf(id), CONTEXT).catch(() => undefined),
+				conversation.entries({}, 1, undefined, CONTEXT),
+			]);
+			const effectiveModel = agentConfig?.model;
+			const effectiveThinking = agentConfig?.thinkingLevel;
+			found.push({
+				id,
+				title,
+				hidden,
+				root: record.id === ROOT_CONVERSATION_ID,
+				// Read from committed state, so a run that survived a restart still
+				// shows as running, and a background run is never invisible.
+				running: live?.run !== undefined,
+				lastEntryId: String(newest.items[0]?.id ?? ""),
+				tokens: totalTokens(usage),
+				cost: totalCost(usage),
+				...(parent === undefined ? {} : { parent }),
+				// The stored configuration is the truth for a conversation control does
+				// not manage, which is every subagent.
+				...(effectiveModel === undefined ? {} : { model: `${effectiveModel.provider}/${effectiveModel.modelId}` }),
+				...(effectiveThinking === undefined ? {} : { thinking: String(effectiveThinking) }),
+				...(meta?.children === undefined || meta.children.length === 0
+					? {}
+					: { children: meta.children }),
+			});
 		}
 		if (page.next === undefined) break;
 		cursor = page.next;
 	}
 	// Newest first; ids are monotonic.
 	return found.sort((a, b) => Number(b.id) - Number(a.id));
+}
+
+type UsageTotals = { models?: Record<string, { totalTokens?: number; cost?: { total?: number } }> };
+
+function totalTokens(usage: UsageTotals | undefined): number {
+	return Object.values(usage?.models ?? {}).reduce((sum, entry) => sum + (entry.totalTokens ?? 0), 0);
+}
+
+function totalCost(usage: UsageTotals | undefined): number {
+	return Object.values(usage?.models ?? {}).reduce((sum, entry) => sum + (entry.cost?.total ?? 0), 0);
 }
 
 /** Writes metadata through the conversation's own commit, so it is durable. */
@@ -332,6 +382,12 @@ async function applyAgent(
 	const conversation = await conversationFor(conversationId);
 	const resolved = resolveAgent(catalog, input.definition);
 	skillFilterByConversation.set(conversationId, resolved.skills);
+	// Written into the conversation, not into control's settings: delegation and
+	// the UI both need it, and it belongs with the transcript.
+	await conversation.commit(async (tx) => {
+		const meta = await tx.doc(ConversationMetaDoc, conversationIdOf(conversationId));
+		meta.definition = input.definition ?? "";
+	}, CONTEXT);
 
 	// An explicit provider/modelId is the user's choice in the picker and beats
 	// the definition; the definition beats nothing.
@@ -503,6 +559,10 @@ async function handle(command: Command): Promise<unknown> {
 			const conversation = await conversationFor(command.conversationId);
 			await conversation.abort(CONTEXT);
 			return undefined;
+		}
+		case "policy": {
+			const view = await policyFor({ harness, storage, catalog: () => catalog }, command.conversationId, CONTEXT);
+			return view;
 		}
 		case "agents":
 			return {
