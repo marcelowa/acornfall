@@ -2,7 +2,7 @@ BIN := bin/acornfall
 DATA ?= $(HOME)/.acornfall
 ADDR ?= 0.0.0.0:7777
 
-.PHONY: help deps build typecheck run dev fmt clean
+.PHONY: help deps build typecheck check run dev fmt clean
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -13,7 +13,12 @@ deps: ## install worker dependencies
 build: ## build the gateway binary
 	cd gateway && go build -o ../$(BIN) ./cmd/acornfall
 
-typecheck: ## typecheck the worker
+typecheck: ## typecheck the worker and check the client against its markup
+	cd worker && bun run typecheck
+	node scripts/check-client.mjs
+
+check: ## verify the client and worker agree with their contracts
+	node scripts/check-client.mjs
 	cd worker && bun run typecheck
 
 run: build ## run against the current directory

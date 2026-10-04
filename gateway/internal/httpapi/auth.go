@@ -33,9 +33,13 @@ func IsLoopback(addr string) bool {
 }
 
 // ResolveToken returns the shared secret guarding this listener, or "" when the
-// listener is loopback-only. A reachable listener without an explicit token gets
-// a generated one persisted beside the other state, so the URL stays stable.
-func ResolveToken(explicit, env, dataDir, addr string) (string, error) {
+// listener is loopback-only or auth is disabled. A reachable listener without an
+// explicit token gets a generated one persisted beside the other state, so the
+// URL stays stable.
+func ResolveToken(explicit, env, dataDir, addr string, disabled bool) (string, error) {
+	if disabled {
+		return "", nil
+	}
 	if explicit != "" {
 		return explicit, nil
 	}

@@ -34,6 +34,7 @@ func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornfall", flag.ContinueOnError)
 	addr := flags.String("addr", "127.0.0.1:7777", "listen address; a non-loopback address requires a token")
 	token := flags.String("token", "", "shared secret; generated and stored when a non-loopback address has none")
+	insecure := flags.Bool("insecure", false, "listen without a token (trusted network or tunnel only)")
 	workspace := flags.String("workspace", "", "workspace directory (default: current directory)")
 	dataDir := flags.String("data-dir", "", "data directory (default: ~/.acornfall)")
 	model := flags.String("model", "", "default model as provider/modelId")
@@ -81,7 +82,7 @@ func serve(argv []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	guard, err := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"), dir, *addr)
+	guard, err := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"), dir, *addr, *insecure)
 	if err != nil {
 		return err
 	}
@@ -112,10 +113,11 @@ func serve(argv []string) error {
 	}()
 
 	log.Printf("acornfall listening on http://%s  workspace=%s", displayAddr(*addr), workdir)
-	if guard != "" {
-		if !httpapi.IsLoopback(*addr) {
-			log.Printf("guard: token required; open http://%s/?token=%s", prettyAddr(*addr), guard)
-		}
+	switch {
+	case guard != "" && !httpapi.IsLoopback(*addr):
+		log.Printf("guard: token required; open http://%s/?token=%s", prettyAddr(*addr), guard)
+	case guard == "" && !httpapi.IsLoopback(*addr):
+		log.Printf("warning: no token and %s is reachable from the network; anyone who can reach it can run commands as %s", displayAddr(*addr), currentUser())
 	}
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
@@ -209,6 +211,13 @@ func writeCredentials(path string, all map[string]credential) error {
 		return err
 	}
 	return os.Rename(temp, path)
+}
+
+func currentUser() string {
+	if user := os.Getenv("USER"); user != "" {
+		return user
+	}
+	return "this user"
 }
 
 // displayAddr turns a wildcard bind into something clickable.

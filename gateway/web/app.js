@@ -1,21 +1,30 @@
 // Acornfall client. No framework and no build step: committed state arrives as
 // whole view frames over SSE, so rendering is a pure function of the last frame.
 
+// Fails loudly when the client and the markup drift apart, instead of
+// deferring the mistake to a property access on undefined.
+const el = (id) => {
+	const node = document.getElementById(id);
+	if (node === null) throw new Error(`index.html is missing #${id}`);
+	return node;
+};
+
 const els = {
-	workspace: document.getElementById("workspace"),
-	status: document.getElementById("status"),
-	model: document.getElementById("model"),
-	transcript: document.getElementById("transcript"),
-	composer: document.getElementById("composer"),
-	input: document.getElementById("input"),
-	steer: document.getElementById("steer"),
-	abort: document.getElementById("abort"),
-	inspector: document.getElementById("inspector"),
-	toggleInspector: document.getElementById("toggle-inspector"),
-	agentFacts: document.getElementById("agent-facts"),
-	runFacts: document.getElementById("run-facts"),
-	usage: document.getElementById("usage"),
-	raw: document.getElementById("raw"),
+	workspace: el("workspace"),
+	status: el("status"),
+	model: el("model"),
+	transcript: el("transcript"),
+	composer: el("composer"),
+	input: el("input"),
+	steer: el("steer"),
+	send: el("send"),
+	abort: el("abort"),
+	inspector: el("inspector"),
+	toggleInspector: el("toggle-inspector"),
+	agentFacts: el("agent-facts"),
+	runFacts: el("run-facts"),
+	usage: el("usage"),
+	raw: el("raw"),
 };
 
 let state = null;
