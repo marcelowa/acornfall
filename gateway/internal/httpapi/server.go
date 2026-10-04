@@ -234,6 +234,12 @@ func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
+	// Refreshed, not cached: the cached list is kept current by a poll that only runs
+	// while a client is attached, so a script would otherwise read stale state.
+	if err := s.control.RefreshConversations(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	writeJSON(w, http.StatusOK, s.control.State().Conversations)
 }
 

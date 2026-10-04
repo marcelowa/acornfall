@@ -1,6 +1,6 @@
 # ADR 0008 — Delegation and conversation addressing
 
-Status: accepted, partially implemented
+Status: accepted, foreground and background implemented
 Date: 2026-10-04
 
 ## Problem
@@ -100,19 +100,77 @@ The subagent tool is `replay: "safe"`: the ownership index is committed in the s
 commit that creates the child, so a rerun after a crash finds the child it already
 made instead of making a second one.
 
+## Background subagents
+
+`delegate` blocks. `subagent` is a relationship instead: the child keeps working while
+the parent answers, and its answer arrives later as a new message — which, per the
+product decision, the parent **acts on without waiting for anyone**. A background
+subagent that could only work while someone watched would not be background.
+
+Three durable pieces, following the shape pi-durable documents in
+`test/examples/23-subagent-background.ts`:
+
+- **An anchor task per subagent.** A background task that finishes at once and exists
+  only to own the child conversation. Ownership is what an abort reaches, and
+  "background" is the boundary where a parent's Esc stops.
+- **A reporter task per message.** Two checkpointed phases: deliver the message, wait
+  for the answer, then report it to the parent as a `followUp` input. Two request ids
+  — one for the message, one for the report — so a restart mid-flight cannot deliver
+  either twice. This is the piece that has to survive a crash, which is why it is a
+  durable intention with an idempotency key rather than a promise.
+- **A delegation document** per conversation: subagents by the name the model gave
+  them, the live reporters, and how many wake-ups have been spent.
+
+Verified with a real model, including the part that matters: the parent answered
+`ACKNOWLEDGED`, **stopped spending**, and was woken later when the child finished.
+
+## The wake budget
+
+Auto-continuation is the feature, and it is also the risk: without a limit, a chain of
+agents can talk to each other indefinitely on your card. `max-wakes` caps how many
+times a subagent's answer may wake its parent (default 12).
+
+Verified by setting it to zero. The parent was told:
+
+```
+[subagent budgettest finished, but this conversation has used its 0 wake-ups.
+ Read conversation 454 for the answer.]
+```
+
+and it then used `list` and `read` to fetch the answer itself. That is the property
+worth having: **the budget does not lose information, it moves the work from an
+automatic wake-up to an explicit read.** The answer is always in the child's
+transcript; the budget only decides whether anyone is notified about it.
+
+The count is read then written, so two reporters finishing at once could in principle
+spend one wake-up more than the budget allows. That is accepted: the budget is a guard
+against a runaway chain, not an invariant, and delivery itself is idempotent.
+
+## A subagent is told what it is
+
+A child inherits its parent's model, tools, and working directory, but **not its
+instructions**. Inheriting them would have the subagent introducing itself as the
+parent's assistant and treating the parent's rules as its own. It gets a role line
+instead, plus a named definition's instructions when one is given:
+
+> You are the subagent "lister". Another conversation started you; answer its requests
+> directly, and say what you did.
+
 ## What is not built yet
 
-- **Background children.** `delegate` blocks. A child owned by a background anchor
-  task would survive your Esc and not keep the parent busy, and its answer would be
-  delivered later as a follow-up with a `requestId` so a restart cannot deliver it
-  twice. That delivery path is the sharp edge and it is deliberately not rushed.
-- **Peer creation** (`peers: true`) is parsed, resolved, and reported, but no tool
-  creates a peer yet. When it does, an agent will be able to write to your rail,
-  which is why the provenance marker and `maxPeers` matter.
-- **Messages between conversations appear as `pi.user` entries.** They need a
-  provenance header so a child's transcript does not read as if you said it.
-- **A message never triggers an automatic reply.** Reports must be explicit, or two
-  agents will talk until the credit card intervenes. That rule belongs with the
-  background path.
+- **Peer creation.** `peers: true` is parsed, resolved, and reported, but no tool
+  creates a peer yet. When it does, an agent will be able to write to your rail, which
+  is why the provenance marker and `maxPeers` matter.
+- **Messages between conversations appear as `pi.user` entries.** The report text is
+  prefixed (`[subagent lister finished] …`), which is what the model needs, and a human
+  reads it correctly enough — but it is a text convention, not a structured field. A
+  custom entry alongside it would let the UI render a chip instead of relying on the
+  prefix.
+- **A tool phase that throws is now logged** (`onReport`) rather than silently
+  vanishing. Before that, a reporter that failed left no trace at all: the run simply
+  never continued.
+- **No spend cap.** Wake-ups are bounded; tokens are not. A conversation can still
+  spend without limit across its subagents, and per-conversation spend is only visible
+  in the rail.
 - **No isolation**: every conversation shares one working directory, so two agents
   editing one file will not notice each other. Accepted for now.

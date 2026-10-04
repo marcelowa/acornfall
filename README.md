@@ -101,6 +101,11 @@ make dev
   request.
 - **Agent definitions** with a global/workspace/agent overlay, and an explain view
   showing which layer contributed what. See `docs/adr/0004-resource-overlay.md`.
+- **Delegation**: `delegate` hands a task to a subagent and waits; `subagent` starts one
+  that keeps working while you answer and reports back when it is done, waking the
+  parent conversation to act on it. Ownership, depth limits, and a wake budget are
+  configurable in the overlay and visible in the inspector's Delegation card. See
+  `docs/adr/0008-delegation.md`.
 - Provider connect/disconnect from the UI, 42 providers, 60+ models each where the key allows.
 - Crash resume: `kill` the worker and restart; the run continues from its last commit.
 - Credentials live in `~/.acornfall/credentials.json` (0600), never in the worker's home.

@@ -1113,6 +1113,13 @@ func (c *Control) publish(frame protocol.Frame) {
 	}
 }
 
+// RefreshConversations re-reads the list on demand, for callers that are not holding
+// an event stream open.
+func (c *Control) RefreshConversations(ctx context.Context) error {
+	_, err := c.listConversations(ctx)
+	return err
+}
+
 func (c *Control) listConversations(ctx context.Context) ([]protocol.ConversationInfo, error) {
 	var data struct {
 		Conversations []protocol.ConversationInfo `json:"conversations"`

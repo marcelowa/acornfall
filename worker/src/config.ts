@@ -32,6 +32,11 @@ export interface Delegation {
 	maxChildren: number;
 	maxDepth: number;
 	maxPeers: number;
+	/**
+	 * How many times a subagent's answer may wake this conversation. The budget that
+	 * stops a chain of agents from talking to each other indefinitely.
+	 */
+	maxWakes: number;
 }
 
 export const DEFAULT_DELEGATION: Delegation = {
@@ -40,6 +45,7 @@ export const DEFAULT_DELEGATION: Delegation = {
 	maxChildren: 4,
 	maxDepth: 1,
 	maxPeers: 2,
+	maxWakes: 12,
 };
 
 export interface Contributions {
@@ -100,6 +106,7 @@ const KNOWN_KEYS = new Set([
 	"max-children",
 	"max-depth",
 	"max-peers",
+	"max-wakes",
 ]);
 
 /** `delegation: spawn, peers` — a list, so the two permissions read separately. */
@@ -177,6 +184,7 @@ async function loadConfig(path: string, label: LayerName): Promise<{ contributio
 		if (typeof raw.maxChildren === "number") policy.maxChildren = raw.maxChildren;
 		if (typeof raw.maxDepth === "number") policy.maxDepth = raw.maxDepth;
 		if (typeof raw.maxPeers === "number") policy.maxPeers = raw.maxPeers;
+		if (typeof raw.maxWakes === "number") policy.maxWakes = raw.maxWakes;
 		contributions.delegation = policy;
 	}
 	if (Array.isArray(source.skills)) contributions.skills = source.skills.map(String);
@@ -208,6 +216,7 @@ async function loadAgentDir(directory: string, layer: "global" | "workspace"): P
 		if (values["max-children"] !== undefined) delegation.maxChildren = parseCount(values["max-children"], "max-children");
 		if (values["max-depth"] !== undefined) delegation.maxDepth = parseCount(values["max-depth"], "max-depth");
 		if (values["max-peers"] !== undefined) delegation.maxPeers = parseCount(values["max-peers"], "max-peers");
+		if (values["max-wakes"] !== undefined) delegation.maxWakes = parseCount(values["max-wakes"], "max-wakes");
 		if (Object.keys(delegation).length > 0) contributions.delegation = delegation;
 		agents.push({
 			name,

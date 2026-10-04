@@ -139,6 +139,9 @@ const harness = await Harness.open(
 		registry,
 		settings,
 		env,
+		// A task phase that throws is otherwise swallowed: the run simply never
+		// continues and nothing is logged. This is the only window into that.
+		onReport: (error) => log("extension failure:", error instanceof Error ? error.message : String(error)),
 		// Runs in every commit that creates or forks a conversation, so metadata
 		// exists from the first entry and a fork inherits its parent's naming rules.
 		conversationCreated: async (tx, conversation) => {
