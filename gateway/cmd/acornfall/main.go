@@ -113,11 +113,10 @@ func serve(argv []string) error {
 	}()
 
 	log.Printf("acornfall listening on http://%s  workspace=%s", displayAddr(*addr), workdir)
-	switch {
-	case guard != "" && !httpapi.IsLoopback(*addr):
-		log.Printf("guard: token required; open http://%s/?token=%s", prettyAddr(*addr), guard)
-	case guard == "" && !httpapi.IsLoopback(*addr):
-		log.Printf("warning: no token and %s is reachable from the network; anyone who can reach it can run commands as %s", displayAddr(*addr), currentUser())
+	if guard != "" && !httpapi.IsLoopback(*addr) {
+		log.Printf("auth: token required; open http://%s/?token=%s", prettyAddr(*addr), guard)
+	} else if guard == "" && !httpapi.IsLoopback(*addr) {
+		log.Printf("auth: off (--insecure)")
 	}
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
@@ -211,13 +210,6 @@ func writeCredentials(path string, all map[string]credential) error {
 		return err
 	}
 	return os.Rename(temp, path)
-}
-
-func currentUser() string {
-	if user := os.Getenv("USER"); user != "" {
-		return user
-	}
-	return "this user"
 }
 
 // displayAddr turns a wildcard bind into something clickable.

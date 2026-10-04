@@ -41,7 +41,7 @@ Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
 ### Reaching it from another machine
 
 ```bash
-make dev ADDR=0.0.0.0:7777     # the default in the Makefile
+make dev                        # binds the tailnet address, no token
 ```
 
 A non-loopback bind requires a token. When none is given with `--token` or
