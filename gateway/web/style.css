@@ -29,6 +29,12 @@
 	--mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* An author `display` beats the user-agent [hidden] rule, so hiding by
+   attribute has to be stated here or `hidden` silently does nothing. */
+[hidden] {
+	display: none !important;
+}
+
 * {
 	box-sizing: border-box;
 }
@@ -386,6 +392,17 @@ main[data-inspector="closed"] .inspector {
 	text-align: center;
 	margin-top: 12vh;
 	line-height: 1.7;
+}
+
+.empty {
+	color: var(--neutral-500);
+	text-align: center;
+	margin-top: 12vh;
+	line-height: 1.7;
+}
+
+.empty .cta {
+	margin-top: 12px;
 }
 
 .empty code {

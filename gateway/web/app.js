@@ -189,12 +189,20 @@ function render() {
 		html.push(`<div class="turn notice">retrying: ${escapeHtml(retry.error ?? "provider error")}</div>`);
 	}
 
+	const connected = (state?.providers ?? []).some((provider) => provider.authenticated);
 	if (html.length === 0) {
 		html.push(
-			`<div class="empty">
-				<p>Acornfall is ready.</p>
-				<p>Ask something, or tell it what to do in <code>${escapeHtml(state?.workspace ?? "the workspace")}</code>.</p>
-			</div>`,
+			connected
+				? `<div class="empty">
+					<p>Acornfall is ready.</p>
+					<p>Ask something, or tell it what to do in <code>${escapeHtml(state?.workspace ?? "the workspace")}</code>.</p>
+				</div>`
+				: `<div class="empty">
+					<p>No model provider is connected.</p>
+					<p>Connect one to start, or add a key from the CLI with
+						<code>acornfall provider add &lt;provider&gt; &lt;api-key&gt;</code>.</p>
+					<button class="primary cta" id="empty-connect" type="button">Connect a provider</button>
+				</div>`,
 		);
 	}
 
@@ -202,6 +210,9 @@ function render() {
 		els.transcript.scrollTop + els.transcript.clientHeight >= els.transcript.scrollHeight - 80;
 	els.transcript.innerHTML = html.join("");
 	if (pinnedToBottom) els.transcript.scrollTop = els.transcript.scrollHeight;
+
+	const emptyConnect = document.getElementById("empty-connect");
+	if (emptyConnect !== null) emptyConnect.addEventListener("click", () => openSheet());
 
 	const busy = isBusy();
 	setStatus(busy ? "running" : "idle", busy ? "busy" : "idle");
@@ -388,29 +399,27 @@ async function answerPrompt(value) {
 }
 
 // Login interactions arrive on the stream and are rendered as they happen.
+// Nothing opens a sheet on its own: a flow started elsewhere is surfaced, but
+// the transcript stays usable either way.
 function handleAuthFrame(frame) {
 	const event = frame.event ?? {};
-	if (sheet.flow === null || !sheet.open) {
-		// A flow started elsewhere (CLI, another tab): show it rather than drop it.
-		if (event.kind !== "done" && event.kind !== "error") openSheet();
-		if (sheet.flow === null) {
-			sheet.flow = {
-				authId: frame.authId,
-				providerId: event.providerId ?? "provider",
-				providerName: event.providerId ?? "provider",
-				log: [],
-				prompt: null,
-				status: "running",
-			};
-		}
+	if (sheet.flow === null) {
+		if (event.kind === "done" || event.kind === "error") return;
+		sheet.flow = {
+			authId: frame.authId,
+			providerId: event.providerId ?? "provider",
+			providerName: event.providerId ?? "provider",
+			log: [],
+			prompt: null,
+			status: "running",
+		};
 	}
 	const flow = sheet.flow;
 	if (frame.authId && flow.authId.startsWith("local-") && frame.authId !== flow.authId) flow.authId = frame.authId;
 	switch (event.kind) {
 		case "prompt":
 			flow.prompt = event;
-			break;
-		case "info":
+			break;		case "info":
 			flow.log.push({ kind: "info", text: event.message, links: event.links });
 			break;
 		case "auth_url":
