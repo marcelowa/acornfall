@@ -15,6 +15,7 @@ const els = {
 	model: el("model"),
 	agent: el("agent"),
 	thinking: el("thinking"),
+	makeDefault: el("make-default"),
 	rail: el("new-conversation"),
 	conversationList: el("conversation-list"),
 	transcript: el("transcript"),
@@ -270,7 +271,11 @@ function renderInspector() {
 		["definition", resolved?.name ?? "default"],
 		["source", resolved?.source || "(layered defaults only)"],
 		["harness", state?.harness],
-		["model", resolved?.model ?? `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`],
+		[
+			"model",
+			`${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}${state?.modelInherited ? " (default)" : " (chosen here)"}`,
+		],
+		["default model", `${state?.defaultModel?.provider ?? "—"}/${state?.defaultModel?.modelId ?? ""}`],
 		["thinking", resolved?.thinking ?? state?.agent?.thinkingLevel ?? "default"],
 		["sandbox", state?.capabilities?.sandbox],
 	]);
@@ -430,6 +435,7 @@ async function loadState() {
 	renderConversations();
 	renderAgentPicker();
 	renderThinking();
+	renderDefaultModel();
 	renderModelPicker();
 	render();
 	if (sheet.open) renderSheet();
@@ -805,6 +811,17 @@ function renderThinking() {
 	els.thinking.disabled = levels.length === 0;
 }
 
+/** The default is what a conversation with no model of its own runs. */
+function renderDefaultModel() {
+	const fallback = state?.defaultModel ?? {};
+	const current = `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`;
+	const isDefault = fallback.provider && current === `${fallback.provider}/${fallback.modelId}`;
+	els.makeDefault.disabled = !state?.agent?.modelId || isDefault;
+	els.makeDefault.title = isDefault
+		? "New conversations already use this model"
+		: `New conversations run ${fallback.provider ?? "?"}/${fallback.modelId ?? "?"}`;
+}
+
 function renderAgentPicker() {
 	const agents = state?.agents ?? [];
 	const current = state?.agent?.definition ?? "";
@@ -931,6 +948,18 @@ els.agent.addEventListener("change", async () => {
 
 els.rail.addEventListener("click", () => void newConversation());
 
+els.makeDefault.addEventListener("click", async () => {
+	try {
+		await post("/api/default-model", {
+			provider: state?.agent?.provider ?? "",
+			modelId: state?.agent?.modelId ?? "",
+		});
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+	}
+});
+
 els.thinking.addEventListener("change", async () => {
 	try {
 		await post(`/api/conversations/${activeId()}/agent`, { thinkingLevel: els.thinking.value });
@@ -981,6 +1010,7 @@ async function boot() {
 	renderConversations();
 	renderAgentPicker();
 	renderThinking();
+	renderDefaultModel();
 	renderModelPicker();
 	render();
 	connect();

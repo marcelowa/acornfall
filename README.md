@@ -36,7 +36,8 @@ make build                     # go build -> ./bin/acornfall
 ```
 
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
-`--model <provider>/<modelId>`, `--addr <host:port>`, `--token <secret>`, `--worker-dir <dir>`.
+`--model <provider>/<modelId>` (the initial default model), `--addr <host:port>`,
+`--token <secret>`, `--worker-dir <dir>`.
 
 ### Reaching it from another machine
 
@@ -87,6 +88,9 @@ make dev
   running work after the current tool round.
 - Abort, model switching, a thinking level populated from what the model actually
   supports, and per-turn usage.
+- **A default model** for new conversations, settable from the UI. Conversations that
+  never chose a model inherit it; conversations that did keep theirs. See
+  [ADR 0007](docs/adr/0007-model-defaults.md).
 - **Context inspector**: the prompt sections and tool schemas the last request was
   actually sent, estimated tokens per section, and what changed since the previous
   request.

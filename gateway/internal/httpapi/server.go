@@ -37,6 +37,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/conversations/{id}/messages", s.messages)
 	mux.HandleFunc("POST /api/conversations/{id}/abort", s.abort)
 	mux.HandleFunc("POST /api/conversations/{id}/agent", s.agent)
+	mux.HandleFunc("POST /api/default-model", s.setDefaultModel)
 	mux.HandleFunc("GET /api/usage", s.usage)
 	mux.HandleFunc("POST /api/providers/login", s.login)
 	mux.HandleFunc("POST /api/providers/logout", s.logout)
@@ -163,18 +164,38 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID string) {
-	var binding protocol.ModelBinding
-	if !decode(w, r, &binding) {
+	// Pointers, so "absent" and "set to empty" are different requests. A plain
+	// struct cannot tell "leave the model alone" from "clear the model".
+	var body struct {
+		Provider      *string `json:"provider"`
+		ModelID       *string `json:"modelId"`
+		ThinkingLevel *string `json:"thinkingLevel"`
+		Definition    *string `json:"definition"`
+	}
+	if !decode(w, r, &body) {
 		return
 	}
-	// An empty definition is a valid request: it means "the layered defaults".
-	// The definition may name its own model; otherwise the current one stands.
-	// Only a half-specified model is an error.
-	if (binding.Provider == "") != (binding.ModelID == "") {
-		http.Error(w, "provider and modelId must be given together", http.StatusBadRequest)
+	if err := s.control.SetAgent(r.Context(), conversationID, control.AgentChange{
+		Provider:      body.Provider,
+		ModelID:       body.ModelID,
+		ThinkingLevel: body.ThinkingLevel,
+		Definition:    body.Definition,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	if err := s.control.SetAgent(r.Context(), conversationID, binding); err != nil {
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Provider string `json:"provider"`
+		ModelID  string `json:"modelId"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.control.SetDefaultModel(r.Context(), body.Provider, body.ModelID); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

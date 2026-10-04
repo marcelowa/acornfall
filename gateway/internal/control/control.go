@@ -29,7 +29,8 @@ type Options struct {
 	DataDir       string
 	WorkerCommand []string
 	WorkerDir     string
-	// Model is the default "provider/modelId" for a conversation that has none.
+	// Model is the "provider/modelId" to use as the install default. It wins over
+	// a persisted default, and every conversation that never chose a model follows it.
 	Model string
 	// SettingsPath persists the active conversation and per-conversation agents.
 	SettingsPath string
@@ -53,11 +54,15 @@ type State struct {
 	Conversations []Conversation          `json:"conversations"`
 	Agent         protocol.ModelBinding   `json:"agent"`
 	Resolved      *protocol.ResolvedAgent `json:"resolved,omitempty"`
-	Agents        []protocol.AgentSummary `json:"agents"`
-	Skills        []protocol.SkillSummary `json:"skills"`
-	Defaults      []protocol.LayerTrace   `json:"defaults"`
-	Providers     []protocol.ProviderInfo `json:"providers"`
-	Seq           int64                   `json:"seq"`
+	// DefaultModel is what a conversation with no explicit model runs.
+	DefaultModel protocol.ModelBinding `json:"defaultModel"`
+	// ModelInherited is true when the active conversation never chose a model.
+	ModelInherited bool                    `json:"modelInherited"`
+	Agents         []protocol.AgentSummary `json:"agents"`
+	Skills         []protocol.SkillSummary `json:"skills"`
+	Defaults       []protocol.LayerTrace   `json:"defaults"`
+	Providers      []protocol.ProviderInfo `json:"providers"`
+	Seq            int64                   `json:"seq"`
 }
 
 type Control struct {
@@ -68,13 +73,16 @@ type Control struct {
 	describe      protocol.Describe
 	conversations []protocol.ConversationInfo
 	active        string
-	bindings      map[string]protocol.ModelBinding
-	resolved      map[string]*protocol.ResolvedAgent
-	catalog       protocol.AgentsData
-	providers     []protocol.ProviderInfo
-	views         map[string]cachedView
-	subscribers   map[int]chan protocol.Frame
-	nextSub       int
+	// bindings holds only explicit choices, made in a conversation. A conversation
+	// with no entry here follows the definition's model or defaultModel.
+	bindings     map[string]protocol.ModelBinding
+	defaultModel protocol.ModelBinding
+	resolved     map[string]*protocol.ResolvedAgent
+	catalog      protocol.AgentsData
+	providers    []protocol.ProviderInfo
+	views        map[string]cachedView
+	subscribers  map[int]chan protocol.Frame
+	nextSub      int
 }
 
 // cachedView is the last full view per conversation, so switching back is
@@ -121,6 +129,11 @@ func (c *Control) Open(ctx context.Context) error {
 	if _, err := c.Agents(ctx); err != nil {
 		return fmt.Errorf("read agent catalog: %w", err)
 	}
+	// Our own state first: it holds the default model this install already uses.
+	persistedActive := c.loadSettings()
+	if err := c.ensureDefault(ctx); err != nil && !errors.Is(err, ErrNoProvider) {
+		return fmt.Errorf("resolve default model: %w", err)
+	}
 	conversations, err := c.listConversations(ctx)
 	if err != nil {
 		return fmt.Errorf("list conversations: %w", err)
@@ -132,7 +145,7 @@ func (c *Control) Open(ctx context.Context) error {
 		return nil
 	}
 
-	active := c.loadPersistedActive()
+	active := persistedActive
 	if !hasConversation(conversations, active) {
 		active = defaultConversation(conversations)
 	}
@@ -141,7 +154,7 @@ func (c *Control) Open(ctx context.Context) error {
 	}
 	// No conversation has an agent yet and no provider is connected is a normal
 	// first run, not a failure.
-	if err := c.adoptModel(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
+	if err := c.ensureConversation(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
 	return nil
@@ -168,13 +181,17 @@ func (c *Control) State() State {
 		Harness:       c.describe.Provider,
 		Capabilities:  c.describe.Capabilities,
 		Conversations: toConversations(c.conversations),
-		Agent:         c.bindings[c.active],
-		Resolved:      c.resolved[c.active],
-		Agents:        c.catalog.Agents,
-		Skills:        c.catalog.Skills,
-		Defaults:      c.catalog.Defaults,
-		Providers:     c.providers,
-		Seq:           c.views[c.active].seq,
+		// Agent is the effective binding, so pickers show what will actually run;
+		// ModelInherited says whether this conversation chose it.
+		Agent:          effectiveFrom(c.bindings[c.active], c.defaultModel, c.resolved[c.active]),
+		Resolved:       c.resolved[c.active],
+		DefaultModel:   c.defaultModel,
+		ModelInherited: c.bindings[c.active].Provider == "",
+		Agents:         c.catalog.Agents,
+		Skills:         c.catalog.Skills,
+		Defaults:       c.catalog.Defaults,
+		Providers:      c.providers,
+		Seq:            c.views[c.active].seq,
 	}
 	for index := range state.Conversations {
 		if state.Conversations[index].ID == c.active {
@@ -211,8 +228,8 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 	c.mu.Unlock()
 	c.persist()
 	// Attaching to a conversation that has no model yet would fail on its next
-	// prompt, so selecting one is where it gets an agent.
-	if err := c.adoptModel(ctx, conversationID); err != nil && !errors.Is(err, ErrNoProvider) {
+	// prompt, so selecting one is where it gets configured.
+	if err := c.ensureConversation(ctx, conversationID); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
 	c.publish(protocol.Frame{Type: "state"})
@@ -301,8 +318,8 @@ func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
 	if err := c.Select(ctx, response.ConversationID); err != nil {
 		return err
 	}
-	if parent.Provider == "" && parent.Definition == "" {
-		if err := c.adoptModel(ctx, response.ConversationID); err != nil && !errors.Is(err, ErrNoProvider) {
+	if parent.Provider == "" {
+		if err := c.ensureConversation(ctx, response.ConversationID); err != nil && !errors.Is(err, ErrNoProvider) {
 			return err
 		}
 	}
@@ -327,54 +344,67 @@ func (c *Control) Create(ctx context.Context) error {
 	if err := c.Select(ctx, response.ConversationID); err != nil {
 		return err
 	}
-	// A conversation with no model cannot run: give it the default one now rather
-	// than failing on its first prompt.
-	if err := c.adoptModel(ctx, response.ConversationID); err != nil && !errors.Is(err, ErrNoProvider) {
+	// A conversation with no model cannot run: configure it now rather than
+	// failing on its first prompt. It still counts as "no explicit model".
+	if err := c.ensureConversation(ctx, response.ConversationID); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
 	return nil
 }
 
-// SetAgent applies a binding to one conversation. The worker resolves the
-// definition and returns it, so the UI can explain the result.
-func (c *Control) SetAgent(ctx context.Context, conversationID string, binding protocol.ModelBinding) error {
+// AgentChange is a partial update. A nil field means "leave it alone" and an
+// empty string means "clear it", which a plain struct could not tell apart.
+type AgentChange struct {
+	Provider      *string
+	ModelID       *string
+	ThinkingLevel *string
+	Definition    *string
+}
+
+// SetAgent applies a change to one conversation. Only fields the caller sets
+// become explicit: anything left alone keeps inheriting.
+func (c *Control) SetAgent(ctx context.Context, conversationID string, change AgentChange) error {
+	c.mu.RLock()
+	explicit := c.bindings[conversationID]
+	c.mu.RUnlock()
+
+	if change.Provider != nil || change.ModelID != nil {
+		provider, modelID := explicit.Provider, explicit.ModelID
+		if change.Provider != nil {
+			provider = *change.Provider
+		}
+		if change.ModelID != nil {
+			modelID = *change.ModelID
+		}
+		if (provider == "") != (modelID == "") {
+			return errors.New("provider and modelId must be given together")
+		}
+		explicit.Provider, explicit.ModelID = provider, modelID
+	}
+	if change.Definition != nil {
+		explicit.Definition = *change.Definition
+	}
+	if change.ThinkingLevel != nil {
+		explicit.ThinkingLevel = *change.ThinkingLevel
+	}
+
+	effective, err := c.effective(conversationID, explicit)
+	if err != nil {
+		return err
+	}
 	var response struct {
 		Agent protocol.ResolvedAgent `json:"agent"`
 	}
 	if err := c.worker.CallInto(ctx, protocol.Command{
 		Type:           "open",
 		ConversationID: conversationID,
-		Agent:          &binding,
+		Agent:          &effective,
 	}, &response); err != nil {
 		return err
 	}
 
-	// Selecting a definition with no explicit model adopts the definition's model,
-	// and otherwise keeps the model already in use. A later explicit picker choice
-	// still beats the definition.
-	c.mu.RLock()
-	previous := c.bindings[conversationID]
-	c.mu.RUnlock()
-	if binding.Provider == "" || binding.ModelID == "" {
-		if parts := strings.SplitN(response.Agent.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			binding.Provider, binding.ModelID = parts[0], parts[1]
-		} else {
-			binding.Provider, binding.ModelID = previous.Provider, previous.ModelID
-		}
-	}
-	// A partial update on a conversation that has no model yet still needs one,
-	// otherwise the next prompt has nothing to run.
-	if binding.Provider == "" || binding.ModelID == "" {
-		if fallback, err := c.defaultBinding(c.Describe()); err == nil {
-			binding.Provider, binding.ModelID = fallback.Provider, fallback.ModelID
-		}
-	}
-	if binding.ThinkingLevel == "" {
-		binding.ThinkingLevel = response.Agent.Thinking
-	}
-
 	c.mu.Lock()
-	c.bindings[conversationID] = binding
+	c.bindings[conversationID] = explicit
 	resolved := response.Agent
 	c.resolved[conversationID] = &resolved
 	c.mu.Unlock()
@@ -382,21 +412,146 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, binding p
 	return nil
 }
 
-// adoptModel gives a conversation an agent binding when it has none and a
-// provider is available.
-func (c *Control) adoptModel(ctx context.Context, conversationID string) error {
+// effective resolves what a conversation actually runs: an explicit choice, then
+// the definition's model, then the install default. Control decides this rather
+// than leaving it to the worker, so "is this model inherited?" has one answer.
+func (c *Control) effective(conversationID string, explicit protocol.ModelBinding) (protocol.ModelBinding, error) {
 	c.mu.RLock()
-	describe := c.describe
-	current := c.bindings[conversationID]
+	resolved := c.resolved[conversationID]
+	fallback := c.defaultModel
 	c.mu.RUnlock()
-	if current.ModelID != "" && c.isAvailable(describe, current) {
+	effective := effectiveFrom(explicit, fallback, resolved)
+	if effective.Provider == "" || effective.ModelID == "" {
+		return effective, fmt.Errorf("%w: connect a provider or set a default model", ErrNoProvider)
+	}
+	return effective, nil
+}
+
+// effectiveFrom is the resolution order itself: an explicit choice, then the
+// definition's model, then the install default. An empty thinking level is left
+// alone, because "whatever the definition says" is the worker's to resolve.
+func effectiveFrom(
+	explicit protocol.ModelBinding,
+	fallback protocol.ModelBinding,
+	resolved *protocol.ResolvedAgent,
+) protocol.ModelBinding {
+	effective := explicit
+	if effective.Provider != "" && effective.ModelID != "" {
+		return effective
+	}
+	if resolved != nil {
+		if parts := strings.SplitN(resolved.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			effective.Provider, effective.ModelID = parts[0], parts[1]
+			return effective
+		}
+	}
+	effective.Provider, effective.ModelID = fallback.Provider, fallback.ModelID
+	return effective
+}
+
+// SetDefaultModel changes what conversations without an explicit model run, and
+// re-applies it so the change reaches them without a restart.
+func (c *Control) SetDefaultModel(ctx context.Context, provider, modelID string) error {
+	if provider == "" || modelID == "" {
+		return errors.New("provider and modelId are required")
+	}
+	if !c.isAvailable(c.Describe(), protocol.ModelBinding{Provider: provider, ModelID: modelID}) {
+		return fmt.Errorf("%s/%s is not available with the current credentials", provider, modelID)
+	}
+	c.mu.Lock()
+	c.defaultModel = protocol.ModelBinding{Provider: provider, ModelID: modelID}
+	c.mu.Unlock()
+
+	// Every conversation that never chose follows the new default.
+	c.mu.RLock()
+	inheriting := make([]string, 0, len(c.bindings))
+	for id, binding := range c.bindings {
+		if binding.Provider == "" {
+			inheriting = append(inheriting, id)
+		}
+	}
+	active := c.active
+	c.mu.RUnlock()
+	for _, id := range inheriting {
+		if err := c.reapply(ctx, id); err != nil {
+			return err
+		}
+	}
+	if active != "" && !contains(inheriting, active) {
+		if err := c.reapply(ctx, active); err != nil {
+			return err
+		}
+	}
+	c.persist()
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
+// ensureDefault gives the install a default model when it has none or when the
+// stored one is no longer available, so the first prompt always has something.
+func (c *Control) ensureDefault(ctx context.Context) error {
+	describe := c.Describe()
+	c.mu.RLock()
+	current := c.defaultModel
+	c.mu.RUnlock()
+	if current.Provider != "" && c.isAvailable(describe, current) {
 		return nil
 	}
-	binding, err := c.defaultBinding(describe)
+	binding, err := c.deriveDefault(describe)
 	if err != nil {
 		return err
 	}
-	return c.SetAgent(ctx, conversationID, binding)
+	c.mu.Lock()
+	c.defaultModel = binding
+	c.mu.Unlock()
+	c.persist()
+	return nil
+}
+
+// ensureConversation configures a conversation that has no explicit model, so it
+// can run, without making the default an explicit choice it never made.
+func (c *Control) ensureConversation(ctx context.Context, conversationID string) error {
+	c.mu.RLock()
+	explicit := c.bindings[conversationID]
+	c.mu.RUnlock()
+	if explicit.Provider != "" && c.isAvailable(c.Describe(), explicit) {
+		return nil
+	}
+	return c.reapply(ctx, conversationID)
+}
+
+func (c *Control) reapply(ctx context.Context, conversationID string) error {
+	c.mu.RLock()
+	explicit := c.bindings[conversationID]
+	c.mu.RUnlock()
+	effective, err := c.effective(conversationID, explicit)
+	if err != nil {
+		return err
+	}
+	var response struct {
+		Agent protocol.ResolvedAgent `json:"agent"`
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{
+		Type:           "open",
+		ConversationID: conversationID,
+		Agent:          &effective,
+	}, &response); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	resolved := response.Agent
+	c.resolved[conversationID] = &resolved
+	c.mu.Unlock()
+	return nil
+}
+
+func contains(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // Agents returns the overlay catalog: every definition and what it resolves to.
@@ -426,11 +581,22 @@ func (c *Control) Reload(ctx context.Context) error {
 		bindings[id] = binding
 	}
 	c.mu.RUnlock()
-	for id, binding := range bindings {
-		if binding.ModelID == "" && binding.Definition == "" {
+	for id := range bindings {
+		if err := c.reapply(ctx, id); err != nil {
+			return err
+		}
+	}
+	c.mu.RLock()
+	known := make([]string, 0, len(c.conversations))
+	for _, conversation := range c.conversations {
+		known = append(known, conversation.ID)
+	}
+	c.mu.RUnlock()
+	for _, id := range known {
+		if _, ok := bindings[id]; ok {
 			continue
 		}
-		if err := c.SetAgent(ctx, id, binding); err != nil {
+		if err := c.reapply(ctx, id); err != nil && !errors.Is(err, ErrNoProvider) {
 			return err
 		}
 	}
@@ -446,8 +612,11 @@ func (c *Control) Refresh(ctx context.Context) error {
 		return err
 	}
 	c.applyDescribe(describe)
+	if err := c.ensureDefault(ctx); err != nil && !errors.Is(err, ErrNoProvider) {
+		return err
+	}
 	if active := c.activeConversation(); active != "" {
-		return c.adoptModel(ctx, active)
+		return c.ensureConversation(ctx, active)
 	}
 	return nil
 }
@@ -649,7 +818,9 @@ func (c *Control) applyDescribe(describe protocol.Describe) {
 	c.providers = describe.Providers
 }
 
-func (c *Control) defaultBinding(describe protocol.Describe) (protocol.ModelBinding, error) {
+// deriveDefault picks a default: the flag, then the first authenticated provider's
+// first model. Guessing is fine once, but it is stored so it stops being a guess.
+func (c *Control) deriveDefault(describe protocol.Describe) (protocol.ModelBinding, error) {
 	if model := strings.TrimSpace(c.opts.Model); model != "" {
 		parts := strings.SplitN(model, "/", 2)
 		if len(parts) != 2 {
@@ -683,11 +854,15 @@ func (c *Control) isAvailable(describe protocol.Describe, binding protocol.Model
 }
 
 type persistedSettings struct {
-	Active string                           `json:"active,omitempty"`
-	Agents map[string]protocol.ModelBinding `json:"agents,omitempty"`
+	Active       string                           `json:"active,omitempty"`
+	DefaultModel protocol.ModelBinding            `json:"defaultModel,omitempty"`
+	Agents       map[string]protocol.ModelBinding `json:"agents,omitempty"`
 }
 
-func (c *Control) loadPersistedActive() string {
+// loadSettings reads our own state: the default model, the active conversation,
+// and which conversations chose a model. It must run before ensureDefault, or
+// ensureDefault derives a default and overwrites the one on disk.
+func (c *Control) loadSettings() string {
 	if c.opts.SettingsPath == "" {
 		return ""
 	}
@@ -698,6 +873,14 @@ func (c *Control) loadPersistedActive() string {
 	var settings persistedSettings
 	if err := json.Unmarshal(payload, &settings); err != nil {
 		return ""
+	}
+	if settings.DefaultModel.Provider != "" && settings.DefaultModel.ModelID != "" {
+		c.mu.Lock()
+		c.defaultModel = protocol.ModelBinding{
+			Provider: settings.DefaultModel.Provider,
+			ModelID:  settings.DefaultModel.ModelID,
+		}
+		c.mu.Unlock()
 	}
 	if settings.Agents != nil {
 		c.mu.Lock()
@@ -717,7 +900,11 @@ func (c *Control) persist() {
 		return
 	}
 	c.mu.RLock()
-	settings := persistedSettings{Active: c.active, Agents: map[string]protocol.ModelBinding{}}
+	settings := persistedSettings{
+		Active:       c.active,
+		DefaultModel: c.defaultModel,
+		Agents:       map[string]protocol.ModelBinding{},
+	}
 	for id, binding := range c.bindings {
 		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
 			continue
