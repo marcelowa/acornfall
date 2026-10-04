@@ -72,17 +72,12 @@ export class FileCredentialStore implements CredentialStore {
 	}
 
 	async delete(providerId: string, options?: AuthOperationOptions): Promise<void> {
-		await this.modify(
-			providerId,
-			async () => undefined,
-			options,
-		).catch(() => undefined);
+		options?.signal?.throwIfAborted();
 		await this.#withLock(async () => {
 			const all = await this.#readAll(true);
-			if (providerId in all) {
-				delete all[providerId];
-				await this.#writeAll(all);
-			}
+			if (!(providerId in all)) return;
+			delete all[providerId];
+			await this.#writeAll(all);
 		});
 	}
 

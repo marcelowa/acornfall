@@ -272,6 +272,10 @@ async function handle(command: Command): Promise<unknown> {
 		}
 		case "login":
 			return await login(models, command.authId, command.providerId, command.authType);
+		case "logout":
+			// Removes the stored credential for this provider only.
+			await models.logout(command.providerId);
+			return { providerId: command.providerId };
 		case "usage":
 			return await harness.usage(CONTEXT);
 		case "shutdown":

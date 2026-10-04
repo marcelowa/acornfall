@@ -186,6 +186,25 @@ func (c *Control) Login(ctx context.Context, providerID, authType string) error 
 	return nil
 }
 
+// Logout forgets one provider's stored credential and re-adopts a binding, so a
+// revoked key cannot keep spending and the picker cannot keep offering it.
+func (c *Control) Logout(ctx context.Context, providerID string) error {
+	if _, err := c.worker.Call(ctx, protocol.Command{Type: "logout", ProviderID: providerID}); err != nil {
+		return err
+	}
+	// Drop the binding first, then let Refresh adopt whatever is still usable.
+	c.mu.Lock()
+	if c.agent.Provider == providerID {
+		c.agent = protocol.ModelBinding{}
+	}
+	c.mu.Unlock()
+	if err := c.Refresh(ctx); err != nil && !errors.Is(err, ErrNoProvider) {
+		return err
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
 // AnswerAuth answers one login prompt. Cancelled rejects it.
 func (c *Control) AnswerAuth(ctx context.Context, authID, promptID, value string, cancelled bool) error {
 	return c.worker.CallInto(ctx, protocol.Command{

@@ -21,6 +21,7 @@ export type Command =
 	| { id: string; type: "prompt"; conversationId: string; text: string; whenBusy?: WhenBusy }
 	| { id: string; type: "abort"; conversationId: string }
 	| { id: string; type: "login"; authId: string; providerId: string; authType: "api_key" | "oauth" }
+	| { id: string; type: "logout"; providerId: string }
 	| { id: string; type: "auth_answer"; authId: string; promptId: string; value?: string; cancelled?: boolean }
 	| { id: string; type: "auth_cancel"; authId: string }
 	| { id: string; type: "usage" }

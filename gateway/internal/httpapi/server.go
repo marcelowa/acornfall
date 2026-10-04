@@ -31,6 +31,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/agent", s.agent)
 	mux.HandleFunc("GET /api/usage", s.usage)
 	mux.HandleFunc("POST /api/providers/login", s.login)
+	mux.HandleFunc("POST /api/providers/logout", s.logout)
 	mux.HandleFunc("POST /api/providers/refresh", s.refresh)
 	mux.HandleFunc("POST /api/auth/answer", s.authAnswer)
 	mux.HandleFunc("POST /api/auth/cancel", s.authCancel)
@@ -166,6 +167,24 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ProviderID string `json:"providerId"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.ProviderID == "" {
+		http.Error(w, "providerId is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.control.Logout(r.Context(), body.ProviderID); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
 }
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {

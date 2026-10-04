@@ -285,18 +285,21 @@ function closeSheet() {
 }
 
 function providerRow(provider) {
-	const badge = provider.authenticated
-		? `<span class="badge">connected</span>`
-		: `<span class="provider-meta">${provider.models.length} models</span>`;
 	const action = provider.authenticated
-		? ""
+		? `<button class="ghost" data-logout="${escapeHtml(provider.id)}" type="button">Disconnect</button>`
+		: `<span class="provider-meta">${provider.models.length} models</span>`;
+	const connect = provider.authenticated
+		? `<button class="ghost" data-connect="${escapeHtml(provider.id)}" type="button">Replace key</button>`
 		: `<button class="primary" data-connect="${escapeHtml(provider.id)}" type="button">Connect</button>`;
+	const source = provider.authenticated && provider.source
+		? `<span class="badge" title="A stored credential, not proof the provider accepts it">key stored</span>`
+		: "";
 	return `<div class="provider">
 		<div>
 			<div class="provider-name">${escapeHtml(provider.name)}</div>
 			<div class="provider-meta">${escapeHtml(provider.id)}</div>
 		</div>
-		<div class="provider-actions">${badge}${action}</div>
+		<div class="provider-actions">${source}${action}${connect}</div>
 	</div>`;
 }
 
@@ -310,6 +313,8 @@ function renderSheet() {
 	);
 	els.sheetBody.innerHTML = `
 		<input class="sheet-search" id="provider-search" placeholder="Search providers" value="${escapeHtml(sheet.query)}" />
+		<p class="provider-meta">A stored key is not a working key: the provider decides at request time,
+			and a rejection appears in the transcript.</p>
 		${providers.map(providerRow).join("") || `<div class="empty">No provider matches that.</div>`}`;
 
 	const search = document.getElementById("provider-search");
@@ -322,6 +327,22 @@ function renderSheet() {
 	});
 	for (const button of els.sheetBody.querySelectorAll("[data-connect]")) {
 		button.addEventListener("click", () => void startLogin(button.dataset.connect));
+	}
+	for (const button of els.sheetBody.querySelectorAll("[data-logout]")) {
+		button.addEventListener("click", () => void logoutProvider(button.dataset.logout, button));
+	}
+}
+
+async function logoutProvider(providerId, button) {
+	button.disabled = true;
+	button.textContent = "Disconnecting…";
+	try {
+		await post("/api/providers/logout", { providerId });
+		await loadState();
+	} catch (error) {
+		button.disabled = false;
+		button.textContent = "Disconnect";
+		setStatus(String(error.message ?? error), "offline");
 	}
 }
 

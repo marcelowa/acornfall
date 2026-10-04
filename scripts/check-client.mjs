@@ -1,11 +1,26 @@
 // Guards the no-build-step client: every el("id") lookup must exist in the
 // markup. Run with `make check`.
 import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
+const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 const web = join(here, "..", "gateway", "web");
+
+// Syntax first: a stray brace is not a lookup failure and must not reach a browser.
+try {
+	await run(process.execPath, ["--check", join(web, "app.js")]);
+} catch (error) {
+	const detail = String(error.stderr ?? error.message)
+		.split("\n")
+		.filter((line) => line.includes("SyntaxError") || line.includes("app.js:"))
+		.join("\n");
+	console.error(`app.js does not parse:\n${detail}`);
+	process.exit(1);
+}
 
 const [js, html, css] = await Promise.all([
 	readFile(join(web, "app.js"), "utf8"),
