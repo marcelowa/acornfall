@@ -46,7 +46,8 @@ Free-form instructions, rendered as the `instructions` section.
 ```
 
 Frontmatter and the body are both optional; a definition with neither is legal but
-useless. Unknown frontmatter keys are reported rather than silently ignored.
+useless. Unknown frontmatter keys are logged by the worker, with the file they came
+from, rather than silently ignored.
 
 ## Resolution
 

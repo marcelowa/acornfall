@@ -66,9 +66,9 @@ type Control struct {
 	describe      protocol.Describe
 	conversations []protocol.ConversationInfo
 	active        string
-	agents        map[string]protocol.ModelBinding
+	bindings      map[string]protocol.ModelBinding
 	resolved      map[string]*protocol.ResolvedAgent
-	agentsData    protocol.AgentsData
+	catalog       protocol.AgentsData
 	providers     []protocol.ProviderInfo
 	views         map[string]cachedView
 	subscribers   map[int]chan protocol.Frame
@@ -85,7 +85,7 @@ type cachedView struct {
 func New(opts Options) *Control {
 	return &Control{
 		opts:        opts,
-		agents:      map[string]protocol.ModelBinding{},
+		bindings:    map[string]protocol.ModelBinding{},
 		resolved:    map[string]*protocol.ResolvedAgent{},
 		views:       map[string]cachedView{},
 		subscribers: map[int]chan protocol.Frame{},
@@ -166,11 +166,11 @@ func (c *Control) State() State {
 		Harness:       c.describe.Provider,
 		Capabilities:  c.describe.Capabilities,
 		Conversations: toConversations(c.conversations),
-		Agent:         c.agents[c.active],
+		Agent:         c.bindings[c.active],
 		Resolved:      c.resolved[c.active],
-		Agents:        c.agentsData.Agents,
-		Skills:        c.agentsData.Skills,
-		Defaults:      c.agentsData.Defaults,
+		Agents:        c.catalog.Agents,
+		Skills:        c.catalog.Skills,
+		Defaults:      c.catalog.Defaults,
 		Providers:     c.providers,
 		Seq:           c.views[c.active].seq,
 	}
@@ -260,7 +260,7 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, binding p
 	// and otherwise keeps the model already in use. A later explicit picker choice
 	// still beats the definition.
 	c.mu.RLock()
-	previous := c.agents[conversationID]
+	previous := c.bindings[conversationID]
 	c.mu.RUnlock()
 	if binding.Provider == "" || binding.ModelID == "" {
 		if parts := strings.SplitN(response.Agent.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
@@ -281,7 +281,7 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, binding p
 	}
 
 	c.mu.Lock()
-	c.agents[conversationID] = binding
+	c.bindings[conversationID] = binding
 	resolved := response.Agent
 	c.resolved[conversationID] = &resolved
 	c.mu.Unlock()
@@ -294,7 +294,7 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, binding p
 func (c *Control) adoptModel(ctx context.Context, conversationID string) error {
 	c.mu.RLock()
 	describe := c.describe
-	current := c.agents[conversationID]
+	current := c.bindings[conversationID]
 	c.mu.RUnlock()
 	if current.ModelID != "" && c.isAvailable(describe, current) {
 		return nil
@@ -313,7 +313,7 @@ func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
 		return protocol.AgentsData{}, err
 	}
 	c.mu.Lock()
-	c.agentsData = data
+	c.catalog = data
 	c.mu.Unlock()
 	return data, nil
 }
@@ -328,8 +328,8 @@ func (c *Control) Reload(ctx context.Context) error {
 		return err
 	}
 	c.mu.RLock()
-	bindings := make(map[string]protocol.ModelBinding, len(c.agents))
-	for id, binding := range c.agents {
+	bindings := make(map[string]protocol.ModelBinding, len(c.bindings))
+	for id, binding := range c.bindings {
 		bindings[id] = binding
 	}
 	c.mu.RUnlock()
@@ -393,9 +393,9 @@ func (c *Control) Logout(ctx context.Context, providerID string) error {
 		return err
 	}
 	c.mu.Lock()
-	for id, binding := range c.agents {
+	for id, binding := range c.bindings {
 		if binding.Provider == providerID {
-			c.agents[id] = protocol.ModelBinding{}
+			c.bindings[id] = protocol.ModelBinding{}
 			delete(c.resolved, id)
 		}
 	}
@@ -612,7 +612,7 @@ func (c *Control) loadPersistedActive() string {
 			if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
 				continue
 			}
-			c.agents[id] = binding
+			c.bindings[id] = binding
 		}
 		c.mu.Unlock()
 	}
@@ -625,7 +625,7 @@ func (c *Control) persist() {
 	}
 	c.mu.RLock()
 	settings := persistedSettings{Active: c.active, Agents: map[string]protocol.ModelBinding{}}
-	for id, binding := range c.agents {
+	for id, binding := range c.bindings {
 		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
 			continue
 		}
@@ -676,9 +676,4 @@ func defaultConversation(infos []protocol.ConversationInfo) string {
 		return infos[0].ID
 	}
 	return ""
-}
-
-// ActiveConversation is the id the gateway is currently attached to.
-func (c *Control) ActiveConversation() string {
-	return c.activeConversation()
 }

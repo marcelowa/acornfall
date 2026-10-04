@@ -34,11 +34,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/conversations/{id}/messages", s.messages)
 	mux.HandleFunc("POST /api/conversations/{id}/abort", s.abort)
 	mux.HandleFunc("POST /api/conversations/{id}/agent", s.agent)
-	// Conversation-less routes from the single-conversation build; they target the
-	// active conversation so existing scripts keep working.
-	mux.HandleFunc("POST /api/messages", s.legacyMessages)
-	mux.HandleFunc("POST /api/abort", s.legacyAbort)
-	mux.HandleFunc("POST /api/agent", s.legacyAgent)
 	mux.HandleFunc("GET /api/usage", s.usage)
 	mux.HandleFunc("POST /api/providers/login", s.login)
 	mux.HandleFunc("POST /api/providers/logout", s.logout)
@@ -181,20 +176,6 @@ func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID
 		return
 	}
 	writeJSON(w, http.StatusOK, s.control.State())
-}
-
-// Conversation-less routes from the single-conversation build. They target the
-// active conversation, so older clients and shell history keep working.
-func (s *Server) legacyMessages(w http.ResponseWriter, r *http.Request) {
-	s.messagesFor(w, r, s.control.ActiveConversation())
-}
-
-func (s *Server) legacyAbort(w http.ResponseWriter, r *http.Request) {
-	s.abortFor(w, r, s.control.ActiveConversation())
-}
-
-func (s *Server) legacyAgent(w http.ResponseWriter, r *http.Request) {
-	s.agentFor(w, r, s.control.ActiveConversation())
 }
 
 func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {

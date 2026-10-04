@@ -78,9 +78,10 @@ POST /api/conversations/{id}/abort
 POST /api/conversations/{id}/agent
 ```
 
-The conversation-less routes from the single-conversation build remain and target the
-active conversation, so existing scripts keep working. They are deprecated and will be
-removed once nothing uses them.
+There are no conversation-less routes. The single-conversation build's `/api/messages`,
+`/api/abort` and `/api/agent` were removed rather than kept as aliases: nobody had
+scripted against them, and a compatibility shim with no known client is just a second
+way to do the same thing.
 
 ## What is still missing
 

@@ -100,6 +100,7 @@ const discoveredSkills = await loadSkills(args.skills);
 
 // The overlay. Reloaded on demand so editing a definition does not need a restart.
 let catalog: Catalog = await loadCatalog(args.dataDir, args.workspace);
+reportUnknownKeys(catalog);
 
 // Skills are filtered per conversation, because two conversations can run
 // different agents at once.
@@ -132,8 +133,6 @@ const harness = await Harness.open(storage, { models, registry, settings, env },
 const handles = new Map<string, Conversation>();
 const subscriptions = new Map<string, { dispose: () => void }>();
 const seqs = new Map<string, number>();
-/** The agent each conversation runs, so a switch back restores it. */
-const agentByConversation = new Map<string, ResolvedAgent>();
 
 function nextSeq(conversationId: string): number {
 	const next = (seqs.get(conversationId) ?? 0) + 1;
@@ -303,7 +302,6 @@ async function applyAgent(
 ): Promise<{ resolved: ResolvedAgent; model: { provider: string; modelId: string } }> {
 	const conversation = await conversationFor(conversationId);
 	const resolved = resolveAgent(catalog, input.definition);
-	agentByConversation.set(conversationId, resolved);
 	skillFilterByConversation.set(conversationId, resolved.skills);
 
 	// An explicit provider/modelId is the user's choice in the picker and beats
@@ -326,6 +324,15 @@ async function applyAgent(
 		CONTEXT,
 	);
 	return { resolved, model: { provider, modelId } };
+}
+
+/** A typo in frontmatter is otherwise indistinguishable from a key that works. */
+function reportUnknownKeys(catalog: Catalog): void {
+	for (const agent of catalog.agents) {
+		if (agent.unknownKeys !== undefined && agent.unknownKeys.length > 0) {
+			log(`agent ${agent.name}: unknown frontmatter keys ${agent.unknownKeys.join(", ")} (${agent.source})`);
+		}
+	}
 }
 
 async function main(): Promise<void> {
@@ -462,6 +469,7 @@ async function handle(command: Command): Promise<unknown> {
 			};
 		case "reload":
 			catalog = await loadCatalog(args.dataDir, args.workspace);
+			reportUnknownKeys(catalog);
 			return { agents: catalog.agents.length };
 		case "login":
 			return await login(models, command.authId, command.providerId, command.authType);

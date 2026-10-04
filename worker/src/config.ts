@@ -30,6 +30,8 @@ export interface AgentDefinition {
 	source: string;
 	layer: "global" | "workspace";
 	contributions: Contributions;
+	/** Frontmatter keys this build does not know; reported, never silently ignored. */
+	unknownKeys?: readonly string[];
 }
 
 export interface LayerTrace {
@@ -143,7 +145,7 @@ async function loadAgentDir(directory: string, layer: "global" | "workspace"): P
 			layer,
 			contributions,
 			...(unknown.length > 0 ? { unknownKeys: unknown } : {}),
-		} as AgentDefinition);
+		});
 	}
 	return agents;
 }
