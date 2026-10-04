@@ -1,6 +1,6 @@
 BIN := bin/acornfall
 DATA ?= $(HOME)/.acornfall
-ADDR ?= 127.0.0.1:7777
+ADDR ?= 0.0.0.0:7777
 
 .PHONY: help deps build typecheck run dev fmt clean
 

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,7 +32,8 @@ func main() {
 
 func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornfall", flag.ContinueOnError)
-	addr := flags.String("addr", "127.0.0.1:7777", "listen address")
+	addr := flags.String("addr", "127.0.0.1:7777", "listen address; a non-loopback address requires a token")
+	token := flags.String("token", "", "shared secret; generated and stored when a non-loopback address has none")
 	workspace := flags.String("workspace", "", "workspace directory (default: current directory)")
 	dataDir := flags.String("data-dir", "", "data directory (default: ~/.acornfall)")
 	model := flags.String("model", "", "default model as provider/modelId")
@@ -79,6 +81,11 @@ func serve(argv []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	guard, err := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"), dir, *addr)
+	if err != nil {
+		return err
+	}
+
 	ctl := control.New(control.Options{
 		Workspace:     workdir,
 		DataDir:       dir,
@@ -94,7 +101,7 @@ func serve(argv []string) error {
 
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           httpapi.New(ctl, web.Files).Handler(),
+		Handler:           httpapi.RequireToken(httpapi.New(ctl, web.Files).Handler(), guard),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -104,7 +111,12 @@ func serve(argv []string) error {
 		_ = server.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("acornfall listening on http://%s  workspace=%s", *addr, workdir)
+	log.Printf("acornfall listening on http://%s  workspace=%s", displayAddr(*addr), workdir)
+	if guard != "" {
+		if !httpapi.IsLoopback(*addr) {
+			log.Printf("guard: token required; open http://%s/?token=%s", prettyAddr(*addr), guard)
+		}
+	}
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
@@ -197,6 +209,31 @@ func writeCredentials(path string, all map[string]credential) error {
 		return err
 	}
 	return os.Rename(temp, path)
+}
+
+// displayAddr turns a wildcard bind into something clickable.
+func displayAddr(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		return "0.0.0.0" + addr
+	}
+	return addr
+}
+
+// prettyAddr prefers the machine's own hostname over a wildcard address, so the
+// printed URL is the one a remote browser can actually use.
+func prettyAddr(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" || host == "0.0.0.0" || host == "::" {
+		if name, err := os.Hostname(); err == nil && name != "" {
+			return net.JoinHostPort(name, port)
+		}
+		return net.JoinHostPort("localhost", port)
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func resolveDataDir(flagValue string) (string, error) {

@@ -36,7 +36,33 @@ make build                     # go build -> ./bin/acornfall
 ```
 
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
-`--model <provider>/<modelId>`, `--addr <host:port>`, `--worker-dir <dir>`.
+`--model <provider>/<modelId>`, `--addr <host:port>`, `--token <secret>`, `--worker-dir <dir>`.
+
+### Reaching it from another machine
+
+```bash
+make dev ADDR=0.0.0.0:7777     # the default in the Makefile
+```
+
+A non-loopback bind requires a token. When none is given with `--token` or
+`ACORNFALL_TOKEN`, one is generated into `<data-dir>/token` (0600) and the startup line
+prints the URL to open once:
+
+```
+guard: token required; open http://desktop:7777/?token=e62b…
+```
+
+That query parameter sets an HttpOnly cookie and redirects to `/`, so it does not linger
+in the address bar. `Authorization: Bearer <token>` also works. EventSource cannot set
+headers, which is why the cookie exists.
+
+The more secure alternative when you already have SSH access — and the one to prefer if
+the machine is on a network you do not control:
+
+```bash
+ssh -L 7777:127.0.0.1:7777 desktop
+# then browse http://localhost:7777, no token, nothing exposed
+```
 
 ### Without an API key
 
