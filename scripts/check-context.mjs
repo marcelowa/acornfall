@@ -50,6 +50,8 @@ global.localStorage = {
 	setItem() {},
 };
 global.getComputedStyle = () => ({ getPropertyValue: () => "" });
+// The client listens for browser lifecycle events at module scope.
+global.window = { addEventListener() {}, removeEventListener() {} };
 global.fetch = () => new Promise(() => {});
 global.EventSource = class {
 	addEventListener() {}

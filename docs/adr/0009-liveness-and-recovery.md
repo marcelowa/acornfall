@@ -39,21 +39,46 @@ burning the machine on a crash loop.
 pipe is still being read, so the stdout reader remains the thing that ends; the reaper
 only announces it.
 
-## The stream had no heartbeat
+## The stream had no heartbeat, and then had one nobody could see
 
 An idle `text/event-stream` is indistinguishable from a dead one until something times
-out, and a hidden tab is exactly where a connection dies without an error. The handler now
-sends `retry: 3000` and a `: keepalive` comment every fifteen seconds, and the client:
+out, and a hidden tab or a sleeping laptop is exactly where a connection dies without an
+error. The handler now sends `retry: 3000` and a **named `ping` event** every three
+seconds, and the client:
 
-- tracks the time of the last event, including the keepalive;
-- reconnects when the stream has been silent for forty seconds, because an `EventSource`
+- treats a ping as proof of life, which is the only event that arrives while nothing is
+  happening;
+- reconnects when the stream has been silent for eight seconds, because an `EventSource`
   that is dead without having fired an error otherwise leaves the display showing state
   that stopped being true minutes ago;
-- reconnects and re-reads state when a hidden tab becomes visible, since that is the case
-  the report came from.
+- reconnects and re-reads state on `visibilitychange`, `online`, `pageshow`, and `focus`,
+  which is what a slept laptop or a dropped tailnet path looks like from inside the page;
+- waits for the document to finish loading before opening the stream, since a stream torn
+  down by the load itself is what the browser reports as an interrupted connection.
+
+**The first version sent an SSE comment as its keepalive.** Comments keep the socket open
+and fire no event, so the client's "time since last event" never advanced and the watchdog
+*mould not fire at all*: a stream could be dead for hours while the interface showed
+`idle`. It took freezing the server with `SIGSTOP` — the only way to make a connection
+open and silent at once — to see it. A liveness signal has to be observable by the thing
+that is watching for it, which a protocol comment is not.
+
+Measured with the server frozen: detected after ~9 seconds, recovered 300 ms after it
+resumed. With the server *gone*, the browser's own retry recovers within three seconds of
+it returning, in both Chromium and Firefox.
 
 Reconnecting is safe because every frame is a complete view and the server sends the
 current state and view on subscribe: there is no delta to have missed.
+
+## Two smaller consequences
+
+- **Polling no longer competes with the stream.** Browsers allow a handful of connections
+  per host, and a usage poll that overlaps a stalled request can hold one of them while
+  the stream's retry waits. The poll now skips while the tab is hidden and never overlaps
+  itself.
+- **A cancelled request is not a failure.** The client replaces its stream on reconnect and
+  the checks cancel one to probe liveness; the browser reports both as a failed request,
+  so the checks ignore deliberate cancellations rather than treating them as errors.
 
 ## The rail marker was a third meaning for one shape
 

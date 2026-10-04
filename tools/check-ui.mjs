@@ -29,7 +29,11 @@ try {
 	});
 	page.on("pageerror", (error) => problems.push(`page: ${error.message}`));
 	page.on("requestfailed", (request) => {
-		if (!request.url().endsWith("/favicon.ico")) problems.push(`request failed: ${request.url()}`);
+		// A cancelled request is deliberate, not a failure: the client replaces its event
+		// stream on reconnect, and the checks below cancel one to probe liveness.
+		const cancelled = /ERR_ABORTED|NS_BINDING_ABORTED/.test(request.failure()?.errorText ?? "");
+		if (cancelled || request.url().endsWith("/favicon.ico")) return;
+		problems.push(`request failed: ${request.url()} ${request.failure()?.errorText ?? ""}`);
 	});
 
 	const response = await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
@@ -322,7 +326,27 @@ try {
 
 	check("still no JavaScript errors after interacting", problems.length === 0, problems.join("; "));
 
-	// 8. A message from another conversation is attributed, not shown as the user's.
+	// 8. The stream proves it is alive. A comment line keeps the socket open but fires no
+	//    event, so a client could not tell a healthy idle stream from a dead one -- the
+	//    first version of this sent a comment and the watchdog could never fire.
+	const liveness = await page.evaluate(async () => {
+		const response = await fetch("/api/stream");
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder();
+		let text = "";
+		const deadline = Date.now() + 9000;
+		while (Date.now() < deadline && !text.includes("event: ping")) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			text += decoder.decode(value, { stream: true });
+		}
+		await reader.cancel();
+		return { ping: text.includes("event: ping"), sawState: text.includes("event: state") };
+	});
+	check("the stream sends a liveness event the client can see", liveness.ping, JSON.stringify(liveness));
+	check("a new subscriber is given the current state", liveness.sawState, JSON.stringify(liveness));
+
+	// 9. A message from another conversation is attributed, not shown as the user's.
 	//    It arrives as a pi.user entry because that is what starts a run, so the
 	//    interface has to say who sent it or a peer's transcript lies about you.
 	const attribution = await page.evaluate(async () => {

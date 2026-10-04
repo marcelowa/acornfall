@@ -765,12 +765,20 @@ function lastUsage(entries) {
 	return null;
 }
 
+let usageInFlight = false;
+
 async function refreshUsage() {
+	// Browsers allow a handful of connections per host. A poll that overlaps with a stalled
+	// request can hold one of them, and the stream's retry is the thing that waits.
+	if (usageInFlight || document.visibilityState !== "visible") return;
+	usageInFlight = true;
 	try {
 		const usage = await (await fetch("/api/usage")).json();
 		bodies.get("usage").innerHTML = `<pre>${escapeHtml(JSON.stringify(usage, null, 2))}</pre>`;
 	} catch (error) {
 		bodies.get("usage").innerHTML = `<pre>${escapeHtml(String(error))}</pre>`;
+	} finally {
+		usageInFlight = false;
 	}
 }
 
@@ -1308,12 +1316,19 @@ function renderAgentPicker() {
 let lastEventAt = 0;
 let watchdog = 0;
 
+// The keepalive interval the server writes, and how long a stream may be silent before
+// it is treated as dead. Silence is the failure that has no error: a sleeping laptop or a
+// dropped tailnet path leaves a connection that is neither open nor reported closed.
+const KEEPALIVE_MS = 3000;
+const SILENCE_LIMIT_MS = 8000;
+
 function connect() {
 	if (sources) sources.close();
 	lastEventAt = Date.now();
 	sources = new EventSource("/api/stream");
-	// Every event, including the server's keepalive, proves the transport is alive.
-	sources.addEventListener("message", () => {
+	// The server's ping is the only event that arrives while nothing is happening, so it
+	// is what proves the stream is alive rather than merely open.
+	sources.addEventListener("ping", () => {
 		lastEventAt = Date.now();
 	});
 	sources.addEventListener("open", () => {
@@ -1363,24 +1378,27 @@ function connect() {
 function startWatchdog() {
 	clearInterval(watchdog);
 	watchdog = setInterval(() => {
-		const silent = Date.now() - lastEventAt;
-		if (silent > 40000) {
-			setStatus("reconnecting", "offline");
-			connect();
-			return;
-		}
-	}, 10000);
+		if (Date.now() - lastEventAt <= SILENCE_LIMIT_MS) return;
+		setStatus("reconnecting", "offline");
+		connect();
+	}, KEEPALIVE_MS);
+}
+
+/** A stream that has gone quiet is worth replacing, whatever woke the page up. */
+function reconnectIfStale() {
+	if (Date.now() - lastEventAt > KEEPALIVE_MS) connect();
+	else void loadState();
+}
+
+for (const event of ["online", "pageshow", "focus"]) {
+	window.addEventListener(event, () => reconnectIfStale());
 }
 
 document.addEventListener("visibilitychange", () => {
 	if (document.visibilityState !== "visible") return;
 	// Coming back to a hidden tab: ask for the truth, and reconnect if the stream has
 	// been silent, because a background tab is exactly where a connection dies quietly.
-	if (Date.now() - lastEventAt > 20000) {
-		connect();
-		return;
-	}
-	void loadState();
+	reconnectIfStale();
 });
 
 /* ---------- input ---------- */
@@ -1505,7 +1523,10 @@ async function boot() {
 	renderThinking();
 	renderModelPicker();
 	render();
-	connect();
+	// A stream opened while the document is still loading can be torn down by the load
+	// itself, which the browser reports as an interrupted connection.
+	if (document.readyState === "complete") connect();
+	else window.addEventListener("load", () => connect(), { once: true });
 	void refreshUsage();
 	setInterval(() => void refreshUsage(), 15000);
 }
