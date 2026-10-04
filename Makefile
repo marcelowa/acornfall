@@ -25,9 +25,11 @@ build: ## build the gateway binary
 typecheck: ## typecheck the worker and check the client against its markup
 	cd worker && bun run typecheck
 	node scripts/check-client.mjs
+	node scripts/check-context.mjs
 
 check: ## verify the client and worker agree with their contracts
 	node scripts/check-client.mjs
+	node scripts/check-context.mjs
 	cd worker && bun run typecheck
 
 run: build ## run against the current directory

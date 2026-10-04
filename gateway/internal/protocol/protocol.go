@@ -20,6 +20,8 @@ type ModelBinding struct {
 	ModelID       string `json:"modelId"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	Instructions  string `json:"instructions,omitempty"`
+	// Definition names an agent definition; empty selects the layered defaults only.
+	Definition string `json:"definition,omitempty"`
 }
 
 // Command is a request from control to the worker.
@@ -84,6 +86,52 @@ type Frame struct {
 	Status         string          `json:"status,omitempty"`
 	AuthID         string          `json:"authId,omitempty"`
 	Event          *AuthEvent      `json:"event,omitempty"`
+}
+
+// LayerTrace records which layer contributed what, so a resolved agent can be
+// explained rather than guessed at. Contributes stays raw: it is the layer's
+// own contribution document, not a normalized form.
+type LayerTrace struct {
+	Layer       string          `json:"layer"`
+	Path        string          `json:"path"`
+	Contributes json.RawMessage `json:"contributes,omitempty"`
+}
+
+// ResolvedAgent is one agent after the overlay folded global, workspace, and
+// definition layers together.
+type ResolvedAgent struct {
+	Name         string       `json:"name"`
+	Description  string       `json:"description,omitempty"`
+	Source       string       `json:"source,omitempty"`
+	Model        string       `json:"model,omitempty"`
+	Thinking     string       `json:"thinking,omitempty"`
+	Instructions string       `json:"instructions,omitempty"`
+	Skills       []string     `json:"skills"`
+	AllowTools   []string     `json:"allowTools,omitempty"`
+	DenyTools    []string     `json:"denyTools,omitempty"`
+	Layers       []LayerTrace `json:"layers"`
+}
+
+// AgentSummary is one selectable definition.
+type AgentSummary struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Source      string        `json:"source"`
+	Layer       string        `json:"layer"`
+	Resolved    ResolvedAgent `json:"resolved"`
+}
+
+// SkillSummary is one discovered skill, for the picker and the explain view.
+type SkillSummary struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// AgentsData is the worker's overlay catalog.
+type AgentsData struct {
+	Defaults []LayerTrace   `json:"defaults"`
+	Skills   []SkillSummary `json:"skills"`
+	Agents   []AgentSummary `json:"agents"`
 }
 
 // ModelInfo is one model available under an authenticated provider.

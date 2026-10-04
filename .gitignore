@@ -6,3 +6,5 @@ credentials.json
 credentials.json.lock
 settings.json
 .DS_Store
+.acornfall/*.sqlite
+.acornfall/*.sqlite-*

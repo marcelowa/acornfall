@@ -93,18 +93,28 @@ export async function loadSkills(roots: readonly string[]): Promise<Skill[]> {
 	return skills;
 }
 
-export function renderSkills(skills: readonly Skill[]): string | undefined {
-	const usable = skills.filter((skill) => !skill.disableModelInvocation);
+export function renderSkills(skills: readonly Skill[], allowed: readonly string[] | null): string | undefined {
+	const usable = skills.filter(
+		(skill) => !skill.disableModelInvocation && (allowed === null || allowed.includes(skill.name)),
+	);
 	if (usable.length === 0) return undefined;
 	const lines = usable.map((skill) => `- ${skill.name}: ${skill.description}\n  dir: ${skill.dir}`);
 	return `Skills provide specialized instructions. Read one with the skill tool before starting work it covers.\n\n${lines.join("\n")}`;
 }
 
-export function skillsExtension(skills: readonly Skill[]) {
-	const byName = new Map(skills.map((skill) => [skill.name, skill]));
+/**
+ * The skill set is a live function, not a captured array: an agent definition
+ * changes which skills are offered, and the next request must see that without
+ * a reload.
+ */
+export function skillsExtension(skills: readonly Skill[], allowed: () => readonly string[] | null) {
+	const permitted = (): readonly Skill[] => {
+		const names = allowed();
+		return names === null ? skills : skills.filter((skill) => names.includes(skill.name));
+	};
 	return defineExtension({
 		name: "acornfall-skills",
-		sections: [section("skills", () => renderSkills(skills))],
+		sections: [section("skills", () => renderSkills(skills, allowed()))],
 		tools: [
 			defineTool({
 				name: "skill",
@@ -115,14 +125,15 @@ export function skillsExtension(skills: readonly Skill[]) {
 					args: Type.Optional(Type.String({ description: "Optional request or arguments for the skill" })),
 				}),
 				execute: async (args) => {
-					const skill = byName.get(args.name);
+					const available = permitted();
+					const skill = available.find((candidate) => candidate.name === args.name);
 					if (skill === undefined) {
-						const available = [...byName.keys()].join(", ");
+						const names = available.map((candidate) => candidate.name).join(", ");
 						return {
 							content: [
 								{
 									type: "text" as const,
-									text: `Unknown skill "${args.name}". Available: ${available || "none"}.`,
+									text: `Skill "${args.name}" is not available here. Available: ${names || "none"}.`,
 								},
 							],
 						};

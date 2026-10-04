@@ -10,7 +10,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Conversation } from "@earendil-works/pi-durable";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Conversation, ToolRegistration } from "@earendil-works/pi-durable";
 import {
 	createRegistry,
 	defineExtension,
@@ -24,6 +25,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
+import { loadCatalog, resolveAgent, type Catalog, type ResolvedAgent } from "./config.ts";
 import { devProvider } from "./devprovider.ts";
 import { CommandQueue, type Command, type DescribeData, emit, log } from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
@@ -39,6 +41,7 @@ const PREAMBLE = [
 
 interface Args {
 	workspace: string;
+	dataDir: string;
 	storage: string;
 	credentials: string;
 	skills: string[];
@@ -65,10 +68,12 @@ function parseArgs(argv: readonly string[]): Args {
 	}
 	const workspace = resolve(values.get("workspace") ?? process.cwd());
 	const defaults = (name: string) => join(workspace, ".acornfall", name);
+	const credentials = resolve(values.get("credentials") ?? defaults("credentials.json"));
 	return {
 		workspace,
+		dataDir: resolve(values.get("data-dir") ?? dirname(credentials)),
 		storage: resolve(values.get("storage") ?? defaults("session.sqlite")),
-		credentials: resolve(values.get("credentials") ?? defaults("credentials.json")),
+		credentials,
 		skills: skills.length > 0 ? skills : [join(homedir(), ".acornfall", "skills"), defaults("skills")],
 	};
 }
@@ -78,7 +83,12 @@ await mkdir(dirname(args.storage), { recursive: true });
 
 const credentials = new FileCredentialStore(args.credentials);
 const models = builtinModels({ credentials });
-const skills = await loadSkills(args.skills);
+const discoveredSkills = await loadSkills(args.skills);
+
+// The overlay. Reloaded on demand so editing a definition does not need a restart.
+let catalog: Catalog = await loadCatalog(args.dataDir, args.workspace);
+let activeAgent: ResolvedAgent = resolveAgent(catalog, undefined);
+const activeSkillFilter = (): readonly string[] | null => activeAgent.skills;
 
 // A scripted stand-in provider, so the full path works without an api key.
 if (process.env.ACORNFALL_DEV_PROVIDER === "1") {
@@ -88,7 +98,7 @@ if (process.env.ACORNFALL_DEV_PROVIDER === "1") {
 
 const registry = createRegistry();
 registry.install(CodingTools);
-registry.install(skillsExtension(skills));
+registry.install(skillsExtension(discoveredSkills, activeSkillFilter));
 registry.install(
 	defineExtension({
 		name: "acornfall-prompt",
@@ -110,8 +120,7 @@ function nextSeq(): number {
 	return seq;
 }
 
-async function describe(): Promise<DescribeData> {
-	const providers: DescribeData["providers"] = [];
+async function describe(): Promise<DescribeData> {	const providers: DescribeData["providers"] = [];
 	for (const provider of models.getProviders()) {
 		const check = await models.checkAuth(provider.id).catch(() => undefined);
 		const authenticated = check !== undefined;
@@ -141,7 +150,6 @@ async function describe(): Promise<DescribeData> {
 		capabilities: { steer: true, subagents: false, sandbox: "local-process" },
 	};
 }
-
 async function bind(conversationId: string, conversation: Conversation): Promise<void> {
 	conversationSubscriptions.get(conversationId)?.dispose();
 	const view = await conversation.viewState(CONTEXT);
@@ -150,6 +158,91 @@ async function bind(conversationId: string, conversation: Conversation): Promise
 		emit({ type: "view", conversationId, seq: nextSeq(), value });
 	});
 	conversationSubscriptions.set(conversationId, { dispose: () => view.dispose() });
+}
+
+/** One resolved agent application: definition first, explicit choices second. */
+async function applyAgent(input: {
+	definition?: string | undefined;
+	provider: string;
+	modelId: string;
+	thinkingLevel?: string | undefined;
+	instructions?: string | undefined;
+}): Promise<{ resolved: ResolvedAgent; model: { provider: string; modelId: string } }> {
+	if (root === undefined) throw new Error("worker is not ready");
+	const resolved = resolveAgent(catalog, input.definition);
+	activeAgent = resolved;
+
+	// An explicit provider/modelId is the user's choice in the picker and beats
+	// the definition; the definition beats nothing.
+	const fromDefinition = resolved.model?.split("/");
+	const provider = input.provider || fromDefinition?.[0] || "";
+	const modelId = input.modelId || fromDefinition?.[1] || "";
+
+	const instructions = [resolved.instructions, input.instructions ?? ""]
+		.filter((text) => text.trim().length > 0)
+		.join("\n\n");
+
+	await root.configure(
+		{
+			...(provider && modelId ? { model: { provider, modelId } } : {}),
+			thinkingLevel: thinkingLevelFor(input.thinkingLevel ?? resolved.thinking),
+			instructions,
+			tools: toolFilter(resolved),
+		},
+		CONTEXT,
+	);
+	return { resolved, model: { provider, modelId } };
+}
+
+const THINKING_LEVELS = new Set<ModelThinkingLevel>([
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]);
+
+/** An unknown level is a config error, not something to pass through to a provider. */
+function thinkingLevelFor(value: string | undefined): ModelThinkingLevel | null {
+	if (value === undefined || value.length === 0) return null;
+	if (!THINKING_LEVELS.has(value as ModelThinkingLevel)) {
+		throw new Error(`unknown thinking level "${value}"; expected one of ${[...THINKING_LEVELS].join(", ")}`);
+	}
+	return value as ModelThinkingLevel;
+}
+
+/** Registered tools by name. Unknown names are a config error, not a silent no-op. */
+function toolsByName(): Map<string, ToolRegistration> {
+	const byName = new Map<string, ToolRegistration>();
+	for (const { tool } of registry.snapshot().tools()) byName.set(tool.name, tool);
+	return byName;
+}
+
+function resolveTool(byName: Map<string, ToolRegistration>, name: string, agent: string): ToolRegistration {
+	const tool = byName.get(name);
+	if (tool === undefined) {
+		throw new Error(
+			`agent "${agent}" names unknown tool "${name}"; registered: ${[...byName.keys()].join(", ")}`,
+		);
+	}
+	return tool;
+}
+
+/**
+ * tools: null clears a previous restriction, an array offers exactly those names,
+ * and { remove } subtracts. A deny always beats an allow.
+ */
+function toolFilter(resolved: ResolvedAgent): readonly ToolRegistration[] | { remove: readonly ToolRegistration[] } | null {
+	const byName = toolsByName();
+	if (resolved.allowTools !== undefined) {
+		return resolved.allowTools.map((name) => resolveTool(byName, name, resolved.name));
+	}
+	if (resolved.denyTools.length > 0) {
+		return { remove: resolved.denyTools.map((name) => resolveTool(byName, name, resolved.name)) };
+	}
+	return null;
 }
 
 /** One root conversation per workspace storage in v0. */
@@ -217,13 +310,31 @@ async function handle(command: Command): Promise<unknown> {
 			return await describe();
 		case "open": {
 			if (root === undefined) throw new Error("worker is not ready");
-			const agent: Record<string, unknown> = {
-				model: { provider: command.agent.provider, modelId: command.agent.modelId },
+			const applied = await applyAgent({
+				definition: command.agent.definition,
+				provider: command.agent.provider,
+				modelId: command.agent.modelId,
+				thinkingLevel: command.agent.thinkingLevel,
+				instructions: command.agent.instructions,
+			});
+			return { conversationId: "root", agent: applied.resolved, model: applied.model };
+		}
+		case "agents": {
+			return {
+				defaults: catalog.defaults,
+				skills: discoveredSkills.map((skill) => ({ name: skill.name, description: skill.description })),
+				agents: catalog.agents.map((agent) => ({
+					name: agent.name,
+					description: agent.description,
+					source: agent.source,
+					layer: agent.layer,
+					resolved: resolveAgent(catalog, agent.name),
+				})),
 			};
-			if (command.agent.thinkingLevel !== undefined) agent.thinkingLevel = command.agent.thinkingLevel;
-			if (command.agent.instructions !== undefined) agent.instructions = command.agent.instructions;
-			await root.configure(agent, CONTEXT);
-			return { conversationId: "root" };
+		}
+		case "reload": {
+			catalog = await loadCatalog(args.dataDir, args.workspace);
+			return { agents: catalog.agents.length };
 		}
 		case "attach": {
 			if (root === undefined) throw new Error("worker is not ready");

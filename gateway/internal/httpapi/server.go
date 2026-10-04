@@ -25,6 +25,8 @@ func New(ctl *control.Control, static fs.FS) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/state", s.state)
+	mux.HandleFunc("GET /api/agents", s.agents)
+	mux.HandleFunc("POST /api/agents/reload", s.reload)
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("POST /api/messages", s.messages)
 	mux.HandleFunc("POST /api/abort", s.abort)
@@ -93,6 +95,23 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
+	data, err := s.control.Agents(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
+	if err := s.control.Reload(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.control.State())
+}
+
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Text     string            `json:"text"`
@@ -130,15 +149,21 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &binding) {
 		return
 	}
-	if binding.Provider == "" || binding.ModelID == "" {
-		http.Error(w, "provider and modelId are required", http.StatusBadRequest)
+	if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
+		http.Error(w, "provide a definition, a provider/modelId, or both", http.StatusBadRequest)
+		return
+	}
+	// Selecting a definition alone is valid: the definition may name its own model,
+	// and otherwise the current one stands.
+	if (binding.Provider == "") != (binding.ModelID == "") {
+		http.Error(w, "provider and modelId must be given together", http.StatusBadRequest)
 		return
 	}
 	if err := s.control.SetAgent(r.Context(), binding); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, binding)
+	writeJSON(w, http.StatusOK, s.control.State())
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {

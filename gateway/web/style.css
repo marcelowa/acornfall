@@ -357,6 +357,73 @@ main[data-inspector="closed"] .inspector {
 	text-transform: uppercase;
 	letter-spacing: 0.06em;
 	color: var(--neutral-500);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+button.small {
+	font-size: 11px;
+	padding: 3px 8px;
+	text-transform: none;
+	letter-spacing: 0;
+}
+
+.card details {
+	border-bottom: 1px solid var(--neutral-100);
+}
+
+.card details:last-child {
+	border-bottom: none;
+}
+
+.card summary {
+	cursor: pointer;
+	padding: 5px 0;
+	font-size: 12px;
+	font-family: var(--mono);
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+}
+
+.card summary::marker {
+	color: var(--neutral-300);
+}
+
+.card summary .provider-meta {
+	font-family: var(--font);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.card details pre {
+	margin: 0 0 8px;
+	padding: 8px;
+	background: var(--neutral-50);
+	border-radius: var(--radius-sm);
+	font-size: 11px;
+	max-height: 240px;
+	overflow: auto;
+	white-space: pre-wrap;
+	color: var(--neutral-700);
+}
+
+.delta {
+	font-size: 11px;
+	font-family: var(--mono);
+	color: var(--neutral-500);
+	margin-bottom: 8px;
+}
+
+.delta .add {
+	color: var(--success-400);
+}
+
+.delta .del {
+	color: var(--danger-400);
 }
 
 .card dl {

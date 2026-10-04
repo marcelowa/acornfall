@@ -11,6 +11,8 @@ export interface ModelBinding {
 	modelId: string;
 	thinkingLevel?: string;
 	instructions?: string;
+	/** Agent definition name; empty or absent selects the defaults only. */
+	definition?: string;
 }
 
 export type Command =
@@ -24,6 +26,8 @@ export type Command =
 	| { id: string; type: "logout"; providerId: string }
 	| { id: string; type: "auth_answer"; authId: string; promptId: string; value?: string; cancelled?: boolean }
 	| { id: string; type: "auth_cancel"; authId: string }
+	| { id: string; type: "agents" }
+	| { id: string; type: "reload" }
 	| { id: string; type: "usage" }
 	| { id: string; type: "shutdown" };
 

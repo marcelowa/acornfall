@@ -18,6 +18,10 @@
 			</div>
 			<div class="topbar-actions">
 				<label class="field">
+					<span class="label">Agent</span>
+					<select id="agent"></select>
+				</label>
+				<label class="field">
 					<span class="label">Model</span>
 					<select id="model"></select>
 				</label>
@@ -51,8 +55,16 @@
 
 			<aside class="inspector" id="inspector">
 				<div class="card">
-					<h2>Agent</h2>
+					<h2>
+						Agent
+						<button class="ghost small" id="reload-agents" type="button">Reload files</button>
+					</h2>
 					<dl id="agent-facts"></dl>
+					<div id="agent-layers"></div>
+				</div>
+				<div class="card">
+					<h2>Context sent</h2>
+					<div id="context"></div>
 				</div>
 				<div class="card">
 					<h2>Run</h2>

@@ -13,6 +13,7 @@ const els = {
 	workspace: el("workspace"),
 	status: el("status"),
 	model: el("model"),
+	agent: el("agent"),
 	transcript: el("transcript"),
 	composer: el("composer"),
 	input: el("input"),
@@ -27,6 +28,9 @@ const els = {
 	inspector: el("inspector"),
 	toggleInspector: el("toggle-inspector"),
 	agentFacts: el("agent-facts"),
+	agentLayers: el("agent-layers"),
+	reloadAgents: el("reload-agents"),
+	context: el("context"),
 	runFacts: el("run-facts"),
 	usage: el("usage"),
 	raw: el("raw"),
@@ -231,15 +235,17 @@ function facts(target, pairs) {
 function renderInspector() {
 	if (els.inspector.hidden) return;
 	const current = live();
+	const resolved = state?.resolved;
 	facts(els.agentFacts, [
+		["definition", resolved?.name ?? "default"],
+		["source", resolved?.source || "(layered defaults only)"],
 		["harness", state?.harness],
-		["provider", state?.agent?.provider],
-		["model", state?.agent?.modelId],
-		["thinking", state?.agent?.thinkingLevel ?? "default"],
-		["workspace", state?.workspace],
+		["model", resolved?.model ?? `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`],
+		["thinking", resolved?.thinking ?? state?.agent?.thinkingLevel ?? "default"],
 		["sandbox", state?.capabilities?.sandbox],
-		["steer", state?.capabilities?.steer ? "yes" : "no"],
 	]);
+	renderLayers(resolved);
+	renderContext();
 	facts(els.runFacts, [
 		["state", isBusy() ? "running" : "idle"],
 		["attempt", current.generation?.attempt],
@@ -249,6 +255,133 @@ function renderInspector() {
 		["seq", state?.seq],
 	]);
 	els.raw.textContent = view ? JSON.stringify(view, null, 2).slice(0, 8000) : "—";
+}
+
+/** Which layer set what, so a surprising prompt is explainable rather than guessed. */
+function renderLayers(resolved) {
+	const layers = resolved?.layers ?? [];
+	const skills = resolved?.skills === null ? "all discovered" : (resolved?.skills ?? []).join(", ") || "none";
+	const tools =
+		resolved?.allowTools !== undefined
+			? `only ${resolved.allowTools.join(", ") || "none"}`
+			: (resolved?.denyTools ?? []).length > 0
+				? `all except ${resolved.denyTools.join(", ")}`
+				: "all registered";
+	const layerRows = layers
+		.map(
+			(trace) => `<details>
+				<summary>${escapeHtml(trace.layer)} <span class="provider-meta">${escapeHtml(trace.path)}</span></summary>
+				<pre>${escapeHtml(JSON.stringify(trace.contributes ?? {}, null, 2))}</pre>
+			</details>`,
+		)
+		.join("");
+	els.agentLayers.innerHTML =
+		`<div class="delta">skills: ${escapeHtml(skills)}<br />tools: ${escapeHtml(tools)}</div>` +
+		(layerRows || `<div class="delta">no config or definition files</div>`);
+}
+
+/**
+ * Reconstructs what each request was actually sent, by folding the positional
+ * system entries forward. Later entries may carry only the sections that
+ * changed, so a patch and a snapshot both fold correctly.
+ */
+function contextHistory(entries) {
+	const sections = new Map();
+	const tools = new Map();
+	const requests = [];
+	for (const entry of entries) {
+		if (entry.kind !== "pi.system") continue;
+		const message = (entry.model ?? [])[0] ?? {};
+		const changes = { sectionsAdded: [], sectionsRemoved: [], sectionsChanged: [], toolsAdded: [], toolsRemoved: [] };
+		for (const [name, text] of Object.entries(message.sections ?? {})) {
+			const before = sections.get(name);
+			if (text === null || text === undefined) {
+				if (before !== undefined) {
+					sections.delete(name);
+					changes.sectionsRemoved.push(name);
+				}
+				continue;
+			}
+			if (before === undefined) changes.sectionsAdded.push(name);
+			else if (before !== text) changes.sectionsChanged.push(name);
+			sections.set(name, text);
+		}
+		for (const tool of message.toolsAdded ?? []) {
+			tools.set(tool.name, tool);
+			changes.toolsAdded.push(tool.name);
+		}
+		for (const tool of message.toolsRemoved ?? []) {
+			if (tools.delete(tool.name)) changes.toolsRemoved.push(tool.name);
+		}
+		requests.push({
+			entryId: entry.id,
+			sections: new Map(sections),
+			tools: new Map(tools),
+			changes,
+			previousId: requests.length > 0 ? requests[requests.length - 1].entryId : null,
+		});
+	}
+	return requests;
+}
+
+function renderContext() {
+	const entries = view?.entries ?? [];
+	const requests = contextHistory(entries);
+	if (requests.length === 0) {
+		els.context.innerHTML = `<div class="delta">nothing sent yet</div>`;
+		return;
+	}
+	const latest = requests[requests.length - 1];
+	const estimate = (text) => Math.ceil(String(text ?? "").length / 4);
+
+	const sectionRows = [...latest.sections.entries()]
+		.map(
+			([name, text]) => `<details>
+				<summary>${escapeHtml(name)} <span class="provider-meta">${String(text).length} chars · ~${estimate(text)} tok</span></summary>
+				<pre>${escapeHtml(text)}</pre>
+			</details>`,
+		)
+		.join("");
+	const toolRows = [...latest.tools.values()]
+		.map(
+			(tool) => `<details>
+				<summary>${escapeHtml(tool.name)} <span class="provider-meta">${escapeHtml((tool.description ?? "").slice(0, 48))}</span></summary>
+				<pre>${escapeHtml(JSON.stringify(tool.parameters ?? {}, null, 2))}</pre>
+			</details>`,
+		)
+		.join("");
+
+	const changes = latest.changes;
+	const delta = [
+		changes.sectionsAdded.length > 0 ? `<span class="add">+sections ${changes.sectionsAdded.join(", ")}</span>` : "",
+		changes.sectionsChanged.length > 0 ? `~${changes.sectionsChanged.join(", ")}` : "",
+		changes.sectionsRemoved.length > 0 ? `<span class="del">−sections ${changes.sectionsRemoved.join(", ")}</span>` : "",
+		changes.toolsAdded.length > 0 ? `<span class="add">+tools ${changes.toolsAdded.join(", ")}</span>` : "",
+		changes.toolsRemoved.length > 0 ? `<span class="del">−tools ${changes.toolsRemoved.join(", ")}</span>` : "",
+	]
+		.filter(Boolean)
+		.join(" · ");
+
+	const totalTokens = [...latest.sections.values()].reduce((sum, text) => sum + estimate(text), 0);
+	const usage = lastUsage(entries);
+	els.context.innerHTML = `
+		<div class="delta">
+			request ${requests.length} · entry ${escapeHtml(latest.entryId)}
+			${latest.previousId === null ? " · first" : ` · previous ${escapeHtml(latest.previousId)}`}<br />
+			~${totalTokens} tok of sections · ${latest.tools.size} tools
+			${usage ? ` · ${usage.input} in / ${usage.output} out / ${usage.cacheRead ?? 0} cached` : ""}
+		</div>
+		${delta.length > 0 ? `<div class="delta">${delta}</div>` : `<div class="delta">unchanged since the previous request</div>`}
+		${sectionRows || `<div class="delta">no prompt sections</div>`}
+		${toolRows}`;
+}
+
+function lastUsage(entries) {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const message = (entries[index].model ?? [])[0];
+		if (entries[index].kind === "pi.assistant" && message?.usage) return message.usage;
+	}
+	return null;
 }
 
 async function refreshUsage() {
@@ -264,6 +397,7 @@ async function refreshUsage() {
 
 async function loadState() {
 	state = await (await fetch("/api/state")).json();
+	renderAgentPicker();
 	renderModelPicker();
 	render();
 	if (sheet.open) renderSheet();
@@ -476,8 +610,7 @@ function handleAuthFrame(frame) {
 
 function renderModelPicker() {
 	const providers = state?.providers ?? [];
-	const selected = `${state?.agent?.provider}/${state?.agent?.modelId}`;
-	const options = [];
+	const selected = `${state?.agent?.provider}/${state?.agent?.modelId}`;	const options = [];
 	for (const provider of providers) {
 		if (!provider.authenticated || provider.models.length === 0) continue;
 		options.push(`<optgroup label="${escapeHtml(provider.name)}">`);
@@ -497,6 +630,20 @@ function renderModelPicker() {
 
 	const connected = providers.filter((provider) => provider.authenticated).length;
 	els.workspace.textContent = `${state?.workspace ?? ""}  ·  ${connected}/${providers.length} providers`;
+}
+
+/** Definitions come from the overlay: global, then workspace, with workspace winning. */
+function renderAgentPicker() {
+	const agents = state?.agents ?? [];
+	const current = state?.agent?.definition ?? "";
+	const options = [`<option value=""${current === "" ? " selected" : ""}>default</option>`];
+	for (const agent of agents) {
+		options.push(
+			`<option value="${escapeHtml(agent.name)}"${agent.name === current ? " selected" : ""}>${escapeHtml(agent.name)}</option>`,
+		);
+	}
+	els.agent.innerHTML = options.join("");
+	els.agent.title = current === "" ? "layered defaults only" : `from ${state?.resolved?.source ?? ""}`;
 }
 
 /* ---------- stream ---------- */
@@ -586,10 +733,33 @@ els.model.addEventListener("change", async () => {
 	const [provider, modelId] = els.model.value.split("/");
 	if (!provider || !modelId) return;
 	try {
-		await post("/api/agent", { provider, modelId });
+		await post("/api/agent", { provider, modelId, definition: state?.agent?.definition ?? "" });
+		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
 	}
+});
+
+// Selecting a definition sends no model, so the definition's own model applies and
+// an explicit picker choice still wins until the next definition change.
+els.agent.addEventListener("change", async () => {
+	try {
+		await post("/api/agent", { definition: els.agent.value });
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+	}
+});
+
+els.reloadAgents.addEventListener("click", async () => {
+	els.reloadAgents.textContent = "Reloading…";
+	try {
+		await post("/api/agents/reload");
+		await loadState();
+	} catch (error) {
+		setStatus(String(error.message ?? error), "offline");
+	}
+	els.reloadAgents.textContent = "Reload files";
 });
 
 els.connect.addEventListener("click", () => openSheet());
@@ -619,6 +789,7 @@ async function boot() {
 		setStatus("gateway unreachable", "offline");
 		return;
 	}
+	renderAgentPicker();
 	renderModelPicker();
 	render();
 	connect();

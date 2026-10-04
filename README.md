@@ -78,15 +78,47 @@ make dev
 - Streaming transcript with tool cards, live tool output, and a running/idle indicator.
 - **Steering**: type while a turn runs. The message queues visibly, then joins the
   running work after the current tool round.
-- Abort, model switching, and per-turn usage.
+- Abort, model switching, thinking level, and per-turn usage.
+- **Context inspector**: the prompt sections and tool schemas the last request was
+  actually sent, estimated tokens per section, and what changed since the previous
+  request.
+- **Agent definitions** with a global/workspace/agent overlay, and an explain view
+  showing which layer contributed what. See `docs/adr/0004-resource-overlay.md`.
+- Provider connect/disconnect from the UI, 42 providers, 60+ models each where the key allows.
 - Crash resume: `kill` the worker and restart; the run continues from its last commit.
 - Credentials live in `~/.acornfall/credentials.json` (0600), never in the worker's home.
 
+## Write an agent
+
+`~/.acornfall/agents/<name>.md` (global) or `<workspace>/.acornfall/agents/<name>.md`
+(workspace, shadows a global definition of the same name):
+
+```markdown
+---
+name: researcher
+description: Reads before it writes
+thinking: medium
+allow-tools: read, bash, skill
+deny-tools: write, edit
+---
+You are a researcher. Read before you answer, and name the paths you relied on.
+```
+
+`config.json` in the same two locations carries defaults for every agent in scope:
+
+```json
+{ "defaults": { "instructions": "…", "denyTools": ["bash"] } }
+```
+
+Then pick the agent in the top bar. **Reload files** in the inspector re-reads them
+without restarting anything. Resolution rules and their rationale are in
+[ADR 0004](docs/adr/0004-resource-overlay.md).
+
 ## What does not exist yet
 
-Memory, MCP, codemode, subagents, multi-session, multi-user, triggers, the resource
-overlay compiler (`global → workspace → agent`), sandboxing beyond the host process,
-and OAuth login flows. See `docs/adr/` for the designs they will land against.
+Memory, MCP, codemode, subagents, multi-session, multi-user, triggers, versioned
+agent definitions, and sandboxing beyond the host process. `docs/adr/` holds the
+designs they will land against.
 
 ## Development
 

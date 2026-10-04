@@ -1,0 +1,5 @@
+{
+  "defaults": {
+    "instructions": "This workspace is the Acornfall repository itself. The worker protocol is documented in docs/adr/0002-layers-and-protocol.md."
+  }
+}

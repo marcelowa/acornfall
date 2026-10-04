@@ -47,6 +47,10 @@ type State struct {
 	Capabilities protocol.Capabilities   `json:"capabilities"`
 	Session      Session                 `json:"session"`
 	Agent        protocol.ModelBinding   `json:"agent"`
+	Resolved     *protocol.ResolvedAgent `json:"resolved,omitempty"`
+	Agents       []protocol.AgentSummary `json:"agents"`
+	Skills       []protocol.SkillSummary `json:"skills"`
+	Defaults     []protocol.LayerTrace   `json:"defaults"`
 	Providers    []protocol.ProviderInfo `json:"providers"`
 	Seq          int64                   `json:"seq"`
 }
@@ -58,6 +62,8 @@ type Control struct {
 	mu          sync.RWMutex
 	describe    protocol.Describe
 	agent       protocol.ModelBinding
+	resolved    *protocol.ResolvedAgent
+	agents      protocol.AgentsData
 	seq         int64
 	lastView    []byte
 	providers   []protocol.ProviderInfo
@@ -98,6 +104,9 @@ func (c *Control) Open(ctx context.Context) error {
 
 	// An unauthenticated install still serves the UI, so a provider can be
 	// connected from it. Only a real worker failure is fatal here.
+	if _, err := c.Agents(ctx); err != nil {
+		return fmt.Errorf("read agent catalog: %w", err)
+	}
 	binding, err := c.defaultBinding(describe)
 	if errors.Is(err, ErrNoProvider) {
 		workerpool.Log("no provider connected yet; open the UI to connect one")
@@ -131,12 +140,15 @@ func (c *Control) State() State {
 		Capabilities: c.describe.Capabilities,
 		Session:      Session{ID: RootConversationID, Title: baseName(c.opts.Workspace)},
 		Agent:        c.agent,
+		Resolved:     c.resolved,
+		Agents:       c.agents.Agents,
+		Skills:       c.agents.Skills,
+		Defaults:     c.agents.Defaults,
 		Providers:    c.providers,
 		Seq:          c.seq,
 	}
 }
 
-// SetAgent applies a model binding and selects it for the session.
 // Refresh re-reads the worker's provider catalog and adopts a usable agent
 // binding when the current one is missing or no longer available.
 func (c *Control) Refresh(ctx context.Context) error {
@@ -221,18 +233,74 @@ func (c *Control) CancelAuth(ctx context.Context, authID string) error {
 	return c.worker.CallInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
 }
 
+// SetAgent applies a model binding and selects it for the session. The worker
+// resolves the definition and returns it, so the UI can explain the result.
 func (c *Control) SetAgent(ctx context.Context, binding protocol.ModelBinding) error {
+	var response struct {
+		Agent protocol.ResolvedAgent `json:"agent"`
+	}
 	if err := c.worker.CallInto(ctx, protocol.Command{
 		Type:           "open",
 		ConversationID: RootConversationID,
 		Agent:          &binding,
-	}, nil); err != nil {
+	}, &response); err != nil {
 		return err
+	}
+	// Selecting a definition with no explicit model adopts the definition's model,
+	// and otherwise keeps the model already in use. A later explicit picker choice
+	// still beats the definition.
+	c.mu.RLock()
+	previous := c.agent
+	c.mu.RUnlock()
+	if binding.Provider == "" || binding.ModelID == "" {
+		if parts := strings.SplitN(response.Agent.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			binding.Provider, binding.ModelID = parts[0], parts[1]
+		} else {
+			binding.Provider, binding.ModelID = previous.Provider, previous.ModelID
+		}
+	}
+	if binding.ThinkingLevel == "" {
+		binding.ThinkingLevel = response.Agent.Thinking
 	}
 	c.mu.Lock()
 	c.agent = binding
+	resolved := response.Agent
+	c.resolved = &resolved
 	c.mu.Unlock()
 	c.persist(binding)
+	return nil
+}
+
+// Agents returns the overlay catalog: every definition and what it resolves to.
+func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
+	var data protocol.AgentsData
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "agents"}, &data); err != nil {
+		return protocol.AgentsData{}, err
+	}
+	c.mu.Lock()
+	c.agents = data
+	c.mu.Unlock()
+	return data, nil
+}
+
+// Reload re-reads definitions and config from disk, then re-applies the current
+// binding so an edited file takes effect without a restart.
+func (c *Control) Reload(ctx context.Context) error {
+	if _, err := c.worker.Call(ctx, protocol.Command{Type: "reload"}); err != nil {
+		return err
+	}
+	if _, err := c.Agents(ctx); err != nil {
+		return err
+	}
+	c.mu.RLock()
+	binding := c.agent
+	c.mu.RUnlock()
+	if binding.ModelID != "" || binding.Definition != "" {
+		if err := c.SetAgent(ctx, binding); err != nil {
+			return err
+		}
+	}
+	c.publish(protocol.Frame{Type: "state"})
 	return nil
 }
 
