@@ -196,9 +196,10 @@ export function delegationExtension(deps: DelegationDeps) {
 		description: [
 			"Work with persistent background subagents: conversations that keep working while you answer,",
 			"and whose answers arrive later as new messages.",
-			"spawn (name, message) starts one; send (name, message) gives an existing one more work;",
-			"list shows names, ids, and whether each is working; read shows a subagent's recent transcript;",
-			"stop aborts what it is doing now.",
+			"spawn (name, message) starts one; send (name, message) gives an existing conversation more work;",
+			"list shows names, ids, and whether each is working; read shows a recent transcript;",
+			"stop aborts what it is doing now. An answer to a message you sent comes back to you as a",
+			"new message unless you pass fireAndForget.",
 		].join(" "),
 		parameters: Type.Object({
 			action: Type.Union([
@@ -218,8 +219,11 @@ export function delegationExtension(deps: DelegationDeps) {
 						"Create a normal conversation instead of a subagent: it appears in the user's list and outlives you",
 				}),
 			),
-			report: Type.Optional(
-				Type.Boolean({ description: "Whether its answer comes back to you. Default: yes for a subagent, no for a peer" }),
+			fireAndForget: Type.Optional(
+				Type.Boolean({
+					description:
+						"Deliver the message, but do not bring its answer back. The conversation still answers in its own transcript; you are just not woken with it. Default: false",
+				}),
 			),
 			message: Type.Optional(Type.String({ description: "What to tell it, for spawn and send" })),
 			followUp: Type.Optional(
@@ -394,13 +398,10 @@ export function delegationExtension(deps: DelegationDeps) {
 					conversationId = target!.conversationId;
 				}
 
-				// A subagent reports back by default; a peer does not, because a peer is a
-				// normal conversation the user also reads, and unsolicited reports into it
-				// would be noise.
-				const wantsReport =
-					args.report ?? (args.action === "spawn" ? args.peer !== true : (named?.peer ?? false) === false);
-				// The reporter delivers the message either way; `report` decides whether the
-				// answer comes back here afterwards.
+				// One rule, no special cases: an answer to a message you sent comes back to
+				// you, whether the conversation you sent it to is a subagent or a peer.
+				// Opting out is a single flag, falsy by default.
+				const wantsReply = !args.fireAndForget;
 				current.reporters[api.taskId] = await tx.createTask(
 					reporterTask(deps),
 					{
@@ -408,11 +409,11 @@ export function delegationExtension(deps: DelegationDeps) {
 						conversationId,
 						message,
 						followUp: args.action === "send" && args.followUp === true,
-						report: wantsReport,
+						report: wantsReply,
 					},
 					background,
 				);
-				const suffix = wantsReport ? " Its answer will come back to you." : "";
+				const suffix = wantsReply ? " Its answer will come back to you." : "";
 				return {
 					text: `${args.action === "send" ? "Sent to" : "Started"} ${name}.${suffix}`,
 					conversationId: String(conversationId),

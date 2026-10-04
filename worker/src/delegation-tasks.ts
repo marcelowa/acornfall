@@ -180,11 +180,15 @@ export function reporterTask(deps: DelegationDeps) {
 					const agent = state.agents[name];
 					if (agent === undefined) return next();
 					if (agent.reported.includes(settled.answer)) return next();
+					// What the sender is decides how its reply is labelled. Read here rather
+					// than carried in the reporter's input, so the task shape is unchanged and
+					// reporters already in flight keep working.
+					const peer = agent.peer === true;
 					agent.reported.push(settled.answer);
 					const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as
 						| AssistantMessage
 						| undefined;
-					return next(`[from subagent ${name}] ${textOf(answer)}`);
+					return next(`[from ${peer ? "peer" : "subagent"} ${name}] ${textOf(answer)}`);
 				}, context);
 			},
 			report: async (reporter, runtime, context) => {
@@ -197,8 +201,10 @@ export function reporterTask(deps: DelegationDeps) {
 					const policy = await policyFor(deps, String(runtime.conversationId), context);
 					const state = await deps.harness.snapshot(DelegationDoc, runtime.conversationId, context);
 					const spent = (state?.wakes ?? 0) >= policy.delegation.maxWakes;
+					const sender = await deps.harness.snapshot(DelegationDoc, runtime.conversationId, context);
+					const kind = sender?.agents[reporter.input.name]?.peer === true ? "peer" : "subagent";
 					const text = spent
-						? `[subagent ${reporter.input.name} finished, but this conversation has used its ${policy.delegation.maxWakes} wake-ups. Read conversation ${String(reporter.input.conversationId)} for the answer.]`
+						? `[${kind} ${reporter.input.name} finished, but this conversation has used its ${policy.delegation.maxWakes} wake-ups. Read conversation ${String(reporter.input.conversationId)} for the answer.]`
 						: report;
 
 					if (!spent) {

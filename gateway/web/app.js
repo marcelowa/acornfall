@@ -39,6 +39,10 @@ const els = {
 let state = null;
 let view = null;
 let sources = null;
+// The shell is built asynchronously, and browser lifecycle events (a tab becoming
+// visible, the network coming back) fire during page load. Without this gate a frame or
+// a lifecycle event can reach render() before the inspector has built its sections.
+let shellReady = false;
 
 /** The conversation everything is scoped to; ids are the harness's own, opaque. */
 const activeId = () => state?.conversation?.id ?? "";
@@ -240,6 +244,7 @@ function renderEntry(entry, calls, forkAt) {
 }
 
 function render() {
+	if (!shellReady) return;
 	els.conversationTitle.textContent = state?.conversation?.title ?? "";
 	// Reading a conversation marks it read, which is what clears the dot.
 	const active = (state?.conversations ?? []).find((conversation) => conversation.id === activeId());
@@ -1323,6 +1328,7 @@ const KEEPALIVE_MS = 3000;
 const SILENCE_LIMIT_MS = 8000;
 
 function connect() {
+	if (!shellReady) return;
 	if (sources) sources.close();
 	lastEventAt = Date.now();
 	sources = new EventSource("/api/stream");
@@ -1519,6 +1525,7 @@ async function boot() {
 	renderConversations();
 	buildInspector();
 	setupSplitters();
+	shellReady = true;
 	renderAgentPicker();
 	renderThinking();
 	renderModelPicker();

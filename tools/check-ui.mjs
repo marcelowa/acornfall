@@ -27,7 +27,8 @@ try {
 	page.on("console", (message) => {
 		if (message.type() === "error") problems.push(`console: ${message.text()}`);
 	});
-	page.on("pageerror", (error) => problems.push(`page: ${error.message}`));
+	page.on("pageerror", (error) => problems.push(`page: ${error.message}
+    ${(error.stack ?? "").split("\n").slice(1, 4).join("\n    ")}`));
 	page.on("requestfailed", (request) => {
 		// A cancelled request is deliberate, not a failure: the client replaces its event
 		// stream on reconnect, and the checks below cancel one to probe liveness.

@@ -124,6 +124,41 @@ Three durable pieces, following the shape pi-durable documents in
 Verified with a real model, including the part that matters: the parent answered
 `ACKNOWLEDGED`, **stopped spending**, and was woken later when the child finished.
 
+## An answer to a message you sent comes back to you
+
+One rule, no special cases: whether the conversation you addressed is a subagent or a peer,
+the answer to a message you sent arrives as a new message to you. `send` and a `spawn`'s
+first message both behave that way. The opt-out is one falsy-by-default flag:
+
+```
+fireAndForget: true   deliver the message; do not come back with the answer
+```
+
+The conversation still answers in its own transcript, so nothing is lost — the sender is
+simply not woken by it, and can read it later.
+
+This replaced a `report` parameter whose default was computed from the action and the
+target's ownership:
+
+```ts
+// what it was: three cases and a hidden default
+const wantsReport = args.report ?? (args.action === "spawn" ? args.peer !== true : (named?.peer ?? false) === false);
+```
+
+Two things were wrong with it, and the second is the one worth remembering:
+
+1. **The behaviour was inconsistent.** `send` to a peer delivered the message and dropped the
+   answer, so the sender had to poll `read` to find it.
+2. **The name described the hierarchy, not the behaviour.** `report` reads as
+   subagent-reports-to-parent, but what it toggles is symmetric: *does the reply to my
+   message come back to me*. Naming it after the one relationship it was first used for
+   hid the fact that it applies to every relationship.
+
+The prefix on a delivered reply says what the sender is — `[from peer jester]` or
+`[from subagent lister]` — read from the delegation document at delivery time rather than
+carried in the reporter's input, so the task shape is unchanged and reporters already in
+flight keep working.
+
 ## The wake budget
 
 Auto-continuation is the feature, and it is also the risk: without a limit, a chain of
@@ -169,7 +204,7 @@ It is how a conversation bootstraps something for you rather than for itself.
 | ownership | an anchor task owns it | ownerless |
 | in your rail | no | yes, marked as created by another conversation |
 | delegation tools | denied | keeps them, so it can have its own |
-| reports back | yes | no, unless you ask (`report: true`) |
+| brings the answer back | yes, unless `fireAndForget: true` | same |
 | counts toward depth | yes | no, which is why it may spawn |
 
 That last row is the requested rule again: a child cannot spawn children because it
