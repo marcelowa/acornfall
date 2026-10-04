@@ -226,25 +226,50 @@ Fixed by recording provenance rather than inferring it:
   the sender, markdown-rendered, with a link to open that conversation. The prefix stays
   in the text for the model and is stripped for the reader.
 
-### Two things this took
+### Composition, not patching
 
-**Durable's view mounts only its own documents.** `acornfall.messages` is not among
-`pi.agent`, `pi.live`, `pi.inbox`, `pi.usage`, so the interface cannot see it through the
-view. The worker therefore annotates each view frame: `{type: "view", value, acornfall:
-{senders}}`. Ours travels beside theirs.
+Everything here is durable's public API used as intended, and no line of it is modified:
 
-**A commit that touches only our documents produces no view frame.** The mount does not
-observe them, so the frame carrying the entry is emitted *before* the provenance is
-written, and nothing announces the write. The first version recorded the provenance
-correctly and the interface never learned it — the feature looked broken while the data
-was right. The reporter now asks the worker to re-emit that conversation's view after
-recording, which is what `DelegationDeps.notify` exists for.
+| Need | API | Why it is the intended one |
+|---|---|---|
+| store who sent what | `defineDoc`, `tx.doc(token, id)`, `harness.snapshot` | "Documents are typed JSON objects committed together with entries" — the documented place for application state |
+| know which entry was placed | `SubmissionRecord.entry` | a public field of the settled submission |
+| observe that document | `harness.watchDoc(token, id, ctx)` | "Non-creating document watch acquisition", the document counterpart of `viewState()` |
+| start a run | `conversation.submit({type: "input"})` | the only way to wake a conversation |
+| durable work | `defineTask`, `tx.createTask`, `runtime.*` | the documented task API |
+
+**One thing is ours, not durable's: the frame.** `{type: "view", conversationId, seq,
+value}` is our wire format (ADR-0002). Adding a sibling field to a message we defined is
+our protocol evolving, not durable being worked around. The `value` is left untouched.
+
+**Why the annotation is needed at all.** Durable's view mounts exactly four documents —
+`pi.agent`, `pi.live`, `pi.inbox`, `pi.usage` — so our own state cannot reach the
+interface through it. We watch our document with `watchDoc` and re-emit the conversation's
+view when it changes, exactly as we already watch the view itself.
+
+The version before this used a callback pushed from the tool that writes the document
+(`DelegationDeps.notify`). It worked, and it was the wrong shape: the writer should not
+need to know that an interface exists. `watchDoc` is the same relationship expressed where
+it belongs, and it removed the callback entirely.
 
 **Control cached a frame by its value alone.** The cached `{value, seq}` is what a newly
 attached client is handed, so the annotation was dropped for exactly the client that had
-just connected — the case a browser reload hits every time. The annotation is cached
-alongside the value now, and the reasoning is in the comment: a view frame is more than
-its value.
+just connected — the case a browser reload hits every time. That was our bug in our
+router, and the annotation is cached with the value now.
+
+### What we would ask durable for instead
+
+If durable grew either of these, the document would not be necessary:
+
+- `submit({type: "input", entry: {kind, data}})`, so an admitted input can carry
+  application data on its own entry. Today an input's entry is always `pi.user` with no
+  room for anything else.
+- a way to write a custom entry that wakes the model. `{type: "write"}` exists and is
+  documented as *not* asking the model anything, which is the correct behaviour for a
+  write; there is simply no third option.
+
+Either would let provenance live on the entry rather than beside it. Neither is a
+blocker, and asking for them is a feature request, not a patch.
 
 `GET /api/conversations/{id}/messages` exposes the document, so attribution can be
 checked without opening a browser. That endpoint is how the last of these was found.

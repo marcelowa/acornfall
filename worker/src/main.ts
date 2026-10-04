@@ -154,9 +154,7 @@ const harness = await Harness.open(
 
 // Registered after the harness opens: the delegation tools need it to read a
 // child's answer, and the registry accepts installs while running.
-registry.install(
-	delegationExtension({ harness, storage, catalog: () => catalog, notify: refreshView }),
-);
+registry.install(delegationExtension({ harness, storage, catalog: () => catalog }));
 
 /** Live handles by conversation id; created on first use. */
 const handles = new Map<string, Conversation>();
@@ -328,14 +326,6 @@ const viewChains = new Map<string, Promise<void>>();
 // without re-reading the view or waiting for durable to commit something it mounts.
 const lastViewValue = new Map<string, unknown>();
 
-/** Re-emit a conversation's current view so its annotation is current. */
-function refreshView(conversationId: string): void {
-	if (!subscriptions.has(conversationId)) return;
-	const value = lastViewValue.get(conversationId);
-	if (value === undefined) return;
-	enqueueView(conversationId, value);
-}
-
 function enqueueView(conversationId: string, value: unknown): void {
 	lastViewValue.set(conversationId, value);
 	const previous = viewChains.get(conversationId) ?? Promise.resolve();
@@ -363,10 +353,27 @@ function enqueueView(conversationId: string, value: unknown): void {
 async function attach(conversationId: string): Promise<void> {
 	const conversation = await conversationFor(conversationId);
 	subscriptions.get(conversationId)?.dispose();
+
 	const view = await conversation.viewState(CONTEXT);
 	enqueueView(conversationId, view.value);
 	view.subscribe((value) => enqueueView(conversationId, value));
-	subscriptions.set(conversationId, { dispose: () => view.dispose() });
+
+	// Durable's view mounts only its own documents, so a commit that writes ours does
+	// not advance it and produces no frame. `watchDoc` is the documented way to observe
+	// a document of our own; when it changes, the annotation the interface reads has
+	// changed with it, so the current view is emitted again.
+	const messages = await harness.watchDoc(MessagesDoc, conversationIdOf(conversationId), CONTEXT);
+	messages?.start(async () => {
+		const current = lastViewValue.get(conversationId);
+		if (current !== undefined) enqueueView(conversationId, current);
+	});
+
+	subscriptions.set(conversationId, {
+		dispose: () => {
+			view.dispose();
+			void messages?.stop();
+		},
+	});
 }
 
 const THINKING_LEVELS = new Set<ModelThinkingLevel>([

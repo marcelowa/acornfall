@@ -155,10 +155,6 @@ export function reporterTask(deps: DelegationDeps) {
 						};
 						return undefined;
 					}, context);
-					// Writing our document does not advance durable's view, because the view
-					// mounts only its own documents: without this the interface would never
-					// learn that the entry it just rendered was not the user's.
-					deps.notify?.(target);
 				}
 
 				// One commit decides the report and records the answer as delivered, so a
@@ -240,7 +236,6 @@ export function reporterTask(deps: DelegationDeps) {
 							};
 							return undefined;
 						}, context);
-						deps.notify?.(String(runtime.conversationId));
 					}
 				}
 				await runtime.commit(

@@ -42,12 +42,6 @@ export interface DelegationDeps {
 	storage: Storage;
 	/** Resolved on demand: the catalog is reloaded when definition files change. */
 	catalog: () => Catalog;
-	/**
-	 * Ask the worker to re-emit a conversation's view. Needed because a commit that
-	 * touches only our documents does not advance durable's view, so nothing else would
-	 * tell an attached interface that anything changed.
-	 */
-	notify?: (conversationId: string) => void;
 }
 
 /** The definition a conversation runs, from its own committed metadata. */
