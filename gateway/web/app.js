@@ -262,6 +262,12 @@ function facts(target, pairs) {
 		.join("");
 }
 
+function thinkingLabel() {
+	const applied = state?.agent?.thinkingLevel || "default";
+	const requested = state?.agent?.thinkingRequested;
+	return requested ? `${applied} (asked for ${requested})` : applied;
+}
+
 function renderInspector() {
 	if (els.inspector.hidden) return;
 	const current = live();
@@ -272,7 +278,9 @@ function renderInspector() {
 		["source", resolved?.source || "(layered defaults only)"],
 		["harness", state?.harness],
 		["model", `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`],
-		["thinking", resolved?.thinking ?? state?.agent?.thinkingLevel ?? "default"],
+		// The applied level is what runs; when the model could not express the
+		// request, say what was asked for instead of appearing to ignore it.
+		["thinking", thinkingLabel()],
 		["sandbox", state?.capabilities?.sandbox],
 	]);
 	renderDefaults();

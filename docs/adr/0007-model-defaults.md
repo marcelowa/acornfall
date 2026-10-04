@@ -56,24 +56,55 @@ choosing a model does not also pin the agent and the thinking level that the con
 was inheriting — a bug this shipped with, because the picker was echoing back everything
 it saw in `State.Agent`.
 
-## Thinking level is clamped, not passed through
+## Thinking level resolution
 
-A level is only meaningful relative to a model. `minimax-m3` declares
-`["off","minimal","low","medium","high"]`; asking for `max` is not a request the provider
-can honour, and passing it through would either be ignored or rejected.
+A level is only meaningful relative to a model, and models declare scales that are
+neither complete nor uniform. Measured on the installed catalog:
 
-Control therefore clamps the resolved level down to the highest level the resolved model
-supports, and reports what it actually applied. Setting the install default to `max`
-against that model yields `high`, visibly, rather than a setting that silently does
-nothing.
+| model | levels |
+|---|---|
+| `minimax-m3` | `off, minimal, low, medium, high` |
+| `hy4-preview` | `off, high` — a gap |
+| `deepseek-v4-flash` | `off, low, high, max` — another shape |
+| `kimi-k3` | `max` — nothing else |
 
-The levels come from `getSupportedThinkingLevels(model)` in the worker's catalog, which
-is also what populates the picker, so the UI cannot offer a level the clamp would then
-take away.
+`resolveThinking` takes the preference **chain** — what this conversation chose, then what
+its definition says, then the install default — and applies:
 
-Clamping has to run against the **resolved** model, not the explicit one. An inheriting
-conversation has no explicit model — which is exactly the case where clamping matters
-most, and exactly the case the first implementation missed.
+1. **The first preference the model supports.**
+2. Otherwise **the closest supported level below the most specific preference.**
+3. Otherwise **the lowest level the model offers.**
+
+The whole chain is passed, not a pre-merged value. That distinction is the difference
+between clamping and falling back: asked for `max` on a model that tops out at `high`,
+a chain with an install default of `off` answers **`off`**, because the default gets a
+chance before approximation does. The first implementation merged first and clamped
+second, which answered `high` and quietly ignored the default.
+
+Step 3 is not hypothetical. `kimi-k3` offers only `max`, so a request for `off` has
+nothing below it; the honest answer is the level the model has, not a setting that
+silently does nothing.
+
+### Where specificity loses, and why
+
+Step 1 can let a *supported* lower-specificity value win over an *unsupported*
+higher-specificity one — a definition saying `medium` on a model offering only `off, high`
+yields the install default rather than a clamped approximation of `medium`. This is the
+one place the "a choice made one layer down beats a global one" rule does not hold.
+
+It is that way deliberately: a preference the model cannot express is not a weaker
+version of the intent, it is an unavailable one, and a supported value from a broader
+layer is a defensible answer where an approximation of the original is a guess. The
+alternative — always clamp the most specific preference — is a one-line change if it
+turns out to match intent better in practice.
+
+### Why the choice is still recorded
+
+The applied level is resolved, but the **chosen** level stays in the binding. Switching
+to a model that cannot express `medium` records `thinkingRequested: "medium"` and applies
+a substitute; switching back restores `medium` exactly. The inspector shows
+`off (asked for medium)` rather than appearing to have ignored the choice, and
+`inherited.thinking` stays `false`, because the conversation did choose.
 
 ## The default
 

@@ -19,7 +19,10 @@ type ModelBinding struct {
 	Provider      string `json:"provider"`
 	ModelID       string `json:"modelId"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
-	Instructions  string `json:"instructions,omitempty"`
+	// ThinkingRequested is the level that was asked for when the model could not
+	// honour it, so the UI can show why the applied level differs.
+	ThinkingRequested string `json:"thinkingRequested,omitempty"`
+	Instructions      string `json:"instructions,omitempty"`
 	// Definition names an agent definition; empty selects the layered defaults only.
 	Definition string `json:"definition,omitempty"`
 }

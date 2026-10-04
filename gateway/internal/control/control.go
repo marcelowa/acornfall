@@ -472,16 +472,34 @@ func (in resolveInputs) effective() protocol.ModelBinding {
 	effective := in.explicit
 	effective.Provider, effective.ModelID = in.effectiveModel()
 
-	if effective.ThinkingLevel == "" {
-		if in.resolved != nil {
-			effective.ThinkingLevel = in.resolved.Thinking
+	// The whole chain, not a pre-merged value: a level the model cannot express
+	// must be able to fall through to the next layer rather than being clamped
+	// in place, which is what "fall back to the default" means.
+	definitionThinking := ""
+	if in.resolved != nil {
+		definitionThinking = in.resolved.Thinking
+	}
+	effective.ThinkingLevel = resolveThinking(
+		in.levels,
+		effective.ThinkingLevel,
+		definitionThinking,
+		in.defaultThinking,
+	)
+
+	// Record what was asked for when the answer differs, so the UI can say why
+	// rather than appearing to have ignored the choice.
+	requested := effective.ThinkingRequested
+	if requested == "" {
+		for _, candidate := range []string{in.explicit.ThinkingLevel, definitionThinking, in.defaultThinking} {
+			if candidate != "" {
+				requested = candidate
+				break
+			}
 		}
-		if effective.ThinkingLevel == "" {
-			effective.ThinkingLevel = in.defaultThinking
-		}
-		// A level the chosen model cannot do is not a level. Clamp down rather
-		// than passing something the provider will ignore or reject.
-		effective.ThinkingLevel = clampThinking(in.levels, effective.ThinkingLevel)
+	}
+	effective.ThinkingRequested = ""
+	if requested != "" && requested != effective.ThinkingLevel {
+		effective.ThinkingRequested = requested
 	}
 
 	if effective.Definition == "" {
@@ -520,32 +538,77 @@ func (c *Control) effective(conversationID string, explicit protocol.ModelBindin
 // thinkingLevels is the ordered scale, weakest first.
 var thinkingLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 
-// clampThinking returns the highest level at or below the requested one that the
-// model supports. Empty means the model has no opinion, so the request stands.
-func clampThinking(levels []string, requested string) string {
-	if requested == "" || len(levels) == 0 {
-		return requested
+// resolveThinking picks the level to run, given an ordered list of preferences:
+// what this conversation chose, then what its definition says, then the install
+// default.
+//
+//  1. the first preference the model supports;
+//  2. otherwise the closest supported level below the most specific preference;
+//  3. otherwise the lowest level the model offers.
+//
+// Step 3 exists because "below" can be empty: a model whose only level is `high`
+// cannot honour a request for `off`, and the honest answer is the level it has,
+// not a setting that silently does nothing. An empty result means no preference
+// was expressed, and the model's own default stands.
+func resolveThinking(levels []string, preferred ...string) string {
+	reference := ""
+	for _, candidate := range preferred {
+		if candidate != "" {
+			reference = candidate
+			break
+		}
+	}
+	if reference == "" {
+		return ""
+	}
+	if len(levels) == 0 {
+		// An unknown model has no declared levels, so nothing to resolve against.
+		return reference
 	}
 	supported := make(map[string]bool, len(levels))
 	for _, level := range levels {
 		supported[level] = true
 	}
-	if supported[requested] {
-		return requested
+	for _, candidate := range preferred {
+		if candidate != "" && supported[candidate] {
+			return candidate
+		}
 	}
+	// Nothing preferred is available: the closest level below the most specific
+	// preference, then the lowest the model has.
 	best := ""
 	for _, level := range thinkingLevels {
-		if level == requested {
+		if level == reference {
 			break
 		}
 		if supported[level] {
 			best = level
 		}
 	}
-	if best == "" && supported["off"] {
-		return "off"
+	if best != "" {
+		return best
 	}
-	return best
+	return lowestThinking(levels)
+}
+
+// lowestThinking returns the weakest level in a set, ordered by the scale rather
+// than by the order the provider happened to list.
+func lowestThinking(levels []string) string {
+	lowest := ""
+	lowestRank := len(thinkingLevels) + 1
+	for _, level := range levels {
+		rank := len(thinkingLevels)
+		for index, known := range thinkingLevels {
+			if known == level {
+				rank = index
+				break
+			}
+		}
+		if rank < lowestRank {
+			lowest, lowestRank = level, rank
+		}
+	}
+	return lowest
 }
 
 // supportedThinking reads the levels a model declares, from the worker's catalog.
