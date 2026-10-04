@@ -22,7 +22,6 @@ const els = {
 	composer: el("composer"),
 	input: el("input"),
 	steer: el("steer"),
-	toggleFormat: el("toggle-format"),
 	conversationTitle: el("conversation-title"),
 	send: el("send"),
 	abort: el("abort"),
@@ -113,13 +112,8 @@ function toolCard({ name, args, output, status, isError }) {
 			<span class="tool-name">${escapeHtml(name)}</span>
 			<span class="tool-status">${escapeHtml(isError ? "error" : status)}</span>
 		</div>
-		${body ? `<pre>${escapeHtml(body)}</pre>${copyButton(body, "Copy output")}` : ""}
+		${body ? `<pre>${escapeHtml(body)}</pre><div class="turn-tools"><button class="ghost small" data-copy="${encodeURIComponent(body)}" type="button">Copy</button></div>` : ""}
 	</div>`;
-}
-
-/** A copy control is added to text a user would plausibly want out of the app. */
-function copyButton(text, label) {
-	return `<button class="icon copy" data-copy="${encodeURIComponent(text)}" type="button" title="${escapeHtml(label)}">⧉</button>`;
 }
 
 /** Clipboard access needs a secure context; the fallback keeps it working over http. */
@@ -137,14 +131,14 @@ async function copyText(button, text) {
 			document.execCommand("copy");
 			scratch.remove();
 		}
-		button.textContent = "✓";
+		button.textContent = "Copied";
 		button.classList.add("copied");
 	} catch (error) {
-		button.textContent = "×";
+		button.textContent = "Copy failed";
 		setStatus(`copy failed: ${error.message ?? error}`, "offline");
 	}
 	setTimeout(() => {
-		button.textContent = "⧉";
+		button.textContent = "Copy";
 		button.classList.remove("copied");
 	}, 1200);
 }
@@ -176,12 +170,22 @@ function renderEntry(entry, calls, forkAt) {
 			const text = (entry.model ?? []).map((item) => textOf(item.content)).join("\n").trim();
 			if (!text) return "";
 			// The reply is markdown; the user's own words are left exactly as typed.
-			const rendered = formattedReplies
-				? `<div class="markdown">${renderMarkdown(text)}</div>`
-				: `<div class="plain">${escapeHtml(text)}</div>`;
+			// Formatted or raw is decided per pane, because it is a reading decision
+			// about one reply rather than a setting for the application.
+			const key = String(entry.id);
+			const raw = rawPanes.has(key);
+			const rendered = raw
+				? `<div class="plain">${escapeHtml(text)}</div>`
+				: `<div class="markdown">${renderMarkdown(text)}</div>`;
 			// Copy takes the markdown source, not the rendered text: pasting markup
 			// into a document is more useful than pasting flattened prose.
-			return `<div class="turn assistant">${rendered}${copyButton(text, "Copy reply")}</div>`;
+			return `<div class="turn assistant">
+				${rendered}
+				<div class="turn-tools">
+					<button class="ghost small" data-format="${key}" type="button">${raw ? "Formatted" : "Raw"}</button>
+					<button class="ghost small" data-copy="${encodeURIComponent(text)}" type="button">Copy</button>
+				</div>
+			</div>`;
 		}
 		case "pi.tool-result": {
 			const message = (entry.model ?? [])[0] ?? {};
@@ -205,16 +209,7 @@ function renderEntry(entry, calls, forkAt) {
 	}
 }
 
-function renderFormatToggle() {
-	els.toggleFormat.textContent = formattedReplies ? "Formatted" : "Unformatted";
-	els.toggleFormat.title = formattedReplies
-		? "Showing rendered markdown; click for the raw text"
-		: "Showing raw text; click to render markdown";
-	els.toggleFormat.setAttribute("aria-pressed", String(formattedReplies));
-}
-
 function render() {
-	renderFormatToggle();
 	els.conversationTitle.textContent = state?.conversation?.title ?? "";
 	const entries = view?.entries ?? [];
 	const current = live();
@@ -257,13 +252,9 @@ function render() {
 	const streaming = textOf(liveMessage?.content).trim();
 	const streamingFailure = liveMessage ? failureOf(liveMessage) : null;
 	if (streamingFailure !== null) html.push(`<div class="turn error">${escapeHtml(streamingFailure)}</div>`);
-	else if (streaming) {
-		html.push(
-			formattedReplies
-				? `<div class="turn assistant live markdown">${renderMarkdown(streaming)}</div>`
-				: `<div class="turn assistant live">${escapeHtml(streaming)}</div>`,
-		);
-	}
+	// No controls while streaming: the text is incomplete, and the pane gets them
+	// the moment it is committed.
+	else if (streaming) html.push(`<div class="turn assistant live markdown">${renderMarkdown(streaming)}</div>`);
 
 	const retry = current.generation?.retry;
 	if (retry) {
@@ -297,6 +288,17 @@ function render() {
 	for (const button of els.transcript.querySelectorAll("[data-copy]")) {
 		button.addEventListener("click", () => void copyText(button, decodeURIComponent(button.dataset.copy)));
 	}
+	for (const button of els.transcript.querySelectorAll("[data-format]")) {
+		button.addEventListener("click", () => {
+			const key = button.dataset.format;
+			if (rawPanes.has(key)) rawPanes.delete(key);
+			else rawPanes.add(key);
+			// Toggling one pane should not move the transcript under the reader.
+			const keep = els.transcript.scrollTop;
+			render();
+			els.transcript.scrollTop = keep;
+		});
+	}
 	for (const button of els.transcript.querySelectorAll("[data-fork-at]")) {
 		button.addEventListener("click", () =>
 			void forkConversation(button.dataset.forkAt, forkSource.get(button.dataset.forkAt)),
@@ -327,7 +329,6 @@ const PREFS = {
 	rail: "acornfall.rail",
 	inspector: "acornfall.inspector",
 	sections: "acornfall.sections",
-	formatted: "acornfall.formatted",
 };
 
 function readPref(key, fallback) {
@@ -348,7 +349,9 @@ function writePref(key, value) {
 }
 
 const openSections = new Set(readPref(PREFS.sections, []));
-let formattedReplies = readPref(PREFS.formatted, true);
+// Panes showing their raw source. Per pane, and deliberately not persisted: it is
+// a reading decision about one reply, not a preference about the app.
+const rawPanes = new Set();
 const bodies = new Map();
 
 function buildInspector() {
@@ -1216,11 +1219,7 @@ els.input.addEventListener("input", () => {
 	els.input.style.height = `${Math.min(els.input.scrollHeight, 200)}px`;
 });
 
-els.toggleFormat.addEventListener("click", () => {
-	formattedReplies = !formattedReplies;
-	writePref(PREFS.formatted, formattedReplies);
-	render();
-});
+
 
 els.steer.addEventListener("change", () => {
 	els.send.textContent = isBusy() && els.steer.checked ? "Steer" : "Send";
@@ -1307,7 +1306,6 @@ async function boot() {
 		return;
 	}
 	renderConversations();
-	renderFormatToggle();
 	buildInspector();
 	setupSplitters();
 	renderAgentPicker();

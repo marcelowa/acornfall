@@ -179,32 +179,97 @@ try {
 	check("javascript: links lose their href", !markdown.jsLink.includes("javascript:"), markdown.jsLink);
 	check("images are refused", !markdown.image.includes("<img"), markdown.image);
 
-	// 6. The format toggle is a button, and it changes what is rendered.
-	const before = await page.evaluate(() => {
-		const reply = document.querySelector("#transcript .turn.assistant");
-		return reply === null
-			? null
-			: {
-					html: reply.innerHTML,
-					label: document.querySelector("#toggle-format").textContent,
-					pressed: document.querySelector("#toggle-format").getAttribute("aria-pressed"),
-					source: reply.querySelector("[data-copy]")?.dataset.copy,
-				};
+	// 6. Each pane decides its own formatting, and the controls are always visible.
+	const controls = await page.evaluate(() =>
+		[...document.querySelectorAll("#transcript .turn.assistant, #transcript .tool")].map((pane) => {
+			const tools = pane.querySelector(".turn-tools");
+			return {
+				type: pane.classList.contains("tool") ? "tool" : "assistant",
+				visible: tools !== null && getComputedStyle(tools).opacity !== "0",
+				format: pane.querySelector("[data-format]") !== null,
+				copy: pane.querySelector("[data-copy]") !== null,
+			};
+		}),
+	);
+	check("every pane carries its controls", controls.length > 0 && controls.every((pane) => pane.visible && pane.copy));
+	check("assistant panes offer a format toggle", controls.filter((p) => p.type === "assistant").every((p) => p.format));
+	check("tool panes do not offer a format toggle", controls.filter((p) => p.type === "tool").every((p) => !p.format));
+
+	const perPane = await page.evaluate(() => {
+		const panes = [...document.querySelectorAll("#transcript .turn.assistant")];
+		const html = panes.map((pane) => pane.querySelector(".markdown, .plain")?.className ?? "");
+		return { count: panes.length, before: html };
 	});
-	if (before === null) {
-		check("a reply exists to format", false, "no assistant turn in the transcript");
-	} else {
-		check("replies are formatted by default", before.pressed === "true" && before.label === "Formatted", before.label);
-		await page.click("#toggle-format");
-		const plain = await page.evaluate(() => ({
-			html: document.querySelector("#transcript .turn.assistant").innerHTML,
-			label: document.querySelector("#toggle-format").textContent,
-		}));
-		check("the toggle switches to unformatted", plain.label === "Unformatted", plain.label);
-		check("the two modes render differently", plain.html !== before.html);
-		await page.click("#toggle-format");
-		const restored = await page.evaluate(() => document.querySelector("#transcript .turn.assistant").innerHTML);
-		check("switching back restores formatted output", restored === before.html);
+	if (perPane.count > 0) {
+		await page.evaluate(() => document.querySelector("#transcript .turn.assistant [data-format]").click());
+		const after = await page.evaluate(() => {
+			const panes = [...document.querySelectorAll("#transcript .turn.assistant")];
+			return {
+				html: panes.map((pane) => pane.querySelector(".markdown, .plain")?.className ?? ""),
+				label: panes[0].querySelector("[data-format]").textContent,
+			};
+		});
+		check("clicking a pane's toggle makes that pane raw", after.html[0] === "plain", after.html[0]);
+		check("the pane's button offers the way back", after.label === "Formatted", after.label);
+		if (perPane.count > 1) {
+			check(
+				"other panes are unaffected",
+				after.html.slice(1).every((value, index) => value === perPane.before[index + 1]),
+				JSON.stringify({ before: perPane.before, after: after.html }),
+			);
+		}
+		await page.evaluate(() => document.querySelector("#transcript .turn.assistant [data-format]").click());
+		const restored = await page.evaluate(() =>
+			[...document.querySelectorAll("#transcript .turn.assistant")].map(
+				(pane) => pane.querySelector(".markdown, .plain")?.className ?? "",
+			),
+		);
+		check("toggling back restores that pane only", restored.join() === perPane.before.join());
+	}
+
+	// A pane must hug its content. Rendered markdown inherited white-space:pre-wrap
+	// once, and every newline marked emits between block elements became a blank
+	// line: 323px of pane for 167px of content.
+	//
+	// Measured inside the body, not around it: the extra height inflates the
+	// markdown box itself, so a pane-level check sees nothing wrong.
+	const slack = await page.evaluate(() =>
+		[...document.querySelectorAll("#transcript .markdown")]
+			.map((body) => {
+				// A child's margins sit outside its box, so they count as its space.
+				// Summing them overestimates where they collapse, which can only make
+				// the result negative, and this only flags positive values.
+				const inner = [...body.children].reduce((sum, child) => {
+					const style = getComputedStyle(child);
+					return (
+						sum +
+						child.getBoundingClientRect().height +
+						Number.parseFloat(style.marginTop) +
+						Number.parseFloat(style.marginBottom)
+					);
+				}, 0);
+				return Math.round(body.clientHeight - inner);
+			})
+			.filter((value) => value > 16),
+	);
+	check(
+		"rendered replies have no dead space",
+		slack.length === 0,
+		`${slack.length} bodies with unexplained height: ${slack.join(", ")}`,
+	);
+
+	// A reply should use the column rather than stopping at an arbitrary width.
+	const width = await page.evaluate(() => {
+		const pane = document.querySelector("#transcript .turn.assistant");
+		const transcript = document.querySelector("#transcript");
+		if (pane === null) return null;
+		return {
+			pane: Math.round(pane.getBoundingClientRect().width),
+			inner: Math.round(transcript.clientWidth - 40),
+		};
+	});
+	if (width !== null) {
+		check("a reply fills the available width", width.pane >= width.inner - 2, JSON.stringify(width));
 	}
 
 	// 7. Copy puts the source on the clipboard, not the rendered text.
@@ -216,7 +281,7 @@ try {
 		return { present: true, text: button.textContent, payload: decodeURIComponent(button.dataset.copy) };
 	});
 	check("assistant replies offer a copy control", copyResult.present);
-	check("copying reports success", copyResult.text === "✓", `button shows ${copyResult.text}`);
+	check("copying reports success", copyResult.text === "Copied", `button shows ${copyResult.text}`);
 	check(
 		"the copied payload looks like source",
 		!copyResult.payload.includes("<p>") && !copyResult.payload.includes("<div"),

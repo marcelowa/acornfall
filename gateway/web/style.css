@@ -369,28 +369,40 @@ button.branch:hover {
 }
 
 .turn {
-	max-width: 760px;
-	width: fit-content;
 	padding: 10px 14px;
 	border-radius: var(--radius-lg);
 	box-shadow: var(--shadow-sm);
-	white-space: pre-wrap;
 	word-break: break-word;
 	line-height: 1.5;
 }
 
-.turn.user {
-	align-self: flex-end;
-	background: var(--brand-400);
-	color: white;
-	border-bottom-right-radius: 6px;
+/* Typed text and raw source keep their newlines; rendered markdown must not, or
+   the newlines marked emits between block elements become blank lines. */
+.turn.user,
+.turn.assistant .plain,
+.turn.error {
+	white-space: pre-wrap;
 }
 
+.turn.assistant .markdown {
+	white-space: normal;
+}
+
+/* A reply is prose and takes the column; your own message stays a bubble sized to
+   its text, so the two remain distinguishable at a glance. */
 .turn.assistant {
-	align-self: flex-start;
+	align-self: stretch;
 	background: var(--neutral-0);
 	border: 1px solid var(--neutral-200);
 	border-bottom-left-radius: 6px;
+}
+
+.turn.user {
+	align-self: flex-end;
+	max-width: 100%;
+	background: var(--brand-400);
+	color: white;
+	border-bottom-right-radius: 6px;
 }
 
 .turn.assistant.live {
@@ -408,8 +420,7 @@ button.branch:hover {
 }
 
 .turn.error {
-	align-self: flex-start;
-	max-width: 760px;
+	align-self: stretch;
 	background: var(--danger-50);
 	border: 1px solid var(--danger-400);
 	color: var(--danger-400);
@@ -418,8 +429,7 @@ button.branch:hover {
 }
 
 .tool {
-	align-self: flex-start;
-	width: min(760px, 100%);
+	align-self: stretch;
 	background: var(--neutral-0);
 	border: 1px solid var(--neutral-200);
 	border-radius: var(--radius);
@@ -1043,36 +1053,28 @@ button.small {
 	color: var(--brand-500);
 }
 
-.turn.assistant {
-	padding-right: 34px;
-}
-
-/* Copy controls sit out of the way until the block is hovered. */
-button.icon.copy {
-	position: absolute;
-	top: 4px;
-	right: 4px;
-	opacity: 0;
+/* Pane controls: bottom right, always visible. Hover-only controls are invisible
+   on touch and are a guess about when someone wants them. */
+.turn-tools {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+	margin-top: 8px;
+	opacity: 0.65;
 	transition: opacity 120ms ease;
-	color: var(--neutral-500);
-	font-size: 12px;
 }
 
-.turn:hover button.icon.copy,
-.tool:hover button.icon.copy,
-button.icon.copy.copied {
+.turn:hover .turn-tools,
+.tool:hover .turn-tools {
 	opacity: 1;
 }
 
-button.icon.copy.copied {
+.turn-tools button {
+	font-size: 11px;
+	padding: 3px 9px;
+}
+
+.turn-tools button.copied {
 	color: var(--success-400);
-}
-
-.tool {
-	position: relative;
-}
-
-.tool button.icon.copy {
-	top: 6px;
-	right: 6px;
+	border-color: var(--success-400);
 }
