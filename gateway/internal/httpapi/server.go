@@ -49,6 +49,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/providers/refresh", s.refresh)
 	mux.HandleFunc("POST /api/auth/answer", s.authAnswer)
 	mux.HandleFunc("POST /api/auth/cancel", s.authCancel)
+	// /c/<id> is a conversation; the client is a single page and reads the id itself.
+	mux.HandleFunc("GET /c/{id}", s.page)
 	mux.Handle("GET /", noCache(http.FileServerFS(s.static)))
 	return mux
 }
@@ -62,8 +64,8 @@ func noCache(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.control.State())
+func (s *Server) state(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.control.StateFor(r.URL.Query().Get("conversation")))
 }
 
 // stream is SSE. Commands are POSTs; this direction is the only streaming one,
@@ -86,10 +88,17 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, frames, initial := s.control.Subscribe()
+	// Each client names the conversation it wants, so two tabs can watch two
+	// conversations without agreeing on an active one.
+	conversationID := r.URL.Query().Get("conversation")
+	id, frames, initial, err := s.control.Subscribe(r.Context(), conversationID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	defer s.control.Unsubscribe(id)
 
-	if err := writeEvent(w, "state", s.control.State()); err != nil {
+	if err := writeEvent(w, "state", s.control.StateFor(conversationID)); err != nil {
 		return
 	}
 	if initial != nil {
@@ -249,6 +258,20 @@ func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.control.State())
+}
+
+// page serves the client for a conversation route, so a reload and a shared link both
+// land on the same conversation.
+func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
+	file, err := s.static.Open("index.html")
+	if err != nil {
+		http.Error(w, "client not found", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = file.Close() }()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = io.Copy(w, file)
 }
 
 func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {

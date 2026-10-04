@@ -327,7 +327,22 @@ try {
 
 	check("still no JavaScript errors after interacting", problems.length === 0, problems.join("; "));
 
-	// 8. The stream proves it is alive. A comment line keeps the socket open but fires no
+	// 8. Every pane says when it happened, and the conversation says whether it is live.
+	const paneMeta = await page.evaluate(() => ({
+		panes: document.querySelectorAll("#transcript .turn, #transcript .tool").length,
+		withoutTime: [...document.querySelectorAll("#transcript .turn, #transcript .tool")].filter(
+			(pane) => pane.querySelector(".turn-when") === null,
+		).length,
+		sample: document.querySelector("#transcript .turn-when")?.textContent.trim() ?? "",
+		live: document.querySelector("#conversation-live").textContent.trim(),
+		path: window.location.pathname,
+	}));
+	check("every pane carries a timestamp", paneMeta.withoutTime === 0, JSON.stringify(paneMeta));
+	check("the timestamp looks like a time", /\d{1,2}:\d{2}/.test(paneMeta.sample), paneMeta.sample);
+	check("the conversation says it is live", /^(working|idle)/.test(paneMeta.live), paneMeta.live);
+	check("the conversation is named in the URL", /^\/c\/[0-9]+$/.test(paneMeta.path), paneMeta.path);
+
+	// 9. The stream proves it is alive. A comment line keeps the socket open but fires no
 	//    event, so a client could not tell a healthy idle stream from a dead one -- the
 	//    first version of this sent a comment and the watchdog could never fire.
 	const liveness = await page.evaluate(async () => {
@@ -347,7 +362,7 @@ try {
 	check("the stream sends a liveness event the client can see", liveness.ping, JSON.stringify(liveness));
 	check("a new subscriber is given the current state", liveness.sawState, JSON.stringify(liveness));
 
-	// 9. A message from another conversation is attributed, not shown as the user's.
+	// 10. A message from another conversation is attributed, not shown as the user's.
 	//    It arrives as a pi.user entry because that is what starts a run, so the
 	//    interface has to say who sent it or a peer's transcript lies about you.
 	const attribution = await page.evaluate(async () => {
@@ -420,7 +435,7 @@ try {
 	}
 	check("per-conversation spend is reported", listed.spend > 0, "no conversation reports tokens");
 
-	// 10. The delegation and created-here sections exist and read from state.
+	// 11. The delegation and created-here sections exist and read from state.
 	await page.evaluate(() => {
 		for (const details of document.querySelectorAll("#inspector details.card")) {
 			if (["delegation", "subagents"].includes(details.dataset.section)) details.open = true;
@@ -468,6 +483,48 @@ try {
 	);
 	check("the open section survives a reload", openAfterReload);
 	check("no errors after reload", problems.length === 0, problems.join("; "));
+
+	// 12. Two tabs, two conversations. The conversation belongs to the URL, so tabs do not
+	//     fight over one "active" conversation and a shared link opens what it names.
+	const other = await page.evaluate(async () => {
+		const state = await (await fetch("/api/state")).json();
+		const mine = state.conversation?.id;
+		const different = state.conversations.find((c) => c.id !== mine && !c.hidden && !c.parent);
+		return different?.id ?? "";
+	});
+	if (other === "") {
+		check("a second conversation exists to open in a second tab", false, "only one conversation");
+	} else {
+		const second = await browser.newPage();
+		await second.goto(`${url.replace(/\/$/, "")}/c/${other}`, { waitUntil: "networkidle2" });
+		await second.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, { timeout: 20000 });
+		const first = await page.evaluate(() => ({
+			path: window.location.pathname,
+			title: document.querySelector("#conversation-title").textContent,
+		}));
+		const both = await second.evaluate(() => ({
+			path: window.location.pathname,
+			title: document.querySelector("#conversation-title").textContent,
+		}));
+		check("a second tab opens the conversation its URL names", both.path.endsWith(`/c/${other}`), JSON.stringify(both));
+		check("the first tab is untouched by the second", first.path === paneMeta.path, JSON.stringify({ first, paneMeta }));
+		check("the two tabs show different conversations", first.title !== both.title, JSON.stringify({ first: first.title, second: both.title }));
+		await second.close();
+
+		// Switching inside a tab is a navigation without a reload, so nothing is lost.
+		await page.evaluate(() => {
+			window.__kept = "yes";
+		});
+		await page.evaluate((id) => document.querySelector(`#conversation-list [data-conversation="${id}"]`).click(), other);
+		await page.waitForFunction((id) => window.location.pathname.endsWith(`/c/${id}`), { timeout: 10000 }, other);
+		const switched = await page.evaluate(() => ({
+			kept: window.__kept === "yes",
+			title: document.querySelector("#conversation-title").textContent,
+			turns: document.querySelectorAll("#transcript .turn").length,
+		}));
+		check("switching conversations does not reload the page", switched.kept);
+		check("the transcript follows the URL", switched.turns > 0, JSON.stringify(switched));
+	}
 } finally {
 	await browser.close();
 }

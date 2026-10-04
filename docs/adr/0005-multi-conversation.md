@@ -88,9 +88,9 @@ way to do the same thing.
 - No rename and no delete. Both are wanted; neither is designed.
 - No fork from the UI, though `conversation.fork(at, options, context)` exists and is
   most of the way there.
-- One attached conversation per gateway instance. Multiple attachments and multiple
-  clients viewing different conversations is the natural next step, and the frame shape
-  already supports it.
+- ~~One attached conversation per gateway instance.~~ Done: attachments are per client and
+  reference counted, and the conversation lives in the URL. See
+  [ADR 0010](0010-per-tab-attachments.md).
 - A client that attaches mid-run gets the cached view immediately, which is correct, but
   has no cursor: it cannot ask for "everything since seq N". That matters when the
   gateway restarts, not yet.

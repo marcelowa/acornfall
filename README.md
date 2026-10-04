@@ -85,6 +85,11 @@ make dev
 - **Delete is a tombstone**, not a row delete: storage is append-only, so a deleted
   conversation keeps its transcript and is restorable from the rail.
 - Streaming transcript with tool cards, live tool output, and a running/idle indicator.
+- **Every pane is timestamped**, and a conversation header says whether it is working,
+  when it last did, and what it has cost.
+- **A conversation lives in the URL** (`/c/1276`), so several browser tabs can show
+  different conversations at once, a reload lands where you were, and links are shareable.
+  See [ADR 0010](docs/adr/0010-per-tab-attachments.md).
 - **Formatted replies**: assistant text renders as Markdown (headings, lists, tables,
   fenced code, links) with a toggle back to the raw text. Tool output stays monospace
   with terminal escape codes stripped.

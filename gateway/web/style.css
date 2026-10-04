@@ -324,25 +324,14 @@ button.icon:hover {
 	text-decoration: line-through;
 }
 
-.turn.user {
-	position: relative;
+.turn.user .turn-tools button {
+	background: transparent;
+	border-color: rgba(255, 255, 255, 0.4);
+	color: rgba(255, 255, 255, 0.9);
 }
 
-button.branch {
-	position: absolute;
-	top: 6px;
-	right: 6px;
-	color: rgba(255, 255, 255, 0.75);
-	opacity: 0;
-}
-
-.turn.user:hover button.branch {
-	opacity: 1;
-}
-
-button.branch:hover {
-	background: rgba(255, 255, 255, 0.2);
-	color: white;
+.turn.user .turn-tools button:hover {
+	background: rgba(255, 255, 255, 0.15);
 }
 
 .conversation {
@@ -1053,15 +1042,35 @@ button.small {
 	color: var(--brand-500);
 }
 
-/* Pane controls: bottom right, always visible. Hover-only controls are invisible
-   on touch and are a guess about when someone wants them. */
+/* Pane footer: when it happened on the left, controls on the right, always visible.
+   Hover-only controls are invisible on touch and are a guess about when someone wants
+   them. */
 .turn-tools {
 	display: flex;
-	justify-content: flex-end;
+	align-items: center;
+	justify-content: space-between;
 	gap: 6px;
 	margin-top: 8px;
-	opacity: 0.65;
+	opacity: 0.7;
 	transition: opacity 120ms ease;
+}
+
+.turn-actions {
+	display: flex;
+	gap: 6px;
+	margin-left: auto;
+}
+
+.turn-when {
+	font-family: var(--mono);
+	font-size: 11px;
+	color: var(--neutral-500);
+	flex-shrink: 0;
+}
+
+/* On the blue bubble the timestamp has to be legible against it. */
+.turn.user .turn-when {
+	color: rgba(255, 255, 255, 0.75);
 }
 
 .turn:hover .turn-tools,
@@ -1164,4 +1173,27 @@ button.small {
 
 .turn.agent-message .markdown {
 	white-space: normal;
+}
+
+/* The conversation page says whether it is live, not just the pill in the top bar. */
+.transcript-bar .live {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-family: var(--mono);
+	font-size: 11px;
+}
+
+.dot.idle {
+	background: var(--neutral-300, #cbd5e1);
+}
+
+.live-label.working {
+	color: var(--brand-500, #2b6cb0);
+}
+
+.pane-time {
+	font-family: var(--mono);
+	font-size: 11px;
+	color: var(--neutral-500);
 }

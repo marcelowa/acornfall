@@ -23,6 +23,7 @@ const els = {
 	input: el("input"),
 	steer: el("steer"),
 	conversationTitle: el("conversation-title"),
+	conversationLive: el("conversation-live"),
 	send: el("send"),
 	abort: el("abort"),
 	connect: el("connect"),
@@ -44,8 +45,15 @@ let sources = null;
 // a lifecycle event can reach render() before the inspector has built its sections.
 let shellReady = false;
 
-/** The conversation everything is scoped to; ids are the harness's own, opaque. */
-const activeId = () => state?.conversation?.id ?? "";
+/**
+ * The conversation this tab shows. It comes from the URL, not from the server, so two
+ * tabs can show two conversations and a shared link opens what it names.
+ */
+const conversationFromUrl = () => {
+	const match = /^\/c\/([^/]+)\/?$/.exec(window.location.pathname);
+	return match === null ? "" : decodeURIComponent(match[1]);
+};
+const activeId = () => conversationFromUrl() || (state?.conversation?.id ?? "");
 /** Text of the message each branch point precedes, so a fork can offer it back. */
 const forkSource = new Map();
 
@@ -110,7 +118,7 @@ function toolCalls(entries, liveMessage) {
 	return calls;
 }
 
-function toolCard({ name, args, output, status, isError }) {
+function toolCard({ name, args, output, status, isError, entry }) {
 	const body = [
 		args === undefined ? "" : `$ ${JSON.stringify(args, null, 2)}`,
 		output ? `\n${stripAnsi(output)}` : "",
@@ -122,7 +130,11 @@ function toolCard({ name, args, output, status, isError }) {
 			<span class="tool-name">${escapeHtml(name)}</span>
 			<span class="tool-status">${escapeHtml(isError ? "error" : status)}</span>
 		</div>
-		${body ? `<pre>${escapeHtml(body)}</pre><div class="turn-tools"><button class="ghost small" data-copy="${encodeURIComponent(body)}" type="button">Copy</button></div>` : ""}
+		${body ? `<pre>${escapeHtml(body)}</pre>` : ""}
+		${paneFooter(
+			entry ?? {},
+			body ? `<button class="ghost small" data-copy="${encodeURIComponent(body)}" type="button">Copy</button>` : "",
+		)}
 	</div>`;
 }
 
@@ -161,7 +173,7 @@ async function copyText(button, text) {
  * what starts a run, so the interface has to say who it is from — otherwise a peer's
  * transcript attributes another agent's words to the user.
  */
-function renderAgentMessage(text, sender) {
+function renderAgentMessage(text, sender, entry) {
 	const label = `${sender.name ? `${escapeHtml(sender.name)} · ` : ""}conversation ${escapeHtml(sender.conversationId)}`;
 	const verb = sender.kind === "report" ? "reported" : "asked";
 	// The prefix the sender wrote is for the model; showing it to a person is noise.
@@ -170,8 +182,11 @@ function renderAgentMessage(text, sender) {
 		<div class="agent-message-head">${label} ${verb}</div>
 		<div class="markdown">${renderMarkdown(body)}</div>
 		<div class="turn-tools">
-			<button class="ghost small" data-open="${escapeHtml(sender.conversationId)}" type="button">Open ${escapeHtml(sender.conversationId)}</button>
-			<button class="ghost small" data-copy="${encodeURIComponent(text)}" type="button">Copy</button>
+			${entry === undefined ? "" : timeOf(entry)}
+			<span class="turn-actions">
+				<button class="ghost small" data-open="${escapeHtml(sender.conversationId)}" type="button">Open ${escapeHtml(sender.conversationId)}</button>
+				<button class="ghost small" data-copy="${encodeURIComponent(text)}" type="button">Copy</button>
+			</span>
 		</div>
 	</div>`;
 }
@@ -182,6 +197,26 @@ function failureOf(message) {
 	return `${message.provider ?? "provider"}/${message.model ?? "model"}: ${detail}`;
 }
 
+/** When this entry happened. Message timestamps are Unix milliseconds. */
+function timeOf(entry) {
+	const message = (entry.model ?? [])[0];
+	const ms = message?.timestamp;
+	if (typeof ms !== "number") return "";
+	const at = new Date(ms);
+	const today = new Date().toDateString() === at.toDateString();
+	const label = today
+		? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+		: at.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+	return `<time class="turn-when" title="${escapeHtml(at.toISOString())}">${escapeHtml(label)}</time>`;
+}
+
+/** Every pane ends the same way: when it happened on the left, controls on the right. */
+function paneFooter(entry, actions) {
+	return `<div class="turn-tools">${timeOf(entry)}${
+		actions === "" ? "" : `<span class="turn-actions">${actions}</span>`
+	}</div>`;
+}
+
 function renderEntry(entry, calls, forkAt) {
 	switch (entry.kind) {
 		case "pi.user": {
@@ -190,17 +225,19 @@ function renderEntry(entry, calls, forkAt) {
 			// Another conversation's words arrive here because an input is what starts a
 			// run. Rendering them as the user's bubble would attribute them to you.
 			const sender = senders.get(activeId())?.[String(entry.id)];
-			if (sender !== undefined) return renderAgentMessage(text, sender);
-			const button =
+			if (sender !== undefined) return renderAgentMessage(text, sender, entry);
+			const branch =
 				forkAt === null
 					? ""
-					: `<button class="icon branch" data-fork-at="${escapeHtml(forkAt)}" title="Branch a new conversation from before this message">⑂</button>`;
-			return `<div class="turn user">${escapeHtml(text)}${button}</div>`;
+					: `<button class="ghost small" data-fork-at="${escapeHtml(forkAt)}" title="Branch a new conversation from before this message">Branch</button>`;
+			return `<div class="turn user"><div class="plain">${escapeHtml(text)}</div>${paneFooter(entry, branch)}</div>`;
 		}
 		case "pi.assistant": {
 			const message = (entry.model ?? [])[0] ?? {};
 			const failure = failureOf(message);
-			if (failure !== null) return `<div class="turn error">${escapeHtml(failure)}</div>`;
+			if (failure !== null) {
+				return `<div class="turn error">${escapeHtml(failure)}${paneFooter(entry, "")}</div>`;
+			}
 			const text = (entry.model ?? []).map((item) => textOf(item.content)).join("\n").trim();
 			if (!text) return "";
 			// The reply is markdown; the user's own words are left exactly as typed.
@@ -213,13 +250,11 @@ function renderEntry(entry, calls, forkAt) {
 				: `<div class="markdown">${renderMarkdown(text)}</div>`;
 			// Copy takes the markdown source, not the rendered text: pasting markup
 			// into a document is more useful than pasting flattened prose.
-			return `<div class="turn assistant">
-				${rendered}
-				<div class="turn-tools">
-					<button class="ghost small" data-format="${key}" type="button">${raw ? "Formatted" : "Raw"}</button>
-					<button class="ghost small" data-copy="${encodeURIComponent(text)}" type="button">Copy</button>
-				</div>
-			</div>`;
+			return `<div class="turn assistant">${rendered}${paneFooter(
+				entry,
+				`<button class="ghost small" data-format="${key}" type="button">${raw ? "Formatted" : "Raw"}</button>
+				 <button class="ghost small" data-copy="${encodeURIComponent(text)}" type="button">Copy</button>`,
+			)}</div>`;
 		}
 		case "pi.tool-result": {
 			const message = (entry.model ?? [])[0] ?? {};
@@ -230,12 +265,13 @@ function renderEntry(entry, calls, forkAt) {
 				output: textOf(message.content),
 				status: "done",
 				isError: message.isError === true,
+				entry,
 			});
 		}
 		case "pi.compaction":
-			return `<div class="turn notice">context compacted</div>`;
+			return `<div class="turn notice">context compacted ${timeOf(entry)}</div>`;
 		case "pi.reset":
-			return `<div class="turn notice">context reset</div>`;
+			return `<div class="turn notice">context reset ${timeOf(entry)}</div>`;
 		case "pi.system":
 			return "";
 		default:
@@ -243,9 +279,24 @@ function renderEntry(entry, calls, forkAt) {
 	}
 }
 
+/** Whether this conversation is working, and what it has cost so far. */
+function renderLive() {
+	const conversation = state?.conversation;
+	const busy = isBusy() || conversation?.running === true;
+	const latest = (view?.entries ?? []).at(-1);
+	const when = latest === undefined ? "" : timeOf(latest);
+	const spend = conversation?.tokens
+		? ` · ${formatTokens(conversation.tokens)}${conversation.cost ? ` · $${conversation.cost.toFixed(4)}` : ""}`
+		: "";
+	els.conversationLive.innerHTML = busy
+		? `<span class="dot running"></span><span class="live-label working">working</span>`
+		: `<span class="dot idle"></span><span class="live-label">idle</span>${when === "" ? "" : ` · last ${when}`}${spend}`;
+}
+
 function render() {
 	if (!shellReady) return;
 	els.conversationTitle.textContent = state?.conversation?.title ?? "";
+	renderLive();
 	// Reading a conversation marks it read, which is what clears the dot.
 	const active = (state?.conversations ?? []).find((conversation) => conversation.id === activeId());
 	if (active !== undefined && seenCursors.get(active.id) !== active.lastEntryId) {
@@ -790,7 +841,7 @@ async function refreshUsage() {
 /* ---------- provider connection ---------- */
 
 async function loadState() {
-	state = await (await fetch("/api/state")).json();
+	state = await (await fetch(`/api/state?conversation=${encodeURIComponent(activeId())}`)).json();
 	renderConversations();
 	renderAgentPicker();
 	renderThinking();
@@ -1016,8 +1067,13 @@ function handleAuthFrame(frame) {
 
 /* ---------- model picker ---------- */
 
+let modelPickerSignature = "";
+
 function renderModelPicker() {
 	const providers = state?.providers ?? [];
+	const pickerSignature = JSON.stringify([providers.map((p) => [p.id, p.authenticated, p.models.length]), state?.agent]);
+	if (pickerSignature === modelPickerSignature) return;
+	modelPickerSignature = pickerSignature;
 	const selected = `${state?.agent?.provider}/${state?.agent?.modelId}`;	const options = [];
 	for (const provider of providers) {
 		if (!provider.authenticated || provider.models.length === 0) continue;
@@ -1072,8 +1128,17 @@ function conversationRow(conversation, active, deleted) {
 	</div>`;
 }
 
+let conversationsSignature = "";
+
 function renderConversations() {
 	const all = state?.conversations ?? [];
+	// Rebuilding the rail on every state frame replaces its elements, which closes a
+	// dropdown the reader has open and detaches anything they are about to click.
+	const signature = JSON.stringify(
+		all.map((c) => [c.id, c.title, c.hidden, c.parent ?? "", c.createdBy ?? "", c.running, c.lastEntryId, c.tokens]),
+	);
+	if (signature === conversationsSignature) return;
+	conversationsSignature = signature;
 	const active = activeId();
 	// A subagent is a conversation but not a peer: it belongs to the conversation
 	// that made it, so the rail lists only conversations without a parent.
@@ -1165,34 +1230,54 @@ async function openConversation(id) {
 	await selectConversation(id);
 }
 
-async function selectConversation(id) {
-	if (id === activeId()) return;
-	// Clear first: the new transcript arrives as a snapshot frame from the worker.
+/** Move this tab to a conversation: URL first, then everything that follows from it. */
+async function selectConversation(id, options = {}) {
+	if (id === "" || id === activeId()) return;
+	if (options.replace === true) window.history.replaceState(null, "", `/c/${encodeURIComponent(id)}`);
+	else window.history.pushState(null, "", `/c/${encodeURIComponent(id)}`);
+	await followUrl();
+}
+
+/**
+ * Re-point the tab at whatever the URL names: clear the old transcript so a stale view
+ * cannot be mistaken for the new one, ask for that conversation's state, and re-open the
+ * stream against it. The worker attaches on demand, so nothing else has to coordinate.
+ */
+async function followUrl() {
 	view = null;
-	state.conversation = { id, title: "" };
+	state = null;
+	senders.clear();
 	render();
+	connect();
 	try {
-		await post(`/api/conversations/${id}/select`);
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
-		// The optimistic switch was wrong: put the real state back.
-		await loadState().catch(() => {});
 	}
 }
 
 async function newConversation() {
 	try {
-		await post("/api/conversations");
-		await loadState();
+		const created = await post("/api/conversations");
+		const id = created?.conversation?.id ?? "";
+		if (id === "") {
+			await loadState();
+			return;
+		}
+		await selectConversation(id);
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
 	}
 }
 
 /** Levels come from the model, so the picker never offers one the model cannot do. */
+let thinkingSignature = "";
+
 function renderThinking() {
 	const binding = state?.agent ?? {};
+	const thinkingKey = JSON.stringify([binding, (state?.providers ?? []).map((p) => [p.id, p.models.map((m) => m.thinkingLevels)])]);
+	if (thinkingKey === thinkingSignature) return;
+	thinkingSignature = thinkingKey;
 	const provider = (state?.providers ?? []).find((item) => item.id === binding.provider);
 	const model = provider?.models?.find((item) => item.id === binding.modelId);
 	const levels = model?.thinkingLevels ?? [];
@@ -1292,8 +1377,13 @@ async function adoptDefault(kind, value) {
 	}
 }
 
+let agentPickerSignature = "";
+
 function renderAgentPicker() {
 	const locked = state?.subagent === true;
+	const agentKey = JSON.stringify([locked, state?.agent?.definition ?? "", (state?.agents ?? []).map((a) => a.name)]);
+	if (agentKey === agentPickerSignature) return;
+	agentPickerSignature = agentKey;
 	els.agent.disabled = locked;
 	els.model.disabled = locked;
 	els.thinking.disabled = locked || (state?.providers ?? []).length === 0;
@@ -1331,7 +1421,7 @@ function connect() {
 	if (!shellReady) return;
 	if (sources) sources.close();
 	lastEventAt = Date.now();
-	sources = new EventSource("/api/stream");
+	sources = new EventSource(`/api/stream?conversation=${encodeURIComponent(activeId())}`);
 	// The server's ping is the only event that arrives while nothing is happening, so it
 	// is what proves the stream is alive rather than merely open.
 	sources.addEventListener("ping", () => {
@@ -1395,6 +1485,8 @@ function reconnectIfStale() {
 	if (Date.now() - lastEventAt > KEEPALIVE_MS) connect();
 	else void loadState();
 }
+
+window.addEventListener("popstate", () => void followUrl());
 
 for (const event of ["online", "pageshow", "focus"]) {
 	window.addEventListener(event, () => reconnectIfStale());
@@ -1521,6 +1613,10 @@ async function boot() {
 	} catch (error) {
 		setStatus("gateway unreachable", "offline");
 		return;
+	}
+	// Name it in the URL straight away, so a reload and a shared link agree.
+	if (conversationFromUrl() === "" && state?.conversation?.id !== undefined) {
+		window.history.replaceState(null, "", `/c/${encodeURIComponent(state.conversation.id)}`);
 	}
 	renderConversations();
 	buildInspector();

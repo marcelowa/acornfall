@@ -119,10 +119,14 @@ type Control struct {
 	resolved        map[string]*protocol.ResolvedAgent
 	catalog         protocol.AgentsData
 	providers       []protocol.ProviderInfo
-	policy          json.RawMessage
+	policies        map[string]json.RawMessage
 	views           map[string]cachedView
 	subscribers     map[int]chan protocol.Frame
 	nextSub         int
+	// Which conversation each subscriber watches, and how many watch each. Several
+	// clients watching different conversations is what makes browser tabs work.
+	subscriberConversation map[int]string
+	attachments            map[string]int
 }
 
 // cachedView is the last full view per conversation, so switching back is instant
@@ -137,12 +141,15 @@ type cachedView struct {
 
 func New(opts Options) *Control {
 	return &Control{
-		workerExited: make(chan struct{}, 1),
-		opts:         opts,
-		bindings:     map[string]protocol.ModelBinding{},
-		resolved:     map[string]*protocol.ResolvedAgent{},
-		views:        map[string]cachedView{},
-		subscribers:  map[int]chan protocol.Frame{},
+		workerExited:           make(chan struct{}, 1),
+		opts:                   opts,
+		bindings:               map[string]protocol.ModelBinding{},
+		resolved:               map[string]*protocol.ResolvedAgent{},
+		views:                  map[string]cachedView{},
+		subscribers:            map[int]chan protocol.Frame{},
+		subscriberConversation: map[int]string{},
+		attachments:            map[string]int{},
+		policies:               map[string]json.RawMessage{},
 	}
 }
 
@@ -360,6 +367,24 @@ func (c *Control) watchConversations(ctx context.Context) {
 	}
 }
 
+// watchedConversations lists the distinct conversations clients are attached to.
+func (c *Control) watchedConversations() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	seen := map[string]bool{}
+	list := make([]string, 0, len(c.attachments))
+	for id, count := range c.attachments {
+		if count > 0 && !seen[id] {
+			seen[id] = true
+			list = append(list, id)
+		}
+	}
+	if c.active != "" && !seen[c.active] {
+		list = append(list, c.active)
+	}
+	return list
+}
+
 func (c *Control) hasSubscribers() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -402,11 +427,23 @@ func (c *Control) Describe() protocol.Describe {
 }
 
 func (c *Control) State() State {
-	// The effective binding is computed before the snapshot lock, because
-	// inputsFor takes its own and nested read locks are not re-entrant here.
 	c.mu.RLock()
 	active := c.active
 	c.mu.RUnlock()
+	return c.StateFor(active)
+}
+
+// StateFor is everything a client needs for one conversation. Each tab asks for its own,
+// so two tabs can show two conversations without agreeing on an "active" one.
+func (c *Control) StateFor(conversationID string) State {
+	// The effective binding is computed before the snapshot lock, because
+	// inputsFor takes its own and nested read locks are not re-entrant here.
+	active := conversationID
+	if active == "" {
+		c.mu.RLock()
+		active = c.active
+		c.mu.RUnlock()
+	}
 	inputs := c.inputsFor(active)
 	isChild := c.isSubagent(active)
 	if isChild {
@@ -445,7 +482,6 @@ func (c *Control) State() State {
 		DefaultModel:    c.defaultModel,
 		DefaultThinking: c.defaultThinking,
 		DefaultAgent:    c.defaultAgent,
-		Policy:          c.policy,
 		WorkerUp:        c.workerUp,
 		WorkerError:     c.workerError,
 		Inherited: Inherited{
@@ -457,7 +493,8 @@ func (c *Control) State() State {
 		Skills:    c.catalog.Skills,
 		Defaults:  c.catalog.Defaults,
 		Providers: c.providers,
-		Seq:       c.views[c.active].seq,
+		Seq:       c.views[active].seq,
+		Policy:    c.policies[active],
 	}
 	for index := range state.Conversations {
 		if state.Conversations[index].ID == c.active {
@@ -1181,32 +1218,73 @@ func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
 
 // Subscribe attaches a client. It returns the active conversation's current
 // view, if any, so a late joiner starts from committed state.
-func (c *Control) Subscribe() (int, <-chan protocol.Frame, *protocol.Frame) {
+// Subscribe attaches one client to one conversation. An empty id means the
+// conversation this install last used, which is what a fresh tab lands on.
+func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-chan protocol.Frame, *protocol.Frame, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	if conversationID == "" {
+		conversationID = c.active
+	}
+	first := c.attachments[conversationID] == 0
+	c.attachments[conversationID] += 1
 	id := c.nextSub
 	c.nextSub++
 	channel := make(chan protocol.Frame, 1)
 	c.subscribers[id] = channel
+	c.subscriberConversation[id] = conversationID
+	// The newest watcher decides what a new tab opens on.
+	if conversationID != "" {
+		c.active = conversationID
+	}
+	cached, hasCache := c.views[conversationID]
+	c.mu.Unlock()
+
+	// The worker subscribes per conversation, so the first watcher is what asks for it.
+	if first && conversationID != "" {
+		if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
+			c.Unsubscribe(id)
+			return 0, nil, nil, err
+		}
+	}
 
 	var initial *protocol.Frame
-	if cached, ok := c.views[c.active]; ok && cached.value != nil {
+	if hasCache && cached.value != nil {
 		frame := protocol.Frame{
 			Type:           "view",
-			ConversationID: c.active,
+			ConversationID: conversationID,
 			Seq:            cached.seq,
 			Value:          append([]byte(nil), cached.value...),
 			Acornfall:      append(json.RawMessage(nil), cached.annotation...),
 		}
 		initial = &frame
 	}
-	return id, channel, initial
+	return id, channel, initial, nil
 }
 
+// Unsubscribe releases one client. The worker is told to stop watching only when the last
+// watcher of that conversation leaves, and never for the one this install remembers.
 func (c *Control) Unsubscribe(id int) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	conversationID := c.subscriberConversation[id]
 	delete(c.subscribers, id)
+	delete(c.subscriberConversation, id)
+	if conversationID != "" {
+		c.attachments[conversationID] -= 1
+		if c.attachments[conversationID] < 0 {
+			c.attachments[conversationID] = 0
+		}
+	}
+	last := conversationID != "" && c.attachments[conversationID] == 0 && conversationID != c.active
+	c.mu.Unlock()
+
+	if last {
+		if _, err := c.worker.Call(context.Background(), protocol.Command{
+			Type:           "detach",
+			ConversationID: conversationID,
+		}); err != nil {
+			workerpool.Log("detach %s: %v", conversationID, err)
+		}
+	}
 }
 
 func (c *Control) onFrame(frame protocol.Frame) {
@@ -1287,13 +1365,16 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 
 	// One extra worker call per refresh, for the active conversation only: the
 	// delegation card is always about the conversation in front of you.
-	if active := c.activeConversation(); active != "" {
-		policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: active})
-		if err == nil {
-			c.mu.Lock()
-			c.policy = policy
-			c.mu.Unlock()
+	// Policy for every conversation a client is watching, so an inspector is correct in
+	// whichever tab it happens to be open.
+	for _, conversationID := range c.watchedConversations() {
+		policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
+		if err != nil {
+			continue
 		}
+		c.mu.Lock()
+		c.policies[conversationID] = policy
+		c.mu.Unlock()
 	}
 	return data.Conversations, nil
 }
