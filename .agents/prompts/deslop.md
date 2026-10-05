@@ -20,7 +20,7 @@ Review the work just completed — ${@:-the changes in the most recent commit, o
 - Remove speculative flexibility, configuration, extension points, and generic machinery that have no current requirement.
 - Remove speculative defensive programming inside trusted code. Validate at real trust boundaries; rely on types and established invariants internally.
 
-  The trust boundaries here are specific: files the user edits (`AGENTS.md`, `.acornfall/config.json`, agent frontmatter, `settings.json`), the model's tool arguments, the worker protocol (`worker/src/protocol.ts` ↔ `gateway/internal/protocol/protocol.go`), and the HTTP API. Validation at those is a feature, not defensiveness. Inside the process, rely on the types and on what the tests pin.
+  The trust boundaries here are specific: files the user edits (`AGENTS.md`, `.agents/config.json` and `.acornfall/config.json`, agent frontmatter, `settings.json`), the model's tool arguments, the worker protocol (`worker/src/protocol.ts` ↔ `gateway/internal/protocol/protocol.go`), and the HTTP API. Validation at those is a feature, not defensiveness. Inside the process, rely on the types and on what the tests pin.
 
 - Do not keep fallback behavior for states that should be impossible. Prefer fixing the invariant or type model.
 - Simplify excessive state, boolean flags, branching, indirection, and special cases. Rework the underlying representation when that is clearer.

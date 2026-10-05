@@ -1,7 +1,7 @@
 // Validate commit messages against Conventional Commits 1.0.0.
 //
 // A subject that does not parse cannot be read as a change, and history is the only place the
-// why of a change survives. `.pi/skills/conventional-commits/SKILL.md` is the standard; this is
+// why of a change survives. `.agents/skills/conventional-commits/SKILL.md` is the standard; this is
 // the check, run over a pull request's commits in CI and by hand before pushing.
 //
 // Usage: node scripts/check-commits.mjs [range]
@@ -61,7 +61,7 @@ for (const sha of shas) {
 
 if (failures.length > 0) {
 	console.error(`commit messages in ${range}:\n  - ${failures.join("\n  - ")}`);
-	console.error(`\nThe standard is .pi/skills/conventional-commits/SKILL.md.`);
+	console.error(`\nThe standard is .agents/skills/conventional-commits/SKILL.md.`);
 	process.exit(1);
 }
 console.log(`commits: ${shas.length} in ${range}, all conventional`);

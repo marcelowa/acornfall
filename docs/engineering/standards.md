@@ -30,7 +30,7 @@ to follow yourself:
    disagree, say which one should move before touching either.
 3. **Run `make lint` and `make test` before saying it is done.** A change that has not run the
    tests has not been made.
-4. **When the work is finished, run `/deslop`** (`.pi/prompts/deslop.md`). It is the review pass
+4. **When the work is finished, run `/deslop`** (`.agents/prompts/deslop.md`). It is the review pass
    that removes what accumulated: abstractions nothing needed, defensive branches inside trusted
    code, comments that restate the code. It preserves behaviour, asks before removing anything
    significant, and validates with the commands above. Run it per work package, not as a
@@ -168,5 +168,5 @@ with a deadline:
 Named here so nobody mistakes them for guarantees: naming, comment quality, which decisions
 deserve an ADR, keeping `docs/features.md` current, and the judgement that a rule does not
 apply to a particular case. If a convention keeps getting broken, give it a check and move it
-into a table above — which is what happened to commit messages, now `.pi/skills/conventional-commits`
+into a table above — which is what happened to commit messages, now `.agents/skills/conventional-commits`
 and `scripts/check-commits.mjs`.
