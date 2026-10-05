@@ -12,7 +12,7 @@ URL ?= http://$(ADDR)
 INSECURE ?= 1
 OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 
-.PHONY: help deps build typecheck lint tools check test ui vendor run dev fmt clean
+.PHONY: help deps build typecheck lint tools commits check test ui vendor run dev fmt clean
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -51,6 +51,9 @@ lint: typecheck ## the static rules; fails on the first one broken
 	if [ -n "$$bad" ]; then echo "a lint exception without a reason (S9):"; echo "$$bad"; exit 1; \
 	else echo "lint exceptions carry reasons: clean"; fi
 	cd worker && bun run lint
+
+commits: ## check commit messages (RANGE=origin/main..HEAD by default)
+	node scripts/check-commits.mjs $(RANGE)
 
 check: typecheck ## fast: the compiler and the unit tests, no processes
 	cd worker && bun test

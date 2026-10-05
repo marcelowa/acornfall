@@ -27,3 +27,33 @@ jobs:
       - run: make deps
       - run: make tools
       - run: make test
+
+  commits:
+    # The commit format is a standard (`.pi/skills/conventional-commits`), so it is checked
+    # rather than trusted — over the commits a pull request or a push adds, not all of history.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The range needs the commits behind it.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Decide what to check
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "value=${{ github.event.pull_request.base.sha }}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            echo "value=${{ github.event.before }}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check the messages
+        if: steps.range.outputs.value != ''
+        run: node scripts/check-commits.mjs "${{ steps.range.outputs.value }}"
+      - name: Nothing to check
+        if: steps.range.outputs.value == ''
+        run: echo "the first push to a branch has no range behind it; skipping"
+

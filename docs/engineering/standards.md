@@ -140,6 +140,7 @@ rather than pretending to have checked:
 | TypeScript types | `bun run typecheck` |
 | TypeScript rules | `bun run lint` (eslint + typescript-eslint, type-aware) |
 | lint exceptions have reasons | a grep |
+| commit message shape | `scripts/check-commits.mjs`, over a pull request's commits in CI |
 
 `make check` is the fast loop (types and unit tests, ~6s). `make test` is everything: unit
 tests, the worker protocol against a real worker process, `-race`, and the end-to-end suite
@@ -164,7 +165,8 @@ with a deadline:
 
 ## Convention (not enforced)
 
-Named here so nobody mistakes them for guarantees: naming, comment quality, commit-message
-shape, which decisions deserve an ADR, keeping `docs/features.md` current, and the judgement
-that a rule does not apply to a particular case. If a convention keeps getting broken, give it
-a check and move it into a table above.
+Named here so nobody mistakes them for guarantees: naming, comment quality, which decisions
+deserve an ADR, keeping `docs/features.md` current, and the judgement that a rule does not
+apply to a particular case. If a convention keeps getting broken, give it a check and move it
+into a table above — which is what happened to commit messages, now `.pi/skills/conventional-commits`
+and `scripts/check-commits.mjs`.
