@@ -115,6 +115,58 @@ func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
 	}
 }
 
+// What a spawned child runs comes from three places, and they have an order: what this
+// conversation runs, then what its definition says, then what the caller asked for. The order
+// was reversed, so an override lost to the definition it was meant to beat, and the definition's
+// level was read and then dropped, so naming one made no difference to a spawned child at all.
+func TestASpawnedChildsLevelFollowsTheDocumentedOrder(t *testing.T) {
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "spawn one",
+				Tools: []scriptTool{{Name: "subagent", Args: map[string]any{
+					"action": "spawn", "name": "one", "message": "helper task one", "agent": "thinky",
+				}}},
+				Reply: "started one",
+			},
+			scriptRule{
+				Match: "spawn two",
+				Tools: []scriptTool{{Name: "subagent", Args: map[string]any{
+					"action": "spawn", "name": "two", "message": "helper task two", "agent": "thinky",
+					"thinking": "low",
+				}}},
+				Reply: "started two",
+			},
+		),
+		withSetup(func(t *testing.T, s *system) {
+			s.writeWorkspace(t, ".agents/agents/thinky.md",
+				"---\nname: thinky\ndescription: names a level of its own\nthinking: high\n---\nBody.")
+		}),
+	)
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	c.prompt("general", root, "spawn one")
+	c.waitForText("general", root, "started one")
+	// The task arrives with its attribution, so the title is "[from conversation 1] helper task
+	// one": the delegation says where a message came from, which is the point of it.
+	fromDefinition := c.waitForConversationMatching("general", func(candidate conversation) bool {
+		return strings.Contains(candidate.Title, "helper task one")
+	})
+	if fromDefinition.Thinking != "high" {
+		t.Errorf("the definition's level should apply to the child, got %q", fromDefinition.Thinking)
+	}
+
+	c.prompt("general", root, "spawn two")
+	c.waitForText("general", root, "started two")
+	fromCaller := c.waitForConversationMatching("general", func(candidate conversation) bool {
+		return strings.Contains(candidate.Title, "helper task two")
+	})
+	if fromCaller.Thinking != "low" {
+		t.Errorf("the caller's level should beat the definition's, got %q", fromCaller.Thinking)
+	}
+}
+
 // A thinking level that does not exist is refused wherever it came from, and the refusal is what
 // the model sees: the level in a definition, and the level the model itself passes as an
 // argument. Both go through the check the open path uses, and a refusal is not a spawn.

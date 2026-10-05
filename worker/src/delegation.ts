@@ -429,10 +429,14 @@ export function delegationExtension(deps: DelegationDeps) {
 						...(overrideLevel === null ? {} : { thinkingLevel: overrideLevel }),
 					};
 					const resolved = args.agent === undefined ? undefined : resolveAgent(deps.catalog(), args.agent);
+					const resolvedLevel = resolved === undefined ? null : thinkingLevelFor(resolved.thinking);
 					const inherited = isPeer ? await tx.doc(AgentDoc, api.conversationId) : undefined;
+					// Least specific first, because the last one wins: what this conversation runs,
+					// then what the named definition says, then what the caller asked for. That is
+					// the order the open path documents — an explicit model beats a definition —
+					// and it was the other way round here, so a caller's override lost to the
+					// definition and a peer's inherited model beat both.
 					await configure(tx, child.id, {
-						...override,
-						...(resolved?.model === undefined ? {} : { model: splitModel(resolved.model) }),
 						// An ownerless conversation does not inherit the creator's agent the way a
 						// task-owned one does, so a peer copies the model and thinking explicitly.
 						...(inherited?.model === undefined ? {} : { model: inherited.model }),
@@ -440,6 +444,11 @@ export function delegationExtension(deps: DelegationDeps) {
 						...(inherited?.thinkingLevel === undefined || inherited.thinkingLevel === null
 							? {}
 							: { thinkingLevel: inherited.thinkingLevel }),
+						...(resolved?.model === undefined ? {} : { model: splitModel(resolved.model) }),
+						// The definition's level applies here too; it was read and then dropped, so a
+						// definition that named one was ignored for every spawned child.
+						...(resolvedLevel === null ? {} : { thinkingLevel: resolvedLevel }),
+						...override,
 						instructions:
 							resolved !== undefined
 								? resolved.instructions

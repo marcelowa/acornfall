@@ -585,20 +585,24 @@ func (c *client) waitForConversation(workspace string) string {
 	return ""
 }
 
-// waitForConversationMatching waits for a conversation to appear in the listing. The listing
-// is refreshed by a poll, so a conversation created a moment ago is not in it yet.
+// waitForConversationMatching waits for a conversation to appear in the listing.
+//
+// The listing it asks is the one the server refreshes before answering, not the cached view the
+// state carries: the cache is kept current by a poll that runs only while a client is attached,
+// so a test that has just closed its stream would wait for a tick that never comes. A
+// conversation created a moment ago is therefore always in this one.
 func (c *client) waitForConversationMatching(workspace string, predicate func(conversation) bool) conversation {
 	c.t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, candidate := range c.state(workspace).Conversations {
+		for _, candidate := range c.conversations(workspace) {
 			if predicate(candidate) {
 				return candidate
 			}
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	c.t.Fatalf("no conversation in %s matched, listing: %+v", workspace, c.state(workspace).Conversations)
+	c.t.Fatalf("no conversation in %s matched, listing: %+v", workspace, c.conversations(workspace))
 	return conversation{}
 }
 
