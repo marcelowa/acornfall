@@ -33,6 +33,11 @@ import { ConversationMetaDoc, conversationIdOf } from "./meta.ts";
 import { Anchor, DelegationDoc, reporterTask } from "./delegation-tasks.ts";
 
 const ANSWER_SCAN_LIMIT = 8;
+/**
+ * How far up an ownership chain to walk before giving up. The chain is acyclic by construction —
+ * a task is created in the parent's commit before the conversation it owns — so reaching this
+ * means the storage contradicts that, and reporting a depth of 16 beats looping forever.
+ */
 const MAX_DEPTH_WALK = 16;
 const READ_LIMIT = 24;
 const READ_CHARS = 4000;
@@ -384,8 +389,8 @@ export function delegationExtension(deps: DelegationDeps) {
 						...(resolved?.model === undefined ? {} : { model: splitModel(resolved.model) }),
 						// An ownerless conversation does not inherit the creator's agent the way a
 						// task-owned one does, so a peer copies the model and thinking explicitly.
-						...(inherited?.model === undefined || isPeer === false ? {} : { model: inherited.model }),
-						...(inherited?.thinkingLevel === undefined || isPeer === false
+						...(inherited?.model === undefined ? {} : { model: inherited.model }),
+						...(inherited?.thinkingLevel === undefined
 							? {}
 							: { thinkingLevel: inherited.thinkingLevel as never }),
 						instructions:

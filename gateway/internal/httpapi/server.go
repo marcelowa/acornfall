@@ -26,16 +26,16 @@ func New(workspaces *control.Workspaces, static fs.FS) *Server {
 
 // controlFor finds the workspace a request is about. The workspace-scoped routes name it;
 // the earlier paths do not, and mean the general workspace.
-func (s *Server) controlFor(r *http.Request) (*control.Control, string, error) {
+func (s *Server) controlFor(r *http.Request) (*control.Control, error) {
 	name := r.PathValue("ws")
 	if name == "" {
 		name = r.URL.Query().Get("workspace")
 	}
-	workspace, ctl, err := s.workspaces.Route(r.Context(), name, r.PathValue("id"))
+	_, ctl, err := s.workspaces.Route(r.Context(), name)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return ctl, workspace.Name, nil
+	return ctl, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -189,7 +189,7 @@ func noCache(next http.Handler) http.Handler {
 }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -200,7 +200,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 // stream is SSE. Commands are POSTs; this direction is the only streaming one,
 // so a reconnect is built in and no socket library is needed.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -271,7 +271,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) commands(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -281,13 +281,11 @@ func (s *Server) commands(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(list)
+	writeJSON(w, http.StatusOK, json.RawMessage(list))
 }
 
 func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -301,7 +299,7 @@ func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -314,11 +312,7 @@ func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
-	s.messagesFor(w, r, r.PathValue("id"))
-}
-
-func (s *Server) messagesFor(w http.ResponseWriter, r *http.Request, conversationID string) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -339,7 +333,7 @@ func (s *Server) messagesFor(w http.ResponseWriter, r *http.Request, conversatio
 		http.Error(w, "whenBusy must be steer, followUp or reject", http.StatusBadRequest)
 		return
 	}
-	if err := ctl.Prompt(r.Context(), conversationID, strings.TrimSpace(body.Text), when); err != nil {
+	if err := ctl.Prompt(r.Context(), r.PathValue("id"), strings.TrimSpace(body.Text), when); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -347,16 +341,12 @@ func (s *Server) messagesFor(w http.ResponseWriter, r *http.Request, conversatio
 }
 
 func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
-	s.abortFor(w, r, r.PathValue("id"))
-}
-
-func (s *Server) abortFor(w http.ResponseWriter, r *http.Request, conversationID string) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	if err := ctl.Abort(r.Context(), conversationID); err != nil {
+	if err := ctl.Abort(r.Context(), r.PathValue("id")); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -364,11 +354,7 @@ func (s *Server) abortFor(w http.ResponseWriter, r *http.Request, conversationID
 }
 
 func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
-	s.agentFor(w, r, r.PathValue("id"))
-}
-
-func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID string) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -384,7 +370,7 @@ func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := ctl.SetAgent(r.Context(), conversationID, control.AgentChange{
+	if err := ctl.SetAgent(r.Context(), r.PathValue("id"), control.AgentChange{
 		Provider:      body.Provider,
 		ModelID:       body.ModelID,
 		ThinkingLevel: body.ThinkingLevel,
@@ -397,7 +383,7 @@ func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID
 }
 
 func (s *Server) setDefaultThinking(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -416,7 +402,7 @@ func (s *Server) setDefaultThinking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setDefaultAgent(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -478,7 +464,7 @@ func (s *Server) setInstallDefaultAgent(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -512,7 +498,7 @@ func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -527,7 +513,7 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -540,7 +526,7 @@ func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) policy(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -550,15 +536,13 @@ func (s *Server) policy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(view)
+	writeJSON(w, http.StatusOK, json.RawMessage(view))
 }
 
 // messagesDoc exposes which entries were sent by another conversation, for debugging
 // attribution without opening a browser.
 func (s *Server) messagesDoc(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -568,13 +552,11 @@ func (s *Server) messagesDoc(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(view)
+	writeJSON(w, http.StatusOK, json.RawMessage(view))
 }
 
 func (s *Server) renameConversation(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -593,7 +575,7 @@ func (s *Server) renameConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hideConversation(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -612,7 +594,7 @@ func (s *Server) hideConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) forkConversation(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -635,7 +617,7 @@ func (s *Server) forkConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) selectConversation(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -648,7 +630,7 @@ func (s *Server) selectConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -681,7 +663,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -704,7 +686,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -717,7 +699,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -743,7 +725,7 @@ func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authCancel(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -762,7 +744,7 @@ func (s *Server) authCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
-	ctl, _, err := s.controlFor(r)
+	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -772,9 +754,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(usage)
+	writeJSON(w, http.StatusOK, json.RawMessage(usage))
 }
 
 func decode(w http.ResponseWriter, r *http.Request, out any) bool {

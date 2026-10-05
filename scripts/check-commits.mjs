@@ -47,7 +47,6 @@ for (const sha of shas) {
 	const body = rest.join("\n").trim();
 	const short = sha.slice(0, 8);
 
-	if (subject.startsWith("Merge ")) continue;
 	if (!SUBJECT.test(subject)) {
 		failures.push(`${short}  ${subject}\n    not a conventional subject: expected "<type>(<scope>): <description>"`);
 	}

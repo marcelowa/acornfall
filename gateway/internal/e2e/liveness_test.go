@@ -21,7 +21,7 @@ func TestDelegateWaitsForTheChildAndReturnsItsAnswer(t *testing.T) {
 		scriptRule{Match: "child task", Reply: "CHILD ANSWER MARKER"},
 	))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "delegate this")
 	got := c.waitForText("general", root, "the child answered")
@@ -61,7 +61,7 @@ func TestAPeerIsANormalConversation(t *testing.T) {
 		scriptRule{Match: "peer task", Reply: "PEER ANSWER MARKER"},
 	))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "make a peer")
 	c.waitForText("general", root, "the peer is running")
@@ -92,12 +92,12 @@ func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	var policy struct {
 		CanSpawn bool `json:"canSpawn"`
 	}
-	c.get("/api/workspaces/general/conversations/"+root+"/policy", &policy)
+	c.get(c.conversationPath("general", root)+"/policy", &policy)
 	if policy.CanSpawn {
 		t.Error("the workspace config forbids spawning, so the policy should say so")
 	}
@@ -124,7 +124,7 @@ func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 		scriptRule{Match: "after the crash", Reply: "AFTER MARKER"},
 	))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	c.prompt("general", root, "before the crash")
 	c.waitForText("general", root, "BEFORE MARKER")
 
@@ -169,7 +169,7 @@ func TestAnInterruptedRunFinishesAfterARestart(t *testing.T) {
 		withScript(scriptRule{Match: "the long one", Reply: "a slow answer that goes on and on and on and on and on and finally says FINISHED"}),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	defer c.watch("general", root)()
 
 	c.prompt("general", root, "the long one")

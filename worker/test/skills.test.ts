@@ -2,9 +2,9 @@
  * Skills, credentials, and conversation ids: the small rules the rest of the system relies on.
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { cleanupScratch, tempDir } from "./scratch.ts";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
+import { cleanupScratch, tempDir, write } from "./scratch.ts";
 import { loadSkills, renderSkills, skillBody } from "../src/skills.ts";
 import { layerRoots, resourceFolders } from "../src/config.ts";
 import { FileCredentialStore } from "../src/credentials.ts";
@@ -12,10 +12,6 @@ import { conversationIdOf } from "../src/meta.ts";
 
 afterAll(cleanupScratch);
 
-async function write(path: string, content: string, mode?: number): Promise<void> {
-	await mkdir(dirname(path), { recursive: true });
-	await writeFile(path, content, mode === undefined ? {} : { mode });
-}
 
 describe("skills", () => {
 	test("a skill is a directory holding SKILL.md, and needs a description", async () => {
@@ -57,7 +53,7 @@ describe("skills", () => {
 		await write(join(workspace, ".acornfall", "skills", "both", "SKILL.md"), "---\nname: both\ndescription: native\n---\nC");
 
 		const roots = layerRoots({ home: join(root, "home"), workspace, trusted: true, userHome: join(root, "user") });
-		const skills = await loadSkills(resourceFolders(roots, "skills"));
+		const skills = await loadSkills(resourceFolders(roots, ["skills"]));
 		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
 			["both", "native"],
 			["eco", "from .agents"],

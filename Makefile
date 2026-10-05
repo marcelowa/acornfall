@@ -40,16 +40,11 @@ typecheck: ## the compiler's opinion, without running anything
 lint: typecheck ## the static rules; fails on the first one broken
 	node scripts/check-client.mjs
 	node scripts/check-context.mjs
-	@if [ -z "$$(gofmt -l gateway)" ]; then echo "gofmt: clean"; else echo "gofmt:"; gofmt -l gateway; exit 1; fi
+	@out=$$(gofmt -l gateway); if [ -n "$$out" ]; then echo "$$out"; echo "gofmt: not formatted"; exit 1; fi; echo "gofmt: clean"
 	cd gateway && go vet ./...
 	@if [ -x "$(STATICCHECK)" ]; then cd gateway && $(STATICCHECK) ./... && echo "staticcheck: clean"; \
 	else echo "staticcheck: not installed (make tools)"; fi
-	@if grep -rn "^func init()" gateway --include=*.go | grep -q .; then \
-		echo "init() is not for setup (docs/engineering/standards.md G3):"; grep -rn "^func init()" gateway --include=*.go; exit 1; \
-	else echo "no init() in the gateway: clean"; fi
-	@bad=$$(grep -rn "eslint-disable" worker/src worker/test 2>/dev/null | grep -v -- " -- " || true); \
-	if [ -n "$$bad" ]; then echo "a lint exception without a reason (S9):"; echo "$$bad"; exit 1; \
-	else echo "lint exceptions carry reasons: clean"; fi
+	node scripts/check-house-rules.mjs
 	cd worker && bun run lint
 
 commits: ## check commit messages (RANGE=origin/main..HEAD by default)
@@ -57,11 +52,15 @@ commits: ## check commit messages (RANGE=origin/main..HEAD by default)
 
 check: typecheck ## fast: the compiler and the unit tests, no processes
 	cd worker && bun test
-	cd gateway && go test -short ./...
+	# -count=1 because the end-to-end suite's inputs include worker/src and gateway/web, which
+	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
+	cd gateway && go test -short -count=1 ./...
 
 test: lint ## everything: static rules, unit tests, the worker protocol, and the features
 	cd worker && bun test
-	cd gateway && go test -race ./...
+	# -count=1 because the end-to-end suite's inputs include worker/src and gateway/web, which
+	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
+	cd gateway && go test -race -count=1 ./...
 
 run: build ## run against the current directory
 	./$(BIN) --addr $(ADDR) $(OPTS) --workspace $(CURDIR)

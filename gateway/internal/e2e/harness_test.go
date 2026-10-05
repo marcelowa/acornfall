@@ -49,8 +49,11 @@ func TestMain(m *testing.M) {
 		skipReason = "bun is not on PATH"
 	case which("go") == "":
 		skipReason = "go is not on PATH"
-	case !exists(filepath.Join(workerDir, "node_modules", "@earendil-works")):
-		skipReason = "worker dependencies are not installed (make deps)"
+	}
+	if skipReason == "" {
+		if _, err := os.Stat(filepath.Join(workerDir, "node_modules", "@earendil-works")); err != nil {
+			skipReason = "worker dependencies are not installed (make deps)"
+		}
 	}
 
 	if skipReason == "" {
@@ -86,11 +89,6 @@ func which(name string) string {
 		return ""
 	}
 	return path
-}
-
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 /* ---------- starting the system ---------- */
@@ -443,15 +441,6 @@ type workspaceRef struct {
 	Running bool   `json:"running"`
 }
 
-type providerInfo struct {
-	ID            string `json:"id"`
-	Authenticated bool   `json:"authenticated"`
-	Models        []struct {
-		ID             string   `json:"id"`
-		ThinkingLevels []string `json:"thinkingLevels"`
-	} `json:"models"`
-}
-
 type state struct {
 	Workspace       workspaceRef      `json:"workspace"`
 	Workspaces      []workspaceRef    `json:"workspaces"`
@@ -466,7 +455,6 @@ type state struct {
 	WorkerUp        bool              `json:"workerUp"`
 	WorkerError     string            `json:"workerError"`
 	Harness         string            `json:"harness"`
-	Providers       []providerInfo    `json:"providers"`
 	Agents          []struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -477,24 +465,30 @@ type state struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	} `json:"skills"`
-	Policy       map[string]any  `json:"policy"`
-	Capabilities map[string]any  `json:"capabilities"`
-	Defaults     []layerTrace    `json:"defaults"`
-	Inherited    map[string]bool `json:"inherited"`
-	Resolved     map[string]any  `json:"resolved"`
-	Subagent     bool            `json:"subagent"`
+	Capabilities map[string]any `json:"capabilities"`
+	Defaults     []layerTrace   `json:"defaults"`
+	Resolved     map[string]any `json:"resolved"`
 }
 
 type layerTrace struct {
-	Layer       string         `json:"layer"`
-	Path        string         `json:"path"`
-	Contributes map[string]any `json:"contributes"`
+	Layer string `json:"layer"`
+	Path  string `json:"path"`
 }
 
 func (c *client) state(workspace string) state {
 	c.t.Helper()
 	var out state
 	c.get("/api/workspaces/"+workspace+"/state", &out)
+	return out
+}
+
+// conversations is the listing the server refreshes before answering, unlike the state, which
+// is the cached view a watching client is pushed. A test that reads something the harness
+// reports only on commit wants this one.
+func (c *client) conversations(workspace string) []conversation {
+	c.t.Helper()
+	var out []conversation
+	c.get("/api/workspaces/"+workspace+"/conversations", &out)
 	return out
 }
 
@@ -507,23 +501,53 @@ func (c *client) conversationIn(workspace, id string) (conversation, bool) {
 	return conversation{}, false
 }
 
+// conversationPath is the collection, or one conversation when an id is given. The actions on
+// a conversation are named after what they do, so a test reads as the call it is making.
+func (c *client) conversationPath(workspace, id string) string {
+	path := "/api/workspaces/" + workspace + "/conversations"
+	if id == "" {
+		return path
+	}
+	return path + "/" + id
+}
+
 func (c *client) prompt(workspace, id, text string) {
 	c.t.Helper()
-	c.post("/api/workspaces/"+workspace+"/conversations/"+id+"/messages", map[string]any{"text": text}, nil)
+	c.post(c.conversationPath(workspace, id)+"/messages", map[string]any{"text": text}, nil)
 }
 
 func (c *client) promptWhenBusy(workspace, id, text, when string) {
 	c.t.Helper()
-	c.post("/api/workspaces/"+workspace+"/conversations/"+id+"/messages",
-		map[string]any{"text": text, "whenBusy": when}, nil)
+	c.post(c.conversationPath(workspace, id)+"/messages", map[string]any{"text": text, "whenBusy": when}, nil)
 }
 
 func (c *client) create(workspace string) conversation {
 	c.t.Helper()
 	var out state
-	c.post("/api/workspaces/"+workspace+"/conversations", nil, &out)
+	c.post(c.conversationPath(workspace, ""), nil, &out)
 	if out.Conversation == nil {
 		c.t.Fatalf("create in %s returned no conversation", workspace)
+	}
+	return *out.Conversation
+}
+
+func (c *client) rename(workspace, id, title string) {
+	c.t.Helper()
+	c.post(c.conversationPath(workspace, id)+"/rename", map[string]any{"title": title}, nil)
+}
+
+func (c *client) hide(workspace, id string, hidden bool) {
+	c.t.Helper()
+	c.post(c.conversationPath(workspace, id)+"/hide", map[string]any{"hidden": hidden}, nil)
+}
+
+// fork branches before the turn the entry begins, and hands back the conversation it made.
+func (c *client) fork(workspace, id, at string) conversation {
+	c.t.Helper()
+	var out state
+	c.post(c.conversationPath(workspace, id)+"/fork", map[string]any{"at": at}, &out)
+	if out.Conversation == nil {
+		c.t.Fatalf("fork of %s/%s returned no conversation", workspace, id)
 	}
 	return *out.Conversation
 }
@@ -613,27 +637,21 @@ type block struct {
 	Text      string          `json:"text"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
-	ToolName  string          `json:"toolName"`
-	IsError   bool            `json:"isError"`
 }
 
 type message struct {
-	Role     string            `json:"role"`
 	Content  json.RawMessage   `json:"content"`
 	Sections map[string]string `json:"sections"`
 }
 
 type entry struct {
-	ID       int       `json:"id"`
-	Kind     string    `json:"kind"`
-	Model    []message `json:"model"`
-	ByTaskID int       `json:"byTaskId"`
+	ID    int       `json:"id"`
+	Kind  string    `json:"kind"`
+	Model []message `json:"model"`
 }
 
 type view struct {
-	Conversation json.RawMessage            `json:"conversation"`
-	Entries      []entry                    `json:"entries"`
-	Docs         map[string]json.RawMessage `json:"docs"`
+	Entries []entry `json:"entries"`
 }
 
 // text is everything the entry says, whichever shape it is in: a user message's string, an
@@ -750,7 +768,7 @@ func (c *client) waitView(workspace, id string, predicate func(view) bool, timeo
 	var last view
 	// Reconnects until the deadline, because a client does: the stream closes while a harness
 	// is being replaced, and a test that treated that as final would fail for the wrong reason.
-	for attempt := 0; time.Now().Before(deadline); attempt++ {
+	for time.Now().Before(deadline) {
 		request, err := http.NewRequest(http.MethodGet,
 			fmt.Sprintf("%s/api/stream?workspace=%s&conversation=%s", c.base, workspace, id), nil)
 		if err != nil {
@@ -766,7 +784,6 @@ func (c *client) waitView(workspace, id string, predicate func(view) bool, timeo
 		scanner := bufio.NewScanner(response.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 		event, data := "", ""
-		found := view{}
 		for scanner.Scan() {
 			line := scanner.Text()
 			switch {
@@ -795,7 +812,6 @@ func (c *client) waitView(workspace, id string, predicate func(view) bool, timeo
 		}
 		response.Body.Close()
 		cancel()
-		_ = found
 		time.Sleep(200 * time.Millisecond)
 	}
 	c.t.Fatalf("the stream ended before %s/%s showed what was expected\nlast transcript:\n%s",
@@ -826,16 +842,17 @@ func (c *client) streamEvents(workspace, id string, window time.Duration) map[st
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), window)
 	defer cancel()
+	counts := map[string]int{}
 	response, err := c.http.Do(request.WithContext(ctx))
-	// Running out of time is how this helper ends: the window is the whole point.
-	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-		c.t.Fatalf("stream: %v", err)
-	}
-	if response == nil {
-		c.t.Fatal("stream: no response")
+	// Running out of time is how this helper ends: the window is the whole point. A deadline
+	// before the first byte leaves nothing to read, which the caller sees as no events.
+	if err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) {
+			c.t.Fatalf("stream: %v", err)
+		}
+		return counts
 	}
 	defer response.Body.Close()
-	counts := map[string]int{}
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for scanner.Scan() {

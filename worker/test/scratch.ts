@@ -5,9 +5,9 @@
  * accumulated in `/tmp` before anyone looked, and the suite had been run a few dozen times.
  * A test is a function of its inputs and it leaves the machine as it found it.
  */
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const created: string[] = [];
 
@@ -16,6 +16,12 @@ export async function tempDir(prefix = "acornfall-test-"): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), prefix));
 	created.push(dir);
 	return dir;
+}
+
+/** Write a file, creating its parent directories. Three test files had a copy of this. */
+export async function write(path: string, content: string): Promise<void> {
+	await mkdir(dirname(path), { recursive: true });
+	await writeFile(path, content);
 }
 
 /** Register with `afterAll(cleanupScratch)` in every file that calls `tempDir`. */

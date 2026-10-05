@@ -18,7 +18,7 @@ func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "/summarize the notes")
 	got := c.waitForText("general", root, "on it")
@@ -45,7 +45,7 @@ func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "/status everything please")
 	got := c.waitForText("general", root, "pong")
@@ -59,7 +59,7 @@ func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
 func TestAnUnknownCommandIsSentAsWritten(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "/not-a-command", Reply: "understood"}))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "/not-a-command does not exist")
 	got := c.waitForText("general", root, "understood")
@@ -114,7 +114,7 @@ func TestSteeringJoinsTheRunningTurn(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	defer c.watch("general", root)()
 
 	c.prompt("general", root, "start the long job")
@@ -148,12 +148,12 @@ func TestAbortStopsTheRun(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	defer c.watch("general", root)()
 
 	c.prompt("general", root, "the long one")
 	c.waitRunning("general", root, 30*time.Second)
-	c.post("/api/workspaces/general/conversations/"+root+"/abort", nil, nil)
+	c.post(c.conversationPath("general", root)+"/abort", nil, nil)
 
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -184,7 +184,7 @@ func TestAbortStopsTheRun(t *testing.T) {
 func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "hello stream", Reply: "streamed"}))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	c.prompt("general", root, "hello stream")
 	c.waitForText("general", root, "streamed")
 
@@ -204,7 +204,7 @@ func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 func TestUsageIsReportedForAWorkspace(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "spend something", Reply: "spent"}))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	c.prompt("general", root, "spend something")
 	c.waitForText("general", root, "spent")
 

@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -61,13 +60,13 @@ func TestConversationLifecycle(t *testing.T) {
 	c.prompt("general", created.ID, "remember this")
 	before := c.waitForText("general", created.ID, "I will remember.")
 
-	c.post("/api/workspaces/general/conversations/"+created.ID+"/rename", map[string]any{"title": "Renamed by a test"}, nil)
+	c.rename("general", created.ID, "Renamed by a test")
 	renamed, found := c.conversationIn("general", created.ID)
 	if !found || renamed.Title != "Renamed by a test" {
 		t.Fatalf("rename did not take: %+v (found %v)", renamed, found)
 	}
 
-	c.post("/api/workspaces/general/conversations/"+created.ID+"/hide", map[string]any{"hidden": true}, nil)
+	c.hide("general", created.ID, true)
 	hidden, found := c.conversationIn("general", created.ID)
 	if !found {
 		t.Fatal("a hidden conversation must still be listed, or it can never be restored")
@@ -80,7 +79,7 @@ func TestConversationLifecycle(t *testing.T) {
 	}
 
 	// Restoring it brings back the same conversation, with the transcript it had.
-	c.post("/api/workspaces/general/conversations/"+created.ID+"/hide", map[string]any{"hidden": false}, nil)
+	c.hide("general", created.ID, false)
 	restored, _ := c.conversationIn("general", created.ID)
 	if restored.Hidden {
 		t.Error("the conversation should be visible again")
@@ -138,7 +137,7 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 	for index := range full.Entries {
 		e := full.Entries[index]
 		if e.Kind == "pi.user" && strings.Contains(e.text(), "second question") && previous != nil {
-			at = entryID(previous.ID)
+			at = strconv.Itoa(previous.ID)
 		}
 		previous = &full.Entries[index]
 	}
@@ -146,12 +145,7 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 		t.Fatal("the second user message is not in the transcript")
 	}
 
-	var forked state
-	c.post("/api/workspaces/general/conversations/"+created.ID+"/fork", map[string]any{"at": at}, &forked)
-	if forked.Conversation == nil {
-		t.Fatal("fork returned no conversation")
-	}
-	child := *forked.Conversation
+	child := c.fork("general", created.ID, at)
 	if child.ID == created.ID {
 		t.Fatal("fork should create a conversation, not return the same one")
 	}
@@ -178,15 +172,14 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 func TestPromptRoundTrip(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "say hello", Reply: "Hello from the script."}))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "say hello")
 	got := c.waitForText("general", root, "Hello from the script.")
 
-	kinds := strings.Join(got.kinds(), ",")
 	for _, want := range []string{"pi.user", "pi.system", "pi.assistant"} {
-		if !strings.Contains(kinds, want) {
-			t.Errorf("the transcript should contain a %s entry, got %s", want, kinds)
+		if len(got.entriesOf(want)) == 0 {
+			t.Errorf("the transcript should contain a %s entry, got %s", want, strings.Join(got.kinds(), ","))
 		}
 	}
 	if sections := got.systemSections(); len(sections) == 0 {
@@ -222,7 +215,7 @@ func TestAToolCallRunsAndIsRecorded(t *testing.T) {
 		Reply: "Listed.",
 	}))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	if err := os.WriteFile(filepath.Join(s.General, "a-file-only-here.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -251,13 +244,23 @@ func TestAToolCallRunsAndIsRecorded(t *testing.T) {
 // A conversation can be given its own model and thinking level, and the level is clamped to
 // what the model can do while the request is remembered. The scripted model only offers
 // "off", so asking for more must land on "off" and say what was asked.
+func conversationByID(t *testing.T, list []conversation, id string) conversation {
+	t.Helper()
+	for _, candidate := range list {
+		if candidate.ID == id {
+			return candidate
+		}
+	}
+	t.Fatalf("conversation %s is not in the listing: %+v", id, list)
+	return conversation{}
+}
+
 func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "think hard", Reply: "Thought."}))
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
-	c.post("/api/workspaces/general/conversations/"+root+"/agent",
-		map[string]any{"thinkingLevel": "max"}, nil)
+	c.post(c.conversationPath("general", root)+"/agent", map[string]any{"thinkingLevel": "max"}, nil)
 
 	got := c.state("general")
 	if got.Conversation == nil {
@@ -266,8 +269,14 @@ func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 	if got.Agent.ThinkingLevel != "off" {
 		t.Errorf("a model that offers only off must run off, got %q", got.Agent.ThinkingLevel)
 	}
-	if !strings.Contains(mustJSON(t, got.Conversation), "\"thinking\"") {
-		t.Errorf("the conversation should record what it runs, got %s", mustJSON(t, got.Conversation))
+	// Through the refreshed listing, not the state: what a conversation records is committed by
+	// the harness, and the state is the cached view that a watching client is pushed.
+	recorded := conversationByID(t, c.conversations("general"), root)
+	if recorded.Thinking != "off" {
+		t.Errorf("the conversation should record the level it runs, got %q", recorded.Thinking)
+	}
+	if recorded.Model != "faux/faux-1" {
+		t.Errorf("the conversation should record the model it runs, got %q", recorded.Model)
 	}
 
 	// The request is kept, so switching to a model that can honour it restores the choice.
@@ -284,8 +293,8 @@ func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 func TestUnusableChoicesAreRefused(t *testing.T) {
 	s := start(t)
 	c := s.client()
-	root := c.state("general").Conversation.ID
-	path := "/api/workspaces/general/conversations/" + root + "/agent"
+	root := c.waitForConversation("general")
+	path := c.conversationPath("general", root) + "/agent"
 
 	status, body := c.postStatus(path, map[string]any{"provider": "anthropic", "modelId": "claude-sonnet-4"})
 	if status == 200 {
@@ -308,17 +317,4 @@ func TestUnusableChoicesAreRefused(t *testing.T) {
 	if after.Agent.ModelID != "faux-1" {
 		t.Errorf("a refused change must not take effect, got %+v", after.Agent)
 	}
-}
-
-func entryID(id int) string {
-	return strconv.Itoa(id)
-}
-
-func mustJSON(t *testing.T, value any) string {
-	t.Helper()
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(encoded)
 }

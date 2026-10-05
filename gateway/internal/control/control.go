@@ -220,7 +220,7 @@ func New(opts Options) *Control {
 // answers, saying the harness is down and why, and the supervisor keeps trying so that fixing
 // the file is enough. Refusing to open hides the reason behind a process that never serves —
 // which is what a guard with a typo in it used to do to the whole gateway.
-func (c *Control) Open(ctx context.Context) error {
+func (c *Control) Open(ctx context.Context) {
 	// Values are kept, cancellation is not: the caller may be a request that is about to end.
 	c.lifetime, c.stop = context.WithCancel(context.WithoutCancel(ctx))
 	if err := c.attachToWorker(ctx); err != nil {
@@ -237,11 +237,10 @@ func (c *Control) Open(ctx context.Context) error {
 		default:
 		}
 		c.publish(protocol.Frame{Type: "state"})
-		return nil
+		return
 	}
 	go c.watchConversations(c.lifetime)
 	go c.supervise(c.lifetime)
-	return nil
 }
 
 // attachToWorker is everything that needs a live harness: start it, ask what it can do, read
@@ -494,7 +493,7 @@ func (c *Control) watchConversations(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !c.hasSubscribers() {
+			if !c.Watching() {
 				continue
 			}
 			before := c.conversationSignature()
@@ -524,12 +523,6 @@ func (c *Control) watchedConversations() []string {
 		list = append(list, c.active)
 	}
 	return list
-}
-
-func (c *Control) hasSubscribers() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.subscribers) > 0
 }
 
 func (c *Control) conversationSignature() string {
@@ -579,7 +572,7 @@ func (c *Control) Busy() bool {
 			return true
 		}
 	}
-	return len(c.views) > 0 && c.workerUp && false
+	return false
 }
 
 // SetWorkspace applies a changed record: a folder that moved, or trust being granted.
@@ -642,23 +635,14 @@ func (c *Control) StateFor(conversationID string) State {
 	isChild := c.isSubagent(active)
 	if isChild {
 		// The stored configuration wins for a conversation control does not own.
-		c.mu.RLock()
-		for _, info := range c.conversations {
-			if info.ID != active {
-				continue
-			}
-			if info.Model != "" {
-				parts := strings.SplitN(info.Model, "/", 2)
-				if len(parts) == 2 {
-					inputs.explicit.Provider, inputs.explicit.ModelID = parts[0], parts[1]
-				}
+		if info, found := c.conversationInfo(active); found {
+			if binding, ok := parseModelBinding(info.Model); ok {
+				inputs.explicit.Provider, inputs.explicit.ModelID = binding.Provider, binding.ModelID
 			}
 			if info.Thinking != "" {
 				inputs.explicit.ThinkingLevel = info.Thinking
 			}
-			break
 		}
-		c.mu.RUnlock()
 	}
 
 	// The registry lock is taken before this snapshot's, never inside it. The eviction sweep
@@ -909,7 +893,7 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, change Ag
 		// prompt instead of here, where the choice was made. The picker can only offer models
 		// of authenticated providers, so this refuses what the interface cannot ask for.
 		if provider != "" && !c.isAvailable(c.Describe(), protocol.ModelBinding{Provider: provider, ModelID: modelID}) {
-			return fmt.Errorf("%s/%s is not available with the current credentials", provider, modelID)
+			return unavailableModel(provider, modelID)
 		}
 		explicit.Provider, explicit.ModelID = provider, modelID
 	}
@@ -935,8 +919,8 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, change Ag
 		explicit.Definition = ""
 	}
 	if change.ThinkingLevel != nil {
-		if level := *change.ThinkingLevel; level != "" && !contains(thinkingLevels, level) {
-			return fmt.Errorf("unknown thinking level %q; expected one of %s", level, strings.Join(thinkingLevels, ", "))
+		if err := validateThinkingLevel(*change.ThinkingLevel); err != nil {
+			return err
 		}
 		explicit.ThinkingLevel = *change.ThinkingLevel
 	}
@@ -986,8 +970,8 @@ func (in resolveInputs) effectiveModel() (string, string) {
 		return in.explicit.Provider, in.explicit.ModelID
 	}
 	if in.resolved != nil {
-		if parts := strings.SplitN(in.resolved.Model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			return parts[0], parts[1]
+		if binding, ok := parseModelBinding(in.resolved.Model); ok {
+			return binding.Provider, binding.ModelID
 		}
 	}
 	return in.fallbackModel.Provider, in.fallbackModel.ModelID
@@ -1261,8 +1245,8 @@ func (c *Control) supportedThinking(provider, modelID string) []string {
 // definition names one. It is validated against the scale, not against one model:
 // control clamps per model when it applies.
 func (c *Control) SetDefaultThinking(ctx context.Context, level string) error {
-	if level != "" && !contains(thinkingLevels, level) {
-		return fmt.Errorf("unknown thinking level %q; expected one of %s", level, strings.Join(thinkingLevels, ", "))
+	if err := validateThinkingLevel(level); err != nil {
+		return err
 	}
 	c.mu.Lock()
 	c.defaultThinking = level
@@ -1382,7 +1366,7 @@ func (c *Control) SetDefaultModel(ctx context.Context, provider, modelID string)
 		return c.reapplyInheriting(ctx)
 	}
 	if !c.isAvailable(c.Describe(), protocol.ModelBinding{Provider: provider, ModelID: modelID}) {
-		return fmt.Errorf("%s/%s is not available with the current credentials", provider, modelID)
+		return unavailableModel(provider, modelID)
 	}
 	c.mu.Lock()
 	c.defaultModel = protocol.ModelBinding{Provider: provider, ModelID: modelID}
@@ -1425,14 +1409,46 @@ func (c *Control) ensureConversation(ctx context.Context, conversationID string)
 
 // isSubagent reports whether a conversation was created by another one.
 func (c *Control) isSubagent(conversationID string) bool {
+	info, found := c.conversationInfo(conversationID)
+	return found && info.Parent != ""
+}
+
+// conversationInfo is one conversation from the cached list, read under one lock. Callers that
+// need it twice, or need two fields of it, take it once.
+func (c *Control) conversationInfo(conversationID string) (protocol.ConversationInfo, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for _, info := range c.conversations {
 		if info.ID == conversationID {
-			return info.Parent != ""
+			return info, true
 		}
 	}
-	return false
+	return protocol.ConversationInfo{}, false
+}
+
+// parseModelBinding reads the "provider/modelId" form the overlay, the stored configuration,
+// and the --model flag all share.
+func parseModelBinding(value string) (protocol.ModelBinding, bool) {
+	parts := strings.SplitN(value, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return protocol.ModelBinding{}, false
+	}
+	return protocol.ModelBinding{Provider: parts[0], ModelID: parts[1]}, true
+}
+
+// validateThinkingLevel refuses a name outside the scale. Control clamps to what a model
+// supports when it applies, so this is only about a level that could never mean anything.
+func validateThinkingLevel(level string) error {
+	if level == "" || contains(thinkingLevels, level) {
+		return nil
+	}
+	return fmt.Errorf("unknown thinking level %q; expected one of %s", level, strings.Join(thinkingLevels, ", "))
+}
+
+// unavailableModel is the one refusal for a model the credentials do not reach, so the three
+// places that refuse one say the same thing.
+func unavailableModel(provider, modelID string) error {
+	return fmt.Errorf("%s/%s is not available with the current credentials", provider, modelID)
 }
 
 func (c *Control) reapply(ctx context.Context, conversationID string) error {
@@ -1618,9 +1634,8 @@ func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
 	return c.worker.Call(ctx, protocol.Command{Type: "usage"})
 }
 
-// Subscribe attaches a client. It returns the active conversation's current
-// view, if any, so a late joiner starts from committed state.
-// Subscribe attaches one client to one conversation. An empty id means the
+// Subscribe attaches one client to one conversation. The view it returns is that
+// conversation's, if any, so a late joiner starts from committed state. An empty id means the
 // conversation this install last used, which is what a fresh tab lands on.
 func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-chan protocol.Frame, *protocol.Frame, error) {
 	c.mu.Lock()
@@ -1772,8 +1787,6 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 	c.conversations = data.Conversations
 	c.mu.Unlock()
 
-	// One extra worker call per refresh, for the active conversation only: the
-	// delegation card is always about the conversation in front of you.
 	// Policy for every conversation a client is watching, so an inspector is correct in
 	// whichever tab it happens to be open.
 	for _, conversationID := range c.watchedConversations() {
@@ -1812,11 +1825,11 @@ var lastResortModels = []string{"deepseek-v4.1-flash"}
 // last resort rather than being stored as though someone had chosen it.
 func (c *Control) deriveLastResort(describe protocol.Describe) (protocol.ModelBinding, error) {
 	if model := strings.TrimSpace(c.opts.Model); model != "" {
-		parts := strings.SplitN(model, "/", 2)
-		if len(parts) != 2 {
+		binding, ok := parseModelBinding(model)
+		if !ok {
 			return protocol.ModelBinding{}, fmt.Errorf("--model must be provider/modelId, got %q", model)
 		}
-		return protocol.ModelBinding{Provider: parts[0], ModelID: parts[1]}, nil
+		return binding, nil
 	}
 	for _, wanted := range lastResortModels {
 		for _, provider := range describe.Providers {

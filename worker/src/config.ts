@@ -319,8 +319,8 @@ export interface Catalog {
  * works here. `.acornfall` is ours. A folder that has both uses ours: the interchange copy is
  * the one you share, and the local one is the one that overrides it.
  */
-export const ECOSYSTEM_DIR = ".agents";
-export const NATIVE_DIR = ".acornfall";
+const ECOSYSTEM_DIR = ".agents";
+const NATIVE_DIR = ".acornfall";
 
 /**
  * The folders one install reads, least specific first: each may hold `config.json`, `agents/`,
@@ -364,9 +364,8 @@ export const COMMAND_DIRS = ["prompts", "commands"] as const;
  * ones. Within a root that means the ecosystem's name first and ours second, and a workspace
  * still beats the install.
  */
-export function resourceFolders(roots: LayerRoots, names: string | readonly string[]): string[] {
-	const list = typeof names === "string" ? [names] : names;
-	return [...roots.global, ...roots.workspace].flatMap((root) => list.map((name) => join(root, name)));
+export function resourceFolders(roots: LayerRoots, names: readonly string[]): string[] {
+	return [...roots.global, ...roots.workspace].flatMap((root) => names.map((name) => join(root, name)));
 }
 
 /**

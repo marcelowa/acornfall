@@ -42,7 +42,7 @@ func serve(argv []string) error {
 	addr := flags.String("addr", "127.0.0.1:7777", "listen address; a non-loopback address requires a token")
 	token := flags.String("token", "", "shared secret; generated and stored when a non-loopback address has none")
 	insecure := flags.Bool("insecure", false, "listen without a token (trusted network or tunnel only)")
-	workspace := flags.String("workspace", "", "the general workspace's folder (default: <home>/workspaces/general)")
+	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
 	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
@@ -234,12 +234,11 @@ func displayAddr(addr string) string {
 // prettyAddr prefers the machine's own hostname over a wildcard address, so the
 // printed URL is the one a remote browser can actually use.
 func prettyAddr(addr string) string {
-	_, port, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return addr
 	}
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil || host == "" || host == "0.0.0.0" || host == "::" {
+	if host == "" || host == "0.0.0.0" || host == "::" {
 		if name, err := os.Hostname(); err == nil && name != "" {
 			return net.JoinHostPort(name, port)
 		}

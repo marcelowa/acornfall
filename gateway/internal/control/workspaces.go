@@ -316,7 +316,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		return nil, fmt.Errorf("no workspace %q", name)
 	}
 	if control != nil {
-		w.touch(name)
+		w.markUsed(name)
 		return control, nil
 	}
 
@@ -335,7 +335,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	control = w.controls[name]
 	w.mu.RUnlock()
 	if control != nil {
-		w.touch(name)
+		w.markUsed(name)
 		return control, nil
 	}
 
@@ -354,12 +354,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	if err := os.MkdirAll(filepath.Join(w.opts.Home, "state", name), 0o700); err != nil {
 		return nil, err
 	}
-	if err := control.Open(ctx); err != nil {
-		// Close whatever it managed to start: Open's error path leaves its lifetime loops
-		// running otherwise.
-		control.Close()
-		return nil, fmt.Errorf("workspace %q: %w", name, err)
-	}
+	control.Open(ctx)
 	w.mu.Lock()
 	w.controls[name] = control
 	w.mu.Unlock()
@@ -368,20 +363,10 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	return control, nil
 }
 
-// InstallDefaultsPath is the install-wide defaults file: <home>/settings.json. The layer
-// that owns the file owns writing it, so every workspace sees one value rather than a copy
-// each.
+// The install-wide defaults file: <home>/settings.json. The layer that owns the file owns
+// writing it, so every workspace sees one value rather than a copy each.
 func (w *Workspaces) installDefaultsPath() string {
 	return filepath.Join(w.opts.Home, "settings.json")
-}
-
-// InstallDefaults reads the install-wide defaults.
-func (w *Workspaces) InstallDefaults() Defaults {
-	defaults, err := LoadDefaults(w.installDefaultsPath())
-	if err != nil {
-		return Defaults{}
-	}
-	return defaults
 }
 
 // SetInstallModel changes the model every workspace falls back to, below its own default
@@ -391,7 +376,7 @@ func (w *Workspaces) SetInstallModel(ctx context.Context, provider, modelID stri
 		return errors.New("a model default needs both a provider and a model id")
 	}
 	if provider != "" && w.noneOffer(provider, modelID) {
-		return fmt.Errorf("%s/%s is not available with the current credentials", provider, modelID)
+		return unavailableModel(provider, modelID)
 	}
 	return w.changeInstall(ctx, func(defaults *Defaults) error {
 		defaults.Model = protocol.ModelBinding{Provider: provider, ModelID: modelID}
@@ -401,8 +386,8 @@ func (w *Workspaces) SetInstallModel(ctx context.Context, provider, modelID stri
 
 // SetInstallThinking changes the level every workspace falls back to.
 func (w *Workspaces) SetInstallThinking(ctx context.Context, level string) error {
-	if level != "" && !contains(thinkingLevels, level) {
-		return fmt.Errorf("unknown thinking level %q; expected one of %s", level, strings.Join(thinkingLevels, ", "))
+	if err := validateThinkingLevel(level); err != nil {
+		return err
 	}
 	return w.changeInstall(ctx, func(defaults *Defaults) error {
 		defaults.Thinking = level
@@ -494,9 +479,8 @@ func (w *Workspaces) noDefinition(name string) bool {
 	return true
 }
 
-// Route finds the workspace a conversation belongs to. Names are checked first so that a
-// caller holding one does not pay for a lookup it already knows the answer to.
-func (w *Workspaces) Route(ctx context.Context, workspaceName, conversationID string) (Workspace, *Control, error) {
+// Route finds the workspace a request is about and the control that serves it.
+func (w *Workspaces) Route(ctx context.Context, workspaceName string) (Workspace, *Control, error) {
 	name := workspaceName
 	if name == "" {
 		name = GeneralWorkspaceName
@@ -510,10 +494,6 @@ func (w *Workspaces) Route(ctx context.Context, workspaceName, conversationID st
 		return Workspace{}, nil, err
 	}
 	return workspace, control, nil
-}
-
-func (w *Workspaces) touch(name string) {
-	w.markUsed(name)
 }
 
 // markUsed records that a workspace was asked for, which is what keeps an actively used

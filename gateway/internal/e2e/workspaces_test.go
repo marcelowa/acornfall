@@ -29,7 +29,7 @@ func TestWorkspacesAreIsolatedAndStartOnDemand(t *testing.T) {
 	if second.Workspace.Name != "second" {
 		t.Fatalf("the state should be about the workspace asked for, got %q", second.Workspace.Name)
 	}
-	root := second.Conversation.ID
+	root := c.waitForConversation("second")
 	if root == "" || len(second.Conversations) != 1 {
 		t.Fatalf("a new workspace should have its own root conversation, got %+v", second.Conversations)
 	}
@@ -100,7 +100,7 @@ func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
 	c := s.client()
 
 	c.createWorkspace("doomed")
-	root := c.state("doomed").Conversation.ID
+	root := c.waitForConversation("doomed")
 	c.prompt("doomed", root, "remember me")
 	c.waitForText("doomed", root, "remembered")
 
@@ -163,7 +163,7 @@ func TestTrustDecidesWhetherAWorkspaceIsRead(t *testing.T) {
 	c := s.client()
 	c.post("/api/workspaces/general/update", map[string]any{"trusted": true}, nil)
 
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	got := c.state("general")
 	if len(got.Agents) != 1 || got.Agents[0].Name != "local-agent" {
 		t.Errorf("a trusted workspace's agents should be offered, got %+v", got.Agents)

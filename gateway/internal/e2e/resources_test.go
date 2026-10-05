@@ -16,7 +16,7 @@ func TestWorkspaceRulesReachThePrompt(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "get to work")
 	got := c.waitForText("general", root, "working")
@@ -69,8 +69,8 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 	}
 
 	// A conversation can be pointed at one, and the state says which it runs.
-	root := c.state("general").Conversation.ID
-	c.post("/api/workspaces/general/conversations/"+root+"/agent",
+	root := c.waitForConversation("general")
+	c.post(c.conversationPath("general", root)+"/agent",
 		map[string]any{"definition": "researcher"}, nil)
 	got = c.state("general")
 	if got.Agent.Definition != "researcher" {
@@ -98,7 +98,7 @@ func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "fold")
 	got := c.waitForText("general", root, "folded")
@@ -187,7 +187,7 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 	}
 
 	// The skill and the rule reach the prompt, which is where they matter.
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	c.prompt("general", root, "what are the rules")
 	view := c.waitForText("general", root, "answered")
 	sections := strings.Join(sectionValues(view.systemSections()), "\n")
@@ -202,7 +202,7 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 func TestReloadPicksUpANewDefinition(t *testing.T) {
 	s := start(t)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 	before := c.view("general", root)
 
 	s.writeWorkspace(t, ".acornfall/agents/late.md", "---\nname: late\ndescription: written after startup\n---\nBody.")
@@ -234,7 +234,7 @@ func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.state("general").Conversation.ID
+	root := c.waitForConversation("general")
 
 	c.prompt("general", root, "with skills")
 	offered := c.waitForText("general", root, "offered")
@@ -246,7 +246,7 @@ func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 		t.Error("a skill's body should load only when the model asks for it")
 	}
 
-	c.post("/api/workspaces/general/conversations/"+root+"/agent", map[string]any{"definition": "picky"}, nil)
+	c.post(c.conversationPath("general", root)+"/agent", map[string]any{"definition": "picky"}, nil)
 	c.prompt("general", root, "without skills")
 	restricted := c.waitForText("general", root, "restricted")
 	if strings.Contains(strings.Join(sectionValues(restricted.systemSections()), "\n"), "acorn-notes") {

@@ -10,7 +10,12 @@ import (
 // which layer it came from — "what runs" without "why" is a question the interface cannot
 // answer.
 func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
-	s := start(t, withScript(scriptRule{Match: "anything", Reply: "answered"}))
+	s := start(t,
+		withScript(scriptRule{Match: "anything", Reply: "answered"}),
+		withSetup(func(t *testing.T, s *system) {
+			s.writeWorkspace(t, ".agents/agents/reviewer.md", "---\nname: reviewer\ndescription: for the defaults test\n---\nBody.")
+		}),
+	)
 	c := s.client()
 
 	// The scripted model offers only "off", which makes the clamping visible: the default is
@@ -36,6 +41,24 @@ func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 	if cleared.DefaultThinking != "" || cleared.DefaultsOrigin["thinking"] != "" {
 		t.Errorf("a cleared default should have no origin, got %q / %q",
 			cleared.DefaultThinking, cleared.DefaultsOrigin["thinking"])
+	}
+
+	// The agent default is the same mechanism, and the effective binding is what a whole
+	// conversation with nothing of its own will run.
+	c.post("/api/workspaces/general/default-agent", map[string]any{"definition": "reviewer"}, nil)
+	withAgent := c.state("general")
+	if withAgent.DefaultAgent != "reviewer" || withAgent.DefaultsOrigin["agent"] != "workspace" {
+		t.Errorf("the workspace default agent should be reported, got %q from %q",
+			withAgent.DefaultAgent, withAgent.DefaultsOrigin["agent"])
+	}
+	if withAgent.Agent.Definition != "reviewer" {
+		t.Errorf("a conversation that chose nothing should run it, got %+v", withAgent.Agent)
+	}
+
+	c.post("/api/workspaces/general/default-agent", map[string]any{"definition": ""}, nil)
+	if back := c.state("general"); back.DefaultAgent != "" || back.Agent.Definition != "" {
+		t.Errorf("clearing the agent default should leave the layered defaults, got %q / %q",
+			back.DefaultAgent, back.Agent.Definition)
 	}
 }
 

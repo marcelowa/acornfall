@@ -3,10 +3,10 @@
  * mistakes have to be errors rather than rules that quietly do nothing.
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { layerRoots, loadCatalog, resolveAgent, type LayerRoots } from "../src/config.ts";
-import { cleanupScratch, tempDir } from "./scratch.ts";
+import { cleanupScratch, tempDir, write } from "./scratch.ts";
 
 afterAll(cleanupScratch);
 
@@ -28,10 +28,6 @@ function rootsOf(parts: { home: string; workspace: string; user: string }, trust
 	return layerRoots({ home: parts.home, workspace: parts.workspace, trusted, userHome: parts.user });
 }
 
-async function write(path: string, content: string): Promise<void> {
-	await mkdir(dirname(path), { recursive: true });
-	await writeFile(path, content);
-}
 
 describe("the catalog", () => {
 	test("reads both layers and reports which one each agent came from", async () => {

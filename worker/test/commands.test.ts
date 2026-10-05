@@ -3,18 +3,13 @@
  * to record — the text the model saw, not the shorthand the user typed.
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { expandCommand, loadCommands, parseCommandInvocation } from "../src/commands.ts";
 import { COMMAND_DIRS, layerRoots, resourceFolders } from "../src/config.ts";
-import { cleanupScratch, tempDir } from "./scratch.ts";
+import { cleanupScratch, tempDir, write } from "./scratch.ts";
 
 afterAll(cleanupScratch);
 
-async function write(path: string, content: string): Promise<void> {
-	await mkdir(dirname(path), { recursive: true });
-	await writeFile(path, content);
-}
 
 describe("invocation", () => {
 	test("reads a name and its arguments", () => {
@@ -129,7 +124,7 @@ describe("loading", () => {
 		await write(join(workspace, ".agents", "commands", "shared.md"), "---\nname: shared\ndescription: only in .agents\n---\nShared");
 
 		const roots = layerRoots({ home, workspace, trusted: true, userHome: user });
-		const commands = await loadCommands(resourceFolders(roots, "commands"));
+		const commands = await loadCommands(resourceFolders(roots, ["commands"]));
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["deploy", "native"],
 			["shared", "only in .agents"],

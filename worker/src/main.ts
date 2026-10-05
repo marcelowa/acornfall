@@ -124,7 +124,7 @@ const models = builtinModels({ credentials });
 // ecosystem's `.agents` before our own `.acornfall`. An explicit --skill replaces the list.
 const roots = layerRoots({ home: args.home, workspace: args.workspace, trusted: args.trusted });
 const discoveredSkills = await loadSkills(
-	args.skills.length > 0 ? args.skills : resourceFolders(roots, "skills"),
+	args.skills.length > 0 ? args.skills : resourceFolders(roots, ["skills"]),
 );
 
 // The overlay, the workspace's rules, and its commands. All reloaded on demand, so
@@ -132,11 +132,7 @@ const discoveredSkills = await loadSkills(
 let catalog: Catalog = await loadCatalog(roots);
 reportUnknownKeys(catalog);
 let workspaceRules = await loadWorkspaceRules();
-let commands = await loadCommands(commandRoots());
-
-function commandRoots(): string[] {
-	return resourceFolders(roots, COMMAND_DIRS);
-}
+let commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS));
 
 /**
  * The workspace's rules file. It is its own prompt section rather than more
@@ -721,7 +717,7 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			catalog = await loadCatalog(roots);
 			reportUnknownKeys(catalog);
 			workspaceRules = await loadWorkspaceRules();
-			commands = await loadCommands(commandRoots());
+			commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS));
 			return { agents: catalog.agents.length, commands: commands.length, rules: workspaceRules !== undefined };
 		case "login":
 			return await login(models, command.authId, command.providerId, command.authType);

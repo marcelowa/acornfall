@@ -46,10 +46,9 @@ type Worker struct {
 	frameMu sync.RWMutex
 	handler func(protocol.Frame)
 
-	exitMu  sync.RWMutex
-	onExit  func(error)
-	exited  chan struct{}
-	waitErr error
+	exitMu sync.RWMutex
+	onExit func(error)
+	exited chan struct{}
 }
 
 func New(config Config) *Worker {
@@ -63,22 +62,6 @@ func (w *Worker) OnExit(handler func(error)) {
 	w.exitMu.Lock()
 	defer w.exitMu.Unlock()
 	w.onExit = handler
-}
-
-// Exited is closed once the process has ended and been reaped.
-func (w *Worker) Exited() <-chan struct{} { return w.exited }
-
-// WaitErr reports why the process ended, once it has.
-func (w *Worker) WaitErr() error { return w.waitErr }
-
-// Alive reports whether the process is still running.
-func (w *Worker) Alive() bool {
-	select {
-	case <-w.exited:
-		return false
-	default:
-		return true
-	}
 }
 
 // OnFrame registers the single consumer of unprompted frames. Call before Start.
@@ -102,9 +85,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	// crashing on startup. Close() is what ends it.
 	_ = ctx
 	cmd := exec.Command(w.config.Command, w.config.Args...)
-	if w.config.Dir != "" {
-		cmd.Dir = w.config.Dir
-	}
+	cmd.Dir = w.config.Dir
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -128,7 +109,6 @@ func (w *Worker) Start(ctx context.Context) error {
 	go func() {
 		waitErr := cmd.Wait()
 		w.exitMu.Lock()
-		w.waitErr = waitErr
 		handler := w.onExit
 		w.exitMu.Unlock()
 		close(w.exited)
@@ -142,9 +122,7 @@ func (w *Worker) Start(ctx context.Context) error {
 
 // Call sends one command and waits for its response.
 func (w *Worker) Call(ctx context.Context, command protocol.Command) (json.RawMessage, error) {
-	if command.ID == "" {
-		command.ID = fmt.Sprintf("c%d", w.nextID.Add(1))
-	}
+	command.ID = fmt.Sprintf("c%d", w.nextID.Add(1))
 	payload, err := command.Marshal()
 	if err != nil {
 		return nil, err
