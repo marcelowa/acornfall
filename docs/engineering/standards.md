@@ -25,6 +25,11 @@ to follow yourself:
    disagree, say which one should move before touching either.
 3. **Run `make lint` and `make test` before saying it is done.** A change that has not run the
    tests has not been made.
+4. **When the work is finished, run `/deslop`** (`.pi/prompts/deslop.md`). It is the review pass
+   that removes what accumulated: abstractions nothing needed, defensive branches inside trusted
+   code, comments that restate the code. It preserves behaviour, asks before removing anything
+   significant, and validates with the commands above. Run it per work package, not as a
+   periodic sweep of the repository — a large cleanup diff is a change nobody can review.
 
 ## The shape of the repository
 
