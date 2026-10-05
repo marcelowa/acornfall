@@ -113,7 +113,8 @@ make dev
   any of it is read. Each workspace runs its own
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
-  `.agents/` or `.acornfall/`, expanded server-side so the transcript records what the model saw.
+  `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
+  name, `prompts/` — expanded server-side so the transcript records what the model saw.
 - **Guards**: declarative rules that block a tool call and say why — a command pattern, or a
   path outside the workspace — accumulating across layers and visible in the inspector.
 - **Workspaces are managed from the interface**: create by name inside the workspaces folder

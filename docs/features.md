@@ -94,7 +94,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | R7 | Slash commands come from two layers, the workspace shadowing the install, and the listing says which file each came from. | `TestCommandsComeFromBothLayersAndTheWorkspaceWins` |
 | R8 | Expansion happens server-side, so the transcript records what the model saw; arguments are appended when there is no placeholder. | `TestCommandExpansionIsWhatTheModelSees`, `TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder` + `worker/test/commands.test.ts` |
 | R9 | A message that merely starts with a slash is not rewritten. | `TestAnUnknownCommandIsSentAsWritten` |
-| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both, and an untrusted workspace contributes neither. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
+| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both, and an untrusted workspace contributes neither. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
 
 ## Guards
 
@@ -122,7 +122,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | L2 | A run interrupted by a crash finishes afterwards. | `TestAnInterruptedRunFinishesAfterARestart` |
 | L3 | The stream carries a full state on attach, whole transcripts as view frames, and a keepalive that arrives while nothing is happening. | `TestTheStreamSendsStateViewsAndKeepalives` |
 | L4 | A failure says what the harness said, not only that it exited. | `workerpool.TestLastWordsPrefersTheLineThatExplains` |
-| L5 | A death is announced once: a restart never leaves two harnesses over one store. | `TestABrokenWorkspaceFileIsReportedAndHeals` (a failed start restarts exactly once), `TestTheHarnessRestartsAndKeepsItsHistory` |
+| L5 | A death is announced once, and only for the worker that is running: a notification from one that was already replaced changes nothing and starts nothing. | `TestOnlyTheCurrentWorkersDeathCounts`, `TestTheHarnessRestartsAndKeepsItsHistory` | `TestABrokenWorkspaceFileIsReportedAndHeals` (a failed start restarts exactly once), `TestTheHarnessRestartsAndKeepsItsHistory` |
 
 ## Credentials and access
 

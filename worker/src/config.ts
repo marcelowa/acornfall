@@ -352,9 +352,21 @@ export function layerRoots(options: {
 	};
 }
 
-/** One folder per root with `name` appended: the same list serves agents, skills, and commands. */
-export function resourceFolders(roots: LayerRoots, name: string): string[] {
-	return [...roots.global, ...roots.workspace].map((root) => join(root, name));
+/**
+ * The folder names a prompt template lives under: ours, and the ecosystem's. Both are read, and
+ * ours wins at the same level, so a bundle can carry a copy for each reader — which is the whole
+ * point of `.agents/`: the file that is `/deslop` in one tool is `/deslop` in the other.
+ */
+export const COMMAND_DIRS = ["prompts", "commands"] as const;
+
+/**
+ * The folders one resource lives in, per layer root, in order: later folders shadow earlier
+ * ones. Within a root that means the ecosystem's name first and ours second, and a workspace
+ * still beats the install.
+ */
+export function resourceFolders(roots: LayerRoots, names: string | readonly string[]): string[] {
+	const list = typeof names === "string" ? [names] : names;
+	return [...roots.global, ...roots.workspace].flatMap((root) => list.map((name) => join(root, name)));
 }
 
 /**

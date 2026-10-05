@@ -38,8 +38,10 @@ one is the one that overrides it.
 convention puts a person's own skills.
 
 Within a layer the order is therefore `~/.agents` → `<data-dir>` → `<ws>/.agents` →
-`<ws>/.acornfall`, and each folder may hold `config.json`, `agents/`, `skills/`, and
-`commands/`. Instructions concatenate in that order; a later model, thinking level, agent
+`<ws>/.acornfall`, and each folder may hold `config.json`, `agents/`, `skills/`, and the prompt
+templates under `commands/` — or `prompts/`, which is the ecosystem's name for the same thing.
+A folder that has both reads `prompts/` first, so `commands/` wins, exactly as ours wins over
+`.agents`. Instructions concatenate in that order; a later model, thinking level, agent
 definition, command, or skill of the same name replaces an earlier one.
 
 ## Contribution shape

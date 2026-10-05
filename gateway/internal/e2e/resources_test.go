@@ -134,6 +134,9 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 			s.writeWorkspace(t, ".agents/config.json", `{"defaults":{"instructions":"ECOSYSTEM MARKER"}}`)
 			s.writeWorkspace(t, ".agents/agents/eco.md", "---\nname: eco\ndescription: from .agents\n---\nEco body.")
 			s.writeWorkspace(t, ".agents/commands/eco.md", "---\nname: eco-command\ndescription: from .agents\n---\nEco body.")
+			// The ecosystem's name for a prompt template, which is where another harness would
+			// keep the same file.
+			s.writeWorkspace(t, ".agents/prompts/eco-prompt.md", "---\nname: eco-prompt\ndescription: from prompts\n---\nEco prompt body.")
 			s.writeWorkspace(t, ".agents/skills/eco-skill/SKILL.md", "---\nname: eco-skill\ndescription: from .agents\n---\nBody.")
 			// And ours, shadowing the agent and the command by name.
 			s.writeWorkspace(t, ".acornfall/agents/eco.md", "---\nname: eco\ndescription: from .acornfall\n---\nNative body.")
@@ -159,11 +162,18 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 		} `json:"commands"`
 	}
 	c.get("/api/workspaces/general/commands", &listing)
-	if len(listing.Commands) != 1 {
-		t.Fatalf("expected the one command, in both folders, got %+v", listing.Commands)
+	if len(listing.Commands) != 2 {
+		t.Fatalf("expected the command from both bundle names and the one from prompts, got %+v", listing.Commands)
 	}
-	if !strings.Contains(listing.Commands[0].Source, ".acornfall") {
-		t.Errorf("our folder should shadow the ecosystem command, got %+v", listing.Commands[0])
+	byCommand := map[string]string{}
+	for _, command := range listing.Commands {
+		byCommand[command.Name] = command.Source
+	}
+	if !strings.Contains(byCommand["eco-command"], ".acornfall") {
+		t.Errorf("our folder should shadow the ecosystem command, got %q", byCommand["eco-command"])
+	}
+	if !strings.Contains(byCommand["eco-prompt"], "/prompts/") {
+		t.Errorf("a prompt template under the ecosystem's name should be read, got %q", byCommand["eco-prompt"])
 	}
 
 	// The explain view names the file each layer contributed, so where a rule came from is

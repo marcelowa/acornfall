@@ -35,6 +35,7 @@ import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import {
+	COMMAND_DIRS,
 	layerRoots,
 	loadCatalog,
 	resourceFolders,
@@ -134,7 +135,7 @@ let workspaceRules = await loadWorkspaceRules();
 let commands = await loadCommands(commandRoots());
 
 function commandRoots(): string[] {
-	return resourceFolders(roots, "commands");
+	return resourceFolders(roots, COMMAND_DIRS);
 }
 
 /**

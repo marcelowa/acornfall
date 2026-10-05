@@ -6,7 +6,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expandCommand, loadCommands, parseCommandInvocation } from "../src/commands.ts";
-import { layerRoots, resourceFolders } from "../src/config.ts";
+import { COMMAND_DIRS, layerRoots, resourceFolders } from "../src/config.ts";
 import { cleanupScratch, tempDir } from "./scratch.ts";
 
 afterAll(cleanupScratch);
@@ -91,6 +91,29 @@ describe("loading", () => {
 		const commands = await loadCommands([first, second]);
 		expect(commands).toHaveLength(1);
 		expect(commands[0]?.description).toBe("workspace");
+	});
+
+	test("the ecosystem's prompts folder is read too, and our commands folder wins", async () => {
+		const root = await tempDir("acornfall-commands-");
+		const workspace = join(root, "workspace");
+		// The same name in both folder names: ours is read second and wins.
+		await write(join(workspace, ".agents", "prompts", "audit.md"), "---\nname: audit\ndescription: from prompts\n---\nPrompts body");
+		await write(join(workspace, ".agents", "commands", "audit.md"), "---\nname: audit\ndescription: from commands\n---\nCommands body");
+		// And one that only exists as a prompt, which is the case a shared bundle has.
+		await write(join(workspace, ".agents", "prompts", "only-here.md"), "---\nname: only-here\ndescription: prompts only\n---\nBody");
+
+		const roots = layerRoots({
+			home: join(root, "home"),
+			workspace,
+			trusted: true,
+			userHome: join(root, "user"),
+		});
+		const commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS));
+		expect(commands.map((command) => [command.name, command.description])).toEqual([
+			["audit", "from commands"],
+			["only-here", "prompts only"],
+		]);
+		expect(commands[1]?.source).toContain("/prompts/");
 	});
 
 	test("the .agents folder is read, and ours shadows it", async () => {
