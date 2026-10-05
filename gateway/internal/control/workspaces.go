@@ -31,12 +31,16 @@ const GeneralWorkspaceName = "general"
 // DefaultWorkspacesDir is where workspaces are created. It is deliberately outside the
 // hidden installation folder: this is the reader's own content, and it should be somewhere
 // they would look.
-func DefaultWorkspacesDir() string {
+//
+// An install without a home directory gets an error rather than a relative guess: workspaces
+// would otherwise land wherever the process happened to start, which is not a place anyone
+// chose and is how a folder of them appears in a container's working directory.
+func DefaultWorkspacesDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "acornfall/workspaces"
+		return "", fmt.Errorf("cannot tell where to create workspaces: %w (pass --workspaces-dir)", err)
 	}
-	return filepath.Join(home, "acornfall", "workspaces")
+	return filepath.Join(home, "acornfall", "workspaces"), nil
 }
 
 // Workspace is a folder the agent works in, plus the decisions that belong to it.
@@ -650,7 +654,10 @@ func (w *Workspaces) loadRegistry() error {
 		dir = recorded
 	}
 	if dir == "" {
-		dir = DefaultWorkspacesDir()
+		dir, err = DefaultWorkspacesDir()
+		if err != nil {
+			return err
+		}
 	}
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
