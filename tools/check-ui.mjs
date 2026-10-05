@@ -13,6 +13,34 @@ const check = (label, ok, detail) => {
 	if (!ok) failures.push(`${label}${detail === undefined ? "" : `: ${detail}`}`);
 };
 
+/**
+ * Show a conversation that has a transcript, and say whether one could be found.
+ *
+ * The app reopens whatever you were last in, which can be a fresh, empty conversation — a
+ * legitimate state that the checks below are not about. It picks from the conversations listing
+ * rather than the rail, because the listing says which conversations have content.
+ */
+async function showConversationWithContent(page) {
+	if (await page.evaluate(() => document.querySelectorAll("#transcript .turn").length > 0)) return true;
+	const picked = await page.evaluate(async () => {
+		const rows = await (await fetch("/api/workspaces/general/conversations")).json();
+		const withContent = (rows ?? []).find(
+			(row) => !row.hidden && row.parent === undefined && row.lastEntryId !== "",
+		);
+		if (withContent === undefined) return "";
+		const button = document.querySelector(`#conversation-list [data-conversation="${withContent.id}"]`);
+		if (button === null) return "";
+		button.click();
+		return withContent.id;
+	});
+	if (picked === "") return false;
+	await page.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, {
+		timeout: 20000,
+		polling: 100,
+	});
+	return true;
+}
+
 const browser = await puppeteer.launch({
 	executablePath: chrome,
 	headless: true,
@@ -126,6 +154,13 @@ try {
 			).length,
 	);
 	check("restoring brings the other sections back", restoredCards > 1, `${restoredCards} visible`);
+
+	// 3b. The checks below are about a transcript, so make sure there is one to check.
+	check(
+		"a conversation with a transcript is shown",
+		await showConversationWithContent(page),
+		"no conversation in this install has any content",
+	);
 
 	// 4. Nothing in the transcript is squashed. A scrolling flex column lets the
 	// browser compress items with overflow:hidden to zero; a long conversation is
@@ -285,12 +320,15 @@ try {
 		await new Promise((resolve) => setTimeout(resolve, 300));
 		return { present: true, text: button.textContent, payload: decodeURIComponent(button.dataset.copy) };
 	});
+	// A missing button fails the first check rather than throwing on the payload it would have
+	// carried: a crash here hid which check was actually unhappy.
+	const payload = copyResult.payload ?? "";
 	check("assistant replies offer a copy control", copyResult.present);
 	check("copying reports success", copyResult.text === "Copied", `button shows ${copyResult.text}`);
 	check(
 		"the copied payload looks like source",
-		!copyResult.payload.includes("<p>") && !copyResult.payload.includes("<div"),
-		copyResult.payload.slice(0, 80),
+		!payload.includes("<p>") && !payload.includes("<div"),
+		payload.slice(0, 80),
 	);
 
 	// 6. The settings sheet holds providers and defaults, and closes.
@@ -623,23 +661,26 @@ try {
 
 	// 14. Two tabs, two conversations. The conversation belongs to the URL, so tabs do not
 	//     fight over one "active" conversation and a shared link opens what it names.
-	// Picked from what the rail is showing, not from /api/state: that reports the
-	// conversation the install remembers, which need not be the one on screen, and
-	// clicking the one already open is a no-op that looks like a failure.
-	await page.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, { timeout: 20000 });
-	const other = await page.evaluate(() => {
+	// Another conversation with content, and one the rail shows — a subagent has a transcript
+	// but is not in the rail, so clicking its row would be clicking nothing.
+	const other = await page.evaluate(async () => {
 		const shown = window.location.pathname.split("/").pop();
-		const row = [...document.querySelectorAll("#conversation-list [data-conversation]")].find(
-			(button) => button.dataset.conversation !== shown,
+		const rows = await (await fetch("/api/workspaces/general/conversations")).json();
+		const row = (rows ?? []).find(
+			(candidate) =>
+				!candidate.hidden && candidate.parent === undefined && candidate.lastEntryId !== "" && candidate.id !== shown,
 		);
-		return row?.dataset.conversation ?? "";
+		return row?.id ?? "";
 	});
 	if (other === "") {
 		check("a second conversation exists to open in a second tab", false, "only one conversation");
 	} else {
 		const second = await browser.newPage();
 		await second.goto(`${url.replace(/\/$/, "")}/c/general/${other}`, { waitUntil: "networkidle2" });
-		await second.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, { timeout: 20000 });
+		await second.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, {
+			timeout: 20000,
+			polling: 100,
+		});
 		const first = await page.evaluate(() => ({
 			path: window.location.pathname,
 			title: document.querySelector("#conversation-title").textContent,
@@ -659,7 +700,10 @@ try {
 		});
 		await page.evaluate((id) => document.querySelector(`#conversation-list [data-conversation="${id}"]`).click(), other);
 		await page.waitForFunction((id) => window.location.pathname.endsWith(`/${id}`), { timeout: 10000 }, other);
-		await page.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, { timeout: 20000 });
+		await page.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, {
+			timeout: 20000,
+			polling: 100,
+		});
 		const switched = await page.evaluate(() => ({
 			kept: window.__kept === "yes",
 			title: document.querySelector("#conversation-title").textContent,
@@ -715,6 +759,11 @@ try {
 	);
 	check("fenced code is highlighted", rendered.highlighted === true, JSON.stringify(rendered));
 	check("terminal escape codes are stripped", rendered.ansiStripped === true, JSON.stringify(rendered));
+} catch (error) {
+	// A crash skips the summary below, which is where check failures are reported — so a run
+	// failed with a stack and nothing about the checks that had already gone wrong.
+	if (failures.length > 0) console.error(`checks so far:\n  - ${failures.join("\n  - ")}`);
+	throw error;
 } finally {
 	await browser.close();
 }
