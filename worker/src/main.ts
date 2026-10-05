@@ -194,7 +194,16 @@ const harness = await Harness.open(
 
 // Registered after the harness opens: the delegation tools need it to read a
 // child's answer, and the registry accepts installs while running.
-registry.install(delegationExtension({ harness, storage, catalog: () => catalog }));
+registry.install(
+	delegationExtension({
+		harness,
+		storage,
+		catalog: () => catalog,
+		// What a definition allows, so a child obeys its own list rather than being offered every
+		// skill the install has.
+		setSkills: (conversationId, skills) => skillFilterByConversation.set(conversationId, skills),
+	}),
+);
 registry.install(guardsExtension({ harness, storage, catalog: () => catalog, workspaceRoot: args.workspace }));
 
 /** Live handles by conversation id; created on first use. */

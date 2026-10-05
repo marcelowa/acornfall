@@ -26,7 +26,7 @@ import {
 	type EntryId,
 	type TaskId,
 } from "@earendil-works/pi-durable";
-import { type DelegationDeps, policyFor } from "./delegation.ts";
+import { policyFor, type StateDeps } from "./delegation.ts";
 
 export type Subagent = {
 	conversationId: ConversationId;
@@ -118,7 +118,7 @@ function textOf(message: AssistantMessage | undefined): string {
 	return (message?.content ?? []).flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
 }
 
-export function reporterTask(deps: DelegationDeps) {
+export function reporterTask(deps: StateDeps) {
 	return defineTask<ReporterInput, ReporterState, null>({
 		name: "acornfall.subagent-reporter",
 		version: 1,

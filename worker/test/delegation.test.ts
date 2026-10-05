@@ -11,12 +11,12 @@
 import { describe, expect, test } from "bun:test";
 import type { Context } from "@earendil-works/chord";
 import type { Harness, Storage } from "@earendil-works/pi-durable";
-import { mayAddress, type DelegationDeps } from "../src/delegation.ts";
+import { mayAddress, type StateDeps } from "../src/delegation.ts";
 
 const context = {} as Context;
 
 /** Deps with only the reads `mayAddress` and its policy need, so a failure can be staged. */
-function deps(conversation: (id: number) => Promise<unknown> = async () => undefined): DelegationDeps {
+function deps(conversation: (id: number) => Promise<unknown> = async () => undefined): StateDeps {
 	return {
 		harness: { snapshot: async () => undefined } as unknown as Harness,
 		storage: {

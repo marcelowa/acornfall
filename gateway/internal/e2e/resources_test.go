@@ -254,6 +254,47 @@ func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 	}
 }
 
+// A child runs the definition it was spawned as, so it is offered the skills that definition
+// allows and no others. Only the open path recorded that list, so a spawned child was offered
+// every skill the install has, whatever its definition said.
+func TestASpawnedChildIsOfferedItsDefinitionsSkills(t *testing.T) {
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "spawn a picky one",
+				Tools: []scriptTool{{Name: "subagent", Args: map[string]any{
+					"action": "spawn", "name": "picky", "message": "picky task", "agent": "pick-one",
+				}}},
+				Reply: "started it",
+			},
+			scriptRule{Match: "picky task", Reply: "PICKY ANSWERED"},
+		),
+		withSetup(func(t *testing.T, s *system) {
+			s.writeWorkspace(t, ".agents/skills/one/SKILL.md", "---\nname: one\ndescription: the first skill\n---\nBody.")
+			s.writeWorkspace(t, ".agents/skills/two/SKILL.md", "---\nname: two\ndescription: the second skill\n---\nBody.")
+			s.writeWorkspace(t, ".agents/agents/pick-one.md",
+				"---\nname: pick-one\ndescription: names one skill of the two\nskills: one\n---\nBody.")
+		}),
+	)
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	c.prompt("general", root, "spawn a picky one")
+	c.waitForText("general", root, "started it")
+	child := c.waitForConversationMatching("general", func(candidate conversation) bool {
+		return strings.Contains(candidate.Title, "picky task")
+	})
+
+	got := c.waitForText("general", child.ID, "PICKY ANSWERED")
+	offered := got.systemSections()["skills"]
+	if !strings.Contains(offered, "one") {
+		t.Errorf("the child should be offered the skill its definition names:\n%q", offered)
+	}
+	if strings.Contains(offered, "two") {
+		t.Errorf("and not the ones it does not:\n%q", offered)
+	}
+}
+
 // A workspace whose harness cannot start is still a workspace: it says the harness is down and
 // why, rather than taking the gateway with it. Fixing the file is enough.
 func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {

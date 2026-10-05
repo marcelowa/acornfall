@@ -15,9 +15,9 @@
 import type { Context } from "@earendil-works/chord";
 import { AgentDoc, defineExtension, hook, ToolTask } from "@earendil-works/pi-durable";
 import { resolveAgent, type Guard } from "./config.ts";
-import { definitionOf, type DelegationDeps } from "./delegation.ts";
+import { definitionOf, type StateDeps } from "./delegation.ts";
 
-export interface GuardDeps extends DelegationDeps {
+export interface GuardDeps extends StateDeps {
 	/** The workspace folder, used when a conversation has no cwd of its own. */
 	workspaceRoot: string;
 }

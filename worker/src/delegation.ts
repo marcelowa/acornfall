@@ -46,16 +46,34 @@ const MAX_DEPTH_WALK = 16;
 const READ_LIMIT = 24;
 const READ_CHARS = 4000;
 
-export interface DelegationDeps {
+/**
+ * What reading a conversation's committed state needs. The rules that only read — resolving a
+ * definition, walking ownership, deciding whether one conversation may address another — take
+ * this, so the guards can use them without pretending to write anything.
+ */
+export interface StateDeps {
 	harness: Harness;
 	storage: Storage;
 	/** Resolved on demand: the catalog is reloaded when definition files change. */
 	catalog: () => Catalog;
 }
 
+export interface DelegationDeps extends StateDeps {
+	/**
+	 * Records which skills a conversation may load. A child was offered every skill whatever its
+	 * definition named, because only the open path set this and a spawn is not an open.
+	 */
+	setSkills: (conversationId: string, skills: readonly string[] | null) => void;
+}
+
+/** The skills a definition allows, or null for every discovered skill. */
+function skillsFor(deps: StateDeps, definition: string): readonly string[] | null {
+	return definition === "" ? null : resolveAgent(deps.catalog(), definition).skills;
+}
+
 /** The definition a conversation runs, from its own committed metadata. */
 export async function definitionOf(
-	deps: DelegationDeps,
+	deps: StateDeps,
 	conversationId: string,
 	context: Context,
 ): Promise<string | undefined> {
@@ -64,7 +82,7 @@ export async function definitionOf(
 }
 
 /** How many ownership edges separate a conversation from a top-level one. */
-export async function depthOf(deps: DelegationDeps, conversationId: string, context: Context): Promise<number> {
+export async function depthOf(deps: StateDeps, conversationId: string, context: Context): Promise<number> {
 	let depth = 0;
 	let record = await deps.storage.conversation(conversationIdOf(conversationId), context);
 	while (record?.owner !== undefined) {
@@ -81,7 +99,7 @@ export async function depthOf(deps: DelegationDeps, conversationId: string, cont
  * Anything else needs `address: any`, which is a deliberate choice for a hub.
  */
 export async function mayAddress(
-	deps: DelegationDeps,
+	deps: StateDeps,
 	fromId: string,
 	targetId: string,
 	context: Context,
@@ -119,7 +137,7 @@ export async function mayAddress(
  * knows what else to say: a peer's title, for instance.
  */
 async function recordChild(
-	deps: DelegationDeps,
+	deps: StateDeps,
 	tx: Tx,
 	context: Context,
 	options: { parentId: string; childId: ConversationId; definition: string | undefined; owned: boolean },
@@ -136,7 +154,7 @@ async function recordChild(
 }
 
 /** How many conversations agents have created in this workspace. */
-export async function agentCreatedCount(deps: DelegationDeps, context: Context): Promise<number> {
+export async function agentCreatedCount(deps: StateDeps, context: Context): Promise<number> {
 	let cursor: Parameters<typeof deps.storage.scanConversations>[2];
 	let created = 0;
 	// Every page: this feeds a ceiling on the whole workspace, and stopping at the first page
@@ -178,7 +196,7 @@ export interface PolicyView {
  * is what keeps a hierarchy from growing: a conversation at depth `maxDepth` may not
  * create children, while creating peers is a separate permission.
  */
-export async function policyFor(deps: DelegationDeps, conversationId: string, context: Context): Promise<PolicyView> {
+export async function policyFor(deps: StateDeps, conversationId: string, context: Context): Promise<PolicyView> {
 	const [definition, depth, meta, peersTotal] = await Promise.all([
 		definitionOf(deps, conversationId, context),
 		depthOf(deps, conversationId, context),
@@ -467,6 +485,7 @@ export function delegationExtension(deps: DelegationDeps) {
 						definition: args.agent,
 						owned: isPeer === false,
 					});
+					deps.setSkills(String(child.id), skillsFor(deps, meta.definition ?? ""));
 					if (isPeer) {
 						// A peer is a normal conversation, so the rail names it after what it is for.
 						meta.title = meta.title === "" ? `Peer: ${name}` : meta.title;
@@ -556,12 +575,13 @@ export function delegationExtension(deps: DelegationDeps) {
 						instructions: definition.instructions,
 					});
 				}
-				await recordChild(deps, tx, context, {
+				const meta = await recordChild(deps, tx, context, {
 					parentId,
 					childId: created.id,
 					definition: args.agent,
 					owned: true,
 				});
+				deps.setSkills(String(created.id), skillsFor(deps, meta.definition ?? ""));
 				return created.id;
 			}, context);
 
