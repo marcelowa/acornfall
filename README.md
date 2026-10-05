@@ -189,11 +189,13 @@ scripted provider, so nothing calls a model and nothing needs a network. They ne
 blocking one, a subagent being spawned — is driven by `ACORNFALL_DEV_SCRIPT`, a JSON file of
 rules matched against the last user message; see `docs/features.md`.
 
-The Markdown renderer in `gateway/web/markdown.js` **escapes the source once, up front**,
-and every later step operates on escaped text. Model output and tool output are
-untrusted — a tool result can contain anything a file or a command produced — so raw
-HTML must never survive, and link targets are scheme-checked rather than passed through.
-`scripts/check-markdown.mjs` exists mostly to keep that true.
+The Markdown renderer in `gateway/web/markdown.js` **escapes the source once, up front**, and every
+later step operates on escaped text. Model output and tool output are untrusted — a tool
+result can contain anything a file or a command produced — so raw HTML must never
+survive, link targets are scheme-checked rather than passed through, and images are
+refused outright: a remote image in a reply is fetched by your browser, which is a way to
+signal information outward. The checks for all of that live in `tools/check-ui.mjs`
+(`make ui`), in a real DOM, because the sanitiser needs one.
 
 `make ui` exists because two bugs shipped that curl could not see: an element looked up
 but never declared, and a modal whose visibility an author rule silently overrode. It

@@ -13,7 +13,7 @@ const raw = await readFile(join(here, "..", "gateway", "web", "app.js"), "utf8")
 
 // The client's only import is replaced with stubs: new Function cannot parse an
 // import statement, and this check is about the fold, not about rendering. The
-// renderer has its own tests in check-markdown.mjs.
+// renderer's escaping is checked in tools/check-ui.mjs, where there is a DOM.
 const source = raw.replace(
 	/^import .*from "\.\/markdown\.js";$/m,
 	'const escape = (value) => String(value ?? "");\nconst renderMarkdown = (value) => String(value ?? "");\nconst stripAnsi = (value) => String(value ?? "");',

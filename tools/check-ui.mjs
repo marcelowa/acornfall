@@ -668,6 +668,53 @@ try {
 		check("switching conversations does not reload the page", switched.kept);
 		check("the transcript follows the URL", switched.turns > 0, JSON.stringify(switched));
 	}
+
+	// 15. The renderer's escaping. Assistant text and tool output are untrusted — a tool result
+	//     can contain anything a file or a command produced — so this is the client's one
+	//     security boundary, and it is checked here rather than in a node script because the
+	//     sanitizer needs a real DOM. Images are refused outright: a remote URL in a reply is
+	//     an exfiltration channel, since your browser fetches it.
+	const rendered = await page.evaluate(async () => {
+		const { renderMarkdown } = await import("/markdown.js");
+		const cases = {
+			script: renderMarkdown("Look: <script>alert('x')</script>"),
+			image: renderMarkdown("<img src=x onerror=alert(1)>"),
+			jsLink: renderMarkdown("[click](javascript:alert(1))"),
+			dataLink: renderMarkdown("[x](data:text/html;base64,PHNjcmlwdD4=)"),
+			goodLink: renderMarkdown("[docs](https://example.com/a?b=1)"),
+			code: renderMarkdown("```js\nconst x = 1;\n```"),
+			ansi: renderMarkdown("\u001b[31mred\u001b[0m"),
+		};
+		return {
+			scriptTag: cases.script.includes("<script"),
+			scriptEscaped: cases.script.includes("&lt;script&gt;"),
+			imageTag: cases.image.includes("<img"),
+			jsHref: /<a[^>]+href=["']?javascript:/i.test(cases.jsLink),
+			jsLabel: cases.jsLink.includes("click"),
+			dataHref: /<a[^>]+href=["']?data:/i.test(cases.dataLink),
+			goodHref: /<a[^>]+href="https:\/\/example\.com/.test(cases.goodLink),
+			privateRel: /rel="noreferrer noopener"/.test(cases.goodLink),
+			highlighted: cases.code.includes('class="hljs language-js"'),
+			ansiStripped: !cases.ansi.includes("\u001b"),
+		};
+	});
+	check(
+		"raw HTML in a reply is escaped, not rendered",
+		rendered.scriptTag === false && rendered.scriptEscaped === true && rendered.imageTag === false,
+		JSON.stringify(rendered),
+	);
+	check(
+		"javascript: and data: links are not turned into links",
+		rendered.jsHref === false && rendered.dataHref === false && rendered.jsLabel === true,
+		JSON.stringify(rendered),
+	);
+	check(
+		"an ordinary link still works, and opens without a referrer",
+		rendered.goodHref === true && rendered.privateRel === true,
+		JSON.stringify(rendered),
+	);
+	check("fenced code is highlighted", rendered.highlighted === true, JSON.stringify(rendered));
+	check("terminal escape codes are stripped", rendered.ansiStripped === true, JSON.stringify(rendered));
 } finally {
 	await browser.close();
 }
