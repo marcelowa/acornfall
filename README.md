@@ -38,7 +38,13 @@ make build                     # go build -> ./bin/acornfall
 
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
 `--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
-`--token <secret>`, `--worker-dir <dir>`.
+`--token <secret>`, `--worker-dir <dir>`, `--workspaces-dir <dir>` (default
+`~/acornfall/workspaces`).
+
+Each of those has an environment variable, for a service manager or a container that should
+not carry flags: `ACORNFALL_HOME` or `ACORNFALL_DATA` for the install folder,
+`ACORNFALL_TOKEN` for the token, and `ACORNFALL_WORKER` for the worker's directory. A flag
+wins over the variable.
 
 ### Reaching it from another machine
 

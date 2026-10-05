@@ -79,12 +79,10 @@ interface Args {
 	trusted: boolean;
 	storage: string;
 	credentials: string;
-	skills: string[];
 }
 
 function parseArgs(argv: readonly string[]): Args {
 	const values = new Map<string, string>();
-	const skills: string[] = [];
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
 		if (arg === undefined || !arg.startsWith("--")) continue;
@@ -94,14 +92,13 @@ function parseArgs(argv: readonly string[]): Args {
 			values.set(key, "true");
 			continue;
 		}
-		if (key === "skill") skills.push(next);
-		else values.set(key, next);
+		values.set(key, next);
 		index += 1;
 	}
 	const workspace = resolve(values.get("workspace") ?? process.cwd());
 	const defaults = (name: string) => join(workspace, ".acornfall", name);
 	const credentials = resolve(values.get("credentials") ?? defaults("credentials.json"));
-	const home = resolve(values.get("home") ?? values.get("data-dir") ?? dirname(credentials));
+	const home = resolve(values.get("home") ?? dirname(credentials));
 	const trusted = (values.get("trusted") ?? "true") !== "false";
 	return {
 		workspace,
@@ -109,9 +106,6 @@ function parseArgs(argv: readonly string[]): Args {
 		trusted,
 		storage: resolve(values.get("storage") ?? defaults("session.sqlite")),
 		credentials,
-		// Explicit `--skill <dir>` entries, if any; empty means "derive them from the layer
-		// roots", which is what knows about `.agents` and about trust.
-		skills,
 	};
 }
 
@@ -124,9 +118,7 @@ const models = builtinModels({ credentials });
 // Every resource folder this install reads: the user's, then the workspace's, each with the
 // ecosystem's `.agents` before our own `.acornfall`. An explicit --skill replaces the list.
 const roots = layerRoots({ home: args.home, workspace: args.workspace, trusted: args.trusted });
-const discoveredSkills = await loadSkills(
-	args.skills.length > 0 ? args.skills : resourceFolders(roots, ["skills"]),
-);
+const discoveredSkills = await loadSkills(resourceFolders(roots, ["skills"]));
 
 // The overlay, the workspace's rules, and its commands. All reloaded on demand, so
 // editing a file does not need a restart.
