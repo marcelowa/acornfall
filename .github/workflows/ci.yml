@@ -1,0 +1,29 @@
+# The rules are only real if something checks them on every change.
+#
+# `make lint` is static analysis and `make test` adds the unit tests, the worker protocol
+# against a real worker process, -race, and the end-to-end suite against a real gateway.
+# Nothing here needs a model or a network.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: gateway/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The end-to-end suite skips itself without bun and the worker's dependencies, so a
+      # missing install would look like a pass.
+      - run: make deps
+      - run: make tools
+      - run: make test

@@ -9,7 +9,6 @@
  * one; control treats it as opaque.
  */
 import { mkdir, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -523,7 +522,7 @@ function reportUnknownKeys(catalog: Catalog): void {
 }
 
 async function main(): Promise<void> {
-	await harness.resume();
+	harness.resume();
 	// The root conversation exists in every install and is adopted as the first
 	// conversation, so an upgrade keeps its history.
 	const root = await harness.root(CONTEXT);
@@ -580,7 +579,16 @@ async function main(): Promise<void> {
 	});
 }
 
-async function handle(command: Command): Promise<unknown> {
+/**
+ * The commands the queue handles. Login answers are not among them: they arrive while a login
+ * is in flight and bypass the queue, because queueing an answer behind the login it answers
+ * would deadlock. Saying so in the type is what lets the switch below be exhaustive — a new
+ * command in the protocol is then either handled here or added to this exclusion, and the
+ * compiler asks.
+ */
+type QueuedCommand = Exclude<Command, { type: "auth_answer" } | { type: "auth_cancel" }>;
+
+async function handle(command: QueuedCommand): Promise<unknown> {
 	switch (command.type) {
 		case "describe":
 			return await describe();
@@ -716,8 +724,12 @@ async function handle(command: Command): Promise<unknown> {
 			return await harness.usage(CONTEXT);
 		case "shutdown":
 			return undefined;
-		default:
-			throw new Error(`unsupported command: ${JSON.stringify(command)}`);
+		default: {
+			// Unreachable while every member of QueuedCommand has a case above: if one is added
+			// without a case, this assignment stops compiling, which is the point.
+			const unhandled: never = command;
+			throw new Error(`unsupported command: ${JSON.stringify(unhandled)}`);
+		}
 	}
 }
 

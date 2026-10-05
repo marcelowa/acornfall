@@ -55,13 +55,14 @@ type Workspace struct {
 }
 
 // Views renders workspaces for the interface, which is the only place `running` belongs.
+//
+// A conversion rather than a field-by-field copy, because the two shapes are the same shape:
+// a field added to one and not the other is then a compile error instead of a value that
+// quietly stops reaching the interface.
 func Views(list []Workspace) []WorkspaceState {
 	views := make([]WorkspaceState, 0, len(list))
 	for _, workspace := range list {
-		views = append(views, WorkspaceState{
-			Name: workspace.Name, Path: workspace.Path, Title: workspace.Title,
-			General: workspace.General, Trusted: workspace.Trusted, Running: workspace.Running,
-		})
+		views = append(views, WorkspaceState(workspace))
 	}
 	return views
 }

@@ -21,6 +21,9 @@ import (
 )
 
 func main() {
+	// One place configures logging, and it is the entry point: a package that sets global
+	// logger state when it is imported decides something the program did not ask for.
+	log.SetFlags(log.Ltime)
 	if len(os.Args) > 1 && os.Args[1] == "provider" {
 		providers(os.Args[2:])
 		return

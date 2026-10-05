@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -61,7 +60,12 @@ func TestMain(m *testing.M) {
 		}
 		defer os.RemoveAll(dir)
 		gatewayBin = filepath.Join(dir, "acornfall")
-		build := exec.Command("go", "build", "-o", gatewayBin, "./cmd/acornfall")
+		args := []string{"build"}
+		if raceEnabled {
+			args = append(args, "-race")
+		}
+		args = append(args, "-o", gatewayBin, "./cmd/acornfall")
+		build := exec.Command("go", args...)
 		build.Dir = filepath.Join(repoRoot, "gateway")
 		if out, err := build.CombinedOutput(); err != nil {
 			panic(fmt.Sprintf("build gateway: %v\n%s", err, out))
@@ -101,7 +105,6 @@ type setup func(t *testing.T, s *system)
 type settings struct {
 	script []scriptRule
 	slow   bool
-	flags  []string
 	setup  []setup
 }
 
@@ -114,10 +117,6 @@ func withScript(rules ...scriptRule) func(*settings) {
 // withSlowModel streams slowly enough that a turn is still running while the test acts.
 func withSlowModel() func(*settings) {
 	return func(s *settings) { s.slow = true }
-}
-
-func withFlags(flags ...string) func(*settings) {
-	return func(s *settings) { s.flags = append(s.flags, flags...) }
 }
 
 // withSetup writes files before anything starts, which is the only moment a workspace's own
@@ -174,7 +173,6 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		"--addr", "127.0.0.1:0",
 		"--insecure",
 	}
-	args = append(args, s.cfg.flags...)
 	cmd := exec.Command(gatewayBin, args...)
 	// A curated environment: the test must not inherit a real install's home, token, or
 	// provider credentials, or it would be testing someone else's configuration.
@@ -257,10 +255,6 @@ func (s *system) stop() {
 		_ = s.cmd.Process.Kill()
 		<-done
 	}
-}
-
-func (s *system) workspaceDir(name string) string {
-	return filepath.Join(s.WorkspacesDir, name)
 }
 
 // writeWorkspace writes a file into the general workspace, creating parents. Tests use it to
@@ -863,16 +857,4 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
-}
-
-// freePort is only for the tests that cannot read a startup line: the auth test binds a
-// non-loopback address and therefore cannot use the loopback default.
-func freePort(t *testing.T) int {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
 }

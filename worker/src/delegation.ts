@@ -192,7 +192,10 @@ function splitModel(value: string): { provider: string; modelId: string } {
 
 export function delegationExtension(deps: DelegationDeps) {
 	// Assigned just below, and read by the tools when they create a child: a child is
-	// denied these extensions, so it cannot delegate even if the depth rule changes.
+	// denied these extensions, so it cannot delegate even if the depth rule changes. The
+	// tools have to be defined first and the extension needs them, so this is assigned once,
+	// after them — which is what `prefer-const` cannot see.
+	// eslint-disable-next-line prefer-const -- forward reference from the tools above
 	let self: Extension | undefined;
 
 	const subagentTool = defineTool({

@@ -17,7 +17,6 @@
  * crash. "Deliver the answer to the parent" is a durable intention with an
  * idempotency key, not a promise that resolves while the process happens to be alive.
  */
-import type { Context } from "@earendil-works/chord";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantEntry,
@@ -127,7 +126,6 @@ export function reporterTask(deps: DelegationDeps) {
 		phases: {
 			deliver: async (reporter, runtime, context) => {
 				const { name, conversationId, message, followUp } = reporter.input;
-				const target = String(conversationId);
 				const sender = String(runtime.conversationId);
 				const subagent = await runtime.conversation(conversationId, context);
 				const request = {

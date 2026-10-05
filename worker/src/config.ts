@@ -355,7 +355,7 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 	let delegation: Partial<Delegation> | undefined;
 	const guards: Guard[] = [];
 
-	for (const { layer, contributes } of layers) {
+	for (const { contributes } of layers) {
 		if (contributes.model !== undefined) model = contributes.model;
 		if (contributes.thinking !== undefined) thinking = contributes.thinking;
 		if (contributes.instructions !== undefined && contributes.instructions.length > 0) {

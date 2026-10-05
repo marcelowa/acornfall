@@ -105,7 +105,7 @@ describe("credentials", () => {
 		const path = join(dir, "credentials.json");
 		await write(path, "{ this is not json");
 		const store = new FileCredentialStore(path);
-		await expect(store.read("p")).rejects.toThrow();
+		expect(store.read("p")).rejects.toThrow();
 	});
 });
 

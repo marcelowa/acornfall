@@ -168,12 +168,16 @@ process. `docs/adr/` holds the designs they will land against.
 ## Development
 
 ```bash
-make check         # fast: types, the client/markup checks, and unit tests
-make test          # everything, including the end-to-end feature tests
+make check         # fast: the compiler and the unit tests, no processes (~6s)
+make lint          # the static rules: gofmt, vet, staticcheck, tsc, eslint
+make test          # everything, including the end-to-end feature tests under -race (~2min)
 make ui            # drives the real client in headless chromium (needs a running gateway)
 make build         # gateway build
 make dev           # dev provider + gateway, workspace = current directory
 ```
+
+`docs/engineering/standards.md` is what the code is held to, rule by rule, with the check that
+enforces each and the bug behind the ones that matter. `make tools` installs the linters.
 
 `docs/features.md` is the inventory: what the platform does, stated as things that are
 observable, and the test that covers each one. Read it before changing behaviour, and add to it

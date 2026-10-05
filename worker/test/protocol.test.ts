@@ -255,7 +255,7 @@ describe("the worker protocol", () => {
 
 	test("an unknown command fails as a response, and does not end the stream", async () => {
 		const id = worker.send({ type: "not-a-command" });
-		await expect(worker.response(id)).rejects.toThrow();
+		expect(worker.response(id)).rejects.toThrow();
 		// Still alive afterwards.
 		const described = await worker.call<{ provider: string }>({ type: "describe" });
 		expect(described.provider).toBe("pi-durable");

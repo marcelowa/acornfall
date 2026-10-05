@@ -14,7 +14,7 @@
  */
 import type { Context } from "@earendil-works/chord";
 import { AgentDoc, defineExtension, hook, ToolTask } from "@earendil-works/pi-durable";
-import { resolveAgent, type Catalog, type Guard } from "./config.ts";
+import { resolveAgent, type Guard } from "./config.ts";
 import { definitionOf, type DelegationDeps } from "./delegation.ts";
 
 export interface GuardDeps extends DelegationDeps {

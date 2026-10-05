@@ -158,7 +158,7 @@ describe("guards", () => {
 			join(workspace, ".acornfall", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf"}]}}}`,
 		);
-		await expect(loadCatalog(home, workspace, true)).rejects.toThrow(/needs a reason/);
+		expect(loadCatalog(home, workspace, true)).rejects.toThrow(/needs a reason/);
 	});
 
 	test("a guard with neither matcher is refused", async () => {
@@ -167,7 +167,7 @@ describe("guards", () => {
 			join(workspace, ".acornfall", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","reason":"because"}]}}}`,
 		);
-		await expect(loadCatalog(home, workspace, true)).rejects.toThrow(/pattern or outside/);
+		expect(loadCatalog(home, workspace, true)).rejects.toThrow(/pattern or outside/);
 	});
 
 	test("a pattern that does not compile is refused where it is written", async () => {
@@ -176,7 +176,7 @@ describe("guards", () => {
 			join(workspace, ".acornfall", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"([","reason":"because"}]}}}`,
 		);
-		await expect(loadCatalog(home, workspace, true)).rejects.toThrow(/does not compile/);
+		expect(loadCatalog(home, workspace, true)).rejects.toThrow(/does not compile/);
 	});
 
 	test("guards accumulate: one added anywhere holds everywhere", async () => {
