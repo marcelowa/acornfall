@@ -3,9 +3,14 @@
 The rules this project holds itself to, why each one exists, and what fails when you break it.
 Read it before changing something; add to it when a rule earns its place.
 
-It supersedes `go-standards.md` and `typescript-standards.md`, which were written as prompts for
-a refactoring agent. Those asked for a generic layout and a big-bang reorganisation; this asks
-for the smallest change that satisfies a rule, in the shape the project already has.
+It replaces the two standards documents that came before it — prompt-shaped, asking for a
+generic layout and a big-bang reorganisation of a working codebase. They are in the history
+rather than in the tree; the rules worth keeping are here, corrected where they were wrong and
+with the reasoning the originals did not carry. This asks for the smallest change that
+satisfies a rule, in the shape the project already has.
+
+A rule's number is an identifier, not an order: rules are added, never renumbered, because
+other documents cite them (the Makefile cites G3).
 
 Two words are used precisely:
 
@@ -78,6 +83,7 @@ split would hide exactly that.
 | G5 | One owner per goroutine, and the owner cancels it. A supervisor must be idempotent: a duplicated "it died" signal must not start a second process. | A closed worker that restarted itself left two harnesses over one storage. | Convention, `TestABrokenWorkspaceFileIsReportedAndHeals` |
 | G6 | `panic` is for the unrecoverable; `log.Fatal` and `os.Exit` live in `cmd/` only. | A library that exits takes the decision away from its caller. | Convention |
 | G7 | `internal/` is the default; an exported identifier has a doc comment and a caller. | The public surface is a cost, not a status symbol. | Convention |
+| G14 | Ending the process is the entry point's decision: a signal or an explicit shutdown, cleanup once, in `cmd/`. A package returns an error and lets its caller decide. | A library that exits takes the decision away, and cleanup in five places means it happens in none of them reliably. | Convention |
 
 ### Errors
 
@@ -94,6 +100,7 @@ split would hide exactly that.
 | G11 | A unit test lives in the package it tests and needs no process. A test that needs processes, ports, or a harness lives in `internal/e2e` and skips under `-short`. | The fast loop has to stay fast, or nobody runs it. | `make check` vs `make test` |
 | G12 | Wait for a condition with a deadline, never for a fixed duration. | `time.Sleep(2 * time.Second)` is either slow or flaky, and often both. | Convention, review |
 | G13 | `-race` is part of the suite, not a special occasion — including for the gateway the end-to-end tests spawn, which is a separate process and would otherwise be uninstrumented. | The bugs this project has had were concurrency bugs. | `make test` |
+| G15 | A table when the test is the same check over different inputs, so the cases read as a list of situations rather than as prose. | `resolveThinking` and the defaults chain are only legible as a table; a name per case says what each one is for. | Convention, review |
 
 ## TypeScript / Bun
 
@@ -103,6 +110,7 @@ split would hide exactly that.
 |---|---|---|---|
 | T1 | `any` is banned; use `unknown` and check. | An `any` is a decision to stop knowing. | `@typescript-eslint/no-explicit-any` |
 | T2 | `as` is allowed only where a check immediately precedes it, or at a documented trust boundary. | The cast is the boundary; write down which side of it you are on. | `make lint` |
+| T11 | The runtime's own tools and APIs first — `Bun.file`, `bun test`, `bun --watch`, `Bun.spawn`. A dependency needs a reason, which is why there is no validator library here: the payloads we parse are our own protocol (checked by shape) and files the user writes (checked field by field, with tests). | Every dependency is someone else's release schedule, and a validator earns its place against an untrusted, changing payload, not a pipe we control. | Convention, review |
 | T3 | A union that grows must break every `switch` over it: `Exclude` the parts handled elsewhere, and make the default `never`. | A new protocol command silently became "unsupported" instead of a compile error. | `switch-exhaustiveness-check` |
 | T4 | Strict compilation, including `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `verbatimModuleSyntax`. | `strict` alone still lets `array[0]` be a value that is not there. | `bun run typecheck` |
 
@@ -113,7 +121,7 @@ split would hide exactly that.
 | T5 | No floating promises: `await`, `return`, `.catch`, or an explicit `void` for something deliberately not awaited. | A rejected promise nobody holds is an invisible failure. | `no-floating-promises` |
 | T6 | Side effects belong to the entry point. `config.ts`, `hooks.ts`, `commands.ts` are functions of their arguments. | It is why unit tests can cover the rules without a harness. | Convention |
 | T7 | A misconfiguration is loud where it is read, naming the file and the field. | A guard without a reason must not become a guard that does nothing. | `worker/test/config.test.ts` |
-| T8 | An error the model should see is a tool result, not a throw. | Throwing away a tool's explanation loses the only useful part. | Convention |
+| T8 | An error the model should see is a tool result, not a throw. An unexpected exception inside a command is an error response, not a process exit: the worker holds live runs, and staying up is the service it provides. | Throwing away a tool's explanation loses the only useful part, and a crash takes every conversation with it. | Convention |
 | T9 | A store never hands out its own object; a task commits before it shows. | Mutation through a getter is the hardest bug to find. | `worker/test/skills.test.ts` |
 | T10 | Serialise where order is the contract (`CommandQueue`), and say so where you do it. | Answers that overtake their questions is a race with a plausible-looking log. | `worker/test/protocol.test.ts` |
 
