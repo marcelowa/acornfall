@@ -83,13 +83,27 @@ type WorkspacesOptions struct {
 type Workspaces struct {
 	opts WorkspacesOptions
 
+	// mu guards the registry and the controls.
+	//
+	// Lock order, and it is not a preference: **registry before control, never the
+	// reverse.** `List` and the eviction sweep read a control while holding this, so a
+	// path that read the registry while holding a control would make two orders out of one
+	// pair of locks, and a pending writer on either side would then hang every request
+	// that touches both — which is every request. `TestStateDoesNotTakeTheRegistryLockInsideItsOwn`
+	// checks the one place that had it backwards.
 	mu       sync.RWMutex
 	dir      string
 	registry map[string]Workspace
 	controls map[string]*Control
-	lastUsed map[string]time.Time
 	starting map[string]*sync.Mutex
 	closed   bool
+
+	// used is guarded by usedMu rather than by mu, because it changes on every request:
+	// taking the registry's write lock to store a timestamp would put the hot path in
+	// front of everything that reads the registry. It is a leaf lock, never held while
+	// taking another.
+	usedMu sync.Mutex
+	used   map[string]time.Time
 }
 
 func NewWorkspaces(opts WorkspacesOptions) *Workspaces {
@@ -97,7 +111,7 @@ func NewWorkspaces(opts WorkspacesOptions) *Workspaces {
 		opts:     opts,
 		registry: map[string]Workspace{},
 		controls: map[string]*Control{},
-		lastUsed: map[string]time.Time{},
+		used:     map[string]time.Time{},
 		starting: map[string]*sync.Mutex{},
 	}
 }
@@ -270,8 +284,8 @@ func (w *Workspaces) Remove(ctx context.Context, name string) error {
 	control := w.controls[name]
 	delete(w.registry, name)
 	delete(w.controls, name)
-	delete(w.lastUsed, name)
 	w.mu.Unlock()
+	w.forgetUsed(name)
 	if control != nil {
 		control.Close()
 	}
@@ -340,8 +354,8 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	}
 	w.mu.Lock()
 	w.controls[name] = control
-	w.lastUsed[name] = time.Now()
 	w.mu.Unlock()
+	w.markUsed(name)
 	workerpool.Log("workspace %s started (%s)", name, workspace.Path)
 	return control, nil
 }
@@ -365,9 +379,33 @@ func (w *Workspaces) Route(ctx context.Context, workspaceName, conversationID st
 }
 
 func (w *Workspaces) touch(name string) {
-	w.mu.Lock()
-	w.lastUsed[name] = time.Now()
-	w.mu.Unlock()
+	w.markUsed(name)
+}
+
+// markUsed records that a workspace was asked for, which is what keeps an actively used
+// one from being evicted.
+func (w *Workspaces) markUsed(name string) {
+	w.usedMu.Lock()
+	w.used[name] = time.Now()
+	w.usedMu.Unlock()
+}
+
+func (w *Workspaces) forgetUsed(name string) {
+	w.usedMu.Lock()
+	delete(w.used, name)
+	w.usedMu.Unlock()
+}
+
+// idleFor reports how long a workspace has gone unused. An unknown one is idle: it has no
+// worker to keep.
+func (w *Workspaces) idleFor(name string) time.Duration {
+	w.usedMu.Lock()
+	defer w.usedMu.Unlock()
+	at, known := w.used[name]
+	if !known {
+		return idleEviction
+	}
+	return time.Since(at)
 }
 
 // evictIdle stops workers nobody is watching. The general workspace is kept: it is where a
@@ -380,22 +418,7 @@ func (w *Workspaces) evictIdle(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			w.mu.Lock()
-			var stopping []*Control
-			for name, control := range w.controls {
-				if name == GeneralWorkspaceName {
-					continue
-				}
-				if time.Since(w.lastUsed[name]) < idleEviction {
-					continue
-				}
-				if control.Watching() || control.Busy() {
-					continue
-				}
-				stopping = append(stopping, control)
-				delete(w.controls, name)
-			}
-			w.mu.Unlock()
+			stopping := w.evictCandidates()
 			for _, control := range stopping {
 				control.Close()
 			}
@@ -404,6 +427,33 @@ func (w *Workspaces) evictIdle(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// evictCandidates decides which idle workspaces to stop, and removes them from the
+// controls map so nothing can start a second worker over the same storage while they are
+// being closed. Closing happens outside: it waits for a process, and the registry lock is
+// not a place to wait for anything.
+//
+// This is the one caller that reads a control while holding the registry lock, which is why
+// the order is registry-then-control everywhere.
+func (w *Workspaces) evictCandidates() []*Control {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var stopping []*Control
+	for name, control := range w.controls {
+		if name == GeneralWorkspaceName {
+			continue
+		}
+		if w.idleFor(name) < idleEviction {
+			continue
+		}
+		if control.Watching() || control.Busy() {
+			continue
+		}
+		stopping = append(stopping, control)
+		delete(w.controls, name)
+	}
+	return stopping
 }
 
 func validateWorkspace(workspace Workspace) error {

@@ -548,6 +548,12 @@ func (c *Control) StateFor(conversationID string) State {
 		c.mu.RUnlock()
 	}
 
+	// The registry lock is taken before this snapshot's, never inside it. The eviction sweep
+	// takes the registry lock and then reads a control, so a state build that read the
+	// registry from inside this lock would close the cycle and hang every request behind
+	// it. Read it first, and the two orders agree.
+	workspaces := c.workspaceList()
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	state := State{
@@ -559,7 +565,7 @@ func (c *Control) StateFor(conversationID string) State {
 			Trusted: c.opts.Workspace.Trusted,
 			Running: c.workerUp,
 		},
-		Workspaces:    c.workspaceList(),
+		Workspaces:    workspaces,
 		WorkspacesDir: c.opts.WorkspacesDir,
 		Harness:       c.describe.Provider,
 		Capabilities:  c.describe.Capabilities,
