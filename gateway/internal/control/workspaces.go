@@ -26,6 +26,17 @@ import (
 // in every install.
 const GeneralWorkspaceName = "general"
 
+// DefaultWorkspacesDir is where workspaces are created. It is deliberately outside the
+// hidden installation folder: this is the reader's own content, and it should be somewhere
+// they would look.
+func DefaultWorkspacesDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "acornfall/workspaces"
+	}
+	return filepath.Join(home, "acornfall", "workspaces")
+}
+
 // Workspace is a folder the agent works in, plus the decisions that belong to it.
 type Workspace struct {
 	Name  string `json:"name"`
@@ -36,9 +47,21 @@ type Workspace struct {
 	// Trusted gates the workspace's own resources: its AGENTS.md, config, agents,
 	// skills, and commands. An untrusted workspace is a folder and nothing else.
 	Trusted bool `json:"trusted"`
-	// Running reports whether this workspace's worker is up. A workspace that has never
-	// been used has no process, which is what keeps an install with many of them cheap.
-	Running bool `json:"running"`
+	// Running is runtime state, never stored: a persisted `true` would be a claim about a
+	// process that does not exist after a restart.
+	Running bool `json:"-"`
+}
+
+// Views renders workspaces for the interface, which is the only place `running` belongs.
+func Views(list []Workspace) []WorkspaceState {
+	views := make([]WorkspaceState, 0, len(list))
+	for _, workspace := range list {
+		views = append(views, WorkspaceState{
+			Name: workspace.Name, Path: workspace.Path, Title: workspace.Title,
+			General: workspace.General, Trusted: workspace.Trusted, Running: workspace.Running,
+		})
+	}
+	return views
 }
 
 // WorkspacesOptions configures the workspace layer.
@@ -46,7 +69,10 @@ type WorkspacesOptions struct {
 	// Home is the installation folder: global resources, credentials, and state.
 	Home string
 	// GeneralPath is the general workspace's folder, from --workspace.
-	GeneralPath   string
+	GeneralPath string
+	// WorkspacesDir is where workspaces are created, from --workspaces-dir. Empty means
+	// the registry's value, and failing that the default.
+	WorkspacesDir string
 	WorkerCommand []string
 	WorkerDir     string
 	// Model is the install default, from --model.
@@ -58,6 +84,7 @@ type Workspaces struct {
 	opts WorkspacesOptions
 
 	mu       sync.RWMutex
+	dir      string
 	registry map[string]Workspace
 	controls map[string]*Control
 	lastUsed map[string]time.Time
@@ -75,10 +102,20 @@ func NewWorkspaces(opts WorkspacesOptions) *Workspaces {
 	}
 }
 
+// Dir is the folder workspaces are created in.
+func (w *Workspaces) Dir() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.dir
+}
+
 // Open loads the registry, seeding the general workspace on first run, and starts it so
 // the interface has somewhere to land.
 func (w *Workspaces) Open(ctx context.Context) error {
 	if err := w.loadRegistry(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(w.Dir(), 0o755); err != nil {
 		return err
 	}
 	if err := w.migrate(); err != nil {
@@ -144,7 +181,32 @@ func (w *Workspaces) Get(name string) (Workspace, bool) {
 	return workspace, ok
 }
 
-// Add registers a workspace and persists the registry.
+// Create makes a workspace inside the workspaces folder. This is the only way the API
+// creates one, which is what keeps the interface inside a single directory: a folder
+// anywhere else on the machine is an operator's decision, not a form field.
+//
+// A folder of that name already there is adopted rather than refused, so a workspace the
+// reader prepared themselves works.
+func (w *Workspaces) Create(name string, trusted bool) (Workspace, error) {
+	if strings.TrimSpace(name) == "" {
+		return Workspace{}, errors.New("a workspace needs a name")
+	}
+	if strings.ContainsAny(name, "/\\ ") {
+		return Workspace{}, fmt.Errorf("a workspace name cannot contain a slash or a space: %q", name)
+	}
+	path := filepath.Join(w.Dir(), name)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return Workspace{}, err
+	}
+	workspace := Workspace{Name: name, Path: path, Title: name, Trusted: trusted}
+	if err := w.Add(workspace); err != nil {
+		return Workspace{}, err
+	}
+	return workspace, nil
+}
+
+// Add registers a workspace at a folder of the caller's choosing. The API does not use it;
+// the CLI and anyone editing the registry do.
 func (w *Workspaces) Add(workspace Workspace) error {
 	if err := validateWorkspace(workspace); err != nil {
 		return err
@@ -262,6 +324,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		Workspace:     workspace,
 		Credentials:   filepath.Join(w.opts.Home, "credentials.json"),
 		Registry:      w.List,
+		WorkspacesDir: w.Dir(),
 		Home:          w.opts.Home,
 		StoragePath:   filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
 		SettingsPath:  filepath.Join(w.opts.Home, "state", name, "settings.json"),
@@ -360,30 +423,86 @@ func (w *Workspaces) registryPath() string {
 	return filepath.Join(w.opts.Home, registryFile)
 }
 
-type registryFileShape struct {
-	Workspaces []Workspace `json:"workspaces"`
+// RegistryFile is the workspaces registry as it exists on disk. It has one owner so the
+// server and the command line cannot disagree about its shape.
+//
+// WorkspacesDir is recorded here rather than in the global config because it belongs to the
+// registry, and because that config is what shapes prompts: a control-plane path there
+// would be a concern in the wrong file.
+type RegistryFile struct {
+	// Path is where it was read from; not part of the file.
+	Path          string      `json:"-"`
+	WorkspacesDir string      `json:"workspacesDir,omitempty"`
+	Workspaces    []Workspace `json:"workspaces"`
+}
+
+// LoadRegistryFile reads a registry, tolerating absence.
+func LoadRegistryFile(path string) (RegistryFile, error) {
+	registry := RegistryFile{Path: path}
+	payload, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return registry, nil
+	}
+	if err != nil {
+		return registry, err
+	}
+	if err := json.Unmarshal(payload, &registry); err != nil {
+		return registry, fmt.Errorf("%s: %w", path, err)
+	}
+	registry.Path = path
+	return registry, nil
+}
+
+// SaveRegistryFile writes a registry atomically and privately.
+func SaveRegistryFile(registry RegistryFile) error {
+	sort.Slice(registry.Workspaces, func(i, j int) bool { return registry.Workspaces[i].Name < registry.Workspaces[j].Name })
+	payload, err := json.MarshalIndent(registry, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(registry.Path), 0o700); err != nil {
+		return err
+	}
+	temp := registry.Path + ".tmp"
+	if err := os.WriteFile(temp, append(payload, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temp, registry.Path)
 }
 
 func (w *Workspaces) loadRegistry() error {
-	payload, err := os.ReadFile(w.registryPath())
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	file, err := LoadRegistryFile(w.registryPath())
+	if err != nil {
 		return err
 	}
-	if err == nil {
-		var shape registryFileShape
-		if err := json.Unmarshal(payload, &shape); err != nil {
-			return fmt.Errorf("%s: %w", w.registryPath(), err)
-		}
-		for _, workspace := range shape.Workspaces {
-			w.registry[workspace.Name] = workspace
-		}
+	recorded := file.WorkspacesDir
+	for _, workspace := range file.Workspaces {
+		w.registry[workspace.Name] = workspace
+	}
+	// The flag wins for this run and is recorded, so where workspaces live is a decision
+	// that sticks rather than one that has to be repeated.
+	dir := w.opts.WorkspacesDir
+	if dir == "" {
+		dir = recorded
+	}
+	if dir == "" {
+		dir = DefaultWorkspacesDir()
+	}
+	absolute, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	w.dir = absolute
+	if w.opts.WorkspacesDir != "" && w.opts.WorkspacesDir != recorded {
+		workerpool.Log("workspaces folder: %s", absolute)
 	}
 	if _, ok := w.registry[GeneralWorkspaceName]; !ok {
 		// First run: the folder the install was started in is the general workspace, which
-		// is what today's single-workspace install already was.
+		// is what today's single-workspace install already was. Without one, it is created
+		// in the workspaces folder like any other.
 		path := w.opts.GeneralPath
 		if path == "" {
-			path = filepath.Join(w.opts.Home, "workspaces", GeneralWorkspaceName)
+			path = filepath.Join(w.dir, GeneralWorkspaceName)
 		}
 		absolute, err := filepath.Abs(path)
 		if err != nil {
@@ -424,25 +543,12 @@ func (w *Workspaces) loadRegistry() error {
 
 func (w *Workspaces) persist() error {
 	w.mu.RLock()
-	shape := registryFileShape{Workspaces: make([]Workspace, 0, len(w.registry))}
+	file := RegistryFile{Path: w.registryPath(), WorkspacesDir: w.dir, Workspaces: make([]Workspace, 0, len(w.registry))}
 	for _, workspace := range w.registry {
-		shape.Workspaces = append(shape.Workspaces, workspace)
+		file.Workspaces = append(file.Workspaces, workspace)
 	}
 	w.mu.RUnlock()
-	sort.Slice(shape.Workspaces, func(i, j int) bool { return shape.Workspaces[i].Name < shape.Workspaces[j].Name })
-	payload, err := json.MarshalIndent(shape, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := w.registryPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temp := path + ".tmp"
-	if err := os.WriteFile(temp, append(payload, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temp, path)
+	return SaveRegistryFile(file)
 }
 
 // migrate moves a single-workspace install onto the workspace layout: one storage and one

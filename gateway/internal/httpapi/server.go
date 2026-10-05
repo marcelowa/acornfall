@@ -8,8 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -89,49 +87,52 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) workspaceList(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.workspaces.List())
+	// The folder is reported with the list, so the interface can say where a new workspace
+	// will be created instead of asking for a path it should not be given.
+	writeJSON(w, http.StatusOK, s.listing())
 }
 
+// listing is the one shape every workspace endpoint answers with, so a caller never has to
+// know which operation produced it.
+func (s *Server) listing() map[string]any {
+	return map[string]any{
+		"workspacesDir": s.workspaces.Dir(),
+		"workspaces":    control.Views(s.workspaces.List()),
+	}
+}
+
+// workspaceCreate makes a workspace inside the workspaces folder. It takes a name, not a
+// path: the interface is scoped to one directory on purpose, and a folder anywhere else on
+// the machine is an operator's decision rather than a form field.
 func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name    string `json:"name"`
-		Path    string `json:"path"`
-		Title   string `json:"title"`
-		Trusted bool   `json:"trusted"`
+		Name    string  `json:"name"`
+		Title   string  `json:"title"`
+		Trusted bool    `json:"trusted"`
+		Path    *string `json:"path"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	path := body.Path
-	if path == "" {
-		http.Error(w, "a workspace needs a folder", http.StatusBadRequest)
+	if body.Path != nil {
+		// Refused rather than ignored: accepting and dropping it would be a field that does
+		// nothing, and pointing at a folder elsewhere is the operator's command.
+		http.Error(w, "workspaces are created inside "+s.workspaces.Dir()+"; use `acornfall workspace add` for a folder elsewhere", http.StatusBadRequest)
 		return
 	}
-	absolute, err := filepath.Abs(path)
+	workspace, err := s.workspaces.Create(body.Name, body.Trusted)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if _, err := os.Stat(absolute); err != nil {
-		http.Error(w, fmt.Sprintf("no folder at %s", absolute), http.StatusBadRequest)
-		return
-	}
-	// The name is what the reader typed and what every selector shows, so it is the better
-	// default title; the folder's basename would make the two disagree.
-	title := body.Title
-	if title == "" {
-		title = body.Name
-	}
-	if err := s.workspaces.Add(control.Workspace{
-		Name:    body.Name,
-		Path:    absolute,
-		Title:   title,
-		Trusted: body.Trusted,
-	}); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.workspaces.List())
+	if body.Title != "" && body.Title != workspace.Name {
+		workspace.Title = body.Title
+		if err := s.workspaces.Update(workspace); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, s.listing())
 }
 
 func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
@@ -141,26 +142,15 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("no workspace %q", name), http.StatusNotFound)
 		return
 	}
-	// Pointers, so a partial update cannot silently clear a field it did not mention.
+	// Pointers, so a partial update cannot silently clear a field it did not mention. No
+	// path: moving a workspace to a folder of the interface's choosing is exactly what the
+	// workspaces folder exists to prevent.
 	var body struct {
-		Path    *string `json:"path"`
 		Title   *string `json:"title"`
 		Trusted *bool   `json:"trusted"`
 	}
 	if !decode(w, r, &body) {
 		return
-	}
-	if body.Path != nil {
-		absolute, err := filepath.Abs(*body.Path)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if _, err := os.Stat(absolute); err != nil {
-			http.Error(w, fmt.Sprintf("no folder at %s", absolute), http.StatusBadRequest)
-			return
-		}
-		existing.Path = absolute
 	}
 	if body.Title != nil {
 		existing.Title = *body.Title
@@ -172,7 +162,7 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.workspaces.List())
+	writeJSON(w, http.StatusOK, s.listing())
 }
 
 func (s *Server) workspaceRemove(w http.ResponseWriter, r *http.Request) {
@@ -180,7 +170,7 @@ func (s *Server) workspaceRemove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.workspaces.List())
+	writeJSON(w, http.StatusOK, s.listing())
 }
 
 // noCache keeps a reload honest while the client has no build step and no

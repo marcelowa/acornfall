@@ -904,13 +904,14 @@ async function renderCommands() {
  * whose resources are not trusted is a folder and nothing else.
  */
 async function renderWorkspaces() {
-	let workspaces = [];
+	let listing = { workspaces: [], workspacesDir: state?.workspacesDir ?? "" };
 	try {
-		workspaces = await (await fetch("/api/workspaces")).json();
+		listing = await (await fetch("/api/workspaces")).json();
 	} catch (error) {
 		els.sheetBody.innerHTML = `<p class="provider-meta">${escapeHtml(String(error))}</p>`;
 		return;
 	}
+	const workspaces = listing.workspaces ?? [];
 	const rows = workspaces
 		.map(
 			(workspace) => `<div class="provider">
@@ -940,13 +941,14 @@ async function renderWorkspaces() {
 			commands, rules, and options. Each one runs its own worker.</p>
 		${rows}
 		<form id="workspace-form" class="workspace-form">
-			<input name="name" placeholder="name" autocomplete="off" />
-			<input name="path" placeholder="/absolute/folder" autocomplete="off" />
+			<input name="name" placeholder="new workspace name" autocomplete="off" />
 			<label class="mode"><input name="trusted" type="checkbox" /><span>trusted</span></label>
-			<button class="primary" type="submit">Add</button>
+			<button class="primary" type="submit">Create</button>
 		</form>
-		<p class="provider-meta">The folder must already exist. Removing a workspace forgets it; it never deletes the
-			folder or the history.</p>`;
+		<p class="provider-meta">New workspaces are created in <code>${escapeHtml(listing.workspacesDir ?? "?")}</code>.
+			An existing folder of that name there is adopted. Pointing a workspace at a folder anywhere else is
+			<code>acornfall workspace add</code>, because the interface stays inside one directory.
+			Removing forgets a workspace; it never deletes the folder or the history.</p>`;
 
 	const form = document.getElementById("workspace-form");
 	form.addEventListener("submit", async (event) => {
@@ -955,7 +957,6 @@ async function renderWorkspaces() {
 		try {
 			await post("/api/workspaces", {
 				name: String(data.get("name") ?? "").trim(),
-				path: String(data.get("path") ?? "").trim(),
 				trusted: data.get("trusted") === "on",
 			});
 			await loadState();

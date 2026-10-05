@@ -45,6 +45,8 @@ type Options struct {
 	SettingsPath string
 	// Registry lists the install's workspaces, so a client can switch between them.
 	Registry func() []Workspace
+	// WorkspacesDir is where new workspaces are created, so the interface can say so.
+	WorkspacesDir string
 }
 
 // WorkspaceState is a workspace as the interface needs it: what it is called, where it
@@ -90,6 +92,7 @@ type Conversation struct {
 type State struct {
 	Workspace     WorkspaceState          `json:"workspace"`
 	Workspaces    []WorkspaceState        `json:"workspaces"`
+	WorkspacesDir string                  `json:"workspacesDir"`
 	Harness       string                  `json:"harness"`
 	Capabilities  protocol.Capabilities   `json:"capabilities"`
 	Conversation  *Conversation           `json:"conversation,omitempty"`
@@ -439,23 +442,11 @@ func (c *Control) WorkerCall(ctx context.Context, kind, conversationID string) (
 	return c.worker.Call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
 }
 
-func (c *Control) workspaceList(includeThis bool) []WorkspaceState {
+func (c *Control) workspaceList() []WorkspaceState {
 	if c.opts.Registry == nil {
 		return nil
 	}
-	list := c.opts.Registry()
-	states := make([]WorkspaceState, 0, len(list))
-	for _, workspace := range list {
-		running := false
-		if includeThis || workspace.Name == c.opts.Workspace.Name {
-			running = c.WorkerUp()
-		}
-		states = append(states, WorkspaceState{
-			Name: workspace.Name, Path: workspace.Path, Title: workspace.Title,
-			General: workspace.General, Trusted: workspace.Trusted, Running: running,
-		})
-	}
-	return states
+	return Views(c.opts.Registry())
 }
 
 // WorkerUp reports whether this workspace's harness process is running.
@@ -568,7 +559,8 @@ func (c *Control) StateFor(conversationID string) State {
 			Trusted: c.opts.Workspace.Trusted,
 			Running: c.workerUp,
 		},
-		Workspaces:    c.workspaceList(false),
+		Workspaces:    c.workspaceList(),
+		WorkspacesDir: c.opts.WorkspacesDir,
 		Harness:       c.describe.Provider,
 		Capabilities:  c.describe.Capabilities,
 		Conversations: toConversations(c.conversations),

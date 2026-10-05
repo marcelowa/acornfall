@@ -25,6 +25,10 @@ func main() {
 		providers(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "workspace" {
+		workspaceCommand(os.Args[2:])
+		return
+	}
 	if err := serve(os.Args[1:]); err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
@@ -38,6 +42,7 @@ func serve(argv []string) error {
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: <home>/workspaces/general)")
 	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
+	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: "bun run src/main.ts")`)
 	workerDir := flags.String("worker-dir", "", "worker directory")
@@ -86,6 +91,7 @@ func serve(argv []string) error {
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
 		Home:          dir,
 		GeneralPath:   general,
+		WorkspacesDir: *workspacesDir,
 		WorkerCommand: command,
 		WorkerDir:     worker,
 		Model:         *model,
@@ -230,6 +236,127 @@ func prettyAddr(addr string) string {
 		return net.JoinHostPort("localhost", port)
 	}
 	return net.JoinHostPort(host, port)
+}
+
+/*
+workspaceCommand is the operator's way to point a workspace at a folder of their choosing.
+The interface cannot do this: it creates workspaces inside the workspaces folder by name,
+which is what keeps it inside one directory. This edits the registry directly, and the
+gateway picks the change up on its next start.
+*/
+func workspaceCommand(argv []string) {
+	flags := flag.NewFlagSet("workspace", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	trusted := flags.Bool("trusted", false, "read this workspace's own agents, skills, commands, and rules")
+	if err := flags.Parse(argv); err != nil {
+		return
+	}
+	args := flags.Args()
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove>")
+		os.Exit(2)
+	}
+	dir, err := resolveDataDir(*dataDir)
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	path := filepath.Join(dir, "workspaces.json")
+	registry, err := control.LoadRegistryFile(path)
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+
+	switch args[0] {
+	case "list":
+		if len(registry.Workspaces) == 0 {
+			fmt.Println("no workspaces registered")
+			return
+		}
+		for _, workspace := range registry.Workspaces {
+			marker := " "
+			if workspace.General {
+				marker = "*"
+			}
+			trust := "untrusted"
+			if workspace.Trusted {
+				trust = "trusted  "
+			}
+			fmt.Printf("%s %-16s %s  %s\n", marker, workspace.Name, trust, workspace.Path)
+		}
+		fmt.Printf("\nworkspaces folder: %s\n", registry.WorkspacesDir)
+	case "add":
+		// Scanned by hand: Go's flag package stops at the first non-flag argument, so
+		// `add <name> <folder> --trusted` would otherwise read as three positionals and a
+		// flag that silently did nothing.
+		positional := make([]string, 0, 2)
+		for _, arg := range args[1:] {
+			switch arg {
+			case "--trusted", "-trusted":
+				*trusted = true
+			default:
+				positional = append(positional, arg)
+			}
+		}
+		if len(positional) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> <folder> [--trusted]")
+			os.Exit(2)
+		}
+		name, folder := positional[0], positional[1]
+		absolute, err := filepath.Abs(folder)
+		if err != nil {
+			log.Fatalf("acornfall: %v", err)
+		}
+		if info, err := os.Stat(absolute); err != nil || !info.IsDir() {
+			log.Fatalf("acornfall: no folder at %s", absolute)
+		}
+		for _, workspace := range registry.Workspaces {
+			if workspace.Name == name {
+				log.Fatalf("acornfall: workspace %q already exists", name)
+			}
+		}
+		registry.Workspaces = append(registry.Workspaces, control.Workspace{
+			Name: name, Path: absolute, Title: name, Trusted: *trusted,
+		})
+		if err := control.SaveRegistryFile(registry); err != nil {
+			log.Fatalf("acornfall: %v", err)
+		}
+		fmt.Printf("added %s at %s (%s)\n", name, absolute, trustLabel(*trusted))
+	case "remove":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: acornfall workspace remove <name>")
+			os.Exit(2)
+		}
+		kept := registry.Workspaces[:0]
+		removed := false
+		for _, workspace := range registry.Workspaces {
+			if workspace.Name != args[1] {
+				kept = append(kept, workspace)
+				continue
+			}
+			if workspace.General {
+				log.Fatalf("acornfall: the general workspace cannot be removed")
+			}
+			removed = true
+		}
+		if !removed {
+			log.Fatalf("acornfall: no workspace %q", args[1])
+		}
+		registry.Workspaces = kept
+		if err := control.SaveRegistryFile(registry); err != nil {
+			log.Fatalf("acornfall: %v", err)
+		}
+		fmt.Printf("removed %s (its folder and history are untouched)\n", args[1])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown workspace command %q\n", args[0])
+		os.Exit(2)
+	}
+}
+
+func trustLabel(trusted bool) string {
+	if trusted {
+		return "trusted"
+	}
+	return "untrusted"
 }
 
 func resolveDataDir(flagValue string) (string, error) {

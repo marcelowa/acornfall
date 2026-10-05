@@ -113,8 +113,11 @@ make dev
   expanded server-side so the transcript records what the model saw.
 - **Guards**: declarative rules that block a tool call and say why — a command pattern, or a
   path outside the workspace — accumulating across layers and visible in the inspector.
-- **Workspaces are managed from the interface**: create from an existing folder, flip trust,
-  forget one (which never deletes the folder or the history).
+- **Workspaces are managed from the interface**: create by name inside the workspaces folder
+  (`--workspaces-dir`, default `~/acornfall/workspaces`), flip trust, forget one (which never
+  deletes the folder or the history). Pointing a workspace at a folder elsewhere is
+  `acornfall workspace add <name> <folder>`, because the interface stays inside one
+  directory.
 - **Delegation**: `delegate` hands a task to a subagent and waits; `subagent` starts one
   that keeps working while you answer and reports back when it is done, waking the parent
   to act on it. `peer: true` creates a *normal* conversation instead — it appears in your

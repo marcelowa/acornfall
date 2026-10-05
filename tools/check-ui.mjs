@@ -513,24 +513,39 @@ try {
 	await page.evaluate(() => document.querySelector('.sheet-tabs .tab[data-view="workspaces"]').click());
 	await page.waitForSelector("#workspace-form", { visible: true, timeout: 5000 });
 	const created = await page.evaluate(async () => {
-		const before = (await (await fetch("/api/workspaces")).json()).length;
+		const dir = (await (await fetch("/api/workspaces")).json()).workspacesDir;
 		const form = document.querySelector("#workspace-form");
 		form.querySelector('[name="name"]').value = "check-made";
-		form.querySelector('[name="path"]').value = "/tmp";
 		form.querySelector('[name="trusted"]').checked = false;
 		form.requestSubmit();
 		await new Promise((resolve) => setTimeout(resolve, 1500));
-		const after = await (await fetch("/api/workspaces")).json();
+		const listing = await (await fetch("/api/workspaces")).json();
+		const made = listing.workspaces.find((w) => w.name === "check-made");
 		return {
-			before,
-			created: after.some((w) => w.name === "check-made"),
-			trusted: after.find((w) => w.name === "check-made")?.trusted,
-			titleMatchesName: after.find((w) => w.name === "check-made")?.title === "check-made",
+			dir,
+			created: made !== undefined,
+			insideDir: made?.path.startsWith(`${dir}/`) === true,
+			trusted: made?.trusted,
+			titleMatchesName: made?.title === "check-made",
 		};
 	});
-	check("the form creates a workspace", created.created, JSON.stringify(created));
+	check("the form creates a workspace from a name alone", created.created, JSON.stringify(created));
+	check("it lands inside the workspaces folder", created.insideDir, JSON.stringify(created));
 	check("its title defaults to its name, so the list and selector agree", created.titleMatchesName);
 	check("trust is recorded as chosen", created.trusted === false, JSON.stringify(created));
+	// Asked from here rather than from the page: a deliberate 400 is a console error in the
+	// browser, and the checks count those.
+	const refusal = await fetch(`${url.replace(/\/$/, "")}/api/workspaces`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ name: "should-not-exist", path: "/etc" }),
+	});
+	const afterRefusal = await (await fetch(`${url.replace(/\/$/, "")}/api/workspaces`)).json();
+	check("a path in the body is refused, not ignored", refusal.status === 400, String(refusal.status));
+	check(
+		"nothing was created outside the workspaces folder",
+		!afterRefusal.workspaces.some((w) => w.name === "should-not-exist"),
+	);
 	await page.evaluate(() => fetch("/api/workspaces/check-made/remove", { method: "POST" }));
 	await new Promise((resolve) => setTimeout(resolve, 500));
 	check("no errors from managing workspaces", problems.length === 0, problems.join("; "));

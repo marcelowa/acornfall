@@ -39,9 +39,19 @@ credentials, defaults, model bindings, subscribers, and the registry itself.
 
 ## Layout
 
-`--home` is the installation folder, configurable, default `~/.acornfall`. A workspace's
-folder defaults to `<home>/workspaces/<name>` and may point anywhere, so an existing repo
-can be a workspace without being moved.
+`--home` is the installation folder, configurable, default `~/.acornfall`. It holds
+configuration, credentials, and runtime state, and it is hidden.
+
+**Workspaces are created in a separate, visible folder**: `--workspaces-dir`, default
+`~/acornfall/workspaces`. Two folders rather than one because they are two different things:
+installation state is ours and hidden, while a workspace is the reader's own content and
+belongs somewhere they would look. The folder is recorded in `workspaces.json` rather than
+in the global config, because that config is what shapes prompts and a control-plane path
+there would be a concern in the wrong file. The flag wins for a run and is recorded, so the
+decision sticks instead of having to be repeated.
+
+A workspace's folder may be anywhere — an existing repository can become one without being
+moved — but only an operator can point it there. See below.
 
 ```
 <home>/
@@ -172,11 +182,27 @@ ends it.
 its write-ahead log is how the most recent commits are lost, and it left four megabytes
 behind.
 
-## Managing workspaces
+## Managing workspaces, and who may point at what
 
-The interface can list them, create one from a folder that already exists, flip its trust,
-and forget it. Removing a workspace unregisters it and stops its worker; it never deletes
-the folder or the history, the same way deleting a conversation is a tombstone.
+The interface can list workspaces, create one **by name**, flip its trust, and forget it.
+Removing unregisters it and stops its worker; it never deletes the folder or the history,
+the same way deleting a conversation is a tombstone.
+
+**The interface cannot name a path.** Creating a workspace takes a name, and the folder is
+`<workspaces-dir>/<name>` — created if absent, adopted if a folder of that name is already
+there. A `path` in the request is **refused rather than ignored**, because accepting and
+dropping it would be a field that does nothing; the error says which command to use
+instead. Pointing a workspace at a folder anywhere else is `acornfall workspace add <name>
+<folder>`, an operator's command, and the registry is one file with one owner so the
+command line and the server cannot disagree about its shape.
+
+That is the whole point of the folder: the interface is scoped to one directory it may
+create in, and everything else on the machine stays out of reach *of the interface* — which
+is a weaker and more honest claim than confinement, since nothing yet stops an agent's
+`bash` from reading elsewhere. That remains the sandbox tier's job.
+
+`running` is runtime state and is never persisted: a stored `true` would be a claim about a
+process that does not exist after a restart.
 
 ## What a workspace does not do yet
 
