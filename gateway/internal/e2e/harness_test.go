@@ -58,8 +58,10 @@ func TestMain(m *testing.M) {
 		if err != nil {
 			panic(err)
 		}
-		defer os.RemoveAll(dir)
 		gatewayBin = filepath.Join(dir, "acornfall")
+		// Removed explicitly rather than deferred: `os.Exit` skips defers, which is how every
+		// run of this suite left a temp directory holding a built binary behind.
+
 		args := []string{"build"}
 		if raceEnabled {
 			args = append(args, "-race")
@@ -71,7 +73,11 @@ func TestMain(m *testing.M) {
 			panic(fmt.Sprintf("build gateway: %v\n%s", err, out))
 		}
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if gatewayBin != "" {
+		_ = os.RemoveAll(filepath.Dir(gatewayBin))
+	}
+	os.Exit(code)
 }
 
 func which(name string) string {

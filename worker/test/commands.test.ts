@@ -2,11 +2,13 @@
  * Slash commands: discovery from two layers, and expansion, which is what the transcript has
  * to record — the text the model saw, not the shorthand the user typed.
  */
-import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expandCommand, loadCommands, parseCommandInvocation } from "../src/commands.ts";
+import { cleanupScratch, tempDir } from "./scratch.ts";
+
+afterAll(cleanupScratch);
 
 async function write(path: string, content: string): Promise<void> {
 	await mkdir(join(path, "..").replace(/\/[^/]+$/, ""), { recursive: true });
@@ -55,7 +57,7 @@ describe("expansion", () => {
 
 describe("loading", () => {
 	test("reads frontmatter, keeps the body, and sorts by name", async () => {
-		const root = await mkdtemp(join(tmpdir(), "acornfall-commands-"));
+		const root = await tempDir("acornfall-commands-");
 		await write(join(root, "b.md"), "---\nname: bravo\ndescription: second\nargument-hint: a thing\n---\nBody B");
 		await write(join(root, "a.md"), "---\nname: alpha\ndescription: first\n---\nBody A");
 
@@ -67,21 +69,21 @@ describe("loading", () => {
 	});
 
 	test("the file name is the name when frontmatter does not give one", async () => {
-		const root = await mkdtemp(join(tmpdir(), "acornfall-commands-"));
+		const root = await tempDir("acornfall-commands-");
 		await write(join(root, "from-file-name.md"), "Just the body.");
 		const commands = await loadCommands([root]);
 		expect(commands[0]?.name).toBe("from-file-name");
 	});
 
 	test("a command with no body is not a command", async () => {
-		const root = await mkdtemp(join(tmpdir(), "acornfall-commands-"));
+		const root = await tempDir("acornfall-commands-");
 		await write(join(root, "empty.md"), "---\nname: empty\n---\n");
 		expect(await loadCommands([root])).toEqual([]);
 	});
 
 	test("a later root shadows an earlier one, which is how a workspace overrides the install", async () => {
-		const first = await mkdtemp(join(tmpdir(), "acornfall-commands-"));
-		const second = await mkdtemp(join(tmpdir(), "acornfall-commands-"));
+		const first = await tempDir("acornfall-commands-");
+		const second = await tempDir("acornfall-commands-");
 		await write(join(first, "deploy.md"), "---\nname: deploy\ndescription: install\n---\nInstall deploy");
 		await write(join(second, "deploy.md"), "---\nname: deploy\ndescription: workspace\n---\nWorkspace deploy");
 

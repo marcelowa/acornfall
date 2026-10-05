@@ -101,6 +101,7 @@ split would hide exactly that.
 | G12 | Wait for a condition with a deadline, never for a fixed duration. | `time.Sleep(2 * time.Second)` is either slow or flaky, and often both. | Convention, review |
 | G13 | `-race` is part of the suite, not a special occasion — including for the gateway the end-to-end tests spawn, which is a separate process and would otherwise be uninstrumented. | The bugs this project has had were concurrency bugs. | `make test` |
 | G15 | A table when the test is the same check over different inputs, so the cases read as a list of situations rather than as prose. | `resolveThinking` and the defaults chain are only legible as a table; a name per case says what each one is for. | Convention, review |
+| G16 | A test removes what it creates. A temp directory is scratch, not a record. | 384 had accumulated in `/tmp` before anyone looked, and the end-to-end harness left a built binary behind on every run — a `defer` before `os.Exit` never runs. | Convention, review |
 
 ## TypeScript / Bun
 

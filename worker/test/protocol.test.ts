@@ -7,10 +7,10 @@
  * process.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupScratch, tempDir } from "./scratch.ts";
 
 const workerDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -125,7 +125,7 @@ let worker: Worker;
 let home: string;
 
 beforeAll(async () => {
-	home = await mkdtemp(join(tmpdir(), "acornfall-protocol-"));
+	home = await tempDir("acornfall-protocol-");
 	const workspace = join(home, "workspace");
 	await mkdir(workspace, { recursive: true });
 	const script = join(home, "script.json");
@@ -141,7 +141,10 @@ beforeAll(async () => {
 	worker = new Worker(workspace, home, script);
 });
 
-afterAll(() => worker?.kill());
+afterAll(async () => {
+	worker?.kill();
+	await cleanupScratch();
+});
 
 describe("the worker protocol", () => {
 	test("describes itself and its providers", async () => {

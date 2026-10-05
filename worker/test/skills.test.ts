@@ -1,13 +1,15 @@
 /**
  * Skills, credentials, and conversation ids: the small rules the rest of the system relies on.
  */
-import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { cleanupScratch, tempDir } from "./scratch.ts";
 import { loadSkills, renderSkills, skillBody } from "../src/skills.ts";
 import { FileCredentialStore } from "../src/credentials.ts";
 import { conversationIdOf } from "../src/meta.ts";
+
+afterAll(cleanupScratch);
 
 async function write(path: string, content: string, mode?: number): Promise<void> {
 	await mkdir(dirname(path), { recursive: true });
@@ -16,7 +18,7 @@ async function write(path: string, content: string, mode?: number): Promise<void
 
 describe("skills", () => {
 	test("a skill is a directory holding SKILL.md, and needs a description", async () => {
-		const root = await mkdtemp(join(tmpdir(), "acornfall-skills-"));
+		const root = await tempDir("acornfall-skills-");
 		await write(join(root, "documented", "SKILL.md"), "---\nname: documented\ndescription: does a thing\n---\nBody");
 		await write(join(root, "silent", "SKILL.md"), "---\nname: silent\n---\nBody");
 		await write(join(root, "loose.md"), "not in a directory");
@@ -27,7 +29,7 @@ describe("skills", () => {
 	});
 
 	test("the directory name is the fallback when frontmatter has none", async () => {
-		const root = await mkdtemp(join(tmpdir(), "acornfall-skills-"));
+		const root = await tempDir("acornfall-skills-");
 		await write(join(root, "acorn-notes", "SKILL.md"), "---\ndescription: from the folder\n---\nBody");
 		const skills = await loadSkills([root]);
 		expect(skills[0]?.name).toBe("acorn-notes");
@@ -60,7 +62,7 @@ describe("skills", () => {
 
 describe("credentials", () => {
 	test("round-trips a credential and keeps the file private", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "acornfall-credentials-"));
+		const dir = await tempDir("acornfall-credentials-");
 		const path = join(dir, "credentials.json");
 		const store = new FileCredentialStore(path);
 
@@ -78,7 +80,7 @@ describe("credentials", () => {
 	});
 
 	test("reading hands back a copy, so a caller cannot mutate the store by accident", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "acornfall-credentials-"));
+		const dir = await tempDir("acornfall-credentials-");
 		const store = new FileCredentialStore(join(dir, "credentials.json"));
 		await store.modify("p", async () => ({ type: "api_key", key: "k" }));
 
@@ -88,7 +90,7 @@ describe("credentials", () => {
 	});
 
 	test("modify returning nothing leaves the credential alone; delete is what removes it", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "acornfall-credentials-"));
+		const dir = await tempDir("acornfall-credentials-");
 		const store = new FileCredentialStore(join(dir, "credentials.json"));
 		await store.modify("p", async () => ({ type: "api_key", key: "k" }));
 
@@ -101,7 +103,7 @@ describe("credentials", () => {
 	});
 
 	test("a corrupt file is an error, not an empty credential store", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "acornfall-credentials-"));
+		const dir = await tempDir("acornfall-credentials-");
 		const path = join(dir, "credentials.json");
 		await write(path, "{ this is not json");
 		const store = new FileCredentialStore(path);

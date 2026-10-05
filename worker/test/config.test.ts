@@ -2,14 +2,16 @@
  * The resource overlay: three layers folding into one resolved agent, and the guards, whose
  * mistakes have to be errors rather than rules that quietly do nothing.
  */
-import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { loadCatalog, resolveAgent } from "../src/config.ts";
+import { cleanupScratch, tempDir } from "./scratch.ts";
+
+afterAll(cleanupScratch);
 
 async function scratch(): Promise<{ home: string; workspace: string }> {
-	const root = await mkdtemp(join(tmpdir(), "acornfall-config-"));
+	const root = await tempDir("acornfall-config-");
 	const home = join(root, "home");
 	const workspace = join(root, "workspace");
 	await mkdir(join(workspace, ".acornfall"), { recursive: true });
