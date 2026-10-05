@@ -855,6 +855,49 @@ async function refreshUsage() {
 
 /* ---------- provider connection ---------- */
 
+/**
+ * Slash commands are prompt templates from this workspace's folder. Expansion happens on
+ * the server, so this only has to name them and put the invocation in the composer.
+ */
+async function renderCommands() {
+	els.sheetBody.innerHTML = `<p class="provider-meta">Loading…</p>`;
+	let commands = [];
+	try {
+		commands = (await (await fetch(api("/commands"))).json()).commands ?? [];
+	} catch (error) {
+		els.sheetBody.innerHTML = `<p class="provider-meta">${escapeHtml(String(error))}</p>`;
+		return;
+	}
+	if (commands.length === 0) {
+		els.sheetBody.innerHTML = `<p class="provider-meta">This workspace has no commands. A command is a markdown
+			file in <code>&lt;workspace&gt;/.acornfall/commands/</code>, and its body is the message it sends.</p>`;
+		return;
+	}
+	els.sheetBody.innerHTML = commands
+		.map(
+			(command) => `<div class="provider">
+				<div>
+					<div class="provider-name">/${escapeHtml(command.name)} ${
+						command.argumentHint === undefined ? "" : `<span class="provider-meta">${escapeHtml(command.argumentHint)}</span>`
+					}</div>
+					<div class="provider-meta">${escapeHtml(command.description || command.source)}</div>
+				</div>
+				<div class="provider-actions">
+					<button class="ghost small" data-command="${escapeHtml(command.name)}" type="button">Use</button>
+				</div>
+			</div>`,
+		)
+		.join("");
+
+	for (const button of els.sheetBody.querySelectorAll("[data-command]")) {
+		button.addEventListener("click", () => {
+			els.input.value = `/${button.dataset.command} `;
+			closeSheet();
+			els.input.focus();
+		});
+	}
+}
+
 async function loadState() {
 	state = await (
 		await fetch(`/api/state?workspace=${encodeURIComponent(activeWorkspace())}&conversation=${encodeURIComponent(activeId())}`)
@@ -912,6 +955,7 @@ function renderSheet() {
 	}
 	if (sheet.flow) return renderFlow();
 	if (sheet.view === "defaults") return renderDefaults();
+	if (sheet.view === "commands") return void renderCommands();
 	renderProviders();
 }
 

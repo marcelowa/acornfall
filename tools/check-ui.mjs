@@ -299,7 +299,11 @@ try {
 	const tabs = await page.evaluate(() =>
 		[...document.querySelectorAll(".sheet-tabs .tab")].map((tab) => tab.dataset.view),
 	);
-	check("the sheet has provider and default tabs", tabs.join(",") === "providers,defaults", tabs.join(","));
+	check(
+		"the sheet has provider, default, and command tabs",
+		tabs.join(",") === "providers,defaults,commands",
+		tabs.join(","),
+	);
 	await page.click('.sheet-tabs .tab[data-view="defaults"]');
 	await page.waitForFunction(
 		() => document.querySelectorAll("#sheet-body .provider").length >= 3,
@@ -486,7 +490,23 @@ try {
 	check("the open section survives a reload", openAfterReload);
 	check("no errors after reload", problems.length === 0, problems.join("; "));
 
-	// 12. Two tabs, two conversations. The conversation belongs to the URL, so tabs do not
+	// 12. Commands from the workspace are listed and put an invocation in the composer.
+	await page.evaluate(() => document.querySelector('.sheet-tabs .tab[data-view="commands"]').click());
+	await new Promise((resolve) => setTimeout(resolve, 1200));
+	const commands = await page.evaluate(() => ({
+		rows: document.querySelectorAll("#sheet-body [data-command]").length,
+		names: [...document.querySelectorAll("#sheet-body .provider-name")].map((n) => n.textContent.trim()),
+	}));
+	if (commands.rows > 0) {
+		const used = await page.evaluate(() => {
+			document.querySelector("#sheet-body [data-command]").click();
+			return document.querySelector("#input").value;
+		});
+		check("choosing a command writes its invocation into the composer", /^\/[\w-]+ $/.test(used), used);
+		check("choosing a command closes the sheet", await page.evaluate(() => document.querySelector("#sheet").getBoundingClientRect().height === 0));
+	}
+
+	// 13. Two tabs, two conversations. The conversation belongs to the URL, so tabs do not
 	//     fight over one "active" conversation and a shared link opens what it names.
 	// Picked from what the rail is showing, not from /api/state: that reports the
 	// conversation the install remembers, which need not be the one on screen, and

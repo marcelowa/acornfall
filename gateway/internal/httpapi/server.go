@@ -61,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET "+base+"/conversations/{id}/policy", s.policy)
 		mux.HandleFunc("GET "+base+"/conversations/{id}/messages", s.messagesDoc)
 		mux.HandleFunc("GET "+base+"/agents", s.agents)
+		mux.HandleFunc("GET "+base+"/commands", s.commands)
 		mux.HandleFunc("POST "+base+"/agents/reload", s.reload)
 		mux.HandleFunc("GET "+base+"/usage", s.usage)
 		mux.HandleFunc("POST "+base+"/providers/login", s.login)
@@ -265,6 +266,22 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+func (s *Server) commands(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	list, err := ctl.Commands(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(list)
 }
 
 func (s *Server) agents(w http.ResponseWriter, r *http.Request) {

@@ -31,6 +31,8 @@ export type Command =
 	| { id: string; type: "prompt"; conversationId: string; text: string; whenBusy?: WhenBusy }
 	| { id: string; type: "abort"; conversationId: string }
 	| { id: string; type: "agents" }
+	| { id: string; type: "commands" }
+	| { id: string; type: "expand"; text: string }
 	| { id: string; type: "policy"; conversationId: string }
 	| { id: string; type: "messages"; conversationId: string }
 	| { id: string; type: "reload" }

@@ -90,7 +90,12 @@ func (w *Worker) Start(ctx context.Context) error {
 	if w.cmd != nil {
 		return errors.New("worker already started")
 	}
-	cmd := exec.CommandContext(ctx, w.config.Command, w.config.Args...)
+	// Deliberately not CommandContext: a worker's lifetime belongs to whoever owns the
+	// pool, not to the request that happened to start it. With a request context, the
+	// process was killed the moment that request finished, which looked like a worker
+	// crashing on startup. Close() is what ends it.
+	_ = ctx
+	cmd := exec.Command(w.config.Command, w.config.Args...)
 	if w.config.Dir != "" {
 		cmd.Dir = w.config.Dir
 	}

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -236,6 +237,9 @@ func (c *Control) startWorker(ctx context.Context) error {
 		"--storage", c.opts.StoragePath,
 		"--credentials", c.opts.Credentials,
 		"--home", c.opts.Home,
+		// Whether this workspace's own resources may be read at all. Passed to the worker
+		// rather than enforced here, because the worker is what reads the files.
+		"--trusted", strconv.FormatBool(c.opts.Workspace.Trusted),
 	)
 	worker := workerpool.New(workerpool.Config{Command: base[0], Args: args, Dir: c.opts.WorkerDir})
 	worker.OnFrame(c.onFrame)
@@ -486,6 +490,11 @@ func (c *Control) SetWorkspace(workspace Workspace) {
 	c.mu.Lock()
 	c.opts.Workspace = workspace
 	c.mu.Unlock()
+}
+
+// Commands lists this workspace's slash commands, global first and workspace shadowing.
+func (c *Control) Commands(ctx context.Context) (json.RawMessage, error) {
+	return c.worker.Call(ctx, protocol.Command{Type: "commands"})
 }
 
 // Policy reports what a conversation may do with other conversations, resolved
@@ -1289,6 +1298,20 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 	if strings.TrimSpace(text) == "" {
 		return errors.New("empty message")
 	}
+	// A message that opens with a slash may be a command. The worker expands it, because
+	// that is where the templates live; unknown names come back unchanged, so a message
+	// that happens to start with a slash is never rewritten.
+	if strings.HasPrefix(strings.TrimSpace(text), "/") {
+		var expanded struct {
+			Text    string `json:"text"`
+			Command string `json:"command"`
+		}
+		if err := c.worker.CallInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
+			workerpool.Log("expanding %q: %v", text, err)
+		} else if expanded.Command != "" {
+			text = expanded.Text
+		}
+	}
 	return c.worker.CallInto(ctx, protocol.Command{
 		Type:           "prompt",
 		ConversationID: conversationID,
@@ -1333,6 +1356,13 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 		if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 			c.Unsubscribe(id)
 			return 0, nil, nil, err
+		}
+		// Fetch its policy now rather than leaving a client to see state without one until
+		// the next refresh tick, which reads as a broken inspector for a few seconds.
+		if policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID}); err == nil {
+			c.mu.Lock()
+			c.policies[conversationID] = policy
+			c.mu.Unlock()
 		}
 	}
 

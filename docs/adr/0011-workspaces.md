@@ -60,9 +60,13 @@ can be a workspace without being moved.
 **Runtime state lives outside the workspace folder.** The agent has `bash`; its own
 database should not be a file it can delete.
 
-**Workspace resources are looked up in both places**, preferring the visible one:
-`<ws>/skills` then `<ws>/.acornfall/skills`. A workspace that is a repo you cloned should
-not be littered with our directories, and `AGENTS.md` at the root stays conventional.
+**Workspace resources live in `<ws>/.acornfall/`**, with one exception: `AGENTS.md` sits at
+the workspace root, where the convention puts it.
+
+The first version looked for `skills/`, `agents/`, and `commands/` at the root as well, so
+they would be visible and editable. That was withdrawn: a workspace is often a repository
+somebody else wrote, and a repository with its own `agents/` directory would silently be
+read as ours. `.acornfall/` cannot be mistaken for project content.
 
 ## The resource layer
 
@@ -90,7 +94,19 @@ is worse. Trust is therefore a field on the workspace record with a global defau
 `config.json` — no interactive prompt, which the UI cannot do anyway.
 
 **Untrusted means the folder and nothing else**: the workspace's `AGENTS.md`, config,
-agents, skills, and commands are not loaded. Global resources still apply.
+agents, skills, and commands are not loaded. Global resources still apply. The flag is
+passed to the worker, because the worker is what reads the files — and changing it, like
+changing the folder, stops that workspace's worker, since both are read at startup rather
+than per request.
+
+Verified by flipping the switch on a workspace with a rules file and a command: with trust
+the command is listed and the rules reach the prompt as their own section; without it the
+list is empty and the only layer left is global.
+
+**Trust is per workspace, not per repository**: a repository cloned *inside* a trusted
+workspace inherits that trust, so its `AGENTS.md` is read. That is the honest limit of a
+workspace-level decision, and the place to fix it is a per-directory rule rather than an
+interactive prompt.
 
 ## Hooks: declarative first
 
@@ -103,7 +119,32 @@ behind the same trust field.
 
 Slash commands are prompt templates discovered from the same two layers, listed over the
 API, and **expanded server-side** so there is one implementation and the expanded text is
-what lands in the transcript.
+what lands in the transcript. A message that merely starts with a slash is never
+rewritten: an unknown name comes back unchanged.
+
+```markdown
+---
+name: summarize
+description: Summarize a file in three bullets
+argument-hint: <path>
+---
+Read the file $ARGUMENTS and summarize it in exactly three bullets.
+```
+
+A template without `$ARGUMENTS` gets the arguments appended, because losing what the user
+typed is worse than an extra line.
+
+## Two bugs this stage produced, both worth recording
+
+**A worker's lifetime is not a request's.** Lazy starting passed the HTTP request's context
+to `exec.CommandContext`, so a workspace's worker was killed the instant the request that
+started it finished — which presents as a worker crashing on startup, on the second
+request rather than the first. The process is no longer tied to any context; the pool
+ends it.
+
+**The migration ran before the sidecars existed to move.** Moving `session.sqlite` without
+its write-ahead log is how the most recent commits are lost, and it left four megabytes
+behind.
 
 ## What a workspace does not do yet
 

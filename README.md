@@ -106,6 +106,11 @@ make dev
   request.
 - **Agent definitions** with a global/workspace/agent overlay, and an explain view
   showing which layer contributed what. See `docs/adr/0004-resource-overlay.md`.
+- **Workspaces**: a folder, its own `AGENTS.md`, config, agents, skills, and commands, and
+  a trust decision that decides whether any of it is read. Each workspace runs its own
+  worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
+- **Slash commands** from `<home>/commands/` and `<workspace>/.acornfall/commands/`,
+  expanded server-side so the transcript records what the model saw.
 - **Delegation**: `delegate` hands a task to a subagent and waits; `subagent` starts one
   that keeps working while you answer and reports back when it is done, waking the parent
   to act on it. `peer: true` creates a *normal* conversation instead — it appears in your

@@ -263,9 +263,14 @@ export interface Catalog {
 	agents: AgentDefinition[];
 }
 
-export async function loadCatalog(dataDir: string, workspace: string): Promise<Catalog> {
+/**
+ * The workspace layer is read only when the workspace is trusted. A workspace's files are
+ * instructions from a folder, and folders are things you clone: an AGENTS.md in an
+ * untrusted repository is prompt injection. Untrusted means the folder and nothing else.
+ */
+export async function loadCatalog(dataDir: string, workspace: string, trusted = true): Promise<Catalog> {
 	const global = await loadConfig(join(dataDir, "config.json"), "global");
-	const workspaceConfig = await loadConfig(join(workspace, ".acornfall", "config.json"), "workspace");
+	const workspaceConfig = trusted ? await loadConfig(join(workspace, ".acornfall", "config.json"), "workspace") : null;
 	const defaults: LayerTrace[] = [];
 	if (global !== null) defaults.push({ layer: "global", path: global.path, contributes: global.contributions });
 	if (workspaceConfig !== null) {
@@ -275,8 +280,10 @@ export async function loadCatalog(dataDir: string, workspace: string): Promise<C
 	// The workspace shadows a global definition of the same name.
 	const byName = new Map<string, AgentDefinition>();
 	for (const agent of await loadAgentDir(join(dataDir, "agents"), "global")) byName.set(agent.name, agent);
-	for (const agent of await loadAgentDir(join(workspace, ".acornfall", "agents"), "workspace")) {
-		byName.set(agent.name, agent);
+	if (trusted) {
+		for (const agent of await loadAgentDir(join(workspace, ".acornfall", "agents"), "workspace")) {
+			byName.set(agent.name, agent);
+		}
 	}
 	return { defaults, agents: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)) };
 }

@@ -177,9 +177,18 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	workspace.Name = existing.Name
 	w.registry[workspace.Name] = workspace
 	control := w.controls[workspace.Name]
+	// Trust and the folder are passed to the worker when it starts, so a change to either
+	// only takes effect in a new process. Stopping it here is what makes the toggle mean
+	// something immediately instead of at the next idle eviction.
+	restart := control != nil && (existing.Trusted != workspace.Trusted || existing.Path != workspace.Path)
+	if restart {
+		delete(w.controls, workspace.Name)
+	}
 	w.mu.Unlock()
-	if control != nil {
-		// The folder may have moved, which the running worker cannot know about.
+	if restart {
+		control.Close()
+		workerpool.Log("workspace %s stopped: its record changed", workspace.Name)
+	} else if control != nil {
 		control.SetWorkspace(workspace)
 	}
 	return w.persist()

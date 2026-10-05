@@ -8,7 +8,7 @@
  * A conversation id is pi-durable's own id, stringified. This layer never invents
  * one; control treats it as opaque.
  */
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -49,6 +49,7 @@ import {
 	log,
 } from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
+import { expandCommand, loadCommands, parseCommandInvocation, type Command as SlashCommand } from "./commands.ts";
 
 const CONTEXT = BACKGROUND_CONTEXT;
 const TITLE_SCAN_LIMIT = 20;
@@ -63,7 +64,10 @@ const PREAMBLE = [
 
 interface Args {
 	workspace: string;
-	dataDir: string;
+	/** The installation folder: global resources and shared state. */
+	home: string;
+	/** Whether this workspace's own resources may be read at all. */
+	trusted: boolean;
 	storage: string;
 	credentials: string;
 	skills: string[];
@@ -88,12 +92,19 @@ function parseArgs(argv: readonly string[]): Args {
 	const workspace = resolve(values.get("workspace") ?? process.cwd());
 	const defaults = (name: string) => join(workspace, ".acornfall", name);
 	const credentials = resolve(values.get("credentials") ?? defaults("credentials.json"));
+	const home = resolve(values.get("home") ?? values.get("data-dir") ?? dirname(credentials));
+	const trusted = (values.get("trusted") ?? "true") !== "false";
 	return {
 		workspace,
-		dataDir: resolve(values.get("data-dir") ?? dirname(credentials)),
+		home,
+		trusted,
 		storage: resolve(values.get("storage") ?? defaults("session.sqlite")),
 		credentials,
-		skills: skills.length > 0 ? skills : [join(homedir(), ".acornfall", "skills"), defaults("skills")],
+		// An untrusted workspace contributes no skills, so only the global set is read.
+		skills:
+			skills.length > 0
+				? skills
+				: [join(home, "skills"), ...(trusted ? [defaults("skills")] : [])],
 	};
 }
 
@@ -104,9 +115,30 @@ const credentials = new FileCredentialStore(args.credentials);
 const models = builtinModels({ credentials });
 const discoveredSkills = await loadSkills(args.skills);
 
-// The overlay. Reloaded on demand so editing a definition does not need a restart.
-let catalog: Catalog = await loadCatalog(args.dataDir, args.workspace);
+// The overlay, the workspace's rules, and its commands. All reloaded on demand, so
+// editing a file does not need a restart.
+let catalog: Catalog = await loadCatalog(args.home, args.workspace, args.trusted);
 reportUnknownKeys(catalog);
+let workspaceRules = await loadWorkspaceRules();
+let commands = await loadCommands(commandRoots());
+
+function commandRoots(): string[] {
+	return [
+		join(args.home, "commands"),
+		...(args.trusted ? [join(args.workspace, ".acornfall", "commands")] : []),
+	];
+}
+
+/**
+ * The workspace's rules file. It is its own prompt section rather than more
+ * `instructions`, so the context inspector can show it and diff it between requests.
+ */
+async function loadWorkspaceRules(): Promise<string | undefined> {
+	if (!args.trusted) return undefined;
+	const source = await readFile(join(args.workspace, "AGENTS.md"), "utf8").catch(() => null);
+	const text = source?.trim() ?? "";
+	return text === "" ? undefined : text;
+}
 
 // Skills are filtered per conversation, because two conversations can run
 // different agents at once.
@@ -118,16 +150,22 @@ if (process.env.ACORNFALL_DEV_PROVIDER === "1") {
 }
 
 const registry = createRegistry();
-registry.install(CodingTools);
-registry.install(
-	skillsExtension(discoveredSkills, (conversationId) => skillFilterByConversation.get(conversationId) ?? null),
-);
+// Order matters: the prompt reads preamble, where it is, the project's rules, then what
+// skills are available, and finally the agent's own instructions, which durable renders.
 registry.install(
 	defineExtension({
 		name: "acornfall-prompt",
-		sections: [section("preamble", () => PREAMBLE, { tag: false }), section("cwd", (input) => input.env?.cwd)],
+		sections: [
+			section("preamble", () => PREAMBLE, { tag: false }),
+			section("cwd", (input) => input.env?.cwd),
+			section("workspace-rules", () => workspaceRules),
+		],
 	}),
 );
+registry.install(
+	skillsExtension(discoveredSkills, (conversationId) => skillFilterByConversation.get(conversationId) ?? null),
+);
+registry.install(CodingTools);
 
 const settings: HarnessSettings = { toolExecution: "parallel" };
 const env = ({ cwd }: { readonly cwd?: string }) => new NodeExecutionEnv({ cwd: cwd ?? args.workspace });
@@ -625,6 +663,24 @@ async function handle(command: Command): Promise<unknown> {
 			const view = await policyFor({ harness, storage, catalog: () => catalog }, command.conversationId, CONTEXT);
 			return view;
 		}
+		case "commands":
+			return {
+				commands: commands.map((template) => ({
+					name: template.name,
+					description: template.description,
+					...(template.argumentHint === undefined ? {} : { argumentHint: template.argumentHint }),
+					source: template.source,
+				})),
+			};
+		case "expand": {
+			// A message that opens with /name is a command; anything else is itself, so a
+			// message that merely contains a slash is never rewritten.
+			const invocation = parseCommandInvocation(command.text);
+			if (invocation === undefined) return { text: command.text };
+			const template: SlashCommand | undefined = commands.find((candidate) => candidate.name === invocation.name);
+			if (template === undefined) return { text: command.text };
+			return { text: expandCommand(template, invocation.args), command: template.name };
+		}
 		case "agents":
 			return {
 				defaults: catalog.defaults,
@@ -638,9 +694,11 @@ async function handle(command: Command): Promise<unknown> {
 				})),
 			};
 		case "reload":
-			catalog = await loadCatalog(args.dataDir, args.workspace);
+			catalog = await loadCatalog(args.home, args.workspace, args.trusted);
 			reportUnknownKeys(catalog);
-			return { agents: catalog.agents.length };
+			workspaceRules = await loadWorkspaceRules();
+			commands = await loadCommands(commandRoots());
+			return { agents: catalog.agents.length, commands: commands.length, rules: workspaceRules !== undefined };
 		case "login":
 			return await login(models, command.authId, command.providerId, command.authType);
 		case "logout":
