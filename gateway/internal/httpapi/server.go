@@ -72,6 +72,12 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST "+base+"/default-agent", s.setDefaultAgent)
 	}
 
+	// Install-wide defaults: no workspace in the path, because the point of them is that
+	// they are not any one workspace's.
+	mux.HandleFunc("POST /api/defaults/model", s.setInstallDefaultModel)
+	mux.HandleFunc("POST /api/defaults/thinking", s.setInstallDefaultThinking)
+	mux.HandleFunc("POST /api/defaults/agent", s.setInstallDefaultAgent)
+
 	mux.HandleFunc("GET /api/workspaces", s.workspaceList)
 	mux.HandleFunc("POST /api/workspaces", s.workspaceCreate)
 	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.workspaceUpdate)
@@ -422,6 +428,49 @@ func (s *Server) setDefaultAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ctl.State())
+}
+
+func (s *Server) setInstallDefaultModel(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Provider string `json:"provider"`
+		ModelID  string `json:"modelId"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.workspaces.SetInstallModel(r.Context(), body.Provider, body.ModelID); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.listing())
+}
+
+func (s *Server) setInstallDefaultThinking(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Level string `json:"level"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.workspaces.SetInstallThinking(r.Context(), body.Level); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.listing())
+}
+
+func (s *Server) setInstallDefaultAgent(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Definition string `json:"definition"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if err := s.workspaces.SetInstallAgent(r.Context(), body.Definition); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.listing())
 }
 
 func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {

@@ -783,6 +783,21 @@ button.small {
 	color: var(--neutral-500);
 }
 
+/* A resolution order reads better on one line than wrapped across three. */
+.chain {
+	white-space: nowrap;
+}
+
+/* The scope row is laid out like a default row without being one: nothing that reads the
+   defaults should have to know which scope the buttons are pointed at. */
+.scope-row .scope-label {
+	font-weight: 500;
+}
+
+.scope-row select {
+	margin-left: auto;
+}
+
 .provider-actions {
 	margin-left: auto;
 	display: flex;

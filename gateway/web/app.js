@@ -1489,37 +1489,71 @@ function renderThinking() {
  * Defaults are configuration, not live state, so they live in the settings sheet
  * beside provider connection rather than in the inspector.
  */
+/**
+ * Where a default is written. The sheet shows one resolved value either way — what will run —
+ * and this decides whether the buttons change it for this workspace or for every one.
+ */
+function defaultsScope() {
+	return localStorage.getItem("acornfall.defaultsScope") === "install" ? "install" : "workspace";
+}
+
+/** How to say where a resolved default came from, in the words the reader would use. */
+function defaultOrigin(origin) {
+	if (origin === "workspace") return "set here";
+	if (origin === "install") return "from all workspaces";
+	if (origin === "last-resort") return "the last resort";
+	return "";
+}
+
 function renderDefaults() {
+	const scope = defaultsScope();
+	const origin = state?.defaultsOrigin ?? {};
 	const model = `${state?.defaultModel?.provider ?? ""}/${state?.defaultModel?.modelId ?? ""}`;
 	const rows = [
 		{
 			label: "model",
-			value: model === "/" ? "unset" : model,
+			value: model === "/" ? "no model available" : model,
 			inherited: state?.inherited?.model,
+			from: defaultOrigin(origin.model),
 			current: `${state?.agent?.provider ?? ""}/${state?.agent?.modelId ?? ""}`,
 			action: "model",
-			clearable: false,
+			clearable: origin.model === scope,
 		},
 		{
 			label: "thinking",
-			value: state?.defaultThinking || "unset",
+			value: state?.defaultThinking || "the harness default",
 			inherited: state?.inherited?.thinking,
+			from: defaultOrigin(origin.thinking),
 			current: state?.agent?.thinkingLevel || "",
 			action: "thinking",
-			clearable: true,
+			clearable: origin.thinking === scope,
 		},
 		{
 			label: "agent",
-			value: state?.defaultAgent || "layered defaults",
+			value: state?.defaultAgent || "the layered defaults",
 			inherited: state?.inherited?.agent,
+			from: defaultOrigin(origin.agent),
 			current: state?.agent?.definition || "",
 			action: "agent",
-			clearable: true,
+			clearable: origin.agent === scope,
 		},
 	];
+	const where = scope === "install" ? "every workspace" : "this workspace";
 	els.sheetBody.innerHTML = `
-		<p class="provider-meta">A conversation that chose its own value keeps it. Everything else
-			follows these, and a definition that names a model or level beats them.</p>
+		<p class="provider-meta">A conversation that chose its own value keeps it, and a definition
+			that names a model or a level beats what is below it. Everything else resolves here:
+			<span class="chain">conversation → definition → this workspace → all workspaces → what is
+			left</span>, which is a preferred model when nothing is set anywhere.</p>
+		<div class="provider scope-row">
+			<div>
+				<div class="scope-label">Change defaults for</div>
+				<div class="provider-meta">Values already set in a conversation are left alone.</div>
+			</div>
+			<select id="defaults-scope" aria-label="Which defaults to change">
+				<option value="workspace"${scope === "workspace" ? " selected" : ""}>this workspace</option>
+				<option value="install"${scope === "install" ? " selected" : ""}>all workspaces</option>
+			</select>
+		</div>
 		${rows
 			.map((row) => {
 				const adopt =
@@ -1527,21 +1561,30 @@ function renderDefaults() {
 						? `<button class="ghost small" data-adopt="${row.action}" data-value="${escapeHtml(row.current)}" type="button">Use current</button>`
 						: "";
 				const clear =
-					row.clearable && row.value !== "unset" && row.value !== "layered defaults" && row.value !== "/"
+					row.clearable && row.value !== "no model available"
 						? `<button class="ghost small" data-adopt="${row.action}" data-value="" type="button">Clear</button>`
 						: "";
 				const marker = row.inherited ? "" : `<span class="badge">chosen here</span>`;
+				const from = row.from === "" ? "" : ` · ${escapeHtml(row.from)}`;
 				return `<div class="provider">
 					<div>
 						<div class="provider-name">${escapeHtml(row.label)}</div>
-						<div class="provider-meta">${escapeHtml(row.value)}</div>
+						<div class="provider-meta">${escapeHtml(row.value)}${from}</div>
 					</div>
 					<div class="provider-actions">${marker}${adopt}${clear}</div>
 				</div>`;
 			})
 			.join("")}
+		<p class="provider-meta">Changing ${escapeHtml(where)}.</p>
 		<button class="ghost" id="open-agents" type="button">Reload agent definition files</button>`;
 
+	const scopePicker = document.getElementById("defaults-scope");
+	if (scopePicker !== null) {
+		scopePicker.addEventListener("change", () => {
+			localStorage.setItem("acornfall.defaultsScope", scopePicker.value);
+			renderDefaults();
+		});
+	}
 	for (const button of els.sheetBody.querySelectorAll("[data-adopt]")) {
 		button.addEventListener("click", () => void adoptDefault(button.dataset.adopt, button.dataset.value));
 	}
@@ -1551,16 +1594,27 @@ function renderDefaults() {
 	}
 }
 
-
+/**
+ * Write a default to the layer the sheet is pointed at. "Use current" takes the conversation's
+ * effective value, which is what someone means by "make this the default".
+ */
 async function adoptDefault(kind, value) {
+	// An empty value is what "Clear" sends: it removes this layer's choice, and the layer
+	// below applies again.
+	const clearing = value === "";
 	const body =
-		kind === "model" ? { provider: state?.agent?.provider ?? "", modelId: state?.agent?.modelId ?? "" }
-		: kind === "thinking" ? { level: value }
-		: { definition: value };
-	const path =
-		kind === "model" ? "/default-model" : kind === "thinking" ? "/default-thinking" : "/default-agent";
+		kind === "model"
+			? clearing
+				? { provider: "", modelId: "" }
+				: { provider: state?.agent?.provider ?? "", modelId: state?.agent?.modelId ?? "" }
+			: kind === "thinking"
+				? { level: value }
+				: { definition: value };
+	const scope = defaultsScope();
+	const path = `/default-${kind}`;
 	try {
-		await post(api(path), body);
+		// Install defaults are not any one workspace's, so they are not under one in the URL.
+		await post(scope === "install" ? `/api/defaults/${kind}` : api(path), body);
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");

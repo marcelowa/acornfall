@@ -318,6 +318,34 @@ try {
 		defaultLabels.join(","),
 	);
 
+	// A resolved default is only half the answer; which layer it came from is the other half,
+	// and it is what makes "why is this workspace on that model" answerable.
+	const defaults = await page.evaluate(() => {
+		const scope = document.querySelector("#defaults-scope");
+		const rows = [...document.querySelectorAll("#sheet-body .provider")];
+		const byLabel = (label) =>
+			rows.find((row) => row.querySelector(".provider-name")?.textContent === label)?.querySelector(".provider-meta")
+				?.textContent ?? "";
+		return {
+			scope: scope === null ? "" : [...scope.options].map((option) => option.value).join(","),
+			model: byLabel("model"),
+		};
+	});
+	check(
+		"the defaults sheet says which layer each value came from",
+		/set here|from all workspaces|last resort/.test(defaults.model),
+		JSON.stringify(defaults),
+	);
+	check("and where its buttons write to", defaults.scope === "workspace,install", JSON.stringify(defaults));
+
+	await page.select("#defaults-scope", "install");
+	const scoped = await page.evaluate(() => ({
+		stored: localStorage.getItem("acornfall.defaultsScope"),
+		says: document.querySelector("#sheet-body")?.textContent?.includes("Changing every workspace."),
+	}));
+	check("choosing a scope sticks, and the sheet says what it will change", scoped.stored === "install" && scoped.says === true, JSON.stringify(scoped));
+	await page.select("#defaults-scope", "workspace");
+
 	// Escape closes it, which the modal bug made impossible once.
 	await page.keyboard.press("Escape");
 	await page.waitForFunction(() => document.querySelector("#sheet").getBoundingClientRect().height === 0, {

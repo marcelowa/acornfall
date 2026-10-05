@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/acornfall/acornfall/gateway/internal/protocol"
+
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
@@ -358,6 +360,132 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	w.markUsed(name)
 	workerpool.Log("workspace %s started (%s)", name, workspace.Path)
 	return control, nil
+}
+
+// InstallDefaultsPath is the install-wide defaults file: <home>/settings.json. The layer
+// that owns the file owns writing it, so every workspace sees one value rather than a copy
+// each.
+func (w *Workspaces) installDefaultsPath() string {
+	return filepath.Join(w.opts.Home, "settings.json")
+}
+
+// InstallDefaults reads the install-wide defaults.
+func (w *Workspaces) InstallDefaults() Defaults {
+	defaults, err := LoadDefaults(w.installDefaultsPath())
+	if err != nil {
+		return Defaults{}
+	}
+	return defaults
+}
+
+// SetInstallModel changes the model every workspace falls back to, below its own default
+// and above the last resort.
+func (w *Workspaces) SetInstallModel(ctx context.Context, provider, modelID string) error {
+	if (provider == "") != (modelID == "") {
+		return errors.New("a model default needs both a provider and a model id")
+	}
+	if provider != "" && w.noneOffer(provider, modelID) {
+		return fmt.Errorf("%s/%s is not available with the current credentials", provider, modelID)
+	}
+	return w.changeInstall(ctx, func(defaults *Defaults) error {
+		defaults.Model = protocol.ModelBinding{Provider: provider, ModelID: modelID}
+		return nil
+	})
+}
+
+// SetInstallThinking changes the level every workspace falls back to.
+func (w *Workspaces) SetInstallThinking(ctx context.Context, level string) error {
+	if level != "" && !contains(thinkingLevels, level) {
+		return fmt.Errorf("unknown thinking level %q; expected one of %s", level, strings.Join(thinkingLevels, ", "))
+	}
+	return w.changeInstall(ctx, func(defaults *Defaults) error {
+		defaults.Thinking = level
+		return nil
+	})
+}
+
+// SetInstallAgent changes the definition every workspace falls back to. A definition a
+// workspace keeps to itself is legitimately unknown to the others: resolution skips it where
+// it is not there.
+func (w *Workspaces) SetInstallAgent(ctx context.Context, name string) error {
+	if name != "" && w.noDefinition(name) {
+		return fmt.Errorf("no agent definition named %q", name)
+	}
+	return w.changeInstall(ctx, func(defaults *Defaults) error {
+		defaults.Agent = name
+		return nil
+	})
+}
+
+// changeInstall writes the file once and tells every running workspace, so a change applies
+// without a restart.
+func (w *Workspaces) changeInstall(ctx context.Context, change func(*Defaults) error) error {
+	path := w.installDefaultsPath()
+	defaults, err := LoadDefaults(path)
+	if err != nil {
+		return err
+	}
+	if err := change(&defaults); err != nil {
+		return err
+	}
+	// An empty layer is not a layer: leaving a file full of zeroes behind would make the
+	// install look configured when it is not.
+	if defaults == (Defaults{}) {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else if err := SaveDefaults(path, defaults); err != nil {
+		return err
+	}
+	for _, control := range w.running() {
+		if err := control.SetInstallDefaults(ctx, defaults); err != nil {
+			workerpool.Log("apply install defaults to %s: %v", control.opts.Workspace.Name, err)
+		}
+	}
+	return nil
+}
+
+// running is a snapshot of the started workspaces, copied out so nothing is called while the
+// registry lock is held.
+func (w *Workspaces) running() []*Control {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	controls := make([]*Control, 0, len(w.controls))
+	for _, control := range w.controls {
+		controls = append(controls, control)
+	}
+	return controls
+}
+
+// noneOffer reports whether no started workspace offers this model. With none started there
+// is nothing to check against, and refusing would make the first thing anyone does fail.
+func (w *Workspaces) noneOffer(provider, modelID string) bool {
+	controls := w.running()
+	if len(controls) == 0 {
+		return false
+	}
+	for _, control := range controls {
+		if control.isAvailable(control.Describe(), protocol.ModelBinding{Provider: provider, ModelID: modelID}) {
+			return false
+		}
+	}
+	return true
+}
+
+func (w *Workspaces) noDefinition(name string) bool {
+	controls := w.running()
+	if len(controls) == 0 {
+		return false
+	}
+	for _, control := range controls {
+		control.mu.RLock()
+		found := definitionExists(control.catalog.Agents, name)
+		control.mu.RUnlock()
+		if found {
+			return false
+		}
+	}
+	return true
 }
 
 // Route finds the workspace a conversation belongs to. Names are checked first so that a

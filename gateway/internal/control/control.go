@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -99,10 +100,13 @@ type State struct {
 	Conversations []Conversation          `json:"conversations"`
 	Agent         protocol.ModelBinding   `json:"agent"`
 	Resolved      *protocol.ResolvedAgent `json:"resolved,omitempty"`
-	// Defaults apply to conversations that never chose, and to new ones.
+	// Defaults apply to conversations that never chose, and to new ones. They are resolved
+	// across the layers, so what is here is what will run; the origin says which layer gave
+	// each one, so the interface can explain rather than just state it.
 	DefaultModel    protocol.ModelBinding `json:"defaultModel"`
 	DefaultThinking string                `json:"defaultThinking"`
 	DefaultAgent    string                `json:"defaultAgent"`
+	DefaultsOrigin  DefaultOrigins        `json:"defaultsOrigin"`
 	// Inherited says, per field, that this conversation never chose it.
 	Inherited Inherited `json:"inherited"`
 	// Subagent is true when the active conversation was created by another one. Its
@@ -122,6 +126,23 @@ type State struct {
 	Seq         int64                   `json:"seq"`
 }
 
+// Defaults are one layer's answer to "what runs when nothing more specific does". The
+// workspace keeps its own, the install keeps its own, and neither is a copy of the other.
+type Defaults struct {
+	Model    protocol.ModelBinding `json:"defaultModel,omitempty"`
+	Thinking string                `json:"defaultThinking,omitempty"`
+	Agent    string                `json:"defaultAgent,omitempty"`
+}
+
+// DefaultOrigins names the layer each resolved default came from: which one is in force,
+// not just what it is. A value that came from the install is not a value this workspace
+// chose, and the difference is what someone looks at this for.
+type DefaultOrigins struct {
+	Model    string `json:"model,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+	Agent    string `json:"agent,omitempty"`
+}
+
 type Control struct {
 	opts   Options
 	worker *workerpool.Worker
@@ -137,17 +158,26 @@ type Control struct {
 	workerExited chan struct{}
 	// bindings holds only explicit choices, made in a conversation. A conversation
 	// with no entry here follows the definition's model or defaultModel.
-	bindings        map[string]protocol.ModelBinding
+	bindings map[string]protocol.ModelBinding
+	// default* is this workspace's own layer, and is what gets persisted here.
 	defaultModel    protocol.ModelBinding
 	defaultThinking string
 	defaultAgent    string
-	resolved        map[string]*protocol.ResolvedAgent
-	catalog         protocol.AgentsData
-	providers       []protocol.ProviderInfo
-	policies        map[string]json.RawMessage
-	views           map[string]cachedView
-	subscribers     map[int]chan protocol.Frame
-	nextSub         int
+	// install is the install-wide layer, from <home>/settings.json. Read-only for a
+	// workspace: it is changed through the workspace layer, which writes the file once for
+	// every workspace to see.
+	install Defaults
+	// lastResort is what is left when no layer chose a model. It is computed from what the
+	// credentials actually offer and is never persisted: a guess written into a workspace
+	// would outrank the install default for good, which is the opposite of a fallback.
+	lastResort  protocol.ModelBinding
+	resolved    map[string]*protocol.ResolvedAgent
+	catalog     protocol.AgentsData
+	providers   []protocol.ProviderInfo
+	policies    map[string]json.RawMessage
+	views       map[string]cachedView
+	subscribers map[int]chan protocol.Frame
+	nextSub     int
 	// Which conversation each subscriber watches, and how many watch each. Several
 	// clients watching different conversations is what makes browser tabs work.
 	subscriberConversation map[int]string
@@ -195,7 +225,7 @@ func (c *Control) Open(ctx context.Context) error {
 	}
 	// Our own state first: it holds the default model this install already uses.
 	persistedActive := c.loadSettings()
-	if err := c.ensureDefault(ctx); err != nil && !errors.Is(err, ErrNoProvider) {
+	if err := c.ensureLastResort(); err != nil && !errors.Is(err, ErrNoProvider) {
 		return fmt.Errorf("resolve default model: %w", err)
 	}
 	conversations, err := c.listConversations(ctx)
@@ -551,8 +581,10 @@ func (c *Control) StateFor(conversationID string) State {
 	// The registry lock is taken before this snapshot's, never inside it. The eviction sweep
 	// takes the registry lock and then reads a control, so a state build that read the
 	// registry from inside this lock would close the cycle and hang every request behind
-	// it. Read it first, and the two orders agree.
+	// it. Read it first, and the two orders agree. The defaults are resolved here for the
+	// same reason: they take the lock themselves.
 	workspaces := c.workspaceList()
+	fallback, origins := c.effectiveDefaults()
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -575,9 +607,10 @@ func (c *Control) StateFor(conversationID string) State {
 		Agent:           inputs.effective(),
 		Subagent:        isChild,
 		Resolved:        c.resolved[active],
-		DefaultModel:    c.defaultModel,
-		DefaultThinking: c.defaultThinking,
-		DefaultAgent:    c.defaultAgent,
+		DefaultModel:    fallback.Model,
+		DefaultThinking: fallback.Thinking,
+		DefaultAgent:    fallback.Agent,
+		DefaultsOrigin:  origins,
 		WorkerUp:        c.workerUp,
 		WorkerError:     c.workerError,
 		Inherited: Inherited{
@@ -893,13 +926,110 @@ func (in resolveInputs) effective() protocol.ModelBinding {
 	return effective
 }
 
+// origins names the layers, in the words the settings sheet uses.
+const (
+	originWorkspace  = "workspace"
+	originInstall    = "install"
+	originLastResort = "last-resort"
+)
+
+// effectiveDefaults resolves what applies to a conversation that has chosen nothing: this
+// workspace's own default, then the install's, then what is left when neither has one.
+//
+// A layer falls through when its choice is not usable — a model the credentials no longer
+// offer, an agent definition that has gone — instead of being overwritten, because a choice
+// that is remembered applies again when the provider or the file comes back.
+func (c *Control) effectiveDefaults() (Defaults, DefaultOrigins) {
+	// Read under one lock, decide outside it: isAvailable and the agent catalog are read
+	// from the same snapshot, and nothing here blocks.
+	c.mu.RLock()
+	describe := c.describe
+	workspace := Defaults{Model: c.defaultModel, Thinking: c.defaultThinking, Agent: c.defaultAgent}
+	install := c.install
+	lastResort := c.lastResort
+	agents := append([]protocol.AgentSummary(nil), c.catalog.Agents...)
+	c.mu.RUnlock()
+
+	resolved := Defaults{}
+	origins := DefaultOrigins{}
+	switch {
+	case c.modelUsable(describe, workspace.Model):
+		resolved.Model, origins.Model = workspace.Model, originWorkspace
+	case c.modelUsable(describe, install.Model):
+		resolved.Model, origins.Model = install.Model, originInstall
+	case lastResort.Provider != "" && lastResort.ModelID != "":
+		resolved.Model, origins.Model = lastResort, originLastResort
+	}
+	resolved.Thinking = firstNonEmpty(workspace.Thinking, install.Thinking)
+	if resolved.Thinking == "" {
+		origins.Thinking = ""
+	} else if workspace.Thinking != "" {
+		origins.Thinking = originWorkspace
+	} else {
+		origins.Thinking = originInstall
+	}
+	// A definition that is gone is not usable: pointing every inheriting conversation at it
+	// would fail them all, where the layer below still works.
+	for _, candidate := range []struct {
+		name   string
+		origin string
+	}{{workspace.Agent, originWorkspace}, {install.Agent, originInstall}} {
+		if candidate.name == "" {
+			continue
+		}
+		if !definitionExists(agents, candidate.name) {
+			continue
+		}
+		resolved.Agent, origins.Agent = candidate.name, candidate.origin
+		break
+	}
+	return resolved, origins
+}
+
+// modelUsable reports whether a layer's model can run here. An empty catalog means the
+// worker has not described itself yet, which is not the same as "not available": treating it
+// that way would resolve a different model for the moment before the worker answers.
+func (c *Control) modelUsable(describe protocol.Describe, binding protocol.ModelBinding) bool {
+	if binding.Provider == "" || binding.ModelID == "" {
+		return false
+	}
+	if len(describe.Providers) == 0 {
+		return true
+	}
+	return c.isAvailable(describe, binding)
+}
+
+func definitionExists(agents []protocol.AgentSummary, name string) bool {
+	if len(agents) == 0 {
+		return true
+	}
+	for _, agent := range agents {
+		if agent.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func (c *Control) inputsFor(conversationID string) resolveInputs {
+	// Resolved first, because it takes its own lock and nested read locks are not
+	// re-entrant here.
+	fallback, _ := c.effectiveDefaults()
 	c.mu.RLock()
 	inputs := resolveInputs{
 		explicit:        c.bindings[conversationID],
-		fallbackModel:   c.defaultModel,
-		defaultThinking: c.defaultThinking,
-		defaultAgent:    c.defaultAgent,
+		fallbackModel:   fallback.Model,
+		defaultThinking: fallback.Thinking,
+		defaultAgent:    fallback.Agent,
 		resolved:        c.resolved[conversationID],
 	}
 	c.mu.RUnlock()
@@ -1073,10 +1203,60 @@ func (c *Control) reapplyInheriting(ctx context.Context) error {
 	return firstErr
 }
 
+// SetInstallDefaults replaces the install-wide layer, which is what every workspace falls
+// back to when it has no default of its own.
+func (c *Control) SetInstallDefaults(ctx context.Context, defaults Defaults) error {
+	c.mu.Lock()
+	c.install = defaults
+	c.mu.Unlock()
+	return c.reapplyInheriting(ctx)
+}
+
+// LoadDefaults reads a defaults file. A missing one is an empty layer, not an error: most
+// installs never set one, and the layers below still resolve.
+func LoadDefaults(path string) (Defaults, error) {
+	var defaults Defaults
+	payload, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return defaults, nil
+	}
+	if err != nil {
+		return defaults, err
+	}
+	if err := json.Unmarshal(payload, &defaults); err != nil {
+		return Defaults{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return defaults, nil
+}
+
+// SaveDefaults writes a defaults file, atomically and privately.
+func SaveDefaults(path string, defaults Defaults) error {
+	payload, err := json.MarshalIndent(defaults, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	temp := path + ".tmp"
+	if err := os.WriteFile(temp, append(payload, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temp, path)
+}
+
 // SetDefaultModel changes what conversations without an explicit model run.
 func (c *Control) SetDefaultModel(ctx context.Context, provider, modelID string) error {
-	if provider == "" || modelID == "" {
-		return errors.New("provider and modelId are required")
+	if (provider == "") != (modelID == "") {
+		return errors.New("a model default needs both a provider and a model id")
+	}
+	if provider == "" {
+		// Clearing this workspace's choice is not the same as having none: it falls back to
+		// the install's default or the last resort instead of being left unusable.
+		c.mu.Lock()
+		c.defaultModel = protocol.ModelBinding{}
+		c.mu.Unlock()
+		return c.reapplyInheriting(ctx)
 	}
 	if !c.isAvailable(c.Describe(), protocol.ModelBinding{Provider: provider, ModelID: modelID}) {
 		return fmt.Errorf("%s/%s is not available with the current credentials", provider, modelID)
@@ -1087,24 +1267,16 @@ func (c *Control) SetDefaultModel(ctx context.Context, provider, modelID string)
 	return c.reapplyInheriting(ctx)
 }
 
-// ensureDefault gives the install a default model when it has none or when the
-// stored one is no longer available, so the first prompt always has something.
-func (c *Control) ensureDefault(ctx context.Context) error {
-	describe := c.Describe()
-	c.mu.RLock()
-	current := c.defaultModel
-	c.mu.RUnlock()
-	if current.Provider != "" && c.isAvailable(describe, current) {
-		return nil
-	}
-	binding, err := c.deriveDefault(describe)
+// ensureLastResort works out what runs when no layer chose a model, so the first prompt
+// always has something. It writes nothing: see the field it fills.
+func (c *Control) ensureLastResort() error {
+	binding, err := c.deriveLastResort(c.Describe())
 	if err != nil {
 		return err
 	}
 	c.mu.Lock()
-	c.defaultModel = binding
+	c.lastResort = binding
 	c.mu.Unlock()
-	c.persist()
 	return nil
 }
 
@@ -1195,23 +1367,15 @@ func (c *Control) Reload(ctx context.Context) error {
 	if _, err := c.Agents(ctx); err != nil {
 		return err
 	}
-	// A definition may have been renamed or removed: stop pointing at one that is
-	// gone rather than failing every conversation that inherited it.
-	c.mu.Lock()
-	if c.defaultAgent != "" {
-		stillThere := false
-		for _, agent := range c.catalog.Agents {
-			if agent.Name == c.defaultAgent {
-				stillThere = true
-				break
-			}
-		}
-		if !stillThere {
-			workerpool.Log("default agent %q is gone; falling back to the layered defaults", c.defaultAgent)
-			c.defaultAgent = ""
-		}
+	// A definition may have been renamed or removed. Resolution skips one that is gone and
+	// falls through to the layer below, so nothing is erased here: the choice survives and
+	// applies again if the file comes back.
+	c.mu.RLock()
+	gone := c.defaultAgent != "" && !definitionExists(c.catalog.Agents, c.defaultAgent)
+	c.mu.RUnlock()
+	if gone {
+		workerpool.Log("default agent %q is gone; using the next layer down", c.defaultAgent)
 	}
-	c.mu.Unlock()
 	return c.reapplyInheriting(ctx)
 }
 
@@ -1223,7 +1387,7 @@ func (c *Control) Refresh(ctx context.Context) error {
 		return err
 	}
 	c.applyDescribe(describe)
-	if err := c.ensureDefault(ctx); err != nil && !errors.Is(err, ErrNoProvider) {
+	if err := c.ensureLastResort(); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
 	if active := c.activeConversation(); active != "" {
@@ -1514,15 +1678,34 @@ func (c *Control) applyDescribe(describe protocol.Describe) {
 	c.providers = describe.Providers
 }
 
-// deriveDefault picks a default: the flag, then the first authenticated provider's
-// first model. Guessing is fine once, but it is stored so it stops being a guess.
-func (c *Control) deriveDefault(describe protocol.Describe) (protocol.ModelBinding, error) {
+// lastResortModels are tried in order when no layer has chosen a model, so an install with
+// credentials always runs something deliberate rather than whatever is listed first. It is a
+// preference, not a rule: a model nobody offers is skipped.
+var lastResortModels = []string{"deepseek-v4.1-flash"}
+
+// deriveLastResort picks what runs when no layer chose a model: the --model flag, then the
+// preferred models, then the first authenticated provider's first model. Only the flag and
+// the preference are decisions; the end of the line is a guess, and it is reported as the
+// last resort rather than being stored as though someone had chosen it.
+func (c *Control) deriveLastResort(describe protocol.Describe) (protocol.ModelBinding, error) {
 	if model := strings.TrimSpace(c.opts.Model); model != "" {
 		parts := strings.SplitN(model, "/", 2)
 		if len(parts) != 2 {
 			return protocol.ModelBinding{}, fmt.Errorf("--model must be provider/modelId, got %q", model)
 		}
 		return protocol.ModelBinding{Provider: parts[0], ModelID: parts[1]}, nil
+	}
+	for _, wanted := range lastResortModels {
+		for _, provider := range describe.Providers {
+			if !provider.Authenticated {
+				continue
+			}
+			for _, model := range provider.Models {
+				if model.ID == wanted {
+					return protocol.ModelBinding{Provider: provider.ID, ModelID: wanted}, nil
+				}
+			}
+		}
 	}
 	for _, provider := range describe.Providers {
 		if !provider.Authenticated || len(provider.Models) == 0 {
@@ -1584,6 +1767,13 @@ func (c *Control) loadSettings() string {
 	c.defaultThinking = settings.DefaultThinking
 	c.defaultAgent = settings.DefaultAgent
 	c.mu.Unlock()
+	if install, err := LoadDefaults(filepath.Join(c.opts.Home, "settings.json")); err == nil {
+		c.mu.Lock()
+		c.install = install
+		c.mu.Unlock()
+	} else {
+		workerpool.Log("install defaults unreadable, using this workspace's: %v", err)
+	}
 	if settings.Agents != nil {
 		c.mu.Lock()
 		for id, binding := range settings.Agents {
@@ -1602,6 +1792,9 @@ func (c *Control) persist() {
 		return
 	}
 	c.mu.RLock()
+	// This workspace's own layer, not the resolved one: writing the resolved value here
+	// would turn the install's default, or a guess, into this workspace's choice and it
+	// would outrank every layer below for good.
 	settings := persistedSettings{
 		Active:          c.active,
 		DefaultModel:    c.defaultModel,

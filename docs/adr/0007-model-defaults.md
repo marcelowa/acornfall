@@ -23,8 +23,10 @@ Control is the single place that resolves, and the order is:
 
 1. **The conversation's explicit model**, when the user picked one here.
 2. **The agent definition's model**, when the definition names one.
-3. **The install default.**
-4. Nothing → `ErrNoProvider`, with a message telling the user to connect a provider.
+3. **This workspace's default**, from `state/<workspace>/settings.json`.
+4. **The install's default**, from `<home>/settings.json` — shared by every workspace.
+5. **The last resort**: the preferred model, else the first the credentials offer.
+6. Nothing → `ErrNoProvider`, with a message telling the user to connect a provider.
 
 A definition naming a model beats the install default on purpose: a definition that pins
 a model means it, and a global default should not silently override a deliberate choice
@@ -122,18 +124,48 @@ a substitute; switching back restores `medium` exactly. The inspector shows
 `off (asked for medium)` rather than appearing to have ignored the choice, and
 `inherited.thinking` stays `false`, because the conversation did choose.
 
-## The default
+## The layers
 
-`settings.json` stores `defaultModel`, `defaultThinking`, and `defaultAgent`; changes
-re-apply to every inheriting conversation immediately. Changing it re-applies to every *inheriting*
-conversation immediately, so the change is visible without a restart, and it does not
-touch conversations that chose their own model.
+Two files, one shape, and neither is a copy of the other:
 
-When no default is set, or the stored one is no longer available (a provider was
-disconnected, a model disappeared from the catalog), control derives one — the `--model`
-flag, else the first model of the first authenticated provider — and **persists it**. The
-guess is fine once; leaving it implicit is what made it hard to find and impossible to
-change.
+| layer | file | scope |
+|---|---|---|
+| workspace | `state/<workspace>/settings.json` | this workspace |
+| install | `<home>/settings.json` | every workspace |
+
+A layer falls through when its choice is not usable — a model the credentials no longer
+offer, an agent definition that has gone — and it is **not rewritten when that happens**.
+The choice is kept, so a provider that comes back applies again. This replaced code that
+overwrote an unusable default with a fresh guess, which destroyed the only record of what
+someone had picked.
+
+The install layer is written once, by the workspace layer that owns the file, and every
+running workspace is told about the change, so it applies without a restart:
+
+```
+POST /api/defaults/model     { provider, modelId }
+POST /api/defaults/thinking  { level }        // empty clears
+POST /api/defaults/agent     { definition }
+```
+
+The workspace's own three keep their `/api/workspaces/<ws>/default-…` paths, and the
+settings sheet has a single control for which of the two the buttons write to. The state
+reports the **resolved** defaults plus `defaultsOrigin` per field — `workspace`, `install`,
+or `last-resort` — so the sheet can say *where* a value came from. Without it, "why is this
+workspace on that model" has no answer in the interface.
+
+## The last resort
+
+When no layer has chosen a model, control prefers `deepseek-v4.1-flash` among what the
+credentials actually offer, then the `--model` flag, then the first model of the first
+authenticated provider. The preference exists because the end of the line used to be
+"whatever is listed first" (alphabetically `minimax-m3`), which is not a decision anyone
+made.
+
+It is **resolved, never persisted**. A fallback written into a workspace's settings is a
+guess that outranks the install default from then on, which is the opposite of a fallback:
+the install could never change it again. The same rule applies to the resolved value as a
+whole — `persist` writes this workspace's own layer, not what resolution produced.
 
 `State.Agent` is the **effective** binding, so the pickers show what will actually run.
 `State.ModelInherited` says whether this conversation chose it. A picker that showed an
@@ -168,9 +200,9 @@ site.
 
 ## Still missing
 
-- The defaults are per install, not per workspace. With more than one workspace they
-  would want their own, and the settings belong beside the workspace rather than the data
-  dir.
 - No allowlist: an agent definition can name any model the credentials reach.
-- A default agent that disappears (renamed or deleted file) is dropped with a log line on
-  reload, but nothing tells the user in the UI that it happened.
+- A default agent that disappears (renamed or deleted file) is skipped at resolution with
+  a log line, so nothing fails — but the interface shows only that the layer below is in
+  force, not that the file is gone.
+- The install layer is a file, not a profile: there is one install default, so two
+  workspaces that want different thinking levels both have to set their own.
