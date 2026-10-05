@@ -199,8 +199,7 @@ export function reporterTask(deps: DelegationDeps) {
 					const policy = await policyFor(deps, String(runtime.conversationId), context);
 					const state = await deps.harness.snapshot(DelegationDoc, runtime.conversationId, context);
 					const spent = (state?.wakes ?? 0) >= policy.delegation.maxWakes;
-					const sender = await deps.harness.snapshot(DelegationDoc, runtime.conversationId, context);
-					const kind = sender?.agents[reporter.input.name]?.peer === true ? "peer" : "subagent";
+					const kind = state?.agents[reporter.input.name]?.peer === true ? "peer" : "subagent";
 					const text = spent
 						? `[${kind} ${reporter.input.name} finished, but this conversation has used its ${policy.delegation.maxWakes} wake-ups. Read conversation ${String(reporter.input.conversationId)} for the answer.]`
 						: report;

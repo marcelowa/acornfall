@@ -26,11 +26,13 @@ import {
 	type Harness,
 	LiveDoc,
 	type Storage,
+	type Tx,
 	UsageDoc,
 } from "@earendil-works/pi-durable";
 import { resolveAgent, type Catalog, type Delegation, type ResolvedAgent } from "./config.ts";
-import { ConversationMetaDoc, conversationIdOf } from "./meta.ts";
+import { type ConversationMeta, ConversationMetaDoc, conversationIdOf } from "./meta.ts";
 import { Anchor, DelegationDoc, reporterTask } from "./delegation-tasks.ts";
+import { totalTokens } from "./usage.ts";
 
 const ANSWER_SCAN_LIMIT = 8;
 /**
@@ -103,6 +105,30 @@ export async function mayAddress(
 		allowed: false,
 		why: `not reachable from here (set address: any in the policy to reach every conversation)`,
 	};
+}
+
+/**
+ * Records a child on the conversation that made it: the definition it runs, and the link back.
+ *
+ * A peer is ownerless — the rail lists it as a normal conversation — so it records who made it
+ * instead of a child link. Returns the child's own document, which a caller adds to when only it
+ * knows what else to say: a peer's title, for instance.
+ */
+async function recordChild(
+	deps: DelegationDeps,
+	tx: Tx,
+	context: Context,
+	options: { parentId: string; childId: ConversationId; definition: string | undefined; owned: boolean },
+): Promise<ConversationMeta> {
+	const meta = await tx.doc(ConversationMetaDoc, options.childId);
+	meta.definition = options.definition ?? (await definitionOf(deps, options.parentId, context)) ?? "";
+	if (!options.owned) {
+		meta.createdBy = options.parentId;
+		return meta;
+	}
+	const parent = await tx.doc(ConversationMetaDoc, conversationIdOf(options.parentId));
+	parent.children = [...(parent.children ?? []), String(options.childId)];
+	return meta;
 }
 
 /** How many conversations agents have created in this workspace. */
@@ -267,13 +293,15 @@ export function delegationExtension(deps: DelegationDeps) {
 
 			const snapshot = await api.snapshot(DelegationDoc, api.conversationId, context);
 			const state = snapshot ?? { agents: {}, reporters: {}, wakes: 0 };
-			const named = args.name === undefined ? undefined : state.agents[args.name];
-			// A conversation can be addressed by name when it was created here, or by id
-			// when it was not, and the policy decides whether the id is reachable at all.
-			const target =
+			// A conversation can be addressed by name when it was created here, or by id when it
+			// was not, and the policy decides whether the id is reachable at all. What the actions
+			// need is the id: the rest of the record is this conversation's own bookkeeping, and
+			// inventing one for a target addressed by id would invent a `peer` and a `reported`
+			// that are not true of it.
+			const target: ConversationId | undefined =
 				args.conversation === undefined
-					? named
-					: { conversationId: conversationIdOf(args.conversation), reported: [], peer: false };
+					? (args.name === undefined ? undefined : state.agents[args.name])?.conversationId
+					: conversationIdOf(args.conversation);
 			if (args.conversation !== undefined) {
 				const reach = await mayAddress(deps, parentId, args.conversation, context);
 				if (!reach.allowed) return reply(`Cannot address ${args.conversation}: ${reach.why}.`);
@@ -289,10 +317,7 @@ export function delegationExtension(deps: DelegationDeps) {
 						deps.harness.snapshot(LiveDoc, entry.conversationId, context).catch(() => undefined),
 						deps.harness.snapshot(UsageDoc, entry.conversationId, context).catch(() => undefined),
 					]);
-					const tokens = Object.values(usage?.models ?? {}).reduce(
-						(sum, item) => sum + (item.totalTokens ?? 0),
-						0,
-					);
+					const tokens = totalTokens(usage);
 					lines.push(
 						`${name}${entry.peer ? " (peer)" : ""}: ${live?.run === undefined ? "idle" : "working"} · conversation ${String(entry.conversationId)} · ${tokens} tokens`,
 					);
@@ -307,13 +332,13 @@ export function delegationExtension(deps: DelegationDeps) {
 			}
 
 			if (args.action === "stop") {
-				const handle = await api.conversation(target!.conversationId, context);
+				const handle = await api.conversation(target!, context);
 				await handle!.abort(context);
-				return reply(`Stopped ${target!.conversationId}.`, String(target!.conversationId));
+				return reply(`Stopped ${String(target!)}.`, String(target!));
 			}
 
 			if (args.action === "read") {
-				const child = await deps.harness.conversation(target!.conversationId, context);
+				const child = await deps.harness.conversation(target!, context);
 				const page = await child!.entries({}, READ_LIMIT, undefined, context);
 				const lines: string[] = [];
 				let budget = READ_CHARS;
@@ -325,7 +350,7 @@ export function delegationExtension(deps: DelegationDeps) {
 					lines.push(`${String(entry.kind).replace("pi.", "")}: ${trimmed}`);
 					if (budget <= 0) break;
 				}
-				return reply(lines.join("\n") || "Its transcript is empty.", String(target!.conversationId));
+				return reply(lines.join("\n") || "Its transcript is empty.", String(target!));
 			}
 
 			if (args.message === undefined) return reply(`${args.action} needs a message.`);
@@ -337,7 +362,7 @@ export function delegationExtension(deps: DelegationDeps) {
 			// Captured as locals because the closures below outlive TypeScript's
 			// narrowing of the optional parameters. A target addressed by id has no name,
 			// so the label falls back to the id.
-			const name = args.name ?? String(target!.conversationId);
+			const name = args.name ?? String(target!);
 			const message: string = args.message;
 
 			const outcome = await api.commit(async (tx) => {
@@ -405,18 +430,18 @@ export function delegationExtension(deps: DelegationDeps) {
 						...(isPeer || self === undefined ? {} : { extensions: { remove: [self] } }),
 					});
 					current.agents[name] = { conversationId: child.id, reported: [], peer: isPeer };
-					const meta = await tx.doc(ConversationMetaDoc, child.id);
-					meta.definition = args.agent ?? (await definitionOf(deps, parentId, context)) ?? "";
+					const meta = await recordChild(deps, tx, context, {
+						parentId,
+						childId: child.id,
+						definition: args.agent,
+						owned: isPeer === false,
+					});
 					if (isPeer) {
-						meta.createdBy = parentId;
 						// A peer is a normal conversation, so the rail names it after what it is for.
 						meta.title = meta.title === "" ? `Peer: ${name}` : meta.title;
-					} else {
-						const parentMeta = await tx.doc(ConversationMetaDoc, conversationIdOf(parentId));
-						parentMeta.children = [...(parentMeta.children ?? []), String(child.id)];
 					}
 				} else {
-					conversationId = target!.conversationId;
+					conversationId = target!;
 				}
 
 				// One rule, no special cases: an answer to a message you sent comes back to
@@ -489,10 +514,12 @@ export function delegationExtension(deps: DelegationDeps) {
 						instructions: resolved.instructions,
 					});
 				}
-				const childMeta = await tx.doc(ConversationMetaDoc, created.id);
-				childMeta.definition = args.agent ?? (await definitionOf(deps, parentId, context)) ?? "";
-				const parentMeta = await tx.doc(ConversationMetaDoc, conversationIdOf(parentId));
-				parentMeta.children = [...(parentMeta.children ?? []), String(created.id)];
+				await recordChild(deps, tx, context, {
+					parentId,
+					childId: created.id,
+					definition: args.agent,
+					owned: true,
+				});
 				return created.id;
 			}, context);
 

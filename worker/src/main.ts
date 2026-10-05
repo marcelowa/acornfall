@@ -33,6 +33,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
+import { totalCost, totalTokens } from "./usage.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import {
 	COMMAND_DIRS,
@@ -309,16 +310,6 @@ async function listConversations(): Promise<ConversationInfo[]> {
 	}
 	// Newest first; ids are monotonic.
 	return found.sort((a, b) => Number(b.id) - Number(a.id));
-}
-
-type UsageTotals = { models?: Record<string, { totalTokens?: number; cost?: { total?: number } }> };
-
-function totalTokens(usage: UsageTotals | undefined): number {
-	return Object.values(usage?.models ?? {}).reduce((sum, entry) => sum + (entry.totalTokens ?? 0), 0);
-}
-
-function totalCost(usage: UsageTotals | undefined): number {
-	return Object.values(usage?.models ?? {}).reduce((sum, entry) => sum + (entry.cost?.total ?? 0), 0);
 }
 
 /** Writes metadata through the conversation's own commit, so it is durable. */

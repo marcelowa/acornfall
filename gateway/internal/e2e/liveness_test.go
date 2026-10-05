@@ -78,6 +78,43 @@ func TestAPeerIsANormalConversation(t *testing.T) {
 	c.waitForText("general", peer.ID, "PEER ANSWER MARKER")
 }
 
+// The subagent tool's own actions answer in the tool result rather than in the rail: the listing
+// names what this conversation made and what each one has spent.
+func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
+	s := start(t, withScript(
+		scriptRule{
+			Match: "start a helper",
+			Tools: []scriptTool{{Name: "subagent", Args: map[string]any{
+				"action": "spawn", "name": "helper", "message": "helper task",
+			}}},
+			Reply: "the helper is running",
+		},
+		scriptRule{Match: "helper task", Reply: "HELPER ANSWERED"},
+		scriptRule{
+			Match: "list the helpers",
+			Tools: []scriptTool{{Name: "subagent", Args: map[string]any{"action": "list"}}},
+			Reply: "listed them",
+		},
+	))
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	c.prompt("general", root, "start a helper")
+	c.waitForText("general", root, "the helper is running")
+	child := c.waitForConversationMatching("general", func(candidate conversation) bool {
+		return candidate.Parent == root && candidate.ID != root
+	})
+
+	c.prompt("general", root, "list the helpers")
+	got := c.waitForText("general", root, "listed them")
+	transcript := got.all()
+	for _, want := range []string{"helper", "conversation " + child.ID, "tokens"} {
+		if !strings.Contains(transcript, want) {
+			t.Errorf("the listing should mention %q:\n%s", want, transcript)
+		}
+	}
+}
+
 // The policy in the overlay decides what a conversation may do, and it is reported, so a
 // refusal can be explained rather than only suffered.
 func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
