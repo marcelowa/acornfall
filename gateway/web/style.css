@@ -1197,3 +1197,20 @@ button.small {
 	font-size: 11px;
 	color: var(--neutral-500);
 }
+
+.workspace-form {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	padding-top: 4px;
+}
+
+.workspace-form input[type="text"],
+.workspace-form input:not([type]) {
+	flex: 1 1 160px;
+	font: inherit;
+	padding: 7px 9px;
+	border: 1px solid var(--neutral-200);
+	border-radius: var(--radius-sm);
+}

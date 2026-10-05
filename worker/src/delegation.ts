@@ -45,7 +45,11 @@ export interface DelegationDeps {
 }
 
 /** The definition a conversation runs, from its own committed metadata. */
-async function definitionOf(deps: DelegationDeps, conversationId: string, context: Context): Promise<string | undefined> {
+export async function definitionOf(
+	deps: DelegationDeps,
+	conversationId: string,
+	context: Context,
+): Promise<string | undefined> {
 	const meta = await deps.harness.snapshot(ConversationMetaDoc, conversationIdOf(conversationId), context);
 	return meta?.definition === undefined || meta.definition === "" ? undefined : meta.definition;
 }

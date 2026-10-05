@@ -898,6 +898,98 @@ async function renderCommands() {
 	}
 }
 
+/**
+ * Workspaces are folders the agent works in, each with its own worker, storage, and trust
+ * decision. This is where they are created and where trust is decided, because a workspace
+ * whose resources are not trusted is a folder and nothing else.
+ */
+async function renderWorkspaces() {
+	let workspaces = [];
+	try {
+		workspaces = await (await fetch("/api/workspaces")).json();
+	} catch (error) {
+		els.sheetBody.innerHTML = `<p class="provider-meta">${escapeHtml(String(error))}</p>`;
+		return;
+	}
+	const rows = workspaces
+		.map(
+			(workspace) => `<div class="provider">
+				<div>
+					<div class="provider-name">${escapeHtml(workspace.title || workspace.name)} ${
+						workspace.general ? `<span class="badge">general</span>` : ""
+					}${workspace.running ? `<span class="badge">running</span>` : ""}</div>
+					<div class="provider-meta">${escapeHtml(workspace.name)} · ${escapeHtml(workspace.path)}</div>
+				</div>
+				<div class="provider-actions">
+					<label class="mode" title="Untrusted means the folder and nothing else: its AGENTS.md, agents, skills, and commands are not read.">
+						<input type="checkbox" data-trust="${escapeHtml(workspace.name)}" ${workspace.trusted ? "checked" : ""} />
+						<span>trusted</span>
+					</label>
+					${
+						workspace.general
+							? ""
+							: `<button class="ghost small" data-forget="${escapeHtml(workspace.name)}" type="button">Remove</button>`
+					}
+				</div>
+			</div>`,
+		)
+		.join("");
+
+	els.sheetBody.innerHTML = `
+		<p class="provider-meta">A workspace is a folder the agent works in, with its own agents, skills,
+			commands, rules, and options. Each one runs its own worker.</p>
+		${rows}
+		<form id="workspace-form" class="workspace-form">
+			<input name="name" placeholder="name" autocomplete="off" />
+			<input name="path" placeholder="/absolute/folder" autocomplete="off" />
+			<label class="mode"><input name="trusted" type="checkbox" /><span>trusted</span></label>
+			<button class="primary" type="submit">Add</button>
+		</form>
+		<p class="provider-meta">The folder must already exist. Removing a workspace forgets it; it never deletes the
+			folder or the history.</p>`;
+
+	const form = document.getElementById("workspace-form");
+	form.addEventListener("submit", async (event) => {
+		event.preventDefault();
+		const data = new FormData(form);
+		try {
+			await post("/api/workspaces", {
+				name: String(data.get("name") ?? "").trim(),
+				path: String(data.get("path") ?? "").trim(),
+				trusted: data.get("trusted") === "on",
+			});
+			await loadState();
+			await renderWorkspaces();
+		} catch (error) {
+			setStatus(String(error.message ?? error), "offline");
+		}
+	});
+
+	for (const box of els.sheetBody.querySelectorAll("[data-trust]")) {
+		box.addEventListener("change", async () => {
+			try {
+				await post(`/api/workspaces/${encodeURIComponent(box.dataset.trust)}/update`, {
+					trusted: box.checked,
+				});
+				await loadState();
+			} catch (error) {
+				setStatus(String(error.message ?? error), "offline");
+			}
+		});
+	}
+	for (const button of els.sheetBody.querySelectorAll("[data-forget]")) {
+		button.addEventListener("click", async () => {
+			try {
+				await post(`/api/workspaces/${encodeURIComponent(button.dataset.forget)}/remove`);
+				await loadState();
+				await renderWorkspaces();
+			} catch (error) {
+				setStatus(String(error.message ?? error), "offline");
+			}
+		});
+	}
+}
+
 async function loadState() {
 	state = await (
 		await fetch(`/api/state?workspace=${encodeURIComponent(activeWorkspace())}&conversation=${encodeURIComponent(activeId())}`)
@@ -956,6 +1048,7 @@ function renderSheet() {
 	if (sheet.flow) return renderFlow();
 	if (sheet.view === "defaults") return renderDefaults();
 	if (sheet.view === "commands") return void renderCommands();
+	if (sheet.view === "workspaces") return void renderWorkspaces();
 	renderProviders();
 }
 

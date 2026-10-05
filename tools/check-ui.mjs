@@ -300,8 +300,8 @@ try {
 		[...document.querySelectorAll(".sheet-tabs .tab")].map((tab) => tab.dataset.view),
 	);
 	check(
-		"the sheet has provider, default, and command tabs",
-		tabs.join(",") === "providers,defaults,commands",
+		"the sheet has provider, default, command, and workspace tabs",
+		tabs.join(",") === "providers,defaults,commands,workspaces",
 		tabs.join(","),
 	);
 	await page.click('.sheet-tabs .tab[data-view="defaults"]');
@@ -506,7 +506,36 @@ try {
 		check("choosing a command closes the sheet", await page.evaluate(() => document.querySelector("#sheet").getBoundingClientRect().height === 0));
 	}
 
-	// 13. Two tabs, two conversations. The conversation belongs to the URL, so tabs do not
+	// 13. A workspace can be created from the interface, and it appears where it is used.
+	// Reopened first: choosing a command closes the sheet, as it should.
+	await page.evaluate(() => document.querySelector("#connect").click());
+	await page.waitForSelector("#sheet:not([hidden])", { visible: true, timeout: 5000 });
+	await page.evaluate(() => document.querySelector('.sheet-tabs .tab[data-view="workspaces"]').click());
+	await page.waitForSelector("#workspace-form", { visible: true, timeout: 5000 });
+	const created = await page.evaluate(async () => {
+		const before = (await (await fetch("/api/workspaces")).json()).length;
+		const form = document.querySelector("#workspace-form");
+		form.querySelector('[name="name"]').value = "check-made";
+		form.querySelector('[name="path"]').value = "/tmp";
+		form.querySelector('[name="trusted"]').checked = false;
+		form.requestSubmit();
+		await new Promise((resolve) => setTimeout(resolve, 1500));
+		const after = await (await fetch("/api/workspaces")).json();
+		return {
+			before,
+			created: after.some((w) => w.name === "check-made"),
+			trusted: after.find((w) => w.name === "check-made")?.trusted,
+			titleMatchesName: after.find((w) => w.name === "check-made")?.title === "check-made",
+		};
+	});
+	check("the form creates a workspace", created.created, JSON.stringify(created));
+	check("its title defaults to its name, so the list and selector agree", created.titleMatchesName);
+	check("trust is recorded as chosen", created.trusted === false, JSON.stringify(created));
+	await page.evaluate(() => fetch("/api/workspaces/check-made/remove", { method: "POST" }));
+	await new Promise((resolve) => setTimeout(resolve, 500));
+	check("no errors from managing workspaces", problems.length === 0, problems.join("; "));
+
+	// 14. Two tabs, two conversations. The conversation belongs to the URL, so tabs do not
 	//     fight over one "active" conversation and a shared link opens what it names.
 	// Picked from what the rail is showing, not from /api/state: that reports the
 	// conversation the install remembers, which need not be the one on screen, and

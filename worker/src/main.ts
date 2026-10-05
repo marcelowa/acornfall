@@ -39,6 +39,7 @@ import { loadCatalog, resolveAgent, type Catalog, type ResolvedAgent } from "./c
 import { devProvider } from "./devprovider.ts";
 import { conversationIdOf, ConversationMetaDoc } from "./meta.ts";
 import { delegationExtension, policyFor } from "./delegation.ts";
+import { guardsExtension } from "./hooks.ts";
 import { MessagesDoc } from "./delegation-tasks.ts";
 import {
 	CommandQueue,
@@ -193,6 +194,7 @@ const harness = await Harness.open(
 // Registered after the harness opens: the delegation tools need it to read a
 // child's answer, and the registry accepts installs while running.
 registry.install(delegationExtension({ harness, storage, catalog: () => catalog }));
+registry.install(guardsExtension({ harness, storage, catalog: () => catalog, workspaceRoot: args.workspace }));
 
 /** Live handles by conversation id; created on first use. */
 const handles = new Map<string, Conversation>();

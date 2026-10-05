@@ -62,6 +62,24 @@ export const DEFAULT_DELEGATION: Delegation = {
 	maxPeersTotal: 8,
 };
 
+/**
+ * A declarative guard on a tool call. Two matchers, because they are the two that
+ * actually matter for an assistant with a shell: do not run this command, and do not
+ * write outside the workspace. A guard can only deny, never allow.
+ */
+export interface Guard {
+	/** A tool name, or `*` for every tool. */
+	tool: string;
+	/** Which argument to test. Explicit, so nothing is matched by surprise. */
+	arg: string;
+	/** A regular expression the argument must not match. */
+	pattern?: string;
+	/** The argument is a path, and must resolve inside the workspace. */
+	outside?: boolean;
+	/** Shown to the model when the call is blocked. */
+	reason: string;
+}
+
 export interface Contributions {
 	model?: string;
 	thinking?: string;
@@ -71,6 +89,8 @@ export interface Contributions {
 	denyTools?: string[];
 	/** Replaces wholesale: a partially specified policy would be ambiguous. */
 	delegation?: Partial<Delegation>;
+	/** Guards accumulate across layers: a rule added anywhere holds everywhere. */
+	guards?: Guard[];
 }
 
 export interface AgentDefinition {
@@ -92,6 +112,7 @@ export interface LayerTrace {
 
 export interface ResolvedAgent {
 	delegation: Delegation;
+	guards: Guard[];
 	name: string;
 	description: string;
 	source: string;
@@ -137,6 +158,30 @@ function parseDelegation(raw: string): Partial<Delegation> {
 		policy.peers = false;
 	}
 	return policy;
+}
+
+/** A guard that cannot be understood is an error, not a rule that quietly does nothing. */
+function parseGuard(entry: unknown, path: string): Guard {
+	if (typeof entry !== "object" || entry === null) throw new Error(`${path}: a guard must be an object`);
+	const raw = entry as Record<string, unknown>;
+	const tool = typeof raw.tool === "string" ? raw.tool : "";
+	const arg = typeof raw.arg === "string" ? raw.arg : "";
+	const reason = typeof raw.reason === "string" ? raw.reason : "";
+	const pattern = typeof raw.pattern === "string" ? raw.pattern : undefined;
+	const outside = raw.outside === true;
+	if (tool === "" || arg === "") throw new Error(`${path}: a guard needs a tool and an arg`);
+	if (reason === "") throw new Error(`${path}: a guard needs a reason, because the model is told it`);
+	if (pattern === undefined && !outside) {
+		throw new Error(`${path}: a guard needs a pattern or outside: true`);
+	}
+	if (pattern !== undefined) {
+		try {
+			new RegExp(pattern);
+		} catch (error) {
+			throw new Error(`${path}: guard pattern does not compile: ${(error as Error).message}`);
+		}
+	}
+	return { tool, arg, reason, ...(pattern === undefined ? {} : { pattern }), ...(outside ? { outside: true } : {}) };
 }
 
 function parseCount(raw: string, key: string): number {
@@ -192,6 +237,8 @@ async function loadConfig(path: string, label: LayerName): Promise<{ contributio
 	if (typeof source.model === "string") contributions.model = source.model;
 	if (typeof source.thinking === "string") contributions.thinking = source.thinking;
 	if (typeof source.instructions === "string") contributions.instructions = source.instructions;
+	const hooks = (source.hooks ?? {}) as Record<string, unknown>;
+	if (Array.isArray(hooks.guards)) contributions.guards = hooks.guards.map((entry) => parseGuard(entry, path));
 	if (source.delegation !== undefined && typeof source.delegation === "object") {
 		const raw = source.delegation as Record<string, unknown>;
 		const policy: Partial<Delegation> = {};
@@ -306,6 +353,7 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 	const denyTools = new Set<string>();
 	const instructions: string[] = [];
 	let delegation: Partial<Delegation> | undefined;
+	const guards: Guard[] = [];
 
 	for (const { layer, contributes } of layers) {
 		if (contributes.model !== undefined) model = contributes.model;
@@ -317,6 +365,7 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 		if (contributes.allowTools !== undefined) allowTools = contributes.allowTools;
 		if (contributes.denyTools !== undefined) for (const tool of contributes.denyTools) denyTools.add(tool);
 		if (contributes.delegation !== undefined) delegation = { ...delegation, ...contributes.delegation };
+		if (contributes.guards !== undefined) guards.push(...contributes.guards);
 	}
 
 	// A deny always wins over an allow, so a workspace cannot be over-permissioned
@@ -328,6 +377,7 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 		description: definition?.description ?? "Default assistant",
 		source: definition?.source ?? "",
 		delegation: { ...DEFAULT_DELEGATION, ...delegation },
+		guards,
 		...(model === undefined ? {} : { model }),
 		...(thinking === undefined ? {} : { thinking }),
 		instructions: instructions.join("\n\n"),

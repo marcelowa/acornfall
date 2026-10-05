@@ -111,6 +111,10 @@ make dev
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
 - **Slash commands** from `<home>/commands/` and `<workspace>/.acornfall/commands/`,
   expanded server-side so the transcript records what the model saw.
+- **Guards**: declarative rules that block a tool call and say why — a command pattern, or a
+  path outside the workspace — accumulating across layers and visible in the inspector.
+- **Workspaces are managed from the interface**: create from an existing folder, flip trust,
+  forget one (which never deletes the folder or the history).
 - **Delegation**: `delegate` hands a task to a subagent and waits; `subagent` starts one
   that keeps working while you answer and reports back when it is done, waking the parent
   to act on it. `peer: true` creates a *normal* conversation instead — it appears in your

@@ -108,12 +108,38 @@ workspace inherits that trust, so its `AGENTS.md` is read. That is the honest li
 workspace-level decision, and the place to fix it is a per-directory rule rather than an
 interactive prompt.
 
-## Hooks: declarative first
+## Hooks: guards, declaratively
 
 durable's hooks are code registered in the process, so a workspace hook file would execute
-workspace-provided code inside the worker. Declarative hooks (`denyTools`, tool-call
-guards) ship first, expressed in the workspace's `config.json`. Code hooks come later,
-behind the same trust field.
+workspace-provided code inside the worker. That is a trust decision, so it comes later. What
+ships first is the half that is configuration: **guards on tool calls**, which can only deny
+and must say why.
+
+```json
+{ "defaults": { "hooks": { "guards": [
+  { "tool": "bash", "arg": "command", "pattern": "git\\s+push|rm\\s+-rf",
+    "reason": "pushing and recursive deletes are not allowed in this workspace" },
+  { "tool": "write", "arg": "path", "outside": true,
+    "reason": "writes stay inside the workspace" }
+] } } }
+```
+
+Two matchers, because they are the two that matter for an assistant with a shell: do not run
+this command, and do not write outside the workspace. The argument is named explicitly
+rather than guessed, so nothing matches by surprise, and a guard without a reason is
+rejected at load because the model is the one who is told it.
+
+Guards accumulate across layers — a rule added globally holds in a workspace — and resolve
+**per conversation** through the same overlay as the agent, so a definition can be built on
+top of them and a conversation working outside the workspace root is still confined to it.
+
+Verified against a real workspace: `git push origin main` and a write to `/tmp` were both
+blocked with their reasons, which the model read and reported, while a write inside the
+workspace succeeded. Guards are visible in the inspector's Agent card and, in full, in the
+layer trace that shows each layer's raw contribution.
+
+**Code hooks remain open**, and the reason is unchanged: executing a workspace's code inside
+the worker is not a config field.
 
 ## Commands
 
@@ -145,6 +171,12 @@ ends it.
 **The migration ran before the sidecars existed to move.** Moving `session.sqlite` without
 its write-ahead log is how the most recent commits are lost, and it left four megabytes
 behind.
+
+## Managing workspaces
+
+The interface can list them, create one from a folder that already exists, flip its trust,
+and forget it. Removing a workspace unregisters it and stops its worker; it never deletes
+the folder or the history, the same way deleting a conversation is a tombstone.
 
 ## What a workspace does not do yet
 

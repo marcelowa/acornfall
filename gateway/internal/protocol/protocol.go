@@ -108,6 +108,15 @@ type LayerTrace struct {
 	Contributes json.RawMessage `json:"contributes,omitempty"`
 }
 
+// Guard denies a tool call when its matcher matches. A guard can only deny, never allow.
+type Guard struct {
+	Tool    string `json:"tool"`
+	Arg     string `json:"arg"`
+	Pattern string `json:"pattern,omitempty"`
+	Outside bool   `json:"outside,omitempty"`
+	Reason  string `json:"reason"`
+}
+
 // ResolvedAgent is one agent after the overlay folded global, workspace, and
 // definition layers together.
 type ResolvedAgent struct {
@@ -120,6 +129,7 @@ type ResolvedAgent struct {
 	Skills       []string     `json:"skills"`
 	AllowTools   []string     `json:"allowTools,omitempty"`
 	DenyTools    []string     `json:"denyTools,omitempty"`
+	Guards       []Guard      `json:"guards,omitempty"`
 	Layers       []LayerTrace `json:"layers"`
 }
 

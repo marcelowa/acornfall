@@ -116,9 +116,11 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("no folder at %s", absolute), http.StatusBadRequest)
 		return
 	}
+	// The name is what the reader typed and what every selector shows, so it is the better
+	// default title; the folder's basename would make the two disagree.
 	title := body.Title
 	if title == "" {
-		title = filepath.Base(absolute)
+		title = body.Name
 	}
 	if err := s.workspaces.Add(control.Workspace{
 		Name:    body.Name,
