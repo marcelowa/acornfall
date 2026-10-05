@@ -35,8 +35,9 @@ func serve(argv []string) error {
 	addr := flags.String("addr", "127.0.0.1:7777", "listen address; a non-loopback address requires a token")
 	token := flags.String("token", "", "shared secret; generated and stored when a non-loopback address has none")
 	insecure := flags.Bool("insecure", false, "listen without a token (trusted network or tunnel only)")
-	workspace := flags.String("workspace", "", "workspace directory (default: current directory)")
-	dataDir := flags.String("data-dir", "", "data directory (default: ~/.acornfall)")
+	workspace := flags.String("workspace", "", "the general workspace's folder (default: <home>/workspaces/general)")
+	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "alias for --home")
 	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: "bun run src/main.ts")`)
 	workerDir := flags.String("worker-dir", "", "worker directory")
@@ -44,23 +45,25 @@ func serve(argv []string) error {
 		return err
 	}
 
-	dir, err := resolveDataDir(*dataDir)
+	dir := *home
+	if dir == "" {
+		dir = *dataDir
+	}
+	resolved, err := resolveDataDir(dir)
 	if err != nil {
 		return err
 	}
+	dir = resolved
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	workdir := *workspace
-	if workdir == "" {
-		workdir, err = os.Getwd()
-		if err != nil {
-			return err
+	// The general workspace's folder: the folder the install was started in, unless told
+	// otherwise. An existing single-workspace install therefore keeps working where it was.
+	general := *workspace
+	if general == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			general = cwd
 		}
-	}
-	workdir, err = filepath.Abs(workdir)
-	if err != nil {
-		return err
 	}
 	worker, err := resolveWorkerDir(*workerDir)
 	if err != nil {
@@ -71,13 +74,6 @@ func serve(argv []string) error {
 	if *workerCommand != "" {
 		command = strings.Fields(*workerCommand)
 	}
-	storage := filepath.Join(dir, "session.sqlite")
-	credentials := filepath.Join(dir, "credentials.json")
-	command = append(command,
-		"--workspace", workdir,
-		"--storage", storage,
-		"--credentials", credentials,
-	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -87,22 +83,21 @@ func serve(argv []string) error {
 		return err
 	}
 
-	ctl := control.New(control.Options{
-		Workspace:     workdir,
-		DataDir:       dir,
+	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
+		Home:          dir,
+		GeneralPath:   general,
 		WorkerCommand: command,
 		WorkerDir:     worker,
 		Model:         *model,
-		SettingsPath:  filepath.Join(dir, "settings.json"),
 	})
-	if err := ctl.Open(ctx); err != nil {
+	if err := workspaces.Open(ctx); err != nil {
 		return err
 	}
-	defer ctl.Close()
+	defer workspaces.Close()
 
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           httpapi.RequireToken(httpapi.New(ctl, web.Files).Handler(), guard),
+		Handler:           httpapi.RequireToken(httpapi.New(workspaces, web.Files).Handler(), guard),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -112,7 +107,7 @@ func serve(argv []string) error {
 		_ = server.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("acornfall listening on http://%s  workspace=%s", displayAddr(*addr), workdir)
+	log.Printf("acornfall listening on http://%s  home=%s", displayAddr(*addr), dir)
 	if guard != "" && !httpapi.IsLoopback(*addr) {
 		log.Printf("auth: token required; open http://%s/?token=%s", prettyAddr(*addr), guard)
 	} else if guard == "" && !httpapi.IsLoopback(*addr) {
@@ -240,6 +235,9 @@ func prettyAddr(addr string) string {
 func resolveDataDir(flagValue string) (string, error) {
 	if flagValue != "" {
 		return filepath.Abs(flagValue)
+	}
+	if env := os.Getenv("ACORNFALL_HOME"); env != "" {
+		return filepath.Abs(env)
 	}
 	if env := os.Getenv("ACORNFALL_DATA"); env != "" {
 		return filepath.Abs(env)

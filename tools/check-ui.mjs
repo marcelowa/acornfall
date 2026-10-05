@@ -340,7 +340,9 @@ try {
 	check("every pane carries a timestamp", paneMeta.withoutTime === 0, JSON.stringify(paneMeta));
 	check("the timestamp looks like a time", /\d{1,2}:\d{2}/.test(paneMeta.sample), paneMeta.sample);
 	check("the conversation says it is live", /^(working|idle)/.test(paneMeta.live), paneMeta.live);
-	check("the conversation is named in the URL", /^\/c\/[0-9]+$/.test(paneMeta.path), paneMeta.path);
+	// A conversation's identity includes its workspace: ids are only unique inside a
+	// workspace's storage, so /c/<workspace>/<conversation> is the honest address.
+	check("the conversation is named in the URL", /^\/c\/[\w-]+\/[0-9]+$/.test(paneMeta.path), paneMeta.path);
 
 	// 9. The stream proves it is alive. A comment line keeps the socket open but fires no
 	//    event, so a client could not tell a healthy idle stream from a dead one -- the
@@ -486,17 +488,22 @@ try {
 
 	// 12. Two tabs, two conversations. The conversation belongs to the URL, so tabs do not
 	//     fight over one "active" conversation and a shared link opens what it names.
-	const other = await page.evaluate(async () => {
-		const state = await (await fetch("/api/state")).json();
-		const mine = state.conversation?.id;
-		const different = state.conversations.find((c) => c.id !== mine && !c.hidden && !c.parent);
-		return different?.id ?? "";
+	// Picked from what the rail is showing, not from /api/state: that reports the
+	// conversation the install remembers, which need not be the one on screen, and
+	// clicking the one already open is a no-op that looks like a failure.
+	await page.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, { timeout: 20000 });
+	const other = await page.evaluate(() => {
+		const shown = window.location.pathname.split("/").pop();
+		const row = [...document.querySelectorAll("#conversation-list [data-conversation]")].find(
+			(button) => button.dataset.conversation !== shown,
+		);
+		return row?.dataset.conversation ?? "";
 	});
 	if (other === "") {
 		check("a second conversation exists to open in a second tab", false, "only one conversation");
 	} else {
 		const second = await browser.newPage();
-		await second.goto(`${url.replace(/\/$/, "")}/c/${other}`, { waitUntil: "networkidle2" });
+		await second.goto(`${url.replace(/\/$/, "")}/c/general/${other}`, { waitUntil: "networkidle2" });
 		await second.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, { timeout: 20000 });
 		const first = await page.evaluate(() => ({
 			path: window.location.pathname,
@@ -506,7 +513,7 @@ try {
 			path: window.location.pathname,
 			title: document.querySelector("#conversation-title").textContent,
 		}));
-		check("a second tab opens the conversation its URL names", both.path.endsWith(`/c/${other}`), JSON.stringify(both));
+		check("a second tab opens the conversation its URL names", both.path.endsWith(`/c/general/${other}`), JSON.stringify(both));
 		check("the first tab is untouched by the second", first.path === paneMeta.path, JSON.stringify({ first, paneMeta }));
 		check("the two tabs show different conversations", first.title !== both.title, JSON.stringify({ first: first.title, second: both.title }));
 		await second.close();
@@ -516,7 +523,8 @@ try {
 			window.__kept = "yes";
 		});
 		await page.evaluate((id) => document.querySelector(`#conversation-list [data-conversation="${id}"]`).click(), other);
-		await page.waitForFunction((id) => window.location.pathname.endsWith(`/c/${id}`), { timeout: 10000 }, other);
+		await page.waitForFunction((id) => window.location.pathname.endsWith(`/${id}`), { timeout: 10000 }, other);
+		await page.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, { timeout: 20000 });
 		const switched = await page.evaluate(() => ({
 			kept: window.__kept === "yes",
 			title: document.querySelector("#conversation-title").textContent,

@@ -4,9 +4,12 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,44 +18,166 @@ import (
 )
 
 type Server struct {
-	control *control.Control
-	static  fs.FS
+	workspaces *control.Workspaces
+	static     fs.FS
 }
 
-func New(ctl *control.Control, static fs.FS) *Server {
-	return &Server{control: ctl, static: static}
+func New(workspaces *control.Workspaces, static fs.FS) *Server {
+	return &Server{workspaces: workspaces, static: static}
+}
+
+// controlFor finds the workspace a request is about. The workspace-scoped routes name it;
+// the earlier paths do not, and mean the general workspace.
+func (s *Server) controlFor(r *http.Request) (*control.Control, string, error) {
+	name := r.PathValue("ws")
+	if name == "" {
+		name = r.URL.Query().Get("workspace")
+	}
+	workspace, ctl, err := s.workspaces.Route(r.Context(), name, r.PathValue("id"))
+	if err != nil {
+		return nil, "", err
+	}
+	return ctl, workspace.Name, nil
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/state", s.state)
-	mux.HandleFunc("GET /api/conversations", s.conversations)
-	mux.HandleFunc("POST /api/conversations", s.createConversation)
-	mux.HandleFunc("POST /api/conversations/{id}/select", s.selectConversation)
-	mux.HandleFunc("POST /api/conversations/{id}/rename", s.renameConversation)
-	mux.HandleFunc("POST /api/conversations/{id}/hide", s.hideConversation)
-	mux.HandleFunc("POST /api/conversations/{id}/fork", s.forkConversation)
-	mux.HandleFunc("GET /api/conversations/{id}/policy", s.policy)
-	mux.HandleFunc("GET /api/conversations/{id}/messages", s.messagesDoc)
-	mux.HandleFunc("GET /api/agents", s.agents)
-	mux.HandleFunc("POST /api/agents/reload", s.reload)
-	mux.HandleFunc("GET /api/stream", s.stream)
-	mux.HandleFunc("POST /api/conversations/{id}/messages", s.messages)
-	mux.HandleFunc("POST /api/conversations/{id}/abort", s.abort)
-	mux.HandleFunc("POST /api/conversations/{id}/agent", s.agent)
-	mux.HandleFunc("POST /api/default-model", s.setDefaultModel)
-	mux.HandleFunc("POST /api/default-thinking", s.setDefaultThinking)
-	mux.HandleFunc("POST /api/default-agent", s.setDefaultAgent)
-	mux.HandleFunc("GET /api/usage", s.usage)
-	mux.HandleFunc("POST /api/providers/login", s.login)
-	mux.HandleFunc("POST /api/providers/logout", s.logout)
-	mux.HandleFunc("POST /api/providers/refresh", s.refresh)
-	mux.HandleFunc("POST /api/auth/answer", s.authAnswer)
-	mux.HandleFunc("POST /api/auth/cancel", s.authCancel)
-	// /c/<id> is a conversation; the client is a single page and reads the id itself.
+
+	// A conversation is addressed under the workspace it belongs to, because ids are only
+	// unique inside a workspace's storage. The earlier paths without a workspace mean the
+	// general one, so existing links and scripts keep working.
+	for _, base := range []string{"/api/workspaces/{ws}", "/api"} {
+		mux.HandleFunc("GET "+base+"/state", s.state)
+		mux.HandleFunc("GET "+base+"/stream", s.stream)
+		mux.HandleFunc("GET "+base+"/conversations", s.conversations)
+		mux.HandleFunc("POST "+base+"/conversations", s.createConversation)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/select", s.selectConversation)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/rename", s.renameConversation)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/hide", s.hideConversation)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/fork", s.forkConversation)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.messages)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.abort)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.agent)
+		mux.HandleFunc("GET "+base+"/conversations/{id}/policy", s.policy)
+		mux.HandleFunc("GET "+base+"/conversations/{id}/messages", s.messagesDoc)
+		mux.HandleFunc("GET "+base+"/agents", s.agents)
+		mux.HandleFunc("POST "+base+"/agents/reload", s.reload)
+		mux.HandleFunc("GET "+base+"/usage", s.usage)
+		mux.HandleFunc("POST "+base+"/providers/login", s.login)
+		mux.HandleFunc("POST "+base+"/providers/logout", s.logout)
+		mux.HandleFunc("POST "+base+"/providers/refresh", s.refresh)
+		mux.HandleFunc("POST "+base+"/auth/answer", s.authAnswer)
+		mux.HandleFunc("POST "+base+"/auth/cancel", s.authCancel)
+		mux.HandleFunc("POST "+base+"/default-model", s.setDefaultModel)
+		mux.HandleFunc("POST "+base+"/default-thinking", s.setDefaultThinking)
+		mux.HandleFunc("POST "+base+"/default-agent", s.setDefaultAgent)
+	}
+
+	mux.HandleFunc("GET /api/workspaces", s.workspaceList)
+	mux.HandleFunc("POST /api/workspaces", s.workspaceCreate)
+	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.workspaceUpdate)
+	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.workspaceRemove)
+
+	// /c/<workspace>/<conversation> is a conversation, /w/<workspace> is a workspace with
+	// whichever conversation it lands on. The client reads both from the path.
+	mux.HandleFunc("GET /c/{ws}/{id}", s.page)
 	mux.HandleFunc("GET /c/{id}", s.page)
+	mux.HandleFunc("GET /w/{ws}", s.page)
 	mux.Handle("GET /", noCache(http.FileServerFS(s.static)))
 	return mux
+}
+
+func (s *Server) workspaceList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.workspaces.List())
+}
+
+func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name    string `json:"name"`
+		Path    string `json:"path"`
+		Title   string `json:"title"`
+		Trusted bool   `json:"trusted"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	path := body.Path
+	if path == "" {
+		http.Error(w, "a workspace needs a folder", http.StatusBadRequest)
+		return
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := os.Stat(absolute); err != nil {
+		http.Error(w, fmt.Sprintf("no folder at %s", absolute), http.StatusBadRequest)
+		return
+	}
+	title := body.Title
+	if title == "" {
+		title = filepath.Base(absolute)
+	}
+	if err := s.workspaces.Add(control.Workspace{
+		Name:    body.Name,
+		Path:    absolute,
+		Title:   title,
+		Trusted: body.Trusted,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.workspaces.List())
+}
+
+func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("ws")
+	existing, ok := s.workspaces.Get(name)
+	if !ok {
+		http.Error(w, fmt.Sprintf("no workspace %q", name), http.StatusNotFound)
+		return
+	}
+	// Pointers, so a partial update cannot silently clear a field it did not mention.
+	var body struct {
+		Path    *string `json:"path"`
+		Title   *string `json:"title"`
+		Trusted *bool   `json:"trusted"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Path != nil {
+		absolute, err := filepath.Abs(*body.Path)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if _, err := os.Stat(absolute); err != nil {
+			http.Error(w, fmt.Sprintf("no folder at %s", absolute), http.StatusBadRequest)
+			return
+		}
+		existing.Path = absolute
+	}
+	if body.Title != nil {
+		existing.Title = *body.Title
+	}
+	if body.Trusted != nil {
+		existing.Trusted = *body.Trusted
+	}
+	if err := s.workspaces.Update(existing); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.workspaces.List())
+}
+
+func (s *Server) workspaceRemove(w http.ResponseWriter, r *http.Request) {
+	if err := s.workspaces.Remove(r.Context(), r.PathValue("ws")); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.workspaces.List())
 }
 
 // noCache keeps a reload honest while the client has no build step and no
@@ -65,12 +190,22 @@ func noCache(next http.Handler) http.Handler {
 }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.control.StateFor(r.URL.Query().Get("conversation")))
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, ctl.StateFor(r.URL.Query().Get("conversation")))
 }
 
 // stream is SSE. Commands are POSTs; this direction is the only streaming one,
 // so a reconnect is built in and no socket library is needed.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -91,14 +226,14 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	// Each client names the conversation it wants, so two tabs can watch two
 	// conversations without agreeing on an active one.
 	conversationID := r.URL.Query().Get("conversation")
-	id, frames, initial, err := s.control.Subscribe(r.Context(), conversationID)
+	id, frames, initial, err := ctl.Subscribe(r.Context(), conversationID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	defer s.control.Unsubscribe(id)
+	defer ctl.Unsubscribe(id)
 
-	if err := writeEvent(w, "state", s.control.StateFor(conversationID)); err != nil {
+	if err := writeEvent(w, "state", ctl.StateFor(conversationID)); err != nil {
 		return
 	}
 	if initial != nil {
@@ -133,7 +268,12 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
-	data, err := s.control.Agents(r.Context())
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	data, err := ctl.Agents(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -142,11 +282,16 @@ func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
-	if err := s.control.Reload(r.Context()); err != nil {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	if err := ctl.Reload(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +299,11 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) messagesFor(w http.ResponseWriter, r *http.Request, conversationID string) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		Text     string            `json:"text"`
 		WhenBusy protocol.WhenBusy `json:"whenBusy"`
@@ -170,7 +320,7 @@ func (s *Server) messagesFor(w http.ResponseWriter, r *http.Request, conversatio
 		http.Error(w, "whenBusy must be steer, followUp or reject", http.StatusBadRequest)
 		return
 	}
-	if err := s.control.Prompt(r.Context(), conversationID, strings.TrimSpace(body.Text), when); err != nil {
+	if err := ctl.Prompt(r.Context(), conversationID, strings.TrimSpace(body.Text), when); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -182,7 +332,12 @@ func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) abortFor(w http.ResponseWriter, r *http.Request, conversationID string) {
-	if err := s.control.Abort(r.Context(), conversationID); err != nil {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if err := ctl.Abort(r.Context(), conversationID); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -194,6 +349,11 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID string) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	// Pointers, so "absent" and "set to empty" are different requests. A plain
 	// struct cannot tell "leave the model alone" from "clear the model".
 	var body struct {
@@ -205,7 +365,7 @@ func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := s.control.SetAgent(r.Context(), conversationID, control.AgentChange{
+	if err := ctl.SetAgent(r.Context(), conversationID, control.AgentChange{
 		Provider:      body.Provider,
 		ModelID:       body.ModelID,
 		ThinkingLevel: body.ThinkingLevel,
@@ -214,38 +374,53 @@ func (s *Server) agentFor(w http.ResponseWriter, r *http.Request, conversationID
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) setDefaultThinking(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		Level string `json:"level"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := s.control.SetDefaultThinking(r.Context(), body.Level); err != nil {
+	if err := ctl.SetDefaultThinking(r.Context(), body.Level); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) setDefaultAgent(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		Definition string `json:"definition"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := s.control.SetDefaultAgent(r.Context(), body.Definition); err != nil {
+	if err := ctl.SetDefaultAgent(r.Context(), body.Definition); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		Provider string `json:"provider"`
 		ModelID  string `json:"modelId"`
@@ -253,11 +428,11 @@ func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := s.control.SetDefaultModel(r.Context(), body.Provider, body.ModelID); err != nil {
+	if err := ctl.SetDefaultModel(r.Context(), body.Provider, body.ModelID); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 // page serves the client for a conversation route, so a reload and a shared link both
@@ -275,25 +450,40 @@ func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
-	// Refreshed, not cached: the cached list is kept current by a poll that only runs
-	// while a client is attached, so a script would otherwise read stale state.
-	if err := s.control.RefreshConversations(r.Context()); err != nil {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State().Conversations)
+	// Refreshed, not cached: the cached list is kept current by a poll that only runs
+	// while a client is attached, so a script would otherwise read stale state.
+	if err := ctl.RefreshConversations(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, ctl.State().Conversations)
 }
 
 func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
-	if err := s.control.Create(r.Context()); err != nil {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	if err := ctl.Create(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) policy(w http.ResponseWriter, r *http.Request) {
-	view, err := s.control.Policy(r.Context(), r.PathValue("id"))
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	view, err := ctl.Policy(r.Context(), r.PathValue("id"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -306,7 +496,12 @@ func (s *Server) policy(w http.ResponseWriter, r *http.Request) {
 // messagesDoc exposes which entries were sent by another conversation, for debugging
 // attribution without opening a browser.
 func (s *Server) messagesDoc(w http.ResponseWriter, r *http.Request) {
-	view, err := s.control.WorkerCall(r.Context(), "messages", r.PathValue("id"))
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	view, err := ctl.WorkerCall(r.Context(), "messages", r.PathValue("id"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -317,34 +512,49 @@ func (s *Server) messagesDoc(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renameConversation(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		Title string `json:"title"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := s.control.Rename(r.Context(), r.PathValue("id"), body.Title); err != nil {
+	if err := ctl.Rename(r.Context(), r.PathValue("id"), body.Title); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) hideConversation(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		Hidden bool `json:"hidden"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := s.control.Hide(r.Context(), r.PathValue("id"), body.Hidden); err != nil {
+	if err := ctl.Hide(r.Context(), r.PathValue("id"), body.Hidden); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) forkConversation(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		At string `json:"at"`
 	}
@@ -355,22 +565,32 @@ func (s *Server) forkConversation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "at is required (the entry id to fork from)", http.StatusBadRequest)
 		return
 	}
-	if err := s.control.Fork(r.Context(), r.PathValue("id"), body.At); err != nil {
+	if err := ctl.Fork(r.Context(), r.PathValue("id"), body.At); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) selectConversation(w http.ResponseWriter, r *http.Request) {
-	if err := s.control.Select(r.Context(), r.PathValue("id")); err != nil {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	if err := ctl.Select(r.Context(), r.PathValue("id")); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		ProviderID string `json:"providerId"`
 		AuthType   string `json:"authType"`
@@ -391,7 +611,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authType must be api_key or oauth", http.StatusBadRequest)
 		return
 	}
-	if err := s.control.Login(r.Context(), body.ProviderID, authType); err != nil {
+	if err := ctl.Login(r.Context(), body.ProviderID, authType); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -399,6 +619,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		ProviderID string `json:"providerId"`
 	}
@@ -409,22 +634,32 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "providerId is required", http.StatusBadRequest)
 		return
 	}
-	if err := s.control.Logout(r.Context(), body.ProviderID); err != nil {
+	if err := ctl.Logout(r.Context(), body.ProviderID); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
-	if err := s.control.Refresh(r.Context()); err != nil {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.control.State())
+	if err := ctl.Refresh(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		AuthID    string `json:"authId"`
 		PromptID  string `json:"promptId"`
@@ -438,7 +673,7 @@ func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "promptId is required", http.StatusBadRequest)
 		return
 	}
-	if err := s.control.AnswerAuth(r.Context(), body.AuthID, body.PromptID, body.Value, body.Cancelled); err != nil {
+	if err := ctl.AnswerAuth(r.Context(), body.AuthID, body.PromptID, body.Value, body.Cancelled); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -446,13 +681,18 @@ func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authCancel(w http.ResponseWriter, r *http.Request) {
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	var body struct {
 		AuthID string `json:"authId"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := s.control.CancelAuth(r.Context(), body.AuthID); err != nil {
+	if err := ctl.CancelAuth(r.Context(), body.AuthID); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -460,7 +700,12 @@ func (s *Server) authCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
-	usage, err := s.control.Usage(r.Context())
+	ctl, _, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	usage, err := ctl.Usage(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return

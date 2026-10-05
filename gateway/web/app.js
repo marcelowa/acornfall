@@ -12,6 +12,7 @@ const el = (id) => {
 
 const els = {
 	workspace: el("workspace"),
+	workspaceSelect: el("workspace-select"),
 	status: el("status"),
 	model: el("model"),
 	agent: el("agent"),
@@ -46,14 +47,28 @@ let sources = null;
 let shellReady = false;
 
 /**
- * The conversation this tab shows. It comes from the URL, not from the server, so two
- * tabs can show two conversations and a shared link opens what it names.
+ * What this tab shows comes from the URL: /c/<workspace>/<conversation>, or /w/<workspace>
+ * for a workspace with whatever conversation it lands on. Two tabs can therefore show two
+ * conversations in two workspaces, and a shared link opens what it names.
  */
-const conversationFromUrl = () => {
-	const match = /^\/c\/([^/]+)\/?$/.exec(window.location.pathname);
-	return match === null ? "" : decodeURIComponent(match[1]);
-};
-const activeId = () => conversationFromUrl() || (state?.conversation?.id ?? "");
+function fromUrl() {
+	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(window.location.pathname);
+	if (conversation !== null) {
+		return { workspace: decodeURIComponent(conversation[1]), conversation: decodeURIComponent(conversation[2]) };
+	}
+	// A link made before workspaces existed names a conversation in the general one.
+	const legacy = /^\/c\/([^/]+)\/?$/.exec(window.location.pathname);
+	if (legacy !== null) return { workspace: "general", conversation: decodeURIComponent(legacy[1]) };
+	const workspace = /^\/w\/([^/]+)\/?$/.exec(window.location.pathname);
+	if (workspace !== null) return { workspace: decodeURIComponent(workspace[1]), conversation: "" };
+	return { workspace: "", conversation: "" };
+}
+
+const activeWorkspace = () => fromUrl().workspace || state?.workspace?.name || "general";
+const activeId = () => fromUrl().conversation || (state?.conversation?.id ?? "");
+
+/** Every conversation-scoped call says which workspace it is about. */
+const api = (path) => `/api/workspaces/${encodeURIComponent(activeWorkspace())}${path}`;
 /** Text of the message each branch point precedes, so a fork can offer it back. */
 const forkSource = new Map();
 
@@ -526,7 +541,7 @@ function toggleMaximize(key) {
 async function reloadAgents(button) {
 	button.textContent = "Reloading…";
 	try {
-		await post("/api/agents/reload");
+		await post(api("/agents/reload"));
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -829,7 +844,7 @@ async function refreshUsage() {
 	if (usageInFlight || document.visibilityState !== "visible") return;
 	usageInFlight = true;
 	try {
-		const usage = await (await fetch("/api/usage")).json();
+		const usage = await (await fetch(api("/usage"))).json();
 		bodies.get("usage").innerHTML = `<pre>${escapeHtml(JSON.stringify(usage, null, 2))}</pre>`;
 	} catch (error) {
 		bodies.get("usage").innerHTML = `<pre>${escapeHtml(String(error))}</pre>`;
@@ -841,7 +856,10 @@ async function refreshUsage() {
 /* ---------- provider connection ---------- */
 
 async function loadState() {
-	state = await (await fetch(`/api/state?conversation=${encodeURIComponent(activeId())}`)).json();
+	state = await (
+		await fetch(`/api/state?workspace=${encodeURIComponent(activeWorkspace())}&conversation=${encodeURIComponent(activeId())}`)
+	).json();
+	renderWorkspacePicker();
 	renderConversations();
 	renderAgentPicker();
 	renderThinking();
@@ -862,7 +880,7 @@ function openSheet(view) {
 
 function closeSheet() {
 	if (sheet.flow && sheet.flow.status === "running") {
-		void post("/api/auth/cancel", { authId: sheet.flow.authId }).catch(() => {});
+		void post(api("/auth/cancel"), { authId: sheet.flow.authId }).catch(() => {});
 	}
 	sheet.open = false;
 	sheet.flow = null;
@@ -929,7 +947,7 @@ async function logoutProvider(providerId, button) {
 	button.disabled = true;
 	button.textContent = "Disconnecting…";
 	try {
-		await post("/api/providers/logout", { providerId });
+		await post(api("/providers/logout"), { providerId });
 		await loadState();
 	} catch (error) {
 		button.disabled = false;
@@ -990,7 +1008,7 @@ async function startLogin(providerId) {
 	};
 	renderFlow();
 	try {
-		await post("/api/providers/login", { providerId, authType: "api_key" });
+		await post(api("/providers/login"), { providerId, authType: "api_key" });
 	} catch (error) {
 		sheet.flow.status = "error";
 		sheet.flow.log.push({ kind: "error", text: String(error.message ?? error) });
@@ -1005,7 +1023,7 @@ async function answerPrompt(value) {
 	flow.prompt = null;
 	renderFlow();
 	try {
-		await post("/api/auth/answer", { authId: flow.authId, promptId: prompt.promptId, value });
+		await post(api("/auth/answer"), { authId: flow.authId, promptId: prompt.promptId, value });
 	} catch (error) {
 		flow.log.push({ kind: "error", text: String(error.message ?? error) });
 		renderFlow();
@@ -1092,8 +1110,7 @@ function renderModelPicker() {
 	els.model.innerHTML = options.join("");
 	els.model.disabled = options.length <= 0;
 
-	const connected = providers.filter((provider) => provider.authenticated).length;
-	els.workspace.textContent = `${state?.workspace ?? ""}  ·  ${connected}/${providers.length} providers`;
+	els.model.title = `${providers.filter((provider) => provider.authenticated).length}/${providers.length} providers connected`;
 }
 
 /** Definitions come from the overlay: global, then workspace, with workspace winning. */
@@ -1191,7 +1208,7 @@ function beginRename(id) {
 
 async function renameConversation(id, title) {
 	try {
-		await post(`/api/conversations/${id}/rename`, { title });
+		await post(api(`/conversations/${id}/rename`), { title });
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -1201,7 +1218,7 @@ async function renameConversation(id, title) {
 
 async function hideConversation(id, hidden) {
 	try {
-		await post(`/api/conversations/${id}/hide`, { hidden });
+		await post(api(`/conversations/${id}/hide`), { hidden });
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -1210,7 +1227,7 @@ async function hideConversation(id, hidden) {
 
 async function forkConversation(at, text) {
 	try {
-		await post(`/api/conversations/${activeId()}/fork`, { at });
+		await post(api(`/conversations/${activeId()}/fork`), { at });
 		view = null;
 		await loadState();
 		// The fork has the same history minus the message that was branched from,
@@ -1233,8 +1250,9 @@ async function openConversation(id) {
 /** Move this tab to a conversation: URL first, then everything that follows from it. */
 async function selectConversation(id, options = {}) {
 	if (id === "" || id === activeId()) return;
-	if (options.replace === true) window.history.replaceState(null, "", `/c/${encodeURIComponent(id)}`);
-	else window.history.pushState(null, "", `/c/${encodeURIComponent(id)}`);
+	const target = `/c/${encodeURIComponent(activeWorkspace())}/${encodeURIComponent(id)}`;
+	if (options.replace === true) window.history.replaceState(null, "", target);
+	else window.history.pushState(null, "", target);
 	await followUrl();
 }
 
@@ -1258,7 +1276,7 @@ async function followUrl() {
 
 async function newConversation() {
 	try {
-		const created = await post("/api/conversations");
+		const created = await post(api("/conversations"));
 		const id = created?.conversation?.id ?? "";
 		if (id === "") {
 			await loadState();
@@ -1368,9 +1386,10 @@ async function adoptDefault(kind, value) {
 		kind === "model" ? { provider: state?.agent?.provider ?? "", modelId: state?.agent?.modelId ?? "" }
 		: kind === "thinking" ? { level: value }
 		: { definition: value };
-	const path = kind === "model" ? "/api/default-model" : kind === "thinking" ? "/api/default-thinking" : "/api/default-agent";
+	const path =
+		kind === "model" ? "/default-model" : kind === "thinking" ? "/default-thinking" : "/default-agent";
 	try {
-		await post(path, body);
+		await post(api(path), body);
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -1378,6 +1397,40 @@ async function adoptDefault(kind, value) {
 }
 
 let agentPickerSignature = "";
+
+let workspacePickerSignature = "";
+
+/** Switching workspace is switching where the agent works; it navigates like a conversation. */
+function renderWorkspacePicker() {
+	const workspaces = state?.workspaces ?? [];
+	const current = activeWorkspace();
+	const key = JSON.stringify([
+		current,
+		workspaces.map((w) => [w.name, w.title, w.running, w.trusted]),
+		(state?.providers ?? []).filter((provider) => provider.authenticated).length,
+		(state?.providers ?? []).length,
+	]);
+	if (key === workspacePickerSignature) return;
+	workspacePickerSignature = key;
+	els.workspaceSelect.innerHTML = workspaces
+		.map(
+			(workspace) =>
+				`<option value="${escapeHtml(workspace.name)}"${workspace.name === current ? " selected" : ""}>${escapeHtml(
+					workspace.title || workspace.name,
+				)}</option>`,
+		)
+		.join("");
+	els.workspaceSelect.disabled = workspaces.length === 0;
+	const active = workspaces.find((workspace) => workspace.name === current);
+	const connected = (state?.providers ?? []).filter((provider) => provider.authenticated).length;
+	els.workspace.textContent =
+		active === undefined
+			? ""
+			: `${active.path}${active.trusted ? "" : " · resources untrusted"}  ·  ${connected}/${
+					(state?.providers ?? []).length
+				} providers`;
+	els.workspace.title = active?.trusted === false ? "This workspace's own AGENTS.md, skills, and agents are not loaded" : "";
+}
 
 function renderAgentPicker() {
 	const locked = state?.subagent === true;
@@ -1421,7 +1474,9 @@ function connect() {
 	if (!shellReady) return;
 	if (sources) sources.close();
 	lastEventAt = Date.now();
-	sources = new EventSource(`/api/stream?conversation=${encodeURIComponent(activeId())}`);
+	sources = new EventSource(
+		`/api/stream?workspace=${encodeURIComponent(activeWorkspace())}&conversation=${encodeURIComponent(activeId())}`,
+	);
 	// The server's ping is the only event that arrives while nothing is happening, so it
 	// is what proves the stream is alive rather than merely open.
 	sources.addEventListener("ping", () => {
@@ -1509,7 +1564,7 @@ els.composer.addEventListener("submit", async (event) => {
 	els.input.value = "";
 	els.input.style.height = "auto";
 	try {
-		await post(`/api/conversations/${activeId()}/messages`, { text, whenBusy });
+		await post(api(`/conversations/${activeId()}/messages`), { text, whenBusy });
 	} catch (error) {
 		els.input.value = text;
 		setStatus(String(error.message ?? error), "offline");
@@ -1536,10 +1591,17 @@ els.steer.addEventListener("change", () => {
 
 els.abort.addEventListener("click", async () => {
 	try {
-		await post(`/api/conversations/${activeId()}/abort`);
+		await post(api(`/conversations/${activeId()}/abort`));
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
 	}
+});
+
+els.workspaceSelect.addEventListener("change", () => {
+	const name = els.workspaceSelect.value;
+	if (name === "" || name === activeWorkspace()) return;
+	window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
+	void followUrl();
 });
 
 els.model.addEventListener("change", async () => {
@@ -1550,7 +1612,7 @@ els.model.addEventListener("change", async () => {
 	const [provider, modelId] = els.model.value.split("/");
 	if (!provider || !modelId) return;
 	try {
-		await post(`/api/conversations/${activeId()}/agent`, { provider, modelId });
+		await post(api(`/conversations/${activeId()}/agent`), { provider, modelId });
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -1561,7 +1623,7 @@ els.model.addEventListener("change", async () => {
 // an explicit picker choice still wins until the next definition change.
 els.agent.addEventListener("change", async () => {
 	try {
-		await post(`/api/conversations/${activeId()}/agent`, { definition: els.agent.value });
+		await post(api(`/conversations/${activeId()}/agent`), { definition: els.agent.value });
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -1572,7 +1634,7 @@ els.rail.addEventListener("click", () => void newConversation());
 
 els.thinking.addEventListener("change", async () => {
 	try {
-		await post(`/api/conversations/${activeId()}/agent`, { thinkingLevel: els.thinking.value });
+		await post(api(`/conversations/${activeId()}/agent`), { thinkingLevel: els.thinking.value });
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
@@ -1609,14 +1671,24 @@ els.toggleInspector.addEventListener("click", () => {
 async function boot() {
 	setStatus("connecting");
 	try {
-		state = await (await fetch("/api/state")).json();
+		const location0 = fromUrl();
+		state = await (
+			await fetch(`/api/state?workspace=${encodeURIComponent(location0.workspace)}&conversation=${encodeURIComponent(location0.conversation)}`)
+		).json();
+		// Name the workspace and the conversation in the URL straight away, so a reload and
+		// a shared link agree with what is on screen.
+		const name = state?.workspace?.name ?? "general";
+		const conversation = location0.conversation || state?.conversation?.id;
+		if (location0.workspace === "" || location0.conversation === "") {
+			const path =
+				conversation === undefined
+					? `/w/${encodeURIComponent(name)}`
+					: `/c/${encodeURIComponent(name)}/${encodeURIComponent(conversation)}`;
+			window.history.replaceState(null, "", path);
+		}
 	} catch (error) {
 		setStatus("gateway unreachable", "offline");
 		return;
-	}
-	// Name it in the URL straight away, so a reload and a shared link agree.
-	if (conversationFromUrl() === "" && state?.conversation?.id !== undefined) {
-		window.history.replaceState(null, "", `/c/${encodeURIComponent(state.conversation.id)}`);
 	}
 	renderConversations();
 	buildInspector();

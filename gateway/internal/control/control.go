@@ -26,15 +26,35 @@ var ErrNoProvider = errors.New("no authenticated provider")
 
 // Options configures one Control instance, which owns exactly one workspace.
 type Options struct {
-	Workspace     string
-	DataDir       string
+	// Workspace is the folder, name, and trust decision this Control serves.
+	Workspace Workspace
+	// Home is the installation folder: global resources and shared credentials.
+	Home string
+	// StoragePath is this workspace's durable storage. One storage per workspace, because
+	// conversation ids are only unique inside one.
+	StoragePath string
+	// WorkerCommand is the base command; the per-workspace flags are appended in here.
 	WorkerCommand []string
 	WorkerDir     string
-	// Model is the "provider/modelId" to use as the install default. It wins over
-	// a persisted default, and every conversation that never chose a model follows it.
+	Credentials   string
+	// Model is the "provider/modelId" to use as the workspace default. It wins over a
+	// persisted default, and every conversation that never chose a model follows it.
 	Model string
 	// SettingsPath persists the active conversation and per-conversation agents.
 	SettingsPath string
+	// Registry lists the install's workspaces, so a client can switch between them.
+	Registry func() []Workspace
+}
+
+// WorkspaceState is a workspace as the interface needs it: what it is called, where it
+// points, whether its own resources are trusted, and whether its worker is running.
+type WorkspaceState struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Title   string `json:"title"`
+	General bool   `json:"general"`
+	Trusted bool   `json:"trusted"`
+	Running bool   `json:"running"`
 }
 
 // Inherited reports which fields the active conversation left to the defaults.
@@ -67,7 +87,8 @@ type Conversation struct {
 
 // State is everything the UI needs to render before any frame arrives.
 type State struct {
-	Workspace     string                  `json:"workspace"`
+	Workspace     WorkspaceState          `json:"workspace"`
+	Workspaces    []WorkspaceState        `json:"workspaces"`
 	Harness       string                  `json:"harness"`
 	Capabilities  protocol.Capabilities   `json:"capabilities"`
 	Conversation  *Conversation           `json:"conversation,omitempty"`
@@ -205,11 +226,18 @@ func (c *Control) Open(ctx context.Context) error {
 
 // startWorker launches the harness process and arranges for its death to be noticed.
 func (c *Control) startWorker(ctx context.Context) error {
-	command := c.opts.WorkerCommand
-	if len(command) == 0 {
-		command = []string{"bun", "run", "src/main.ts"}
+	base := c.opts.WorkerCommand
+	if len(base) == 0 {
+		base = []string{"bun", "run", "src/main.ts"}
 	}
-	worker := workerpool.New(workerpool.Config{Command: command[0], Args: command[1:], Dir: c.opts.WorkerDir})
+	args := append([]string(nil), base[1:]...)
+	args = append(args,
+		"--workspace", c.opts.Workspace.Path,
+		"--storage", c.opts.StoragePath,
+		"--credentials", c.opts.Credentials,
+		"--home", c.opts.Home,
+	)
+	worker := workerpool.New(workerpool.Config{Command: base[0], Args: args, Dir: c.opts.WorkerDir})
 	worker.OnFrame(c.onFrame)
 	if err := worker.Start(ctx); err != nil {
 		return fmt.Errorf("start worker: %w", err)
@@ -407,6 +435,59 @@ func (c *Control) WorkerCall(ctx context.Context, kind, conversationID string) (
 	return c.worker.Call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
 }
 
+func (c *Control) workspaceList(includeThis bool) []WorkspaceState {
+	if c.opts.Registry == nil {
+		return nil
+	}
+	list := c.opts.Registry()
+	states := make([]WorkspaceState, 0, len(list))
+	for _, workspace := range list {
+		running := false
+		if includeThis || workspace.Name == c.opts.Workspace.Name {
+			running = c.WorkerUp()
+		}
+		states = append(states, WorkspaceState{
+			Name: workspace.Name, Path: workspace.Path, Title: workspace.Title,
+			General: workspace.General, Trusted: workspace.Trusted, Running: running,
+		})
+	}
+	return states
+}
+
+// WorkerUp reports whether this workspace's harness process is running.
+func (c *Control) WorkerUp() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.workerUp
+}
+
+// Watching reports whether a client is attached to any of this workspace's conversations.
+func (c *Control) Watching() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.subscribers) > 0
+}
+
+// Busy reports whether any conversation here is running. An eviction must not stop a
+// worker mid-run, even when nobody is watching it.
+func (c *Control) Busy() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, info := range c.conversations {
+		if info.Running {
+			return true
+		}
+	}
+	return len(c.views) > 0 && c.workerUp && false
+}
+
+// SetWorkspace applies a changed record: a folder that moved, or trust being granted.
+func (c *Control) SetWorkspace(workspace Workspace) {
+	c.mu.Lock()
+	c.opts.Workspace = workspace
+	c.mu.Unlock()
+}
+
 // Policy reports what a conversation may do with other conversations, resolved
 // the same way its agent is.
 func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMessage, error) {
@@ -470,7 +551,15 @@ func (c *Control) StateFor(conversationID string) State {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	state := State{
-		Workspace:     c.opts.Workspace,
+		Workspace: WorkspaceState{
+			Name:    c.opts.Workspace.Name,
+			Path:    c.opts.Workspace.Path,
+			Title:   c.opts.Workspace.Title,
+			General: c.opts.Workspace.General,
+			Trusted: c.opts.Workspace.Trusted,
+			Running: c.workerUp,
+		},
+		Workspaces:    c.workspaceList(false),
 		Harness:       c.describe.Provider,
 		Capabilities:  c.describe.Capabilities,
 		Conversations: toConversations(c.conversations),
