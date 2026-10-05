@@ -574,16 +574,16 @@ func (c *Control) StateFor(conversationID string) State {
 		// Inherited says which parts of it this conversation chose itself.
 		Agent:           inputs.effective(),
 		Subagent:        isChild,
-		Resolved:        c.resolved[c.active],
+		Resolved:        c.resolved[active],
 		DefaultModel:    c.defaultModel,
 		DefaultThinking: c.defaultThinking,
 		DefaultAgent:    c.defaultAgent,
 		WorkerUp:        c.workerUp,
 		WorkerError:     c.workerError,
 		Inherited: Inherited{
-			Model:    c.bindings[c.active].Provider == "",
-			Thinking: c.bindings[c.active].ThinkingLevel == "",
-			Agent:    c.bindings[c.active].Definition == "",
+			Model:    c.bindings[active].Provider == "",
+			Thinking: c.bindings[active].ThinkingLevel == "",
+			Agent:    c.bindings[active].Definition == "",
 		},
 		Agents:    c.catalog.Agents,
 		Skills:    c.catalog.Skills,
@@ -592,8 +592,13 @@ func (c *Control) StateFor(conversationID string) State {
 		Seq:       c.views[active].seq,
 		Policy:    c.policies[active],
 	}
+	// The conversation this call asked for, not the one the worker happens to be attached
+	// to. They are the same only once the attach has landed, and a client that asks about a
+	// conversation before attaching — which is every switch, and the state fetch that comes
+	// with it — was told about a different one. Everything else here already used `active`;
+	// this is the field that made the difference visible, because the client follows it.
 	for index := range state.Conversations {
-		if state.Conversations[index].ID == c.active {
+		if state.Conversations[index].ID == active {
 			conversation := state.Conversations[index]
 			state.Conversation = &conversation
 			break

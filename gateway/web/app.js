@@ -67,6 +67,31 @@ function fromUrl() {
 const activeWorkspace = () => fromUrl().workspace || state?.workspace?.name || "general";
 const activeId = () => fromUrl().conversation || (state?.conversation?.id ?? "");
 
+/**
+ * Name what is on screen in the URL, and do it with one owner.
+ *
+ * A workspace link names no conversation, and a link to one that has since gone names one
+ * that is not there. In both cases the tab is showing whatever the workspace landed on,
+ * and the URL has to say so, because the stream drops frames for any conversation the URL
+ * does not name: a URL that disagrees shows an empty transcript and never recovers.
+ *
+ * Arriving from the load and from a switch are the same situation, so they take the same
+ * route. They did not, and only the load was fixed when the workspace layer landed.
+ */
+function landUrl() {
+	const name = state?.workspace?.name ?? "general";
+	const conversation = state?.conversation?.id ?? "";
+	const here = fromUrl();
+	if (here.workspace === name && here.conversation === conversation) return;
+	window.history.replaceState(
+		null,
+		"",
+		conversation === ""
+			? `/w/${encodeURIComponent(name)}`
+			: `/c/${encodeURIComponent(name)}/${encodeURIComponent(conversation)}`,
+	);
+}
+
 /** Every conversation-scoped call says which workspace it is about. */
 const api = (path) => `/api/workspaces/${encodeURIComponent(activeWorkspace())}${path}`;
 /** Text of the message each branch point precedes, so a fork can offer it back. */
@@ -995,6 +1020,7 @@ async function loadState() {
 	state = await (
 		await fetch(`/api/state?workspace=${encodeURIComponent(activeWorkspace())}&conversation=${encodeURIComponent(activeId())}`)
 	).json();
+	landUrl();
 	renderWorkspacePicker();
 	renderConversations();
 	renderAgentPicker();
@@ -1287,14 +1313,17 @@ let conversationsSignature = "";
 
 function renderConversations() {
 	const all = state?.conversations ?? [];
+	const active = activeId();
 	// Rebuilding the rail on every state frame replaces its elements, which closes a
-	// dropdown the reader has open and detaches anything they are about to click.
-	const signature = JSON.stringify(
+	// dropdown the reader has open and detaches anything they are about to click. The active
+	// conversation is part of what is drawn, so it is part of the signature: the list can be
+	// identical while the row that is marked is not.
+	const signature = JSON.stringify([
+		active,
 		all.map((c) => [c.id, c.title, c.hidden, c.parent ?? "", c.createdBy ?? "", c.running, c.lastEntryId, c.tokens]),
-	);
+	]);
 	if (signature === conversationsSignature) return;
 	conversationsSignature = signature;
-	const active = activeId();
 	// A subagent is a conversation but not a peer: it belongs to the conversation
 	// that made it, so the rail lists only conversations without a parent.
 	const visible = all.filter(
@@ -1404,12 +1433,16 @@ async function followUrl() {
 	state = null;
 	senders.clear();
 	render();
-	connect();
+	// The state comes first, because the stream is opened for the conversation the URL names
+	// and the URL cannot name one until the workspace has said which it landed on. Opening
+	// the stream first reads the old workspace's conversation id, and every frame for the
+	// new one is then dropped as belonging to someone else.
 	try {
 		await loadState();
 	} catch (error) {
 		setStatus(String(error.message ?? error), "offline");
 	}
+	connect();
 }
 
 async function newConversation() {
@@ -1815,15 +1848,7 @@ async function boot() {
 		).json();
 		// Name the workspace and the conversation in the URL straight away, so a reload and
 		// a shared link agree with what is on screen.
-		const name = state?.workspace?.name ?? "general";
-		const conversation = location0.conversation || state?.conversation?.id;
-		if (location0.workspace === "" || location0.conversation === "") {
-			const path =
-				conversation === undefined
-					? `/w/${encodeURIComponent(name)}`
-					: `/c/${encodeURIComponent(name)}/${encodeURIComponent(conversation)}`;
-			window.history.replaceState(null, "", path);
-		}
+		landUrl();
 	} catch (error) {
 		setStatus("gateway unreachable", "offline");
 		return;

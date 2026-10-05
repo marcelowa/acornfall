@@ -546,6 +546,49 @@ try {
 		"nothing was created outside the workspaces folder",
 		!afterRefusal.workspaces.some((w) => w.name === "should-not-exist"),
 	);
+	// 13b. Switching to it and back. This is a workspace that has never been used, so its
+	//      worker starts on demand and the conversation it lands on is one nobody has named
+	//      yet — which is the case that used to leave the pane empty: the tab opened its
+	//      stream for the workspace it was leaving, dropped every frame for the new one as
+	//      belonging to someone else, and never recovered.
+	const generalBefore = await page.evaluate(() => window.location.pathname);
+	await page.select("#workspace-select", "check-made");
+	await page.waitForFunction(() => window.location.pathname.startsWith("/c/check-made/"), {
+		timeout: 30000,
+		polling: 100,
+	});
+	const landed = await page.evaluate(async () => {
+		const answer = await (await fetch("/api/state?workspace=check-made&conversation=")).json();
+		return {
+			path: window.location.pathname,
+			conversation: answer?.conversation?.id ?? "",
+			workspace: document.querySelector("#workspace-select")?.value,
+			status: document.querySelector("#status")?.textContent?.trim(),
+		};
+	});
+	check(
+		"the tab lands on a conversation the new workspace actually has",
+		landed.path === `/c/check-made/${landed.conversation}` && landed.conversation !== "",
+		JSON.stringify(landed),
+	);
+	check("and it is not left on the workspace it came from", landed.workspace === "check-made");
+	check("the pane settles rather than waiting forever", landed.status === "idle", JSON.stringify(landed));
+
+	await page.select("#workspace-select", "general");
+	await page.waitForFunction(() => window.location.pathname.startsWith("/c/general/"), { timeout: 30000, polling: 100 });
+	await page.waitForFunction(() => document.querySelectorAll("#transcript .turn").length > 0, { timeout: 30000, polling: 100 });
+	const returned = await page.evaluate(() => ({
+		path: window.location.pathname,
+		turns: document.querySelectorAll("#transcript .turn").length,
+		selected: document.querySelector("#workspace-select")?.value,
+	}));
+	check(
+		"switching back restores the conversation that was on screen",
+		returned.path === generalBefore && returned.turns > 0 && returned.selected === "general",
+		JSON.stringify({ ...returned, generalBefore }),
+	);
+	check("no errors from switching workspaces", problems.length === 0, problems.join("; "));
+
 	await page.evaluate(() => fetch("/api/workspaces/check-made/remove", { method: "POST" }));
 	await new Promise((resolve) => setTimeout(resolve, 500));
 	check("no errors from managing workspaces", problems.length === 0, problems.join("; "));
