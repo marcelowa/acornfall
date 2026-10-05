@@ -102,13 +102,22 @@ export async function mayAddress(
 
 /** How many conversations agents have created in this workspace. */
 export async function agentCreatedCount(deps: DelegationDeps, context: Context): Promise<number> {
-	const page = await deps.storage.scanConversations({}, 200, undefined, context);
-	const metas = await Promise.all(
-		page.items.map((record) =>
-			deps.harness.snapshot(ConversationMetaDoc, record.id, context).catch(() => undefined),
-		),
-	);
-	return metas.filter((meta) => meta?.createdBy !== undefined && meta.createdBy !== "").length;
+	let cursor: Parameters<typeof deps.storage.scanConversations>[2];
+	let created = 0;
+	// Every page: this feeds a ceiling on the whole workspace, and stopping at the first page
+	// would stop limiting anything in a workspace with more conversations than one page holds.
+	for (;;) {
+		const page = await deps.storage.scanConversations({}, 200, cursor, context);
+		const metas = await Promise.all(
+			page.items.map((record) =>
+				deps.harness.snapshot(ConversationMetaDoc, record.id, context).catch(() => undefined),
+			),
+		);
+		created += metas.filter((meta) => meta?.createdBy !== undefined && meta.createdBy !== "").length;
+		if (page.next === undefined) break;
+		cursor = page.next;
+	}
+	return created;
 }
 
 export interface PolicyView {
