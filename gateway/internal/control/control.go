@@ -358,7 +358,9 @@ func (c *Control) startWorker(ctx context.Context) error {
 	c.workerUp = true
 	c.workerError = ""
 	c.mu.Unlock()
-	worker.OnExit(func(err error) { c.workerDied(err) })
+	// The identity of the dying worker is part of the notification: a worker that has already
+	// been replaced must not be able to mark this control down.
+	worker.OnExit(func(err error) { c.workerFailed(worker, err) })
 	return nil
 }
 
@@ -418,17 +420,27 @@ func (c *Control) supervise(ctx context.Context) {
 
 // workerDied is the difference between a quiet conversation and a dead backend. Without
 // it the gateway keeps serving a cached view and everything looks idle and healthy.
-func (c *Control) workerDied(err error) {
+func (c *Control) workerFailed(worker *workerpool.Worker, err error) {
+	c.mu.Lock()
+	// A notification from a worker that has already been replaced is not this control's
+	// problem: the process it describes is gone, and the one running now is fine. Acting on it
+	// marked a live workspace down, and the signal woke the supervisor to start a second
+	// harness over the same storage — two writers, from a late message about a dead process.
+	if c.worker != worker {
+		c.mu.Unlock()
+		workerpool.Log("worker died: %v (already replaced)", err)
+		return
+	}
 	reason := "the harness process ended"
 	if err != nil {
 		reason = fmt.Sprintf("the harness process ended: %v", err)
 	}
-	// What the harness itself said, when it said anything: "exit status 1" is not a reason
-	// anyone can act on, and the line that is one is in its output.
-	if words := c.worker.LastWords(); words != "" {
+	// What that harness itself said, when it said anything: "exit status 1" is not a reason
+	// anyone can act on, and the line that is one is in its output. Read from the worker that
+	// died, not from whatever is current by the time this runs.
+	if words := worker.LastWords(); words != "" {
 		reason = fmt.Sprintf("%s — %s", reason, words)
 	}
-	c.mu.Lock()
 	c.workerUp = false
 	c.workerError = reason
 	c.mu.Unlock()
