@@ -274,11 +274,14 @@ async function listConversations(): Promise<ConversationInfo[]> {
 			const { title, hidden } = await nameOf(id, conversation);
 			const owner = record.owner;
 			const parent = owner === undefined ? undefined : String(owner.conversationId);
+			// No catches: a snapshot answers undefined for a document that is not there, so a
+			// failure here is a failure, and reading it as idle/0/unnamed is a lie the interface
+			// would then show. `conversation.entries` below was always allowed to fail.
 			const [live, usage, meta, agentConfig, newest] = await Promise.all([
-				harness.snapshot(LiveDoc, conversationIdOf(id), CONTEXT).catch(() => undefined),
-				harness.snapshot(UsageDoc, conversationIdOf(id), CONTEXT).catch(() => undefined),
-				harness.snapshot(ConversationMetaDoc, conversationIdOf(id), CONTEXT).catch(() => undefined),
-				harness.snapshot(AgentDoc, conversationIdOf(id), CONTEXT).catch(() => undefined),
+				harness.snapshot(LiveDoc, conversationIdOf(id), CONTEXT),
+				harness.snapshot(UsageDoc, conversationIdOf(id), CONTEXT),
+				harness.snapshot(ConversationMetaDoc, conversationIdOf(id), CONTEXT),
+				harness.snapshot(AgentDoc, conversationIdOf(id), CONTEXT),
 				conversation.entries({}, 1, undefined, CONTEXT),
 			]);
 			const effectiveModel = agentConfig?.model;
@@ -325,6 +328,9 @@ async function setMeta(id: string, patch: { title?: string; hidden?: boolean }):
 async function describe(): Promise<DescribeData> {
 	const providers: DescribeData["providers"] = [];
 	for (const provider of models.getProviders()) {
+		// One provider's check failing must not fail the description: the description is how the
+		// worker announces itself, so a workspace would be unusable over a provider's bad day.
+		// It reports that provider as not authenticated, which is what it also does for no key.
 		const check = await models.checkAuth(provider.id).catch(() => undefined);
 		const authenticated = check !== undefined;
 		const list = authenticated

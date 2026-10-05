@@ -32,6 +32,7 @@ import {
 import { resolveAgent, type Catalog, type Delegation, type ResolvedAgent } from "./config.ts";
 import { type ConversationMeta, ConversationMetaDoc, conversationIdOf } from "./meta.ts";
 import { Anchor, DelegationDoc, reporterTask } from "./delegation-tasks.ts";
+import { log } from "./protocol.ts";
 import { thinkingLevelFor } from "./thinking.ts";
 import { totalTokens } from "./usage.ts";
 
@@ -86,10 +87,12 @@ export async function mayAddress(
 	context: Context,
 ): Promise<{ allowed: boolean; why: string }> {
 	if (fromId === targetId) return { allowed: false, why: "that is this conversation" };
+	// A failed read must not read as "no conversation": an unreadable target is not a target
+	// that does not exist, and the tool would tell the model the wrong thing.
 	const [policy, state, record] = await Promise.all([
 		policyFor(deps, fromId, context),
-		deps.harness.snapshot(DelegationDoc, conversationIdOf(fromId), context).catch(() => undefined),
-		deps.storage.conversation(conversationIdOf(targetId), context).catch(() => undefined),
+		deps.harness.snapshot(DelegationDoc, conversationIdOf(fromId), context),
+		deps.storage.conversation(conversationIdOf(targetId), context),
 	]);
 	if (record === undefined) return { allowed: false, why: `no conversation ${targetId}` };
 	if (policy.delegation.address === "any") return { allowed: true, why: "policy allows any conversation" };
@@ -98,7 +101,7 @@ export async function mayAddress(
 	}
 	// A child, or the conversation this one is working for.
 	if (String(record.owner?.conversationId ?? "") === fromId) return { allowed: true, why: "it is a child" };
-	const own = await deps.storage.conversation(conversationIdOf(fromId), context).catch(() => undefined);
+	const own = await deps.storage.conversation(conversationIdOf(fromId), context);
 	if (own?.owner !== undefined && String(own.owner.conversationId) === targetId) {
 		return { allowed: true, why: "it is the conversation that started this one" };
 	}
@@ -142,7 +145,13 @@ export async function agentCreatedCount(deps: DelegationDeps, context: Context):
 		const page = await deps.storage.scanConversations({}, 200, cursor, context);
 		const metas = await Promise.all(
 			page.items.map((record) =>
-				deps.harness.snapshot(ConversationMetaDoc, record.id, context).catch(() => undefined),
+				deps.harness.snapshot(ConversationMetaDoc, record.id, context).catch((error: unknown) => {
+					// Count it rather than skip it: this feeds a ceiling on how many conversations
+					// agents may create, and a ceiling that opens when a read fails is not one. The
+					// log is what makes the over-count visible instead of silent.
+					log(`agentCreatedCount: cannot read ${String(record.id)}; counting it:`, error);
+					return { title: "", hidden: false, createdBy: "unreadable" } satisfies ConversationMeta;
+				}),
 			),
 		);
 		created += metas.filter((meta) => meta?.createdBy !== undefined && meta.createdBy !== "").length;
@@ -315,8 +324,8 @@ export function delegationExtension(deps: DelegationDeps) {
 				for (const name of names) {
 					const entry = state.agents[name]!;
 					const [live, usage] = await Promise.all([
-						deps.harness.snapshot(LiveDoc, entry.conversationId, context).catch(() => undefined),
-						deps.harness.snapshot(UsageDoc, entry.conversationId, context).catch(() => undefined),
+						deps.harness.snapshot(LiveDoc, entry.conversationId, context),
+						deps.harness.snapshot(UsageDoc, entry.conversationId, context),
 					]);
 					const tokens = totalTokens(usage);
 					lines.push(
