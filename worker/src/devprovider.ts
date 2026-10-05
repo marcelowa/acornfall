@@ -14,6 +14,11 @@
  * A rule's tools are emitted once per turn: the same rule is consulted again after the tool
  * results come back, and that time it answers with its reply. Without that, every rule would
  * loop on its own tool call.
+ *
+ * A tool argument may be `{"$fromTranscript": "<regex>"}`: the first capture group of the last
+ * match in the conversation so far. That is how a script names something only the conversation
+ * knows — the id of a subagent it just made, for instance, which is what an action by id needs
+ * and what a fixed script cannot spell.
  */
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -74,6 +79,50 @@ function answeredSinceLastUser(messages: readonly { role: string; content: unkno
 	return messages.slice(lastUserIndex + 1).some((message) => message.role === "toolResult");
 }
 
+/** Every text the conversation has seen, oldest first: where a script finds a runtime value. */
+function transcriptText(messages: readonly { role: string; content: unknown }[]): string {
+	return messages
+		.map((message) => {
+			if (typeof message.content === "string") return message.content;
+			if (!Array.isArray(message.content)) return "";
+			return message.content
+				.filter((block): block is { type: "text"; text: string } =>
+					typeof block === "object" && block !== null && (block as { type?: string }).type === "text",
+				)
+				.map((block) => block.text)
+				.join(" ");
+		})
+		.join("\n");
+}
+
+/**
+ * Substitutes `{"$fromTranscript": "<regex>"}` wherever a tool argument carries one. A missing
+ * match is a broken script, not a tool call to make with an empty id, so it throws.
+ */
+function resolveReferences(value: unknown, transcript: string, tool: string): unknown {
+	if (Array.isArray(value)) return value.map((item) => resolveReferences(item, transcript, tool));
+	if (typeof value !== "object" || value === null) return value;
+
+	const record = value as Record<string, unknown>;
+	if (typeof record.$fromTranscript === "string") {
+		// The last match, because the newest value is the one a script means when a listing has
+		// been read more than once.
+		const expression = new RegExp(record.$fromTranscript, "g");
+		let found: string | undefined;
+		for (let match = expression.exec(transcript); match !== null; match = expression.exec(transcript)) {
+			if (match[1] !== undefined) found = match[1];
+			if (match[0] === "") expression.lastIndex += 1;
+		}
+		if (found === undefined) {
+			throw new Error(`dev script: nothing in the transcript matches ${record.$fromTranscript} for ${tool}`);
+		}
+		return found;
+	}
+	return Object.fromEntries(
+		Object.entries(record).map(([key, item]) => [key, resolveReferences(item, transcript, tool)]),
+	);
+}
+
 function matchRule(script: Script, request: string): ScriptRule | undefined {
 	for (const rule of script.rules ?? []) {
 		if (rule.match === undefined) return rule;
@@ -109,8 +158,11 @@ function scriptedRespond(script: Script): FauxResponseFactory {
 		const request = lastUserText(messages);
 		const rule = matchRule(script, request);
 		if (rule !== undefined && !answeredSinceLastUser(messages) && (rule.tools?.length ?? 0) > 0) {
+			const transcript = transcriptText(messages);
 			return fauxAssistantMessage(
-				(rule.tools ?? []).map((tool) => fauxToolCall(tool.name, tool.args ?? {})),
+				(rule.tools ?? []).map((tool) =>
+					fauxToolCall(tool.name, resolveReferences(tool.args ?? {}, transcript, tool.name) as JsonObject),
+				),
 				{ stopReason: "toolUse" },
 			);
 		}

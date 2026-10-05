@@ -330,6 +330,14 @@ export function delegationExtension(deps: DelegationDeps) {
 				args.conversation === undefined
 					? (args.name === undefined ? undefined : state.agents[args.name])?.conversationId
 					: conversationIdOf(args.conversation);
+			// The name this conversation knows the target by, when it knows it at all. A target
+			// addressed by id is a conversation this one made — the id came from a listing — and
+			// the reporter is keyed by that name, so without this the answer has nothing to be
+			// reported against and is silently dropped.
+			const knownAs =
+				args.conversation === undefined
+					? undefined
+					: Object.entries(state.agents).find(([, entry]) => String(entry.conversationId) === args.conversation)?.[0];
 			if (args.conversation !== undefined) {
 				const reach = await mayAddress(deps, parentId, args.conversation, context);
 				if (!reach.allowed) return reply(`Cannot address ${args.conversation}: ${reach.why}.`);
@@ -399,9 +407,9 @@ export function delegationExtension(deps: DelegationDeps) {
 			}
 
 			// Captured as locals because the closures below outlive TypeScript's
-			// narrowing of the optional parameters. A target addressed by id has no name,
-			// so the label falls back to the id.
-			const name = args.name ?? String(target!);
+			// narrowing of the optional parameters. A target addressed by id is labelled with
+			// the name it was created under when there is one, and only otherwise with the id.
+			const name = args.name ?? knownAs ?? String(target!);
 			const message: string = args.message;
 
 			const outcome = await api.commit(async (tx) => {
@@ -497,7 +505,12 @@ export function delegationExtension(deps: DelegationDeps) {
 				// One rule, no special cases: an answer to a message you sent comes back to
 				// you, whether the conversation you sent it to is a subagent or a peer.
 				// Opting out is a single flag, falsy by default.
-				const wantsReply = !args.fireAndForget;
+				// A conversation this one has no record of is not one it can be woken about: the
+				// reporter records the answer it delivered against that record, which is what
+				// stops a restart from reporting the same answer twice. The reply says so rather
+				// than promising a wake that would never come.
+				const known = args.action === "spawn" || knownAs !== undefined;
+				const wantsReply = !args.fireAndForget && known;
 				current.reporters[api.taskId] = await tx.createTask(
 					reporterTask(deps),
 					{
@@ -509,7 +522,12 @@ export function delegationExtension(deps: DelegationDeps) {
 					},
 					background,
 				);
-				const suffix = wantsReply ? " Its answer will come back to you." : "";
+				const suffix =
+					wantsReply
+						? " Its answer will come back to you."
+						: known
+							? ""
+							: " It answers in its own transcript; nothing wakes this conversation for it.";
 				return {
 					text: `${args.action === "send" ? "Sent to" : "Started"} ${name}.${suffix}`,
 					conversationId: String(conversationId),

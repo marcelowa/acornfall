@@ -167,6 +167,59 @@ func TestASpawnedChildsLevelFollowsTheDocumentedOrder(t *testing.T) {
 	}
 }
 
+// An answer comes back to the conversation that asked for it, however it addressed the one it
+// asked: by name, or by the id a listing handed it. The id form delivered the message and then
+// dropped the answer — the reporter had nothing to attribute it to — while the tool told the
+// model the answer would come back.
+func TestASendByConversationIdReportsItsAnswer(t *testing.T) {
+	s := start(t, withScript(
+		scriptRule{
+			Match: "start a helper",
+			Tools: []scriptTool{{Name: "subagent", Args: map[string]any{
+				"action": "spawn", "name": "helper", "message": "first task",
+			}}},
+			Reply: "started it",
+		},
+		scriptRule{Match: "first task", Reply: "FIRST ANSWER"},
+		scriptRule{
+			Match: "list the helpers",
+			Tools: []scriptTool{{Name: "subagent", Args: map[string]any{"action": "list"}}},
+			Reply: "listed them",
+		},
+		scriptRule{
+			Match: "send it another task by id",
+			Tools: []scriptTool{{Name: "subagent", Args: map[string]any{
+				"action": "send",
+				// The id exists only at runtime, so the script reads it out of the listing.
+				"conversation": map[string]any{"$fromTranscript": `conversation (\d+)`},
+				"message":      "second task",
+			}}},
+			Reply: "sent by id",
+		},
+		scriptRule{Match: "second task", Reply: "SECOND ANSWER"},
+	))
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	c.prompt("general", root, "start a helper")
+	c.waitForText("general", root, "started it")
+	c.prompt("general", root, "list the helpers")
+	c.waitForText("general", root, "listed them")
+	c.prompt("general", root, "send it another task by id")
+	c.waitForText("general", root, "sent by id")
+
+	// The wake itself, and the label on it: the answer is attributed to the name this
+	// conversation knows, not to the id it happened to address.
+	// A wake either arrives within a second or never does, so a short window here keeps a
+	// regression from taking a minute to say so.
+	woken := c.waitView("general", root, func(v view) bool {
+		return strings.Contains(v.all(), "SECOND ANSWER")
+	}, 20*time.Second)
+	if !strings.Contains(woken.all(), "[from subagent helper]") {
+		t.Errorf("the answer should say which conversation it came from:\n%s", woken.all())
+	}
+}
+
 // A thinking level that does not exist is refused wherever it came from, and the refusal is what
 // the model sees: the level in a definition, and the level the model itself passes as an
 // argument. Both go through the check the open path uses, and a refusal is not a spawn.
