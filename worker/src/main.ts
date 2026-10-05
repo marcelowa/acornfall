@@ -12,7 +12,6 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
 import {
 	AgentDoc,
@@ -33,6 +32,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
+import { thinkingLevelFor } from "./thinking.ts";
 import { totalCost, totalTokens } from "./usage.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import {
@@ -414,25 +414,6 @@ async function attach(conversationId: string): Promise<void> {
 			void messages?.stop();
 		},
 	});
-}
-
-const THINKING_LEVELS = new Set<ModelThinkingLevel>([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
-/** An unknown level is a config error, not something to pass through to a provider. */
-function thinkingLevelFor(value: string | undefined): ModelThinkingLevel | null {
-	if (value === undefined || value.length === 0) return null;
-	if (!THINKING_LEVELS.has(value as ModelThinkingLevel)) {
-		throw new Error(`unknown thinking level "${value}"; expected one of ${[...THINKING_LEVELS].join(", ")}`);
-	}
-	return value as ModelThinkingLevel;
 }
 
 /** Registered tools by name. Unknown names are a config error, not a silent no-op. */

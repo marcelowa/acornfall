@@ -14,7 +14,7 @@
  *   delegation-tasks.ts; this file is the model-facing surface and the policy.
  */
 import type { Context } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import { Type, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	type Conversation,
@@ -32,6 +32,7 @@ import {
 import { resolveAgent, type Catalog, type Delegation, type ResolvedAgent } from "./config.ts";
 import { type ConversationMeta, ConversationMetaDoc, conversationIdOf } from "./meta.ts";
 import { Anchor, DelegationDoc, reporterTask } from "./delegation-tasks.ts";
+import { thinkingLevelFor } from "./thinking.ts";
 import { totalTokens } from "./usage.ts";
 
 const ANSWER_SCAN_LIMIT = 8;
@@ -359,6 +360,17 @@ export function delegationExtension(deps: DelegationDeps) {
 				return reply(`Cannot start a subagent here: ${policy.blockedBy}. Do the work yourself and say why.`);
 			}
 
+			// The level is the model's own argument, so an unusable one is answered the way the
+			// other refusals here are — as this call's result — rather than thrown past it.
+			let overrideLevel: ModelThinkingLevel | null = null;
+			if (args.thinking !== undefined) {
+				try {
+					overrideLevel = thinkingLevelFor(args.thinking);
+				} catch (error) {
+					return reply((error as Error).message);
+				}
+			}
+
 			// Captured as locals because the closures below outlive TypeScript's
 			// narrowing of the optional parameters. A target addressed by id has no name,
 			// so the label falls back to the id.
@@ -405,7 +417,7 @@ export function delegationExtension(deps: DelegationDeps) {
 
 					const override = {
 						...(args.model === undefined ? {} : { model: splitModel(args.model) }),
-						...(args.thinking === undefined ? {} : { thinkingLevel: args.thinking as never }),
+						...(overrideLevel === null ? {} : { thinkingLevel: overrideLevel }),
 					};
 					const resolved = args.agent === undefined ? undefined : resolveAgent(deps.catalog(), args.agent);
 					const inherited = isPeer ? await tx.doc(AgentDoc, api.conversationId) : undefined;
@@ -415,9 +427,10 @@ export function delegationExtension(deps: DelegationDeps) {
 						// An ownerless conversation does not inherit the creator's agent the way a
 						// task-owned one does, so a peer copies the model and thinking explicitly.
 						...(inherited?.model === undefined ? {} : { model: inherited.model }),
-						...(inherited?.thinkingLevel === undefined
+						// A child that recorded no level of its own keeps whatever the copy left it.
+						...(inherited?.thinkingLevel === undefined || inherited.thinkingLevel === null
 							? {}
-							: { thinkingLevel: inherited.thinkingLevel as never }),
+							: { thinkingLevel: inherited.thinkingLevel }),
 						instructions:
 							resolved !== undefined
 								? resolved.instructions
@@ -499,19 +512,30 @@ export function delegationExtension(deps: DelegationDeps) {
 				};
 			}
 
+			// A named agent replaces the inherited instructions rather than stacking on them, or
+			// the child would be told it is both. Read outside the commit so a definition whose
+			// level cannot be used refuses without creating a conversation.
+			let definition: ResolvedAgent | undefined;
+			let level: ModelThinkingLevel | null = null;
+			if (args.agent !== undefined) {
+				definition = resolveAgent(deps.catalog(), args.agent);
+				try {
+					level = thinkingLevelFor(definition.thinking);
+				} catch (error) {
+					return { content: [{ type: "text" as const, text: (error as Error).message }] };
+				}
+			}
+
 			const childId = await api.commit(async (tx) => {
 				const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
 				if (existing !== undefined) return existing.id;
 
 				const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
-				if (args.agent !== undefined) {
-					// A named agent replaces the inherited instructions rather than stacking
-					// on them, or the child would be told it is both.
-					const resolved = resolveAgent(deps.catalog(), args.agent);
+				if (definition !== undefined) {
 					await configure(tx, created.id, {
-						...(resolved.model === undefined ? {} : { model: splitModel(resolved.model) }),
-						...(resolved.thinking === undefined ? {} : { thinkingLevel: resolved.thinking as never }),
-						instructions: resolved.instructions,
+						...(definition.model === undefined ? {} : { model: splitModel(definition.model) }),
+						...(level === null ? {} : { thinkingLevel: level }),
+						instructions: definition.instructions,
 					});
 				}
 				await recordChild(deps, tx, context, {

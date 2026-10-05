@@ -115,6 +115,53 @@ func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
 	}
 }
 
+// A thinking level that does not exist is refused wherever it came from, and the refusal is what
+// the model sees: the level in a definition, and the level the model itself passes as an
+// argument. Both go through the check the open path uses, and a refusal is not a spawn.
+func TestAnUnknownThinkingLevelIsRefusedNotPassedOn(t *testing.T) {
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "spawn with a bad level",
+				Tools: []scriptTool{{Name: "subagent", Args: map[string]any{
+					"action": "spawn", "name": "helper", "message": "helper task", "thinking": "banana",
+				}}},
+				Reply: "I was refused",
+			},
+			scriptRule{
+				Match: "delegate to the broken agent",
+				Tools: []scriptTool{{Name: "delegate", Args: map[string]any{
+					"task": "child task", "agent": "broken-level",
+				}}},
+				Reply: "that was refused too",
+			},
+		),
+		withSetup(func(t *testing.T, s *system) {
+			s.writeWorkspace(t, ".agents/agents/broken-level.md",
+				"---\nname: broken-level\ndescription: a level that does not exist\nthinking: banana\n---\nBody.")
+		}),
+	)
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	c.prompt("general", root, "spawn with a bad level")
+	first := c.waitForText("general", root, "I was refused")
+	if !strings.Contains(first.all(), `unknown thinking level "banana"`) {
+		t.Errorf("the refusal should name the level the model asked for:\n%s", first.all())
+	}
+
+	c.prompt("general", root, "delegate to the broken agent")
+	second := c.waitForText("general", root, "that was refused too")
+	if !strings.Contains(second.all(), `unknown thinking level "banana"`) {
+		t.Errorf("a definition's level should be refused too:\n%s", second.all())
+	}
+
+	// Neither refusal created anything: the check happens before the commit, not inside it.
+	if listing := c.conversations("general"); len(listing) != 1 {
+		t.Errorf("a refused spawn should create no conversation, got %+v", listing)
+	}
+}
+
 // The policy in the overlay decides what a conversation may do, and it is reported, so a
 // refusal can be explained rather than only suffered.
 func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
