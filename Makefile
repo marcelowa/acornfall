@@ -12,7 +12,7 @@ URL ?= http://$(ADDR)
 INSECURE ?= 1
 OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 
-.PHONY: help deps build typecheck check ui vendor run dev fmt clean
+.PHONY: help deps build typecheck check test ui vendor run dev fmt clean
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -24,16 +24,24 @@ deps: ## install worker and tool dependencies
 build: ## build the gateway binary
 	cd gateway && go build -o ../$(BIN) ./cmd/acornfall
 
-typecheck: ## typecheck the worker and check the client against its markup
+typecheck: ## typecheck everything without running behaviour tests
 	cd worker && bun run typecheck
 	node scripts/check-client.mjs
 	node scripts/check-context.mjs
-	cd gateway && go test ./...
+	cd gateway && go vet ./...
 
-check: ## verify the client, the worker, and the resolution rules
+check: ## fast: types and unit tests, no processes
 	node scripts/check-client.mjs
 	node scripts/check-context.mjs
 	cd worker && bun run typecheck
+	cd worker && bun test
+	cd gateway && go test -short ./...
+
+test: ## everything: unit tests, the worker protocol, and the end-to-end features
+	node scripts/check-client.mjs
+	node scripts/check-context.mjs
+	cd worker && bun run typecheck
+	cd worker && bun test
 	cd gateway && go test ./...
 
 run: build ## run against the current directory

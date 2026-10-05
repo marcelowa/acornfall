@@ -1,9 +1,19 @@
 /**
- * Development provider: a scripted stand-in so the whole path (gateway, worker,
- * UI, tool loop, steering) can be exercised without spending tokens.
+ * Development providers: scripted stand-ins so the whole path (gateway, worker, tool loop,
+ * steering, delegation) can be exercised without spending tokens and without a network.
  *
- * Enabled with ACORNFALL_DEV_PROVIDER=1. It answers each user turn with one
- * bash call and then a short reply quoting the request.
+ * Two of them, because a test needs to say what the model does:
+ *
+ * - `ACORNFALL_DEV_PROVIDER=1` answers every user turn with one real bash call and a short
+ *   reply quoting the request. Enough to exercise tools and streaming by hand.
+ * - `ACORNFALL_DEV_SCRIPT=<file>` answers from a script: the first rule whose `match` is a
+ *   substring of the last user message wins, and if it lists tools they are emitted before
+ *   the reply. That is what makes a feature driven *by* a tool call — a guard blocking one,
+ *   a subagent being spawned — testable offline instead of only by hand.
+ *
+ * A rule's tools are emitted once per turn: the same rule is consulted again after the tool
+ * results come back, and that time it answers with its reply. Without that, every rule would
+ * loop on its own tool call.
  */
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -13,8 +23,32 @@ import {
 	fauxText,
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
+import { readFileSync } from "node:fs";
+import type { JsonObject } from "@earendil-works/pi-ai";
 
 const REPLY_STEPS = 1000;
+
+interface ScriptTool {
+	name: string;
+	args?: JsonObject;
+}
+
+interface ScriptRule {
+	/** Substring of the last user message. Absent matches anything, which is the fallback. */
+	match?: string;
+	/** The assistant's text once the tools (if any) have run. */
+	reply?: string;
+	/** Tool calls emitted before the reply, in order. */
+	tools?: ScriptTool[];
+}
+
+interface Script {
+	/** Streaming pace. Slow it down to have time to steer while a turn runs. */
+	tokensPerSecond?: number;
+	tokenSize?: { min: number; max: number };
+	rules?: ScriptRule[];
+	fallback?: ScriptRule;
+}
 
 function lastUserText(messages: readonly { role: string; content: unknown }[]): string {
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -34,15 +68,25 @@ function lastUserText(messages: readonly { role: string; content: unknown }[]): 
 	return "";
 }
 
-const respond: FauxResponseFactory = (context) => {
-	const messages = context.messages as readonly { role: string; content: unknown }[];
+/** True once a tool result has arrived after the last user message: this turn is answering. */
+function answeredSinceLastUser(messages: readonly { role: string; content: unknown }[]): boolean {
 	const lastUserIndex = messages.findLastIndex((message) => message.role === "user");
-	const answeredAfterUser = messages
-		.slice(lastUserIndex + 1)
-		.some((message) => message.role === "toolResult");
+	return messages.slice(lastUserIndex + 1).some((message) => message.role === "toolResult");
+}
+
+function matchRule(script: Script, request: string): ScriptRule | undefined {
+	for (const rule of script.rules ?? []) {
+		if (rule.match === undefined) return rule;
+		if (request.includes(rule.match)) return rule;
+	}
+	return script.fallback;
+}
+
+const defaultRespond: FauxResponseFactory = (context) => {
+	const messages = context.messages as readonly { role: string; content: unknown }[];
 	const request = lastUserText(messages);
 
-	if (!answeredAfterUser) {
+	if (!answeredSinceLastUser(messages)) {
 		return fauxAssistantMessage([fauxToolCall("bash", { command: "ls -la" }, { id: `dev-${Date.now()}` })], {
 			stopReason: "toolUse",
 		});
@@ -59,8 +103,39 @@ const respond: FauxResponseFactory = (context) => {
 	return answer;
 };
 
-export function devProvider() {
-	const faux = fauxProvider({ tokensPerSecond: 120, tokenSize: { min: 3, max: 8 } });
+function scriptedRespond(script: Script): FauxResponseFactory {
+	return (context) => {
+		const messages = context.messages as readonly { role: string; content: unknown }[];
+		const request = lastUserText(messages);
+		const rule = matchRule(script, request);
+		if (rule !== undefined && !answeredSinceLastUser(messages) && (rule.tools?.length ?? 0) > 0) {
+			return fauxAssistantMessage(
+				(rule.tools ?? []).map((tool) => fauxToolCall(tool.name, tool.args ?? {})),
+				{ stopReason: "toolUse" },
+			);
+		}
+		// No rule matched: say so, because a script that silently answers something generic
+		// makes a test pass for the wrong reason.
+		const reply = rule?.reply ?? `dev script: no rule matched ${JSON.stringify(request)}`;
+		return fauxAssistantMessage([fauxText(reply)]);
+	};
+}
+
+function provider(respond: FauxResponseFactory, script?: Script): ReturnType<typeof fauxProvider> {
+	const faux = fauxProvider({
+		tokensPerSecond: script?.tokensPerSecond ?? 120,
+		tokenSize: script?.tokenSize ?? { min: 3, max: 8 },
+	});
 	faux.setResponses(Array.from({ length: REPLY_STEPS }, () => respond));
 	return faux;
+}
+
+export function devProvider(): ReturnType<typeof fauxProvider> {
+	return provider(defaultRespond);
+}
+
+/** Reads the script named by ACORNFALL_DEV_SCRIPT. Throws loudly: a broken script is a test bug. */
+export function scriptedDevProvider(path: string): ReturnType<typeof fauxProvider> {
+	const script = JSON.parse(readFileSync(path, "utf8")) as Script;
+	return provider(scriptedRespond(script), script);
 }

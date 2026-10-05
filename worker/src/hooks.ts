@@ -25,7 +25,8 @@ export interface GuardDeps extends DelegationDeps {
 /** Compiled once per pattern: a guard runs on every tool call. */
 const compiled = new Map<string, RegExp>();
 
-function matches(guard: Guard, call: { name: string; arguments: Record<string, unknown> }, cwd: string): boolean {
+/** Exported for its tests: these two are the whole rule, and a rule is worth pinning. */
+export function matches(guard: Guard, call: { name: string; arguments: Record<string, unknown> }, cwd: string): boolean {
 	if (guard.tool !== "*" && guard.tool !== call.name) return false;
 	const value = call.arguments[guard.arg];
 	if (typeof value !== "string" || value === "") return false;
@@ -50,7 +51,7 @@ function matches(guard: Guard, call: { name: string; arguments: Record<string, u
 }
 
 /** Resolved without node:path so a `..` in the middle is handled the same way a shell does. */
-function resolvePath(cwd: string, value: string): string {
+export function resolvePath(cwd: string, value: string): string {
 	const base = value.startsWith("/") ? [] : cwd.split("/").filter((part) => part !== "");
 	const parts = value.split("/");
 	for (const part of parts) {

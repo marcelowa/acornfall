@@ -113,13 +113,20 @@ func serve(argv []string) error {
 		_ = server.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("acornfall listening on http://%s  home=%s", displayAddr(*addr), dir)
-	if guard != "" && !httpapi.IsLoopback(*addr) {
-		log.Printf("auth: token required; open http://%s/?token=%s", prettyAddr(*addr), guard)
-	} else if guard == "" && !httpapi.IsLoopback(*addr) {
+	// Listen explicitly so the line below reports the address that was actually bound: with
+	// a port of 0 the configured address says nothing about where to reach it.
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		return err
+	}
+	bound := listener.Addr().String()
+	log.Printf("acornfall listening on http://%s  home=%s", displayAddr(bound), dir)
+	if guard != "" && !httpapi.IsLoopback(bound) {
+		log.Printf("auth: token required; open http://%s/?token=%s", prettyAddr(bound), guard)
+	} else if guard == "" && !httpapi.IsLoopback(bound) {
 		log.Printf("auth: off (--insecure)")
 	}
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	return nil

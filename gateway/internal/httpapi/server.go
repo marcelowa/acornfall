@@ -227,7 +227,11 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.URL.Query().Get("conversation")
 	id, frames, initial, err := ctl.Subscribe(r.Context(), conversationID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		// The stream is already open, so a status line here would be a second header that no
+		// client reads. Say it on the stream and close: the client reconnects, which is what
+		// an EventSource does with a closed connection, and it works once the reason is gone.
+		_ = writeEvent(w, "state", map[string]string{"error": err.Error()})
+		flusher.Flush()
 		return
 	}
 	defer ctl.Unsubscribe(id)

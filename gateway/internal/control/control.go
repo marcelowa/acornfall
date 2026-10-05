@@ -156,6 +156,11 @@ type Control struct {
 	// One notification per death, drained by the single supervisor loop. A restart loop
 	// per death would compound: every failed attempt is another death.
 	workerExited chan struct{}
+	// lifetime is what the background loops run on. Not the context that happened to start
+	// this workspace: that is often one HTTP request, and a supervisor that stops when the
+	// first request finishes never supervises anything. Close is what ends it.
+	lifetime context.Context
+	stop     context.CancelFunc
 	// bindings holds only explicit choices, made in a conversation. A conversation
 	// with no entry here follows the definition's model or defaultModel.
 	bindings map[string]protocol.ModelBinding
@@ -210,7 +215,38 @@ func New(opts Options) *Control {
 
 // Open starts the worker, reads the catalog, and attaches to the active
 // conversation, creating the root conversation if the storage is empty.
+//
+// A harness that cannot start is not a workspace that cannot be used: the control still
+// answers, saying the harness is down and why, and the supervisor keeps trying so that fixing
+// the file is enough. Refusing to open hides the reason behind a process that never serves —
+// which is what a guard with a typo in it used to do to the whole gateway.
 func (c *Control) Open(ctx context.Context) error {
+	// Values are kept, cancellation is not: the caller may be a request that is about to end.
+	c.lifetime, c.stop = context.WithCancel(context.WithoutCancel(ctx))
+	if err := c.attachToWorker(ctx); err != nil {
+		c.mu.Lock()
+		c.workerUp = false
+		c.workerError = err.Error()
+		c.mu.Unlock()
+		workerpool.Log("workspace %s: %v", c.opts.Workspace.Name, err)
+		go c.supervise(c.lifetime)
+		// Something for the supervisor to react to: it retries on a death, and this is the
+		// first one.
+		select {
+		case c.workerExited <- struct{}{}:
+		default:
+		}
+		c.publish(protocol.Frame{Type: "state"})
+		return nil
+	}
+	go c.watchConversations(c.lifetime)
+	go c.supervise(c.lifetime)
+	return nil
+}
+
+// attachToWorker is everything that needs a live harness: start it, ask what it can do, read
+// the agent catalog, and attach to a conversation.
+func (c *Control) attachToWorker(ctx context.Context) error {
 	var describe protocol.Describe
 	if err := c.startWorker(ctx); err != nil {
 		return err
@@ -223,11 +259,36 @@ func (c *Control) Open(ctx context.Context) error {
 	if _, err := c.Agents(ctx); err != nil {
 		return fmt.Errorf("read agent catalog: %w", err)
 	}
+	persistedActive, err := c.restoreState()
+	if err != nil {
+		return err
+	}
+	return c.adoptConversation(ctx, persistedActive)
+}
+
+// restoreState is everything that has to be true before a conversation can run: our own
+// settings, which hold the defaults and the conversation that was open, and a last-resort
+// model so a conversation that never chose one still has something to run.
+//
+// Shared with recovery on purpose. Recovery used to skip it, which was invisible after a
+// crash — the values were already in memory — and meant that a workspace whose *first* start
+// failed came back with no model and answered nothing.
+func (c *Control) restoreState() (string, error) {
 	// Our own state first: it holds the default model this install already uses.
 	persistedActive := c.loadSettings()
 	if err := c.ensureLastResort(); err != nil && !errors.Is(err, ErrNoProvider) {
-		return fmt.Errorf("resolve default model: %w", err)
+		return persistedActive, fmt.Errorf("resolve default model: %w", err)
 	}
+	return persistedActive, nil
+}
+
+// adoptConversation attaches this control to a conversation, creating the root one only when
+// the storage is empty.
+//
+// Listing comes first, and that order is the point: the harness creates its own root
+// conversation the first time it is used, so deciding to create one without looking makes a
+// second, leaves the root empty, and lands on the copy.
+func (c *Control) adoptConversation(ctx context.Context, persistedActive string) error {
 	conversations, err := c.listConversations(ctx)
 	if err != nil {
 		return fmt.Errorf("list conversations: %w", err)
@@ -236,8 +297,6 @@ func (c *Control) Open(ctx context.Context) error {
 		if err := c.Create(ctx); err != nil {
 			return fmt.Errorf("create first conversation: %w", err)
 		}
-		go c.watchConversations(ctx)
-		go c.supervise(ctx)
 		return nil
 	}
 
@@ -253,13 +312,18 @@ func (c *Control) Open(ctx context.Context) error {
 	if err := c.ensureConversation(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
-	go c.watchConversations(ctx)
-	go c.supervise(ctx)
 	return nil
 }
 
 // startWorker launches the harness process and arranges for its death to be noticed.
+//
+// It refuses to start a second one. A death is announced twice — the process's own exit, and
+// the failure of whatever request found it — and without this the second announcement put a
+// second harness over the same storage, which is not a restart, it is two writers.
 func (c *Control) startWorker(ctx context.Context) error {
+	if c.WorkerUp() {
+		return errors.New("a worker is already running")
+	}
 	base := c.opts.WorkerCommand
 	if len(base) == 0 {
 		base = []string{"bun", "run", "src/main.ts"}
@@ -274,10 +338,20 @@ func (c *Control) startWorker(ctx context.Context) error {
 		// rather than enforced here, because the worker is what reads the files.
 		"--trusted", strconv.FormatBool(c.opts.Workspace.Trusted),
 	)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	worker := workerpool.New(workerpool.Config{Command: base[0], Args: args, Dir: c.opts.WorkerDir})
 	worker.OnFrame(c.onFrame)
 	if err := worker.Start(ctx); err != nil {
 		return fmt.Errorf("start worker: %w", err)
+	}
+	// Start does not take a context (a worker's lifetime belongs to its owner, not to the
+	// request that started it), so closing the window here is what keeps a control that was
+	// closed mid-start from leaving a process behind.
+	if err := ctx.Err(); err != nil {
+		worker.Close()
+		return err
 	}
 	c.mu.Lock()
 	c.worker = worker
@@ -298,6 +372,10 @@ func (c *Control) supervise(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-c.workerExited:
+		}
+		// Nothing to restart: the announcement was a duplicate, not a death.
+		if c.WorkerUp() {
+			continue
 		}
 		failures += 1
 		if failures > 5 {
@@ -345,6 +423,11 @@ func (c *Control) workerDied(err error) {
 	if err != nil {
 		reason = fmt.Sprintf("the harness process ended: %v", err)
 	}
+	// What the harness itself said, when it said anything: "exit status 1" is not a reason
+	// anyone can act on, and the line that is one is in its output.
+	if words := c.worker.LastWords(); words != "" {
+		reason = fmt.Sprintf("%s — %s", reason, words)
+	}
 	c.mu.Lock()
 	c.workerUp = false
 	c.workerError = reason
@@ -370,40 +453,21 @@ func (c *Control) recoverWithWorker(ctx context.Context) error {
 	if _, err := c.Agents(ctx); err != nil {
 		return err
 	}
+	persistedActive, err := c.restoreState()
+	if err != nil {
+		return err
+	}
+	// The same adoption as a first start, so a workspace that comes back lands where it was
+	// rather than on a conversation it just made.
 	active := c.activeConversation()
-	if active != "" {
-		var response struct {
-			ConversationID string `json:"conversationId"`
-		}
-		if err := c.worker.CallInto(ctx, protocol.Command{
-			Type:           "attach",
-			ConversationID: active,
-		}, &response); err != nil {
-			return err
-		}
-	} else if err := c.createFirstConversation(ctx); err != nil {
-		return err
-	}
-	if _, err := c.listConversations(ctx); err != nil {
-		return err
-	}
 	if active == "" {
-		c.mu.RLock()
-		active = c.active
-		c.mu.RUnlock()
+		active = persistedActive
 	}
-	if active != "" {
-		if err := c.ensureConversation(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
-			workerpool.Log("re-apply agent after restart: %v", err)
-		}
+	if err := c.adoptConversation(ctx, active); err != nil {
+		return err
 	}
 	c.publish(protocol.Frame{Type: "state"})
 	return nil
-}
-
-// createFirstConversation is the empty-install path, shared by Open and recovery.
-func (c *Control) createFirstConversation(ctx context.Context) error {
-	return c.Create(ctx)
 }
 
 // watchConversations keeps the rail honest about runs happening elsewhere. A run
@@ -525,6 +589,13 @@ func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMe
 }
 
 func (c *Control) Close() {
+	// The loops stop first. A supervisor that sees its worker close takes that for a crash and
+	// restarts it from the settings this control was built from, so closing in the other order
+	// left a second worker running with the record that had just been replaced — over the same
+	// storage as its replacement.
+	if c.stop != nil {
+		c.stop()
+	}
 	if c.worker != nil {
 		c.worker.Close()
 	}
@@ -821,12 +892,40 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, change Ag
 		if (provider == "") != (modelID == "") {
 			return errors.New("provider and modelId must be given together")
 		}
+		// Refused rather than stored: a conversation bound to a model the credentials do not
+		// reach cannot run, and the failure would arrive later as a provider error on its next
+		// prompt instead of here, where the choice was made. The picker can only offer models
+		// of authenticated providers, so this refuses what the interface cannot ask for.
+		if provider != "" && !c.isAvailable(c.Describe(), protocol.ModelBinding{Provider: provider, ModelID: modelID}) {
+			return fmt.Errorf("%s/%s is not available with the current credentials", provider, modelID)
+		}
 		explicit.Provider, explicit.ModelID = provider, modelID
 	}
-	if change.Definition != nil {
+	if change.Definition != nil && *change.Definition != "" {
+		// Strictly, unlike resolution: choosing a definition is a request that it exists, and
+		// the catalog here is what the worker reported. Resolution stays lenient because it
+		// also runs before the worker has described itself.
+		c.mu.RLock()
+		agents := c.catalog.Agents
+		c.mu.RUnlock()
+		known := false
+		for _, agent := range agents {
+			if agent.Name == *change.Definition {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("no agent definition named %q", *change.Definition)
+		}
 		explicit.Definition = *change.Definition
+	} else if change.Definition != nil {
+		explicit.Definition = ""
 	}
 	if change.ThinkingLevel != nil {
+		if level := *change.ThinkingLevel; level != "" && !contains(thinkingLevels, level) {
+			return fmt.Errorf("unknown thinking level %q; expected one of %s", level, strings.Join(thinkingLevels, ", "))
+		}
 		explicit.ThinkingLevel = *change.ThinkingLevel
 	}
 
@@ -1201,6 +1300,18 @@ func (c *Control) reapplyInheriting(ctx context.Context) error {
 	c.persist()
 	c.publish(protocol.Frame{Type: "state"})
 	return firstErr
+}
+
+// loadInstallDefaults reads the install-wide layer.
+func (c *Control) loadInstallDefaults() {
+	install, err := LoadDefaults(filepath.Join(c.opts.Home, "settings.json"))
+	if err != nil {
+		workerpool.Log("install defaults unreadable, using this workspace's: %v", err)
+		return
+	}
+	c.mu.Lock()
+	c.install = install
+	c.mu.Unlock()
 }
 
 // SetInstallDefaults replaces the install-wide layer, which is what every workspace falls
@@ -1744,6 +1855,9 @@ type persistedSettings struct {
 // and which conversations chose a model. It must run before ensureDefault, or
 // ensureDefault derives a default and overwrites the one on disk.
 func (c *Control) loadSettings() string {
+	// The install layer first, and whatever this workspace's own file says: a workspace that
+	// has never saved settings has no file, and it still follows the install's defaults.
+	c.loadInstallDefaults()
 	if c.opts.SettingsPath == "" {
 		return ""
 	}
@@ -1767,13 +1881,6 @@ func (c *Control) loadSettings() string {
 	c.defaultThinking = settings.DefaultThinking
 	c.defaultAgent = settings.DefaultAgent
 	c.mu.Unlock()
-	if install, err := LoadDefaults(filepath.Join(c.opts.Home, "settings.json")); err == nil {
-		c.mu.Lock()
-		c.install = install
-		c.mu.Unlock()
-	} else {
-		workerpool.Log("install defaults unreadable, using this workspace's: %v", err)
-	}
 	if settings.Agents != nil {
 		c.mu.Lock()
 		for id, binding := range settings.Agents {

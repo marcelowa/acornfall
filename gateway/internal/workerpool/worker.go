@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,9 @@ type Config struct {
 	Dir string
 }
 
+// stderrKept is how many lines of harness diagnostics are kept for a failure message.
+const stderrKept = 12
+
 // Worker owns one worker process and speaks the JSONL protocol to it.
 type Worker struct {
 	config Config
@@ -36,6 +40,8 @@ type Worker struct {
 	pending map[string]chan protocol.Frame
 	nextID  atomic.Int64
 	closed  bool
+	// stderr is the tail of what the harness said, kept for a failure message.
+	stderr []string
 
 	frameMu sync.RWMutex
 	handler func(protocol.Frame)
@@ -244,9 +250,43 @@ func (w *Worker) readStdout(stdout io.Reader) {
 
 func (w *Worker) readStderr(stderr io.Reader) {
 	scanner := bufio.NewScanner(stderr)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
 	for scanner.Scan() {
-		Log("worker: %s", scanner.Text())
+		line := scanner.Text()
+		Log("worker: %s", line)
+		w.rememberStderr(line)
 	}
+}
+
+// rememberStderr keeps the tail of what the harness said, so a failure can be explained
+// where it is seen instead of only in the gateway's log. Bounded on purpose: this is a
+// diagnosis, not a log file.
+func (w *Worker) rememberStderr(line string) {
+	w.mu.Lock()
+	w.stderr = append(w.stderr, line)
+	if len(w.stderr) > stderrKept {
+		w.stderr = w.stderr[len(w.stderr)-stderrKept:]
+	}
+	w.mu.Unlock()
+}
+
+// LastWords is the most informative line the harness printed before it died: the one that
+// says something went wrong, or the last thing it said. A stack trace on stderr is normal
+// output for a crash, and its last line is the least useful one.
+func (w *Worker) LastWords() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for index := len(w.stderr) - 1; index >= 0; index-- {
+		if strings.Contains(strings.ToLower(w.stderr[index]), "error:") {
+			return strings.TrimSpace(w.stderr[index])
+		}
+	}
+	for index := len(w.stderr) - 1; index >= 0; index-- {
+		if trimmed := strings.TrimSpace(w.stderr[index]); trimmed != "" && !strings.HasPrefix(trimmed, "Bun v") {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // fail settles every waiter so callers do not hang when the process dies.

@@ -168,11 +168,22 @@ process. `docs/adr/` holds the designs they will land against.
 ## Development
 
 ```bash
-make check         # client/markup drift, the context fold, worker types, go test
+make check         # fast: types, the client/markup checks, and unit tests
+make test          # everything, including the end-to-end feature tests
 make ui            # drives the real client in headless chromium (needs a running gateway)
 make build         # gateway build
 make dev           # dev provider + gateway, workspace = current directory
 ```
+
+`docs/features.md` is the inventory: what the platform does, stated as things that are
+observable, and the test that covers each one. Read it before changing behaviour, and add to it
+when adding a feature.
+
+The end-to-end tests (`gateway/internal/e2e`) run a real gateway and a real worker against a
+scripted provider, so nothing calls a model and nothing needs a network. They need `bun` and
+`make deps`; without them they skip with a reason. A feature driven by a tool call — a guard
+blocking one, a subagent being spawned — is driven by `ACORNFALL_DEV_SCRIPT`, a JSON file of
+rules matched against the last user message; see `docs/features.md`.
 
 The Markdown renderer in `gateway/web/markdown.js` **escapes the source once, up front**,
 and every later step operates on escaped text. Model output and tool output are

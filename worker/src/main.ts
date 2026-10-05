@@ -36,7 +36,7 @@ import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import { loadCatalog, resolveAgent, type Catalog, type ResolvedAgent } from "./config.ts";
-import { devProvider } from "./devprovider.ts";
+import { devProvider, scriptedDevProvider } from "./devprovider.ts";
 import { conversationIdOf, ConversationMetaDoc } from "./meta.ts";
 import { delegationExtension, policyFor } from "./delegation.ts";
 import { guardsExtension } from "./hooks.ts";
@@ -145,7 +145,11 @@ async function loadWorkspaceRules(): Promise<string | undefined> {
 // different agents at once.
 const skillFilterByConversation = new Map<string, readonly string[] | null>();
 
-if (process.env.ACORNFALL_DEV_PROVIDER === "1") {
+const devScript = process.env.ACORNFALL_DEV_SCRIPT;
+if (devScript !== undefined && devScript !== "") {
+	const dev = scriptedDevProvider(devScript);
+	models.setProvider(dev.provider);
+} else if (process.env.ACORNFALL_DEV_PROVIDER === "1") {
 	const dev = devProvider();
 	models.setProvider(dev.provider);
 }
@@ -349,7 +353,8 @@ async function describe(): Promise<DescribeData> {
 		provider: "pi-durable",
 		workdir: args.workspace,
 		providers,
-		capabilities: { steer: true, subagents: false, sandbox: "local-process" },
+		// subagents: the delegation tools are installed below, so the interface may offer them.
+		capabilities: { steer: true, subagents: true, sandbox: "local-process" },
 	};
 }
 

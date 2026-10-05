@@ -138,7 +138,9 @@ func (w *Workspaces) Open(ctx context.Context) error {
 		return err
 	}
 	if _, err := w.Ensure(ctx, GeneralWorkspaceName); err != nil {
-		return err
+		// Logged, not fatal: the general workspace is where a client lands, but a client can
+		// still be told what is wrong with it. Exiting here would leave nothing to talk to.
+		workerpool.Log("general workspace: %v", err)
 	}
 	go w.evictIdle(ctx)
 	return nil
@@ -352,6 +354,9 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		return nil, err
 	}
 	if err := control.Open(ctx); err != nil {
+		// Close whatever it managed to start: Open's error path leaves its lifetime loops
+		// running otherwise.
+		control.Close()
 		return nil, fmt.Errorf("workspace %q: %w", name, err)
 	}
 	w.mu.Lock()
