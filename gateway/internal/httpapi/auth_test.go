@@ -24,12 +24,13 @@ func TestResolveToken(t *testing.T) {
 		{name: "loopback needs no token", addr: "127.0.0.1:7777"},
 		{name: "loopback with ::1 needs none", addr: "[::1]:7777"},
 		{name: "localhost needs none", addr: "localhost:7777"},
-		{name: "a tailnet address needs one", addr: "100.107.166.15:7777", want: true},
+		// TEST-NET-3, so a test fixture never carries someone's real address.
+		{name: "an address off this machine needs one", addr: "203.0.113.7:7777", want: true},
 		{name: "binding every interface needs one", addr: "0.0.0.0:7777", want: true},
 		{name: "and --insecure is how you say otherwise", addr: "0.0.0.0:7777", insecure: true},
 		{name: "a given token is used", explicit: "given", addr: "0.0.0.0:7777", want: true},
-		{name: "the environment is next", env: "from-env", addr: "100.0.0.1:7777", want: true},
-		{name: "the flag beats the environment", explicit: "given", env: "from-env", addr: "100.0.0.1:7777", want: true},
+		{name: "the environment is next", env: "from-env", addr: "203.0.113.7:7777", want: true},
+		{name: "the flag beats the environment", explicit: "given", env: "from-env", addr: "203.0.113.7:7777", want: true},
 	}
 
 	for _, test := range cases {

@@ -5,7 +5,7 @@
 // Needs a gateway on --addr; run with: bun run tools/check-ui.mjs [url]
 import puppeteer from "puppeteer-core";
 
-const url = process.argv[2] ?? process.env.ACORNFALL_URL ?? "http://100.107.166.15:7777";
+const url = process.argv[2] ?? process.env.ACORNFALL_URL ?? "http://127.0.0.1:7777";
 const chrome = process.env.CHROME_PATH ?? "/usr/bin/chromium";
 
 const failures = [];
