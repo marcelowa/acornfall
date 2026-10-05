@@ -13,8 +13,10 @@ unfalsifiable — an explanation of which layer produced what.
 ## Layers
 
 ```
-global     <data-dir>/config.json          <data-dir>/agents/<name>.md
-workspace  <workspace>/.acornfall/config.json   .acornfall/agents/<name>.md
+global     <data-dir>/config.json                <data-dir>/agents/<name>.md
+           ~/.agents/config.json                 ~/.agents/agents/<name>.md
+workspace  <ws>/.agents/config.json              <ws>/.agents/agents/<name>.md
+           <ws>/.acornfall/config.json           <ws>/.acornfall/agents/<name>.md
 agent      the definition file itself
 ```
 
@@ -22,6 +24,23 @@ A workspace definition **shadows** a global one with the same name. `config.json
 carries defaults that apply to every agent in scope; a definition applies to the
 one agent it names. Both use the same contribution shape, so there is one mental
 model rather than two.
+
+### Two folder names, one bundle
+
+`.agents` is the rest of the ecosystem's name for this bundle: it is where the Agent
+Skills convention puts `skills/`, and what the other harnesses look for. A bundle written
+for one of them therefore works here unchanged, and a skill you already have is not
+something you rewrite to use this platform. `.acornfall` is our name, and a folder that has
+both reads ours last, so ours wins: the interchange copy is the one you share, and the local
+one is the one that overrides it.
+
+`~/.agents` is read for the same reason, at the user level, because that is where the
+convention puts a person's own skills.
+
+Within a layer the order is therefore `~/.agents` → `<data-dir>` → `<ws>/.agents` →
+`<ws>/.acornfall`, and each folder may hold `config.json`, `agents/`, `skills/`, and
+`commands/`. Instructions concatenate in that order; a later model, thinking level, agent
+definition, command, or skill of the same name replaces an earlier one.
 
 ## Contribution shape
 

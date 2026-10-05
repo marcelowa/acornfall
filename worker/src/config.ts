@@ -10,6 +10,7 @@
  * which layer set it. See docs/adr/0004-resource-overlay.md.
  */
 import { readdir, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type LayerName = "global" | "workspace" | "agent";
@@ -311,27 +312,77 @@ export interface Catalog {
 }
 
 /**
- * The workspace layer is read only when the workspace is trusted. A workspace's files are
- * instructions from a folder, and folders are things you clone: an AGENTS.md in an
- * untrusted repository is prompt injection. Untrusted means the folder and nothing else.
+ * The folder names a resource bundle may live under.
+ *
+ * `.agents` is the rest of the ecosystem's name for it — the Agent Skills convention for
+ * `skills/`, and what the other harnesses look for — so a bundle written for one of them
+ * works here. `.acornfall` is ours. A folder that has both uses ours: the interchange copy is
+ * the one you share, and the local one is the one that overrides it.
  */
-export async function loadCatalog(dataDir: string, workspace: string, trusted = true): Promise<Catalog> {
-	const global = await loadConfig(join(dataDir, "config.json"), "global");
-	const workspaceConfig = trusted ? await loadConfig(join(workspace, ".acornfall", "config.json"), "workspace") : null;
-	const defaults: LayerTrace[] = [];
-	if (global !== null) defaults.push({ layer: "global", path: global.path, contributes: global.contributions });
-	if (workspaceConfig !== null) {
-		defaults.push({ layer: "workspace", path: workspaceConfig.path, contributes: workspaceConfig.contributions });
-	}
+export const ECOSYSTEM_DIR = ".agents";
+export const NATIVE_DIR = ".acornfall";
 
-	// The workspace shadows a global definition of the same name.
-	const byName = new Map<string, AgentDefinition>();
-	for (const agent of await loadAgentDir(join(dataDir, "agents"), "global")) byName.set(agent.name, agent);
-	if (trusted) {
-		for (const agent of await loadAgentDir(join(workspace, ".acornfall", "agents"), "workspace")) {
-			byName.set(agent.name, agent);
+/**
+ * The folders one install reads, least specific first: each may hold `config.json`, `agents/`,
+ * `skills/`, and `commands/`. Later folders shadow earlier ones, which is how a workspace
+ * overrides the install and how the native folder overrides the ecosystem one beside it.
+ */
+export interface LayerRoots {
+	/** The user's: the ecosystem's shared folder first, then the install's own. */
+	global: readonly string[];
+	/** The workspace's, or empty when it is untrusted. */
+	workspace: readonly string[];
+}
+
+export function layerRoots(options: {
+	home: string;
+	workspace: string;
+	trusted: boolean;
+	/** The user's home directory, for `~/.agents`. Injected so a test never reads the real one. */
+	userHome?: string;
+}): LayerRoots {
+	const user = options.userHome ?? homedir();
+	return {
+		global: [join(user, ECOSYSTEM_DIR), options.home],
+		// An untrusted workspace contributes nothing, including the folder a clone is most
+		// likely to carry.
+		workspace: options.trusted
+			? [join(options.workspace, ECOSYSTEM_DIR), join(options.workspace, NATIVE_DIR)]
+			: [],
+	};
+}
+
+/** One folder per root with `name` appended: the same list serves agents, skills, and commands. */
+export function resourceFolders(roots: LayerRoots, name: string): string[] {
+	return [...roots.global, ...roots.workspace].map((root) => join(root, name));
+}
+
+/**
+ * Reads every folder the install has, in order.
+ *
+ * Trust is already decided by the roots: `layerRoots` gives an untrusted workspace none. That
+ * matters because a workspace's files are instructions from a folder, and folders are things
+ * you clone — an `AGENTS.md` or an agent definition in an untrusted repository is prompt
+ * injection. Untrusted means the folder and nothing else.
+ */
+export async function loadCatalog(roots: LayerRoots): Promise<Catalog> {
+	const defaults: LayerTrace[] = [];
+	const discovered: AgentDefinition[] = [];
+
+	for (const [layer, folders] of [["global", roots.global], ["workspace", roots.workspace]] as const) {
+		for (const root of folders) {
+			const config = await loadConfig(join(root, "config.json"), layer);
+			if (config !== null) {
+				defaults.push({ layer, path: config.path, contributes: config.contributions });
+			}
+			discovered.push(...(await loadAgentDir(join(root, "agents"), layer)));
 		}
 	}
+
+	// Later folders shadow earlier ones: the workspace beats the install, and the native folder
+	// beats the ecosystem one beside it.
+	const byName = new Map<string, AgentDefinition>();
+	for (const agent of discovered) byName.set(agent.name, agent);
 	return { defaults, agents: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)) };
 }
 

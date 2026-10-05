@@ -60,8 +60,9 @@ async function isDirectory(path: string): Promise<boolean> {
 
 /** Discovery is shallow on purpose: one level of grouping, then skill directories. */
 export async function loadSkills(roots: readonly string[]): Promise<Skill[]> {
-	const skills: Skill[] = [];
-	const seen = new Set<string>();
+	// Later roots shadow earlier ones, the same way agents and commands do: a workspace skill
+	// with a global skill's name replaces it, and `.acornfall` replaces `.agents`.
+	const byName = new Map<string, Skill>();
 	for (const root of roots) {
 		const base = isAbsolute(root) ? root : resolve(process.cwd(), root);
 		if (!(await isDirectory(base))) continue;
@@ -79,9 +80,7 @@ export async function loadSkills(roots: readonly string[]): Promise<Skill[]> {
 			const front = parseFrontmatter(source);
 			const name = front.name ?? entry.name;
 			if (front.description === undefined || front.description.length === 0) continue;
-			if (seen.has(name)) continue;
-			seen.add(name);
-			skills.push({
+			byName.set(name, {
 				name,
 				description: front.description,
 				disableModelInvocation: front.disableModelInvocation,
@@ -90,7 +89,8 @@ export async function loadSkills(roots: readonly string[]): Promise<Skill[]> {
 			});
 		}
 	}
-	return skills;
+	// Sorted so the prompt's skill section does not depend on the order a filesystem listed.
+	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function renderSkills(skills: readonly Skill[], allowed: readonly string[] | null): string | undefined {

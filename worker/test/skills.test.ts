@@ -6,6 +6,7 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { cleanupScratch, tempDir } from "./scratch.ts";
 import { loadSkills, renderSkills, skillBody } from "../src/skills.ts";
+import { layerRoots, resourceFolders } from "../src/config.ts";
 import { FileCredentialStore } from "../src/credentials.ts";
 import { conversationIdOf } from "../src/meta.ts";
 
@@ -33,6 +34,34 @@ describe("skills", () => {
 		await write(join(root, "acorn-notes", "SKILL.md"), "---\ndescription: from the folder\n---\nBody");
 		const skills = await loadSkills([root]);
 		expect(skills[0]?.name).toBe("acorn-notes");
+	});
+
+	test("a later root shadows an earlier one, the way agents and commands do", async () => {
+		const root = await tempDir("acornfall-skills-");
+		await write(join(root, "first", "same", "SKILL.md"), "---\nname: same\ndescription: first\n---\nA");
+		await write(join(root, "second", "same", "SKILL.md"), "---\nname: same\ndescription: second\n---\nB");
+		await write(join(root, "second", "only", "SKILL.md"), "---\nname: only\ndescription: second only\n---\nC");
+
+		const skills = await loadSkills([join(root, "first"), join(root, "second")]);
+		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
+			["only", "second only"],
+			["same", "second"],
+		]);
+	});
+
+	test("the .agents folder is read, and ours shadows it", async () => {
+		const root = await tempDir("acornfall-skills-");
+		const workspace = join(root, "workspace");
+		await write(join(workspace, ".agents", "skills", "eco", "SKILL.md"), "---\nname: eco\ndescription: from .agents\n---\nA");
+		await write(join(workspace, ".agents", "skills", "both", "SKILL.md"), "---\nname: both\ndescription: ecosystem\n---\nB");
+		await write(join(workspace, ".acornfall", "skills", "both", "SKILL.md"), "---\nname: both\ndescription: native\n---\nC");
+
+		const roots = layerRoots({ home: join(root, "home"), workspace, trusted: true, userHome: join(root, "user") });
+		const skills = await loadSkills(resourceFolders(roots, "skills"));
+		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
+			["both", "native"],
+			["eco", "from .agents"],
+		]);
 	});
 
 	test("the body is available but not what the prompt carries", () => {

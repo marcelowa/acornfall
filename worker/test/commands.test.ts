@@ -4,14 +4,15 @@
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { expandCommand, loadCommands, parseCommandInvocation } from "../src/commands.ts";
+import { layerRoots, resourceFolders } from "../src/config.ts";
 import { cleanupScratch, tempDir } from "./scratch.ts";
 
 afterAll(cleanupScratch);
 
 async function write(path: string, content: string): Promise<void> {
-	await mkdir(join(path, "..").replace(/\/[^/]+$/, ""), { recursive: true });
+	await mkdir(dirname(path), { recursive: true });
 	await writeFile(path, content);
 }
 
@@ -90,6 +91,26 @@ describe("loading", () => {
 		const commands = await loadCommands([first, second]);
 		expect(commands).toHaveLength(1);
 		expect(commands[0]?.description).toBe("workspace");
+	});
+
+	test("the .agents folder is read, and ours shadows it", async () => {
+		const root = await tempDir("acornfall-commands-");
+		const home = join(root, "home");
+		const workspace = join(root, "workspace");
+		const user = join(root, "user");
+		// The same command in all three places it can live: the user's ecosystem folder, the
+		// workspace's, and ours beside it. Ours is read last and wins.
+		await write(join(user, ".agents", "commands", "deploy.md"), "---\nname: deploy\ndescription: user\n---\nUser");
+		await write(join(workspace, ".agents", "commands", "deploy.md"), "---\nname: deploy\ndescription: ecosystem\n---\nEco");
+		await write(join(workspace, ".acornfall", "commands", "deploy.md"), "---\nname: deploy\ndescription: native\n---\nNative");
+		await write(join(workspace, ".agents", "commands", "shared.md"), "---\nname: shared\ndescription: only in .agents\n---\nShared");
+
+		const roots = layerRoots({ home, workspace, trusted: true, userHome: user });
+		const commands = await loadCommands(resourceFolders(roots, "commands"));
+		expect(commands.map((command) => [command.name, command.description])).toEqual([
+			["deploy", "native"],
+			["shared", "only in .agents"],
+		]);
 	});
 
 	test("a directory that does not exist is not an error", async () => {

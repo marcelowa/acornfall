@@ -63,20 +63,26 @@ moved — but only an operator can point it there. See below.
   workspaces/
     general/                  a workspace: the agent can read and write here
       AGENTS.md
-      .acornfall/             its resources: config.json, agents/, skills/, commands/
+      .agents/                its resources, the ecosystem's name: config.json, agents/,
+                              skills/, commands/ — shared, and committed with the project
+      .acornfall/             the same bundle under our name, which wins when both exist
       projects/               cloned or created projects
 ```
 
 **Runtime state lives outside the workspace folder.** The agent has `bash`; its own
 database should not be a file it can delete.
 
-**Workspace resources live in `<ws>/.acornfall/`**, with one exception: `AGENTS.md` sits at
-the workspace root, where the convention puts it.
+**Workspace resources live in `<ws>/.agents/` or `<ws>/.acornfall/`**, with one exception:
+`AGENTS.md` sits at the workspace root, where the convention puts it. Both names read the same
+bundle; ours wins when a folder has both (ADR 0004). The split is useful in practice: the
+`.agents` copy is the one a project shares, and the `.acornfall` copy is the one you keep to
+yourself — which is why this repository commits the first and ignores the second.
 
 The first version looked for `skills/`, `agents/`, and `commands/` at the root as well, so
 they would be visible and editable. That was withdrawn: a workspace is often a repository
-somebody else wrote, and a repository with its own `agents/` directory would silently be
-read as ours. `.acornfall/` cannot be mistaken for project content.
+somebody else wrote, and a repository with its own `agents/` directory would silently be read
+as ours. The folder has to be *named* to be read, and now there are two names that are
+unmistakable: the ecosystem's convention, and ours.
 
 ## The resource layer
 

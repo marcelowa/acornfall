@@ -123,6 +123,71 @@ func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 	}
 }
 
+// The ecosystem's folder name is read the same way ours is, so a bundle written for another
+// harness works here. Where a folder has both, ours wins: the interchange copy is what you
+// share, and the local one is what overrides it.
+func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
+	s := start(t,
+		withScript(scriptRule{Match: "what are the rules", Reply: "answered"}),
+		withSetup(func(t *testing.T, s *system) {
+			// A complete bundle under the ecosystem name: rules, an agent, a command, a skill.
+			s.writeWorkspace(t, ".agents/config.json", `{"defaults":{"instructions":"ECOSYSTEM MARKER"}}`)
+			s.writeWorkspace(t, ".agents/agents/eco.md", "---\nname: eco\ndescription: from .agents\n---\nEco body.")
+			s.writeWorkspace(t, ".agents/commands/eco.md", "---\nname: eco-command\ndescription: from .agents\n---\nEco body.")
+			s.writeWorkspace(t, ".agents/skills/eco-skill/SKILL.md", "---\nname: eco-skill\ndescription: from .agents\n---\nBody.")
+			// And ours, shadowing the agent and the command by name.
+			s.writeWorkspace(t, ".acornfall/agents/eco.md", "---\nname: eco\ndescription: from .acornfall\n---\nNative body.")
+			s.writeWorkspace(t, ".acornfall/commands/eco.md", "---\nname: eco-command\ndescription: from .acornfall\n---\nNative body.")
+		}),
+	)
+	c := s.client()
+
+	listed := c.state("general")
+	if len(listed.Agents) != 1 {
+		t.Fatalf("expected the one definition, in both folders, got %+v", listed.Agents)
+	}
+	agent := listed.Agents[0]
+	if !strings.Contains(agent.Description, "from .acornfall") || !strings.Contains(agent.Source, ".acornfall") {
+		t.Errorf("our folder should shadow the ecosystem one, got %+v", agent)
+	}
+
+	var listing struct {
+		Commands []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Source      string `json:"source"`
+		} `json:"commands"`
+	}
+	c.get("/api/workspaces/general/commands", &listing)
+	if len(listing.Commands) != 1 {
+		t.Fatalf("expected the one command, in both folders, got %+v", listing.Commands)
+	}
+	if !strings.Contains(listing.Commands[0].Source, ".acornfall") {
+		t.Errorf("our folder should shadow the ecosystem command, got %+v", listing.Commands[0])
+	}
+
+	// The explain view names the file each layer contributed, so where a rule came from is
+	// answerable rather than inferred.
+	paths := make([]string, 0, len(listed.Defaults))
+	for _, trace := range listed.Defaults {
+		paths = append(paths, trace.Path)
+	}
+	if !strings.Contains(strings.Join(paths, " "), ".agents/config.json") {
+		t.Errorf("the layer trace should name the ecosystem file, got %v", paths)
+	}
+
+	// The skill and the rule reach the prompt, which is where they matter.
+	root := c.state("general").Conversation.ID
+	c.prompt("general", root, "what are the rules")
+	view := c.waitForText("general", root, "answered")
+	sections := strings.Join(sectionValues(view.systemSections()), "\n")
+	for _, want := range []string{"ECOSYSTEM MARKER", "eco-skill"} {
+		if !strings.Contains(sections, want) {
+			t.Errorf("%s should reach the prompt, got %q", want, sections)
+		}
+	}
+}
+
 // Reload re-reads the files, so writing an agent does not mean restarting anything.
 func TestReloadPicksUpANewDefinition(t *testing.T) {
 	s := start(t)

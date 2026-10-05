@@ -34,7 +34,14 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
-import { loadCatalog, resolveAgent, type Catalog, type ResolvedAgent } from "./config.ts";
+import {
+	layerRoots,
+	loadCatalog,
+	resourceFolders,
+	resolveAgent,
+	type Catalog,
+	type ResolvedAgent,
+} from "./config.ts";
 import { devProvider, scriptedDevProvider } from "./devprovider.ts";
 import { conversationIdOf, ConversationMetaDoc } from "./meta.ts";
 import { delegationExtension, policyFor } from "./delegation.ts";
@@ -100,11 +107,9 @@ function parseArgs(argv: readonly string[]): Args {
 		trusted,
 		storage: resolve(values.get("storage") ?? defaults("session.sqlite")),
 		credentials,
-		// An untrusted workspace contributes no skills, so only the global set is read.
-		skills:
-			skills.length > 0
-				? skills
-				: [join(home, "skills"), ...(trusted ? [defaults("skills")] : [])],
+		// Explicit `--skill <dir>` entries, if any; empty means "derive them from the layer
+		// roots", which is what knows about `.agents` and about trust.
+		skills,
 	};
 }
 
@@ -113,20 +118,23 @@ await mkdir(dirname(args.storage), { recursive: true });
 
 const credentials = new FileCredentialStore(args.credentials);
 const models = builtinModels({ credentials });
-const discoveredSkills = await loadSkills(args.skills);
+
+// Every resource folder this install reads: the user's, then the workspace's, each with the
+// ecosystem's `.agents` before our own `.acornfall`. An explicit --skill replaces the list.
+const roots = layerRoots({ home: args.home, workspace: args.workspace, trusted: args.trusted });
+const discoveredSkills = await loadSkills(
+	args.skills.length > 0 ? args.skills : resourceFolders(roots, "skills"),
+);
 
 // The overlay, the workspace's rules, and its commands. All reloaded on demand, so
 // editing a file does not need a restart.
-let catalog: Catalog = await loadCatalog(args.home, args.workspace, args.trusted);
+let catalog: Catalog = await loadCatalog(roots);
 reportUnknownKeys(catalog);
 let workspaceRules = await loadWorkspaceRules();
 let commands = await loadCommands(commandRoots());
 
 function commandRoots(): string[] {
-	return [
-		join(args.home, "commands"),
-		...(args.trusted ? [join(args.workspace, ".acornfall", "commands")] : []),
-	];
+	return resourceFolders(roots, "commands");
 }
 
 /**
@@ -709,7 +717,7 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 				})),
 			};
 		case "reload":
-			catalog = await loadCatalog(args.home, args.workspace, args.trusted);
+			catalog = await loadCatalog(roots);
 			reportUnknownKeys(catalog);
 			workspaceRules = await loadWorkspaceRules();
 			commands = await loadCommands(commandRoots());

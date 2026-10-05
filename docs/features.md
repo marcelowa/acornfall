@@ -94,6 +94,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | R7 | Slash commands come from two layers, the workspace shadowing the install, and the listing says which file each came from. | `TestCommandsComeFromBothLayersAndTheWorkspaceWins` |
 | R8 | Expansion happens server-side, so the transcript records what the model saw; arguments are appended when there is no placeholder. | `TestCommandExpansionIsWhatTheModelSees`, `TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder` + `worker/test/commands.test.ts` |
 | R9 | A message that merely starts with a slash is not rewritten. | `TestAnUnknownCommandIsSentAsWritten` |
+| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both, and an untrusted workspace contributes neither. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
 
 ## Guards
 

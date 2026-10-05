@@ -107,11 +107,13 @@ make dev
   request.
 - **Agent definitions** with a global/workspace/agent overlay, and an explain view
   showing which layer contributed what. See `docs/adr/0004-resource-overlay.md`.
-- **Workspaces**: a folder, its own `AGENTS.md`, config, agents, skills, and commands, and
-  a trust decision that decides whether any of it is read. Each workspace runs its own
+- **Workspaces**: a folder, its own `AGENTS.md`, config, agents, skills, and commands — under
+  `.agents/` (the ecosystem's name, so a bundle written for another harness works) or
+  `.acornfall/`, which wins when a folder has both — and a trust decision that decides whether
+  any of it is read. Each workspace runs its own
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
-- **Slash commands** from `<home>/commands/` and `<workspace>/.acornfall/commands/`,
-  expanded server-side so the transcript records what the model saw.
+- **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
+  `.agents/` or `.acornfall/`, expanded server-side so the transcript records what the model saw.
 - **Guards**: declarative rules that block a tool call and say why — a command pattern, or a
   path outside the workspace — accumulating across layers and visible in the inspector.
 - **Workspaces are managed from the interface**: create by name inside the workspaces folder
@@ -135,8 +137,11 @@ make dev
 
 ## Write an agent
 
-`~/.acornfall/agents/<name>.md` (global) or `<workspace>/.acornfall/agents/<name>.md`
-(workspace, shadows a global definition of the same name):
+`~/.acornfall/agents/<name>.md` (global) or `<workspace>/.agents/agents/<name>.md`
+(workspace, shadows a global definition of the same name). The workspace bundle may also be
+`<workspace>/.acornfall/`, and that one wins when both exist: `.agents` is the ecosystem's
+name — a bundle written for another harness works here, and `~/.agents/skills/` is read too —
+while `.acornfall` is where you keep what is yours alone:
 
 ```markdown
 ---
