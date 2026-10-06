@@ -43,6 +43,11 @@ class MicrosandboxClient implements SandboxClient {
 		const stdout: Uint8Array[] = [];
 		const stderr: Uint8Array[] = [];
 		let stopped: "aborted" | "timeout" | undefined;
+		// The exit code arrives as the stream's last event. Calling the SDK's wait() after the
+		// stream drained is a second reader for the same event, and it reports "exec session
+		// ended without exit event" for every command that succeeded — so a run that looked
+		// fine to a reader who only checked the output was an error to the model that read it.
+		let exitCode: number | undefined;
 		const stop = (reason: "aborted" | "timeout"): void => {
 			if (stopped !== undefined) return;
 			stopped = reason;
@@ -59,6 +64,10 @@ class MicrosandboxClient implements SandboxClient {
 		}
 		try {
 			for await (const event of handle) {
+				if (event.kind === "exited") {
+					exitCode = event.code;
+					continue;
+				}
 				if (event.kind !== "stdout" && event.kind !== "stderr") continue;
 				(event.kind === "stdout" ? stdout : stderr).push(event.data);
 				options.onChunk?.({ stream: event.kind, data: event.data });
@@ -67,7 +76,10 @@ class MicrosandboxClient implements SandboxClient {
 			if (timer !== undefined) clearTimeout(timer);
 			options.signal?.removeEventListener("abort", abort);
 		}
-		const code = stopped === undefined ? (await handle.wait()).code : 143;
+		const code = stopped === undefined ? exitCode : 143;
+		if (code === undefined) {
+			throw new Error("the sandbox ended the exec stream without an exit event");
+		}
 		return { code, stdout: concatChunks(stdout), stderr: concatChunks(stderr), ...(stopped === undefined ? {} : { stopped }) };
 	}
 

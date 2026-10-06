@@ -247,6 +247,13 @@ func TestAToolCallRunsAndIsRecorded(t *testing.T) {
 	if !sawCall {
 		t.Errorf("the transcript should record the call:\n%s", transcript)
 	}
+	// A result that carries both the command's output and the harness's error block is worse
+	// than either alone: the model reads the error and distrusts the output. This assertion
+	// was missing while every streamed command was reported as "exec session ended without
+	// exit event", which only the file name above could not catch.
+	if result := got.lastToolResult(); strings.Contains(result, "[error]") {
+		t.Errorf("a command that succeeded was reported with an error:\n%s", result)
+	}
 }
 
 // A conversation can be given its own model and thinking level, and the level is clamped to
