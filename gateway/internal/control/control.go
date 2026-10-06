@@ -49,7 +49,8 @@ type Options struct {
 	// WorkspacesDir is where new workspaces are created, so the interface can say so.
 	WorkspacesDir string
 	// Sandbox is the machine's sandbox tier. Nil means this Control was built without one,
-	// which only tests do: the workspace still opens and its tools refuse.
+	// which is what ACORNFALL_NO_SANDBOX asks the gateway for: the workspace still opens and
+	// its tools refuse.
 	Sandbox *sandbox.Manager
 }
 

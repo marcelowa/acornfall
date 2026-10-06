@@ -98,28 +98,11 @@ func serve(argv []string) error {
 	}
 
 	// The sandbox tier. One engine per install, and the worker is told which one, because it
-	// attaches with that engine's SDK and the two must agree. Opening it does not install
-	// anything: the engine is fetched on the first workspace that needs it, so starting the
-	// gateway stays fast and a machine that cannot sandbox still runs everything else — with
-	// tools that refuse.
-	driver := sandbox.NewMicrosandbox(dir)
-	if *sandboxState != "" {
-		driver = driver.WithStateDir(*sandboxState)
-	}
-	engine, err := sandbox.Open(ctx, sandbox.Options{
-		Home:   dir,
-		Log:    log.Printf,
-		Driver: driver,
-	})
+	// attaches with that engine's SDK and the two must agree.
+	engine, err := sandboxTier(ctx, dir, *sandboxState)
 	if err != nil {
 		return err
 	}
-	report := engine.Report()
-	if problem := engine.Problem(); problem != nil {
-		log.Printf("sandbox: %v", problem)
-		log.Printf("sandbox: commands and file tools will refuse until this is fixed; tools never run on the host")
-	}
-	log.Printf("sandbox: engine %s %s, state %s", report.Engine, report.Version, report.StateDir)
 
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
 		Home:          dir,
@@ -164,6 +147,40 @@ func serve(argv []string) error {
 		return err
 	}
 	return nil
+}
+
+// sandboxTier builds the machine's sandbox tier, or returns nil when this run asks for none.
+// Opening it installs nothing: the engine is fetched on the first workspace that needs it,
+// so starting the gateway stays fast and a machine that cannot sandbox still runs everything
+// else — with tools that refuse.
+//
+// ACORNFALL_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
+// nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
+// behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
+func sandboxTier(ctx context.Context, home, state string) (*sandbox.Manager, error) {
+	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
+		log.Printf("sandbox: disabled by ACORNFALL_NO_SANDBOX; commands and file tools will refuse")
+		return nil, nil
+	}
+	driver := sandbox.NewMicrosandbox(home)
+	if state != "" {
+		driver = driver.WithStateDir(state)
+	}
+	engine, err := sandbox.Open(ctx, sandbox.Options{
+		Home:   home,
+		Log:    log.Printf,
+		Driver: driver,
+	})
+	if err != nil {
+		return nil, err
+	}
+	report := engine.Report()
+	if problem := engine.Problem(); problem != nil {
+		log.Printf("sandbox: %v", problem)
+		log.Printf("sandbox: commands and file tools will refuse until this is fixed; tools never run on the host")
+	}
+	log.Printf("sandbox: engine %s %s, state %s", report.Engine, report.Version, report.StateDir)
+	return engine, nil
 }
 
 func providers(argv []string) {

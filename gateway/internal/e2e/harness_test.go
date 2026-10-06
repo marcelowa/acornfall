@@ -220,8 +220,12 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	}
 	cmd := exec.Command(gatewayBin, args...)
 	// A curated environment: the test must not inherit a real install's home, token, or
-	// provider credentials, or it would be testing someone else's configuration.
+	// provider credentials, or it would be testing someone else's configuration. The
+	// switches that decide how this install behaves are forwarded explicitly.
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + s.Home, "ACORNFALL_HOME=" + s.Home}
+	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" {
+		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
+	}
 	if len(s.cfg.script) > 0 {
 		scriptPath := filepath.Join(s.Home, "script.json")
 		payload := map[string]any{"rules": s.cfg.script}
@@ -578,8 +582,15 @@ type state struct {
 		Description string `json:"description"`
 	} `json:"skills"`
 	Capabilities map[string]any `json:"capabilities"`
-	Defaults     []layerTrace   `json:"defaults"`
-	Resolved     map[string]any `json:"resolved"`
+	Sandbox      struct {
+		Engine  string `json:"engine"`
+		Version string `json:"version"`
+		Status  string `json:"status"`
+		Tools   bool   `json:"tools"`
+		Problem string `json:"problem"`
+	} `json:"sandbox"`
+	Defaults []layerTrace   `json:"defaults"`
+	Resolved map[string]any `json:"resolved"`
 }
 
 type layerTrace struct {
