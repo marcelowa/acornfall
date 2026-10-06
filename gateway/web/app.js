@@ -129,6 +129,15 @@ function setStatus(text, stateName) {
 		els.status.title = state.workerError ?? "";
 		return;
 	}
+	// A sandbox that cannot run is not a subtle failure: the tools refuse, and the reason is
+	// the only useful thing to show. It is stated here rather than in a banner of its own,
+	// because the state is the same kind of fact as a worker being down.
+	if (state && state.sandbox && state.sandbox.tools === false) {
+		els.status.textContent = "tools refused";
+		els.status.dataset.state = "offline";
+		els.status.title = state.sandbox.problem ?? "the sandbox is not available";
+		return;
+	}
 	els.status.textContent = text;
 	if (stateName) els.status.dataset.state = stateName;
 	else delete els.status.dataset.state;

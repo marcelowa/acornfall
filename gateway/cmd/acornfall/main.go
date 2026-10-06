@@ -17,6 +17,7 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/httpapi"
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/web"
 )
 
@@ -30,6 +31,10 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "workspace" {
 		workspaceCommand(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		doctorCommand(os.Args[2:])
 		return
 	}
 	if err := serve(os.Args[1:]); err != nil {
@@ -46,6 +51,7 @@ func serve(argv []string) error {
 	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
+	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
 	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: "bun run src/main.ts")`)
 	workerDir := flags.String("worker-dir", "", "worker directory")
@@ -91,6 +97,30 @@ func serve(argv []string) error {
 		return err
 	}
 
+	// The sandbox tier. One engine per install, and the worker is told which one, because it
+	// attaches with that engine's SDK and the two must agree. Opening it does not install
+	// anything: the engine is fetched on the first workspace that needs it, so starting the
+	// gateway stays fast and a machine that cannot sandbox still runs everything else — with
+	// tools that refuse.
+	driver := sandbox.NewMicrosandbox(dir)
+	if *sandboxState != "" {
+		driver = driver.WithStateDir(*sandboxState)
+	}
+	engine, err := sandbox.Open(ctx, sandbox.Options{
+		Home:   dir,
+		Log:    log.Printf,
+		Driver: driver,
+	})
+	if err != nil {
+		return err
+	}
+	report := engine.Report()
+	if problem := engine.Problem(); problem != nil {
+		log.Printf("sandbox: %v", problem)
+		log.Printf("sandbox: commands and file tools will refuse until this is fixed; tools never run on the host")
+	}
+	log.Printf("sandbox: engine %s %s, state %s", report.Engine, report.Version, report.StateDir)
+
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
 		Home:          dir,
 		GeneralPath:   general,
@@ -98,6 +128,7 @@ func serve(argv []string) error {
 		WorkerCommand: command,
 		WorkerDir:     worker,
 		Model:         *model,
+		Sandbox:       engine,
 	})
 	if err := workspaces.Open(ctx); err != nil {
 		return err
@@ -256,12 +287,18 @@ gateway picks the change up on its next start.
 func workspaceCommand(argv []string) {
 	flags := flag.NewFlagSet("workspace", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
+	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
 	if err := flags.Parse(argv); err != nil {
 		return
 	}
 	args := flags.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove>")
+		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove> [--image IMAGE] [--network on|off]")
+		os.Exit(2)
+	}
+	if *network != "" && !control.ValidNetwork(*network) {
+		fmt.Fprintln(os.Stderr, `acornfall: --network is "on" or "off"`)
 		os.Exit(2)
 	}
 	dir, err := resolveDataDir(*dataDir)
@@ -285,15 +322,19 @@ func workspaceCommand(argv []string) {
 			if workspace.General {
 				marker = "*"
 			}
-			fmt.Printf("%s %-16s %s\n", marker, workspace.Name, workspace.Path)
+			fmt.Printf("%s %-16s %-22s %s\n", marker, workspace.Name, sandboxLabel(workspace), workspace.Path)
 		}
 		fmt.Printf("\nworkspaces folder: %s\n", registry.WorkspacesDir)
 	case "add":
-		if len(args) < 3 {
-			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> <folder>")
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> [folder] [--image IMAGE] [--network on|off]")
 			os.Exit(2)
 		}
-		name, folder := args[1], args[2]
+		name := args[1]
+		folder := name
+		if len(args) > 2 {
+			folder = args[2]
+		}
 		absolute, err := filepath.Abs(folder)
 		if err != nil {
 			log.Fatalf("acornfall: %v", err)
@@ -307,12 +348,13 @@ func workspaceCommand(argv []string) {
 			}
 		}
 		registry.Workspaces = append(registry.Workspaces, control.Workspace{
-			Name: name, Path: absolute, Title: name,
+			Name: name, Path: absolute, Title: name, Image: *image, Network: *network,
 		})
 		if err := control.SaveRegistryFile(registry); err != nil {
 			log.Fatalf("acornfall: %v", err)
 		}
 		fmt.Printf("added %s at %s\n", name, absolute)
+		fmt.Printf("sandbox: %s, network %s\n", imageLabel(*image), networkLabel(*network))
 	case "remove":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: acornfall workspace remove <name>")
@@ -342,6 +384,34 @@ func workspaceCommand(argv []string) {
 		fmt.Fprintf(os.Stderr, "unknown workspace command %q\n", args[0])
 		os.Exit(2)
 	}
+}
+
+// sandboxLabel is what a workspace's sandbox will be, for the list column: short enough to
+// scan, specific enough to answer "which image is this one running".
+func sandboxLabel(workspace control.Workspace) string {
+	image := workspace.Image
+	if image == "" {
+		image = sandbox.DefaultImage
+	}
+	network := "net on"
+	if workspace.Network == control.NetworkOff {
+		network = "net off"
+	}
+	return image + ", " + network
+}
+
+func imageLabel(image string) string {
+	if image == "" {
+		return "image " + sandbox.DefaultImage + " (default)"
+	}
+	return "image " + image
+}
+
+func networkLabel(network string) string {
+	if network == control.NetworkOff {
+		return "off"
+	}
+	return "on (default)"
 }
 
 func resolveDataDir(flagValue string) (string, error) {

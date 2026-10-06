@@ -115,6 +115,8 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		Name    string  `json:"name"`
 		Title   string  `json:"title"`
 		Path    *string `json:"path"`
+		Image   *string `json:"image"`
+		Network *string `json:"network"`
 		Trusted *bool   `json:"trusted"`
 	}
 	if !decode(w, r, &body) {
@@ -125,6 +127,10 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		// a trust flag that decided whether its own resources were read, and it does not any
 		// more. A caller that asks for the old behaviour should be told, not humoured.
 		http.Error(w, "every workspace's own agents, skills, commands, and rules are read; there is no trust flag", http.StatusBadRequest)
+		return
+	}
+	if body.Network != nil && !control.ValidNetwork(*body.Network) {
+		http.Error(w, `network is "on" or "off"`, http.StatusBadRequest)
 		return
 	}
 	if body.Path != nil {
@@ -138,12 +144,16 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	if body.Title != "" && body.Title != workspace.Name {
-		workspace.Title = body.Title
-		if err := s.workspaces.Update(workspace); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
+	workspace.Title = firstNonEmpty(body.Title, workspace.Title)
+	if body.Image != nil {
+		workspace.Image = *body.Image
+	}
+	if body.Network != nil {
+		workspace.Network = *body.Network
+	}
+	if err := s.workspaces.Update(workspace); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
 	}
 	writeJSON(w, http.StatusOK, s.listing())
 }
@@ -160,6 +170,8 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	// workspaces folder exists to prevent.
 	var body struct {
 		Title   *string `json:"title"`
+		Image   *string `json:"image"`
+		Network *string `json:"network"`
 		Trusted *bool   `json:"trusted"`
 	}
 	if !decode(w, r, &body) {
@@ -169,8 +181,20 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "every workspace's own agents, skills, commands, and rules are read; there is no trust flag", http.StatusBadRequest)
 		return
 	}
+	if body.Network != nil && !control.ValidNetwork(*body.Network) {
+		// Refused rather than ignored: a caller asking for a network setting we do not have
+		// should be told, not humoured.
+		http.Error(w, `network is "on" or "off"`, http.StatusBadRequest)
+		return
+	}
 	if body.Title != nil {
 		existing.Title = *body.Title
+	}
+	if body.Image != nil {
+		existing.Image = *body.Image
+	}
+	if body.Network != nil {
+		existing.Network = *body.Network
 	}
 	if err := s.workspaces.Update(existing); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -185,6 +209,15 @@ func (s *Server) workspaceRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.listing())
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // noCache keeps a reload honest while the client has no build step and no
