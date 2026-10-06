@@ -11,6 +11,7 @@ import (
 // Each workspace is its own everything: its own folder, its own harness process, its own
 // history. A second workspace is created by name and is usable immediately.
 func TestWorkspacesAreIsolatedAndStartOnDemand(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "in the other workspace", Reply: "answered elsewhere"}))
 	c := s.client()
 
@@ -60,6 +61,7 @@ func TestWorkspacesAreIsolatedAndStartOnDemand(t *testing.T) {
 // The interface creates a workspace by name inside one folder; a path is refused rather than
 // ignored, because accepting and dropping it would be a field that does nothing.
 func TestWorkspaceCreationTakesANameAndRefusesAPath(t *testing.T) {
+	t.Parallel()
 	s := start(t)
 	c := s.client()
 
@@ -96,6 +98,7 @@ func TestWorkspaceCreationTakesANameAndRefusesAPath(t *testing.T) {
 // Removing a workspace forgets it. It never deletes the folder or the history, and the
 // general one cannot be removed at all.
 func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "remember me", Reply: "remembered"}))
 	c := s.client()
 
@@ -140,6 +143,7 @@ func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
 // in was the one folder it could not take instructions from, while its tools stayed free to read
 // the whole machine. Reach is the sandbox's business, and this is not it.
 func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	guard := `{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf","reason":"no destructive commands here"}]}}}`
 	s := start(t,
@@ -199,6 +203,7 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 // The flag is gone, and a caller that still sends it is told so rather than humoured: a request
 // for the old behaviour that quietly gets the new one is a lie in the other direction.
 func TestTheTrustFlagIsGone(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t)
 	c := s.client()

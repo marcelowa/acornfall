@@ -10,6 +10,7 @@ import (
 // so the transcript records the text the model actually saw — which is the only way the
 // command and its effect can be told apart later.
 func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "EXPANDED:", Reply: "on it"}),
@@ -39,6 +40,7 @@ func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
 // A template without a placeholder still gets the arguments: dropping what someone typed is
 // worse than an extra line.
 func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "PING", Reply: "pong"}),
@@ -59,6 +61,7 @@ func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
 
 // A message that merely starts with a slash is not a command unless it names one.
 func TestAnUnknownCommandIsSentAsWritten(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "/not-a-command", Reply: "understood"}))
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -74,6 +77,7 @@ func TestAnUnknownCommandIsSentAsWritten(t *testing.T) {
 // The workspace's commands shadow the install's by name, and the listing says which file each
 // came from, because "why is this command different here" is a question with an answer.
 func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t, withSetup(func(t *testing.T, s *system) {
 		s.writeHome(t, "commands/deploy.md", "---\nname: deploy\ndescription: the install's way\n---\nInstall deploy.")
@@ -109,6 +113,7 @@ func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
 // Steering is how a message joins work that is already running: it queues, and the run picks
 // it up rather than being replaced by a second one.
 func TestSteeringJoinsTheRunningTurn(t *testing.T) {
+	t.Parallel()
 	s := start(t,
 		withSlowModel(),
 		withScript(
@@ -143,6 +148,7 @@ func TestSteeringJoinsTheRunningTurn(t *testing.T) {
 // Abort stops what is running. The partial answer is not the whole answer, and the
 // conversation is usable again afterwards.
 func TestAbortStopsTheRun(t *testing.T) {
+	t.Parallel()
 	s := start(t,
 		withSlowModel(),
 		withScript(
@@ -185,6 +191,7 @@ func TestAbortStopsTheRun(t *testing.T) {
 // on attach, whole transcripts as view frames, and a keepalive that arrives even when nothing
 // is happening — which is what lets a client tell a quiet gateway from a dead one.
 func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "hello stream", Reply: "streamed"}))
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -205,6 +212,7 @@ func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 
 // The conversation listing and the usage report are what a client shows beside the transcript.
 func TestUsageIsReportedForAWorkspace(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "spend something", Reply: "spent"}))
 	c := s.client()
 	root := c.waitForConversation("general")

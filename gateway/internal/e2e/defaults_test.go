@@ -10,6 +10,7 @@ import (
 // which layer it came from — "what runs" without "why" is a question the interface cannot
 // answer.
 func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "anything", Reply: "answered"}),
@@ -66,6 +67,7 @@ func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 // An install default is the answer for every workspace that has not decided for itself, and
 // it applies to running workspaces without a restart.
 func TestInstallDefaultsApplyToEveryWorkspace(t *testing.T) {
+	t.Parallel()
 	s := start(t)
 	c := s.client()
 	c.createWorkspace("second")
@@ -101,6 +103,7 @@ func TestInstallDefaultsApplyToEveryWorkspace(t *testing.T) {
 // With nothing set anywhere, a model is still chosen deliberately rather than by whichever
 // happens to be listed first, and the state calls it what it is: the last resort.
 func TestTheLastResortRunsWhenNothingIsSet(t *testing.T) {
+	t.Parallel()
 	s := start(t)
 	c := s.client()
 

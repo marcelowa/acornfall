@@ -12,6 +12,7 @@ import (
 // Delegation: a task handed to a subagent comes back as the answer to the call, and the
 // subagent is a real conversation with the parent recorded on it.
 func TestDelegateWaitsForTheChildAndReturnsItsAnswer(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(
 		scriptRule{
 			Match: "delegate this",
@@ -50,6 +51,7 @@ func TestDelegateWaitsForTheChildAndReturnsItsAnswer(t *testing.T) {
 // A peer is a conversation like any other: it appears in the list, it is not owned by the
 // conversation that made it, and it outlives it.
 func TestAPeerIsANormalConversation(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(
 		scriptRule{
 			Match: "make a peer",
@@ -81,6 +83,7 @@ func TestAPeerIsANormalConversation(t *testing.T) {
 // The subagent tool's own actions answer in the tool result rather than in the rail: the listing
 // names what this conversation made and what each one has spent.
 func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(
 		scriptRule{
 			Match: "start a helper",
@@ -120,6 +123,7 @@ func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
 // was reversed, so an override lost to the definition it was meant to beat, and the definition's
 // level was read and then dropped, so naming one made no difference to a spawned child at all.
 func TestASpawnedChildsLevelFollowsTheDocumentedOrder(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(
@@ -173,6 +177,7 @@ func TestASpawnedChildsLevelFollowsTheDocumentedOrder(t *testing.T) {
 // dropped the answer — the reporter had nothing to attribute it to — while the tool told the
 // model the answer would come back.
 func TestASendByConversationIdReportsItsAnswer(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(
 		scriptRule{
 			Match: "start a helper",
@@ -225,6 +230,7 @@ func TestASendByConversationIdReportsItsAnswer(t *testing.T) {
 // the model sees: the level in a definition, and the level the model itself passes as an
 // argument. Both go through the check the open path uses, and a refusal is not a spawn.
 func TestAnUnknownThinkingLevelIsRefusedNotPassedOn(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(
@@ -272,6 +278,7 @@ func TestAnUnknownThinkingLevelIsRefusedNotPassedOn(t *testing.T) {
 // The policy in the overlay decides what a conversation may do, and it is reported, so a
 // refusal can be explained rather than only suffered.
 func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{
@@ -311,6 +318,7 @@ func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
 // replacing it is invisible apart from the pause — the workspace, its conversations, and
 // their transcripts are all still there afterwards.
 func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(
 		scriptRule{Match: "before the crash", Reply: "BEFORE MARKER"},
 		scriptRule{Match: "after the crash", Reply: "AFTER MARKER"},
@@ -356,6 +364,7 @@ func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 // A run that was interrupted by the crash finishes afterwards: work is committed before it is
 // shown, so the new process picks it up from the last commit.
 func TestAnInterruptedRunFinishesAfterARestart(t *testing.T) {
+	t.Parallel()
 	s := start(t,
 		withSlowModel(),
 		withScript(scriptRule{Match: "the long one", Reply: "a slow answer that goes on and on and on and on and on and finally says FINISHED"}),

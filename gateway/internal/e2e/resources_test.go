@@ -9,6 +9,7 @@ import (
 // A workspace's AGENTS.md is its rules. It reaches the prompt as its own section, so the
 // model can tell the project's instructions from the platform's.
 func TestWorkspaceRulesReachThePrompt(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "get to work", Reply: "working"}),
@@ -33,6 +34,7 @@ func TestWorkspaceRulesReachThePrompt(t *testing.T) {
 // Definitions come from two layers and the workspace shadows the global one by name, which is
 // how a project overrides a shared agent without renaming it.
 func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "who are you", Reply: "an agent"}),
@@ -92,6 +94,7 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 // The config layers fold into one resolved agent: instructions concatenate global-then-
 // workspace, tool denials union, and the explain view names every layer that contributed.
 func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "fold", Reply: "folded"}),
@@ -130,6 +133,7 @@ func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 // harness works here. Where a folder has both, ours wins: the interchange copy is what you
 // share, and the local one is what overrides it.
 func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "what are the rules", Reply: "answered"}),
@@ -204,6 +208,7 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 
 // Reload re-reads the files, so writing an agent does not mean restarting anything.
 func TestReloadPicksUpANewDefinition(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t)
 	c := s.client()
@@ -228,6 +233,7 @@ func TestReloadPicksUpANewDefinition(t *testing.T) {
 // Skills reach the prompt by name and description only; the body is loaded when the model
 // asks for it. An agent that names its skills offers only those.
 func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
+	t.Parallel()
 	s := start(t,
 		withScript(
 			scriptRule{Match: "with skills", Reply: "offered"},
@@ -263,6 +269,7 @@ func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 // allows and no others. Only the open path recorded that list, so a spawned child was offered
 // every skill the install has, whatever its definition said.
 func TestASpawnedChildIsOfferedItsDefinitionsSkills(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(
@@ -304,6 +311,7 @@ func TestASpawnedChildIsOfferedItsDefinitionsSkills(t *testing.T) {
 // A workspace whose harness cannot start is still a workspace: it says the harness is down and
 // why, rather than taking the gateway with it. Fixing the file is enough.
 func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "after the fix", Reply: "fixed"}),

@@ -12,6 +12,7 @@ import (
 // A fresh install is usable without a setup step: there is a conversation to type into, and
 // it is the root one.
 func TestAFreshInstallHasARootConversation(t *testing.T) {
+	t.Parallel()
 	s := start(t)
 	c := s.client()
 
@@ -46,6 +47,7 @@ func TestAFreshInstallHasARootConversation(t *testing.T) {
 // A conversation is created, named, hidden, and brought back. Hiding is a tombstone: the
 // storage is append-only, so the transcript has to survive it.
 func TestConversationLifecycle(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
 	c := s.client()
 
@@ -96,6 +98,7 @@ func TestConversationLifecycle(t *testing.T) {
 // An unnamed conversation is named after its first user message, so the rail is readable
 // without anyone naming anything.
 func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "what is the capital", Reply: "Paris."}))
 	c := s.client()
 
@@ -117,6 +120,7 @@ func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
 // A fork branches before a user turn: the branch keeps the history that led to it, and does
 // not keep the message it branched from. It is how "say that again, differently" works.
 func TestForkBranchesBeforeATurn(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(
 		scriptRule{Match: "first question", Reply: "first answer"},
 		scriptRule{Match: "second question", Reply: "second answer"},
@@ -170,6 +174,7 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 // A prompt produces a transcript the client can read: the user's message, the prompt that
 // was sent, the assistant's answer, and spend that is attributed to this conversation.
 func TestPromptRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "say hello", Reply: "Hello from the script."}))
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -210,6 +215,7 @@ func TestPromptRoundTrip(t *testing.T) {
 // point of the platform is that the model touches the workspace — inside its sandbox, which
 // is why this test needs one.
 func TestAToolCallRunsAndIsRecorded(t *testing.T) {
+	t.Parallel()
 	maybeSandbox(t)
 	s := start(t, withScript(scriptRule{
 		Match: "list the files",
@@ -258,6 +264,7 @@ func conversationByID(t *testing.T, list []conversation, id string) conversation
 }
 
 func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
+	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "think hard", Reply: "Thought."}))
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -293,6 +300,7 @@ func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 // Choosing something that cannot run is refused with a reason, not accepted and then
 // silently replaced.
 func TestUnusableChoicesAreRefused(t *testing.T) {
+	t.Parallel()
 	s := start(t)
 	c := s.client()
 	root := c.waitForConversation("general")
