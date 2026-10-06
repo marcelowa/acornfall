@@ -172,11 +172,14 @@ and the fix is in the history rather than a workaround:
   refusal are right, and those are covered.
 - **The model's judgement.** Nothing here asserts that an agent does something sensible. The
   platform's job is to make the call and record it.
-- **The sandbox.** `ExecutionEnv` is only the host process today, so there is nothing to assert:
-  a workspace's shell can reach anything the user can, and no test pretends otherwise. The tier
-  is decided and verified — one microVM per workspace, microsandbox as the engine, the workspace
-  mounted at its own path and nothing else, no network ([ADR 0012](adr/0012-sandbox.md)) — and
-  the tests come with the code.
+- **The sandbox needs a hypervisor.** One microVM per workspace runs commands and file
+  operations, with the workspace mounted at its own path ([ADR 0012](adr/0012-sandbox.md)).
+  Everything that can be tested without one is: the environment, the path routing, and the
+  refusal run against a fake sandbox, and the policy and the lifecycle against a fake engine.
+  The end-to-end tests that use a real workspace — its `AGENTS.md`, `.agents/`, skills,
+  commands, guards — skip when the machine cannot boot a microVM, and
+  `ACORNFALL_NO_SANDBOX=1` forces that path so CI's behaviour can be checked on a machine that
+  has one.
 - **Memory and self-improvement.** Designed, not built (see `docs/adr/`).
 - **The interface.** `make ui` still covers the client, but the client is being rebuilt, so no
   feature above depends on it.

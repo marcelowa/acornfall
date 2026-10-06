@@ -118,8 +118,10 @@ make dev
   `.acornfall/`, which wins when a folder has both. Each workspace runs its own
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
 - **Sandboxed execution**: what the agent *runs* runs in a microVM — one per workspace, the
-  workspace mounted at its own path and nothing else, no network. The policy is one generated
-  file. See `docs/adr/0012-sandbox.md`.
+  workspace mounted at its own path and nothing else, no network — and so does every file the
+  agent reads or writes. The worker stays outside it, next to the provider key. When the engine
+  or the hypervisor is missing the tools refuse rather than run on the host; `acornfall doctor`
+  says which it is. See `docs/adr/0012-sandbox.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
   `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
   name, `prompts/` — expanded server-side so the transcript records what the model saw.
@@ -175,9 +177,9 @@ without restarting anything. Resolution rules and their rationale are in
 
 ## What does not exist yet
 
-Memory, MCP, codemode, subagents, multi-user, triggers, versioned agent definitions,
-renaming or deleting a conversation, forking from the UI, and sandboxing beyond the host
-process. `docs/adr/` holds the designs they will land against.
+Memory, MCP, codemode, multi-user, triggers, versioned agent definitions, and the parts of
+the interface that are being rebuilt. `docs/adr/` holds the designs they will land against;
+ADR 0012 lists what the sandbox deliberately does not cover yet.
 
 ## Development
 
