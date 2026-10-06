@@ -164,16 +164,7 @@ func TestAbortStopsTheRun(t *testing.T) {
 	c.waitRunning("general", root, 30*time.Second)
 	c.post(c.conversationPath("general", root)+"/abort", nil, nil)
 
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if conversation, found := c.conversationIn("general", root); found && !conversation.Running {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	if conversation, _ := c.conversationIn("general", root); conversation.Running {
-		t.Fatal("abort should stop the run")
-	}
+	c.waitIdle("general", root, 30*time.Second)
 	aborted := c.view("general", root)
 	if strings.Contains(aborted.all(), "FINISHED") {
 		t.Errorf("the answer should not have finished after an abort:\n%s", aborted.all())

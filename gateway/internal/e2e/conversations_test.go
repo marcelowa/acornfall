@@ -192,7 +192,7 @@ func TestPromptRoundTrip(t *testing.T) {
 	}
 	c.waitIdle("general", root, 30*time.Second)
 
-	idle, _ := c.conversationIn("general", root)
+	idle := conversationByID(t, c.conversations("general"), root)
 	if idle.Running {
 		t.Error("the conversation should be idle once the answer is in")
 	}

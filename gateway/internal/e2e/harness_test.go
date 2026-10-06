@@ -687,10 +687,12 @@ func (c *client) waitIdle(workspace, id string, timeout time.Duration) {
 	c.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if candidate, found := c.conversationIn(workspace, id); found && !candidate.Running {
-			return
+		for _, candidate := range c.conversations(workspace) {
+			if candidate.ID == id && !candidate.Running {
+				return
+			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 	c.t.Fatalf("%s/%s never went idle", workspace, id)
 }
@@ -748,12 +750,19 @@ func (c *client) waitForTitle(workspace, id, prefix string) conversation {
 	return candidate
 }
 
+// waitRunning waits until the worker reports the conversation as running. It asks the
+// refreshed listing, not the cached state: the state is kept current by a 3-second poll that
+// runs only while a client is attached, so a turn that finishes inside that window is never
+// seen as running at all — with a fast scripted model the three tests that act on a live run
+// waited 30 seconds and failed on "never started running". The listing asks the worker.
 func (c *client) waitRunning(workspace, id string, timeout time.Duration) {
 	c.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if candidate, found := c.conversationIn(workspace, id); found && candidate.Running {
-			return
+		for _, candidate := range c.conversations(workspace) {
+			if candidate.ID == id && candidate.Running {
+				return
+			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
