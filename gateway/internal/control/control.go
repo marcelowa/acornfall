@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
@@ -27,7 +28,7 @@ var ErrNoProvider = errors.New("no authenticated provider")
 
 // Options configures one Control instance, which owns exactly one workspace.
 type Options struct {
-	// Workspace is the folder, name, and trust decision this Control serves.
+	// Workspace is the folder and name this Control serves.
 	Workspace Workspace
 	// Home is the installation folder: global resources and shared credentials.
 	Home string
@@ -47,6 +48,20 @@ type Options struct {
 	Registry func() []Workspace
 	// WorkspacesDir is where new workspaces are created, so the interface can say so.
 	WorkspacesDir string
+	// Sandbox is the machine's sandbox tier. Nil means this Control was built without one,
+	// which only tests do: the workspace still opens and its tools refuse.
+	Sandbox *sandbox.Manager
+}
+
+// SandboxState says what the agent's tools can reach here. When Tools is false the tools
+// refuse rather than running on the host, and Problem says why, because a silent fallback
+// would be worse than a refusal.
+type SandboxState struct {
+	Engine  string `json:"engine,omitempty"`
+	Version string `json:"version,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Tools   bool   `json:"tools"`
+	Problem string `json:"problem,omitempty"`
 }
 
 // WorkspaceState is a workspace as the interface needs it: what it is called, where it
@@ -56,6 +71,8 @@ type WorkspaceState struct {
 	Path    string `json:"path"`
 	Title   string `json:"title"`
 	General bool   `json:"general"`
+	Image   string `json:"image,omitempty"`
+	Network string `json:"network,omitempty"`
 	Running bool   `json:"running"`
 }
 
@@ -115,13 +132,15 @@ type State struct {
 	Policy json.RawMessage `json:"policy,omitempty"`
 	// WorkerUp is false when the harness process is gone. Without it a dead backend is
 	// indistinguishable from an idle one, because everything here is served from cache.
-	WorkerUp    bool                    `json:"workerUp"`
-	WorkerError string                  `json:"workerError,omitempty"`
-	Agents      []protocol.AgentSummary `json:"agents"`
-	Skills      []protocol.SkillSummary `json:"skills"`
-	Defaults    []protocol.LayerTrace   `json:"defaults"`
-	Providers   []protocol.ProviderInfo `json:"providers"`
-	Seq         int64                   `json:"seq"`
+	WorkerUp    bool   `json:"workerUp"`
+	WorkerError string `json:"workerError,omitempty"`
+	// Sandbox is where this workspace's commands and file reads actually happen.
+	Sandbox   SandboxState            `json:"sandbox"`
+	Agents    []protocol.AgentSummary `json:"agents"`
+	Skills    []protocol.SkillSummary `json:"skills"`
+	Defaults  []protocol.LayerTrace   `json:"defaults"`
+	Providers []protocol.ProviderInfo `json:"providers"`
+	Seq       int64                   `json:"seq"`
 }
 
 // Defaults are one layer's answer to "what runs when nothing more specific does". The
@@ -151,6 +170,9 @@ type Control struct {
 	active        string
 	workerUp      bool
 	workerError   string
+	// sandbox is what the agent's tools can reach, refreshed when the worker starts. It is
+	// nil-free on purpose: "no sandbox" is a state the interface has to be able to show.
+	sandbox SandboxState
 	// One notification per death, drained by the single supervisor loop. A restart loop
 	// per death would compound: every failed attempt is another death.
 	workerExited chan struct{}
@@ -332,10 +354,30 @@ func (c *Control) startWorker(ctx context.Context) error {
 		"--credentials", c.opts.Credentials,
 		"--home", c.opts.Home,
 	)
+	// The sandbox is made first, because the worker is told to use it and refuses to run
+	// anything without it. A failure is a state, not a stop: the workspace opens, the tools
+	// say what is missing, and the rest of the product works.
+	sandboxState := c.provisionSandbox(ctx)
+	if sandboxState.Tools {
+		args = append(args, "--sandbox", sandbox.Name(c.opts.Workspace.Path))
+		if driver := c.opts.Sandbox.Driver(); driver != nil {
+			// The worker attaches with this engine's SDK: naming it here is how the two sides
+			// of one install cannot disagree about which engine is in use.
+			args = append(args, "--sandbox-engine", driver.Name())
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	worker := workerpool.New(workerpool.Config{Command: base[0], Args: args, Dir: c.opts.WorkerDir})
+	worker := workerpool.New(workerpool.Config{
+		Command: base[0],
+		Args:    args,
+		Dir:     c.opts.WorkerDir,
+		// The worker attaches to the sandbox with the engine's SDK, so it needs the engine's
+		// own environment to find it. One engine per install, so this is the same for every
+		// workspace.
+		Env: sandboxEnv(c.opts.Sandbox),
+	})
 	worker.OnFrame(c.onFrame)
 	if err := worker.Start(ctx); err != nil {
 		return fmt.Errorf("start worker: %w", err)
@@ -351,6 +393,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 	c.worker = worker
 	c.workerUp = true
 	c.workerError = ""
+	c.sandbox = sandboxState
 	c.mu.Unlock()
 	// The identity of the dying worker is part of the notification: a worker that has already
 	// been replaced must not be able to mark this control down.
@@ -599,6 +642,52 @@ func (c *Control) Close() {
 	if c.worker != nil {
 		c.worker.Close()
 	}
+	// The worker is gone, so nothing can use the sandbox: stopping it frees the memory and
+	// the engine's own idle timeout would do it anyway. Its disk stays, so a workspace that
+	// installed dependencies yesterday still has them.
+	if manager := c.opts.Sandbox; manager != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), sandbox.Timeout)
+		defer cancel()
+		if err := manager.Stop(ctx, c.opts.Workspace.Path); err != nil && !errors.Is(err, sandbox.ErrUnavailable) {
+			workerpool.Log("stopping the sandbox for %s: %v", c.opts.Workspace.Name, err)
+		}
+	}
+}
+
+// sandboxEnv is what the worker needs to reach the engine's sandboxes, or nothing when there
+// is no sandbox tier at all.
+func sandboxEnv(manager *sandbox.Manager) []string {
+	if manager == nil || manager.Driver() == nil {
+		return nil
+	}
+	return manager.Driver().Env()
+}
+
+// provisionSandbox makes sure this workspace has a sandbox and reports what the tools may
+// reach. It never fails the worker: a machine without a hypervisor is a supported state, and
+// the tools refuse rather than running unconfined.
+func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
+	manager := c.opts.Sandbox
+	if manager == nil {
+		return SandboxState{Problem: "no sandbox is configured: tool execution is disabled"}
+	}
+	report := manager.Report()
+	state := SandboxState{Engine: report.Engine, Version: report.Version}
+	if problem := manager.Problem(); problem != nil {
+		state.Problem = problem.Error()
+		return state
+	}
+	policy := c.opts.Workspace.SandboxPolicy()
+	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
+		state.Problem = err.Error()
+		workerpool.Log("sandbox for %s: %v", c.opts.Workspace.Name, err)
+		return state
+	}
+	if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {
+		state.Status = status
+	}
+	state.Tools = true
+	return state
 }
 
 // Describe returns the cached worker self-report.
@@ -674,6 +763,7 @@ func (c *Control) StateFor(conversationID string) State {
 		DefaultsOrigin:  origins,
 		WorkerUp:        c.workerUp,
 		WorkerError:     c.workerError,
+		Sandbox:         c.sandbox,
 		Inherited: Inherited{
 			Model:    c.bindings[active].Provider == "",
 			Thinking: c.bindings[active].ThinkingLevel == "",

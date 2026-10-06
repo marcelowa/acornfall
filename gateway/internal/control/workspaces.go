@@ -8,6 +8,8 @@
 package control
 
 import (
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -50,9 +52,36 @@ type Workspace struct {
 	Title string `json:"title"`
 	// General marks the default workspace. Exactly one workspace is general.
 	General bool `json:"general"`
+	// Image is the sandbox's environment for this workspace: the project's toolchain, not
+	// ours. Empty means the default, and changing it takes effect at the next sandbox
+	// because the running one is where the workspace's dependencies live.
+	Image string `json:"image,omitempty"`
+	// Network is whether the sandbox may reach the network: "on", "off", or empty for the
+	// default, which is on. A string rather than a bool so that "not set" is expressible —
+	// and so an allowlist can be added later without a migration.
+	Network string `json:"network,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
+}
+
+// NetworkOff is the one non-default value Network has today.
+const NetworkOff = "off"
+
+// SandboxPolicy is what this workspace's sandbox is allowed to be. It is derived rather than
+// stored so that a new field cannot be forgotten in one of the two places.
+func (w Workspace) SandboxPolicy() sandbox.Policy {
+	return sandbox.Policy{
+		Image:     w.Image,
+		Workspace: w.Path,
+		Egress:    w.Network != NetworkOff,
+	}
+}
+
+// ValidNetwork reports whether a network value means something. An unknown value is refused
+// rather than ignored: a caller asking for "maybe" should be told, not humoured.
+func ValidNetwork(value string) bool {
+	return value == "" || value == "on" || value == NetworkOff
 }
 
 // Views renders workspaces for the interface, which is the only place `running` belongs.
@@ -81,6 +110,8 @@ type WorkspacesOptions struct {
 	WorkerDir     string
 	// Model is the install default, from --model.
 	Model string
+	// Sandbox is the machine's sandbox tier, shared by every workspace.
+	Sandbox *sandbox.Manager
 }
 
 // Workspaces is the install: a registry of workspaces and their started Controls.
@@ -283,7 +314,8 @@ func (w *Workspaces) Remove(ctx context.Context, name string) error {
 		return errors.New("the general workspace cannot be removed")
 	}
 	w.mu.Lock()
-	if _, exists := w.registry[name]; !exists {
+	workspace, exists := w.registry[name]
+	if !exists {
 		w.mu.Unlock()
 		return fmt.Errorf("no workspace %q", name)
 	}
@@ -294,6 +326,14 @@ func (w *Workspaces) Remove(ctx context.Context, name string) error {
 	w.forgetUsed(name)
 	if control != nil {
 		control.Close()
+	}
+	// The sandbox is deleted with the workspace: it is the one thing that holds what the
+	// agent accumulated inside it, and leaving it behind would leak a disk per forgotten
+	// workspace. A failure is reported and does not stop the removal the user asked for.
+	if manager := w.opts.Sandbox; manager != nil {
+		if err := manager.Remove(ctx, workspace.Path); err != nil && !errors.Is(err, sandbox.ErrUnavailable) {
+			workerpool.Log("removing the sandbox for %s: %v", name, err)
+		}
 	}
 	return w.persist()
 }
@@ -348,6 +388,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		Home:          w.opts.Home,
 		StoragePath:   filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
 		SettingsPath:  filepath.Join(w.opts.Home, "state", name, "settings.json"),
+		Sandbox:       w.opts.Sandbox,
 		WorkerCommand: w.opts.WorkerCommand,
 		WorkerDir:     w.opts.WorkerDir,
 		Model:         w.opts.Model,

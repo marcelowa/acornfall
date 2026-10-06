@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -25,6 +26,10 @@ type Config struct {
 	Args []string
 	// Dir is the working directory for the process.
 	Dir string
+	// Env adds to the gateway's own environment. It is how the worker is told where the
+	// sandbox engine keeps its state, so that the SDK it attaches with finds the same
+	// sandboxes this gateway created.
+	Env []string
 }
 
 // stderrKept is how many lines of harness diagnostics are kept for a failure message.
@@ -86,6 +91,9 @@ func (w *Worker) Start(ctx context.Context) error {
 	_ = ctx
 	cmd := exec.Command(w.config.Command, w.config.Args...)
 	cmd.Dir = w.config.Dir
+	if len(w.config.Env) > 0 {
+		cmd.Env = append(os.Environ(), w.config.Env...)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
