@@ -83,8 +83,9 @@ Reads are routed per path (`worker/src/files.ts`): under the workspace they go t
 elsewhere to the host. The user's own folders are the host's business; the workspace's are the
 sandbox's.
 
-Attachments (ADR 0010) are bytes in the session, so the worker materializes them into the
-sandbox's `/tmp` and the `read` tool sees an ordinary path.
+A message is text: there is no file or image attachment yet. When one arrives, its bytes are
+the sandbox's business — the client and the gateway never hand the worker a host path into a
+workspace, and nothing here should change that.
 
 ## Refusal
 
