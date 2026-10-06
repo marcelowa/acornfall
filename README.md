@@ -186,7 +186,8 @@ ADR 0012 lists what the sandbox deliberately does not cover yet.
 ```bash
 make check         # fast: the compiler and the unit tests, no processes (~6s)
 make lint          # the static rules: gofmt, vet, staticcheck, tsc, eslint
-make test          # everything, including the end-to-end feature tests under -race (~2min)
+make test          # the default gate: units + the feature suite, no hypervisor (~35s)
+make test-sandbox  # the slow tier: real microVMs; needs /dev/kvm or Apple Silicon (~5min)
 make ui            # drives the real client in headless chromium (needs a running gateway)
 make build         # gateway build
 make dev           # dev provider + gateway, workspace = current directory
@@ -201,7 +202,10 @@ when adding a feature.
 
 The end-to-end tests (`gateway/internal/e2e`) run a real gateway and a real worker against a
 scripted provider, so nothing calls a model and nothing needs a network. They need `bun` and
-`make deps`; without them they skip with a reason. A feature driven by a tool call — a guard
+`make deps`; without them they skip with a reason. `make test` runs them with the sandbox tier
+forced off, so the tools take the refusal path and the command behaves the same everywhere;
+`make test-sandbox` runs them against real microVMs where there is a hypervisor — the tiers
+are [ADR 0013](docs/adr/0013-test-tiers.md). A feature driven by a tool call — a guard
 blocking one, a subagent being spawned — is driven by `ACORNFALL_DEV_SCRIPT`, a JSON file of
 rules matched against the last user message; see `docs/features.md`.
 

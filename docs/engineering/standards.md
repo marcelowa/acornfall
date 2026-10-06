@@ -97,7 +97,7 @@ split would hide exactly that.
 
 | # | Rule | Why | Check |
 |---|---|---|---|
-| G11 | A unit test lives in the package it tests and needs no process. A test that needs processes, ports, or a harness lives in `internal/e2e` and skips under `-short`. | The fast loop has to stay fast, or nobody runs it. | `make check` vs `make test` |
+| G11 | A unit test lives in the package it tests and needs no process. A test that needs processes, ports, or a harness lives in `internal/e2e`, and one that needs a sandbox says so with `maybeSandbox` and skips under `-short`. | The fast loop has to stay fast, or nobody runs it. | `make check`, `make test` vs `make test-sandbox` |
 | G12 | Wait for a condition with a deadline, never for a fixed duration. | `time.Sleep(2 * time.Second)` is either slow or flaky, and often both. | Convention, review |
 | G13 | `-race` is part of the suite, not a special occasion — including for the gateway the end-to-end tests spawn, which is a separate process and would otherwise be uninstrumented. | The bugs this project has had were concurrency bugs. | `make test` |
 | G15 | A table when the test is the same check over different inputs, so the cases read as a list of situations rather than as prose. | `resolveThinking` and the defaults chain are only legible as a table; a name per case says what each one is for. | Convention, review |
@@ -142,9 +142,10 @@ rather than pretending to have checked:
 | lint exceptions have reasons | a grep |
 | commit message shape | `scripts/check-commits.mjs`, over a pull request's commits in CI |
 
-`make check` is the fast loop (types and unit tests, ~6s). `make test` is everything: unit
-tests, the worker protocol against a real worker process, `-race`, and the end-to-end suite
-against a real gateway (~60s). `make tools` installs the linters.
+`make check` is the fast loop (types and unit tests, ~6s). `make test` adds the end-to-end suite
+against a real gateway with the sandbox tier forced off, under `-race` (~35s, no hypervisor
+needed). `make test-sandbox` is the slow tier: real microVMs, the engine's checks, and the
+worker's SDK suite, on a machine that has a hypervisor. `make tools` installs the linters.
 
 None of this is enforced by a machine unless it runs on every change: `.github/workflows/ci.yml`
 runs `make lint` and `make test` on push.
@@ -162,6 +163,7 @@ with a deadline:
 | Recovery created a second conversation, landed on it, and skipped the settings a first start reads — so a workspace whose first start failed answered nothing. | S8 |
 | A workspace that had never saved settings never read the install defaults. | S2 (the test that caught it) |
 | `auth_answer` was handled before the command queue on purpose (queueing it would deadlock), so the switch looked incomplete. | T3 — the fix was to say it in the type, not to reorder the code. |
+| The end-to-end cleanup removed every sandbox labelled `acornfall` — every test's, not the finishing test's — so a parallel sandbox run failed in a different set of tests each time. | G16 |
 
 ## Convention (not enforced)
 

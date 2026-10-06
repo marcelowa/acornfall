@@ -155,7 +155,9 @@ state path, and the reason it cannot work if it cannot.
 - `acornfall doctor` and the workspace CLI (`--image`, `--network`).
 - Tests: the environment, the routing, and the refusal are unit-tested against a fake sandbox,
   so the ordinary suite needs no hypervisor. The end-to-end tests that exercise a real
-  workspace run a real microVM and **skip when the machine has none** (`ACORNFALL_NO_SANDBOX=1`
-  forces the skip, which is how the CI path is checked on a machine that has a hypervisor).
-  Each of those tests cleans up its sandbox by label; the image cache is shared across the
-  suite, which is also what keeps it inside a registry's rate limit.
+  workspace run a real microVM and belong to the slow tier, `make test-sandbox`, which fails
+  rather than skips where there is no hypervisor. `make test` forces the refusal path with
+  `ACORNFALL_NO_SANDBOX=1` instead of auto-detecting the machine, so the fast gate behaves the
+  same everywhere. Each test removes the sandboxes it created, named from the workspaces it
+  owns; the image cache is shared across the suite, which is also what keeps it inside a
+  registry's rate limit. [ADR 0013](0013-test-tiers.md) records the tiers.

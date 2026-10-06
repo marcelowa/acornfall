@@ -4,17 +4,22 @@ What the platform does, stated as things that are observable from outside, and w
 tested. It is the list to read before changing something: a feature here has a test that fails
 when it stops working, and the test names are the map.
 
-Three levels of testing, and each feature is covered at the lowest level that can decide it:
+Each feature is covered at the lowest level that can decide it:
 
 | Level | Command | What it can decide |
 |---|---|---|
 | Unit (Go) | `go test ./...` | Resolution, registries, lock order, arities. Milliseconds, no processes. |
 | Unit (worker) | `bun test` (from `worker/`) | The overlay, guards, commands, skills, credentials, the worker protocol. Under a second. |
 | Feature (end to end) | `go test ./internal/e2e/...` | A real gateway, a real worker, and a scripted provider over HTTP: everything a client can see. |
+| Sandbox (end to end and the worker SDK) | `make test-sandbox` | The end-to-end suite against real microVMs, and the SDK's own streaming, kill, and file operations. Needs a hypervisor. |
 | Interface | `make ui` | The browser client. Kept, but the client is being rebuilt, so nothing here depends on it. |
 
-`make test` runs all of it. The end-to-end suite needs `bun` and `make deps`; without them it
-skips with a reason rather than failing.
+`make test` is the default gate: `-short -race`, the worker units, the Go units, and the
+feature suite with `ACORNFALL_NO_SANDBOX=1`, so the tools take the refusal path and the same
+command behaves the same on every machine, including CI ([ADR 0013](adr/0013-test-tiers.md)).
+It needs `bun` and `make deps`; without them the end-to-end suite skips with a reason rather
+than failing. `make test-sandbox` is the slow tier, and fails rather than skips where there
+is no hypervisor.
 
 ## The scripted provider
 
@@ -177,9 +182,10 @@ and the fix is in the history rather than a workaround:
   Everything that can be tested without one is: the environment, the path routing, and the
   refusal run against a fake sandbox, and the policy and the lifecycle against a fake engine.
   The end-to-end tests that use a real workspace — its `AGENTS.md`, `.agents/`, skills,
-  commands, guards — skip when the machine cannot boot a microVM, and
-  `ACORNFALL_NO_SANDBOX=1` forces that path so CI's behaviour can be checked on a machine that
-  has one.
+  commands, guards — skip under `-short` and run in `make test-sandbox`, which fails rather
+  than skips where there is no hypervisor, and the worker's file operations and streaming
+  execution are exercised against the real SDK there too
+  ([ADR 0013](adr/0013-test-tiers.md)).
 - **Memory and self-improvement.** Designed, not built (see `docs/adr/`).
 - **The interface.** `make ui` still covers the client, but the client is being rebuilt, so no
   feature above depends on it.
