@@ -140,6 +140,7 @@ func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
 // in was the one folder it could not take instructions from, while its tools stayed free to read
 // the whole machine. Reach is the sandbox's business, and this is not it.
 func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
+	maybeSandbox(t)
 	guard := `{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf","reason":"no destructive commands here"}]}}}`
 	s := start(t,
 		withScript(scriptRule{
@@ -198,6 +199,7 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 // The flag is gone, and a caller that still sends it is told so rather than humoured: a request
 // for the old behaviour that quietly gets the new one is a lie in the other direction.
 func TestTheTrustFlagIsGone(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t)
 	c := s.client()
 

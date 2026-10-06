@@ -10,6 +10,7 @@ import (
 // which layer it came from — "what runs" without "why" is a question the interface cannot
 // answer.
 func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "anything", Reply: "answered"}),
 		withSetup(func(t *testing.T, s *system) {

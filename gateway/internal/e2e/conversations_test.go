@@ -207,8 +207,10 @@ func TestPromptRoundTrip(t *testing.T) {
 }
 
 // A tool call runs for real, and both the call and its output are in the transcript: the
-// point of the platform is that the model touches the workspace.
+// point of the platform is that the model touches the workspace — inside its sandbox, which
+// is why this test needs one.
 func TestAToolCallRunsAndIsRecorded(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t, withScript(scriptRule{
 		Match: "list the files",
 		Tools: []scriptTool{{Name: "bash", Args: map[string]any{"command": "ls"}}},

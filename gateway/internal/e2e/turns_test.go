@@ -10,6 +10,7 @@ import (
 // so the transcript records the text the model actually saw — which is the only way the
 // command and its effect can be told apart later.
 func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "EXPANDED:", Reply: "on it"}),
 		withSetup(func(t *testing.T, s *system) {
@@ -38,6 +39,7 @@ func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
 // A template without a placeholder still gets the arguments: dropping what someone typed is
 // worse than an extra line.
 func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{Match: "PING", Reply: "pong"}),
 		withSetup(func(t *testing.T, s *system) {
@@ -72,6 +74,7 @@ func TestAnUnknownCommandIsSentAsWritten(t *testing.T) {
 // The workspace's commands shadow the install's by name, and the listing says which file each
 // came from, because "why is this command different here" is a question with an answer.
 func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t, withSetup(func(t *testing.T, s *system) {
 		s.writeHome(t, "commands/deploy.md", "---\nname: deploy\ndescription: the install's way\n---\nInstall deploy.")
 		s.writeHome(t, "commands/shared.md", "---\nname: shared\ndescription: from the install\n---\nShared install body.")

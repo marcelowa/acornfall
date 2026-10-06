@@ -138,6 +138,10 @@ type system struct {
 	WorkspacesDir string
 	General       string
 	Addr          string
+	// SandboxState is shared by every test in this package: the image the sandboxes boot from
+	// is fetched once, so the suite does not pull it thirty times and hit a registry's
+	// anonymous rate limit.
+	SandboxState string
 
 	cmd  *exec.Cmd
 	logs *syncBuffer
@@ -156,7 +160,38 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	for _, opt := range opts {
 		opt(&s.cfg)
 	}
-	s.Home = filepath.Join(t.TempDir(), "home")
+	// The installation folder has to be short: the sandbox engine's runtime sockets live under
+	// it and a Unix socket path is limited to 108 bytes, most of which the engine's own layout
+	// uses. A test's name is long, so the home is made here rather than under it.
+	shortRoot := filepath.Join(os.TempDir(), fmt.Sprintf("af-%d", os.Getpid()))
+	if err := os.MkdirAll(shortRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shortHome, err := os.MkdirTemp(shortRoot, "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// The sandboxes this test created are stopped here: the gateway is killed, so its
+		// control never closes, and a leftover microVM holds memory for its idle timeout.
+		// Labels are ours, so this removes exactly what this install made. The shared state
+		// directory stays: it holds the downloaded image every test would otherwise fetch
+		// again, which is also how a suite avoids a registry's rate limit.
+		if keepSandboxes() {
+			return
+		}
+		if bin := engineBinary(shortHome); bin != "" {
+			cmd := exec.Command(bin, "rm", "--force", "--label", "acornfall")
+			cmd.Env = append(os.Environ(), "MSB_HOME="+s.SandboxState)
+			_ = cmd.Run()
+		}
+		os.RemoveAll(shortHome)
+	})
+	s.Home = shortHome
+	// A stable path, not a per-run one: it holds the image every sandbox boots from, and a
+	// fresh directory per run means a registry pull per run — which is how a suite runs into
+	// an anonymous pull limit. The sandboxes themselves are removed per test by their label.
+	s.SandboxState = filepath.Join(os.TempDir(), "acornfall-e2e-sandboxes")
 	s.WorkspacesDir = filepath.Join(t.TempDir(), "workspaces")
 	s.General = filepath.Join(t.TempDir(), "general")
 	for _, dir := range []string{s.Home, s.WorkspacesDir, s.General} {
@@ -174,6 +209,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		"--workspace", s.General,
 		"--model", "faux/faux-1",
 		"--worker-dir", workerDir,
+		"--sandbox-state", s.SandboxState,
 		"--addr", "127.0.0.1:0",
 		"--insecure",
 	}
@@ -258,6 +294,60 @@ func (s *system) stop() {
 	case <-time.After(10 * time.Second):
 		_ = s.cmd.Process.Kill()
 		<-done
+	}
+}
+
+// requireSandbox skips a test that needs the workspace's own files, because those files live
+// inside a sandbox now. The gateway refuses to run tools where there is no hypervisor, which
+// is the behaviour ADR 0012 asks for — so the tests that need one have to skip rather than
+// pretend, and this is the only place that decision is made.
+// keepSandboxes leaves the sandboxes a test made in place, which is what somebody debugging a
+// sandbox failure wants: the machine is then still there to look at.
+func keepSandboxes() bool {
+	return os.Getenv("ACORNFALL_KEEP_SANDBOXES") != ""
+}
+
+// engineBinary finds the installed engine under a home, whatever version it is.
+func engineBinary(home string) string {
+	matches, err := filepath.Glob(filepath.Join(home, "tools", "microsandbox", "*", "bin", "msb"))
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	return matches[0]
+}
+
+// maybeSandbox is used at the top of a test, before a system exists.
+func maybeSandbox(t *testing.T) {
+	t.Helper()
+	if reason := sandboxUnavailable(); reason != "" {
+		t.Skipf("this machine cannot run a sandbox: %s", reason)
+	}
+}
+
+// sandboxUnavailable is the cheap version of the engine's own check: enough to decide whether
+// a test can run, without starting an engine to ask it.
+func sandboxUnavailable() string {
+	// CI has no /dev/kvm, and nobody wants to think about which tests skip there: this makes
+	// it a switch, so the CI behaviour can be run deliberately on a machine that has one.
+	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
+		return "ACORNFALL_NO_SANDBOX is set"
+	}
+	switch runtime.GOOS {
+	case "linux":
+		file, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+		if err != nil {
+			return "/dev/kvm is not usable: " + err.Error()
+		}
+		file.Close()
+		return ""
+	case "darwin":
+		out, err := exec.Command("sysctl", "-n", "kern.hv_support").Output()
+		if err != nil || strings.TrimSpace(string(out)) != "1" {
+			return "macOS reports no hypervisor support"
+		}
+		return ""
+	default:
+		return "no hypervisor for " + runtime.GOOS
 	}
 }
 

@@ -120,6 +120,7 @@ func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
 // was reversed, so an override lost to the definition it was meant to beat, and the definition's
 // level was read and then dropped, so naming one made no difference to a spawned child at all.
 func TestASpawnedChildsLevelFollowsTheDocumentedOrder(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t,
 		withScript(
 			scriptRule{
@@ -224,6 +225,7 @@ func TestASendByConversationIdReportsItsAnswer(t *testing.T) {
 // the model sees: the level in a definition, and the level the model itself passes as an
 // argument. Both go through the check the open path uses, and a refusal is not a spawn.
 func TestAnUnknownThinkingLevelIsRefusedNotPassedOn(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t,
 		withScript(
 			scriptRule{
@@ -270,6 +272,7 @@ func TestAnUnknownThinkingLevelIsRefusedNotPassedOn(t *testing.T) {
 // The policy in the overlay decides what a conversation may do, and it is reported, so a
 // refusal can be explained rather than only suffered.
 func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
+	maybeSandbox(t)
 	s := start(t,
 		withScript(scriptRule{
 			Match: "delegate this",
