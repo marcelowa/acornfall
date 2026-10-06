@@ -28,6 +28,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 )
 
 var (
@@ -174,16 +176,19 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	t.Cleanup(func() {
 		// The sandboxes this test created are stopped here: the gateway is killed, so its
 		// control never closes, and a leftover microVM holds memory for its idle timeout.
-		// Labels are ours, so this removes exactly what this install made. The shared state
-		// directory stays: it holds the downloaded image every test would otherwise fetch
-		// again, which is also how a suite avoids a registry's rate limit.
+		// Only this test's workspaces are named: removing by the acornfall label took every
+		// sandbox in the shared state, including a parallel test's running VM. The shared
+		// state directory stays: it holds the downloaded image every test would otherwise
+		// fetch again, which is also how a suite avoids a registry's rate limit.
 		if keepSandboxes() {
 			return
 		}
 		if bin := engineBinary(shortHome); bin != "" {
-			cmd := exec.Command(bin, "rm", "--force", "--label", "acornfall")
-			cmd.Env = append(os.Environ(), "MSB_HOME="+s.SandboxState)
-			_ = cmd.Run()
+			for _, name := range s.sandboxesOwnedByTest() {
+				cmd := exec.Command(bin, "rm", "--force", name)
+				cmd.Env = append(os.Environ(), "MSB_HOME="+s.SandboxState)
+				_ = cmd.Run()
+			}
 		}
 		os.RemoveAll(shortHome)
 	})
@@ -295,6 +300,24 @@ func (s *system) stop() {
 		_ = s.cmd.Process.Kill()
 		<-done
 	}
+}
+
+// sandboxesOwnedByTest lists the sandboxes this test is allowed to remove: the general
+// workspace, and every workspace created by name inside this test's own workspaces folder.
+// A test owns what it created, and the workspaces folder is a per-test temp directory, so
+// nothing here can name another test's sandbox. Removing by the acornfall label instead took
+// every sandbox in the shared state, which is what made a parallel sandbox run fail in a
+// different set of tests each time.
+func (s *system) sandboxesOwnedByTest() []string {
+	paths := []string{s.General}
+	if matches, err := filepath.Glob(filepath.Join(s.WorkspacesDir, "*")); err == nil {
+		paths = append(paths, matches...)
+	}
+	names := make([]string, 0, len(paths))
+	for _, path := range paths {
+		names = append(names, sandbox.Name(path))
+	}
+	return names
 }
 
 // requireSandbox skips a test that needs the workspace's own files, because those files live
