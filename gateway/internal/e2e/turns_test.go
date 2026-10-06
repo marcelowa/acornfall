@@ -181,6 +181,10 @@ func TestAbortStopsTheRun(t *testing.T) {
 // The stream is the interface's only live channel, so its contract is a feature: a full state
 // on attach, whole transcripts as view frames, and a keepalive that arrives even when nothing
 // is happening — which is what lets a client tell a quiet gateway from a dead one.
+//
+// The window is the keepalive interval plus a margin. It was 5s to watch a 3s ticker, which
+// was a second and a half of the suite run spent waiting for a number the server had already
+// promised.
 func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 	t.Parallel()
 	s := start(t, withScript(scriptRule{Match: "hello stream", Reply: "streamed"}))
@@ -189,7 +193,7 @@ func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 	c.prompt("general", root, "hello stream")
 	c.waitForText("general", root, "streamed")
 
-	counts := c.streamEvents("general", root, 5*time.Second)
+	counts := c.streamEvents("general", root, 4*time.Second)
 	if counts["state"] == 0 {
 		t.Errorf("a client that attaches should be told the state: %v", counts)
 	}

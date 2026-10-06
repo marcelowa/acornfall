@@ -120,6 +120,14 @@ func withScript(rules ...scriptRule) func(*settings) {
 	return func(s *settings) { s.script = rules }
 }
 
+// slowTokensPerSecond is the pace withSlowModel asks for. It has to be slow enough that a
+// turn is still running when the test acts — aborting, steering, killing the worker — and
+// fast enough that the suite does not spend five to fifteen seconds per test waiting for
+// scripted tokens: at 2/s these three tests were 33 of the 52 seconds the suite spent. 20/s
+// leaves about a second of stream for a reply this size, and the tests act within
+// milliseconds of the run appearing.
+const slowTokensPerSecond = 20
+
 // withSlowModel streams slowly enough that a turn is still running while the test acts.
 func withSlowModel() func(*settings) {
 	return func(s *settings) { s.slow = true }
@@ -228,7 +236,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		scriptPath := filepath.Join(s.Home, "script.json")
 		payload := map[string]any{"rules": s.cfg.script}
 		if s.cfg.slow {
-			payload["tokensPerSecond"] = 2
+			payload["tokensPerSecond"] = slowTokensPerSecond
 		}
 		encoded, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
