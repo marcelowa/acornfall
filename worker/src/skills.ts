@@ -5,7 +5,7 @@
  * Only name and description reach the prompt. The body loads when the model
  * calls `skill`, which keeps detailed guidance out of context until it is used.
  */
-import { readdir, readFile, stat } from "node:fs/promises";
+import type { Files } from "./files.ts";
 import { isAbsolute, join, resolve } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
@@ -50,33 +50,24 @@ export function skillBody(source: string): string {
 	return source.slice(end + 4).trim();
 }
 
-async function isDirectory(path: string): Promise<boolean> {
-	try {
-		return (await stat(path)).isDirectory();
-	} catch {
-		return false;
-	}
+async function isDirectory(files: Files, path: string): Promise<boolean> {
+	return (await files.stat(path))?.directory === true;
 }
 
 /** Discovery is shallow on purpose: one level of grouping, then skill directories. */
-export async function loadSkills(roots: readonly string[]): Promise<Skill[]> {
+export async function loadSkills(roots: readonly string[], files: Files): Promise<Skill[]> {
 	// Later roots shadow earlier ones, the same way agents and commands do: a workspace skill
 	// with a global skill's name replaces it, and `.acornfall` replaces `.agents`.
 	const byName = new Map<string, Skill>();
 	for (const root of roots) {
 		const base = isAbsolute(root) ? root : resolve(process.cwd(), root);
-		if (!(await isDirectory(base))) continue;
-		const entries = await readdir(base, { withFileTypes: true }).catch(() => []);
-		for (const entry of entries) {
-			if (!entry.isDirectory()) continue;
+		if (!(await isDirectory(files, base))) continue;
+		for (const entry of await files.list(base)) {
+			if (!entry.directory) continue;
 			const dir = join(base, entry.name);
 			const path = join(dir, "SKILL.md");
-			let source: string;
-			try {
-				source = await readFile(path, "utf8");
-			} catch {
-				continue;
-			}
+			const source = await files.read(path);
+			if (source === null) continue;
 			const front = parseFrontmatter(source);
 			const name = front.name ?? entry.name;
 			if (front.description === undefined || front.description.length === 0) continue;
@@ -110,6 +101,7 @@ export function renderSkills(skills: readonly Skill[], allowed: readonly string[
 export function skillsExtension(
 	skills: readonly Skill[],
 	allowedFor: (conversationId: string) => readonly string[] | null,
+	files: Files,
 ) {
 	const permitted = (conversationId: string): readonly Skill[] => {
 		const names = allowedFor(conversationId);
@@ -143,7 +135,14 @@ export function skillsExtension(
 							],
 						};
 					}
-					const source = await readFile(skill.path, "utf8");
+					// The body is read when the skill is used, not when it is listed: the file may
+					// have changed since, and it is the workspace's own file.
+					const source = await files.read(skill.path);
+					if (source === null) {
+						return {
+							content: [{ type: "text" as const, text: `Skill "${args.name}" is no longer there: ${skill.path}` }],
+						};
+					}
 					const body = skillBody(source);
 					const request = args.args === undefined ? "" : `\n\nUser request: ${args.args}`;
 					return {

@@ -8,7 +8,7 @@
  * A conversation id is pi-durable's own id, stringified. This layer never invents
  * one; control treats it as opaque.
  */
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -27,7 +27,6 @@ import {
 	type ToolRegistration,
 	type HarnessSettings,
 } from "@earendil-works/pi-durable";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
@@ -58,6 +57,9 @@ import {
 	log,
 } from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
+import { routingFiles } from "./files.ts";
+import { refusedSandbox, type SandboxClient } from "./sandbox.ts";
+import { SandboxExecutionEnv } from "./sandbox-env.ts";
 import { expandCommand, loadCommands, parseCommandInvocation, type Command as SlashCommand } from "./commands.ts";
 
 const CONTEXT = BACKGROUND_CONTEXT;
@@ -77,6 +79,10 @@ interface Args {
 	home: string;
 	storage: string;
 	credentials: string;
+	/** The sandbox this workspace runs in, as control named it. Empty means none: tools refuse. */
+	sandbox: string;
+	/** Which engine that sandbox belongs to. The name is control's, and the two must agree. */
+	sandboxEngine: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -102,6 +108,8 @@ function parseArgs(argv: readonly string[]): Args {
 		home,
 		storage: resolve(values.get("storage") ?? defaults("session.sqlite")),
 		credentials,
+		sandbox: values.get("sandbox") ?? "",
+		sandboxEngine: values.get("sandbox-engine") ?? "microsandbox",
 	};
 }
 
@@ -111,25 +119,53 @@ await mkdir(dirname(args.storage), { recursive: true });
 const credentials = new FileCredentialStore(args.credentials);
 const models = builtinModels({ credentials });
 
+/**
+ * The sandbox this workspace runs in — the only way this process touches the workspace.
+ *
+ * Control created it and named it; this attaches to it with the engine's SDK. There is no
+ * fallback to the host: without a sandbox the tools refuse, and a workspace whose resources
+ * cannot be read simply has fewer of them. Running unconfined must be a decision somebody
+ * made, never a state the system drifted into.
+ */
+const sandbox: SandboxClient = await openSandboxForWorkspace(args);
+
+async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
+	if (options.sandbox === "") {
+		return refusedSandbox("this workspace has no sandbox: tool execution is disabled");
+	}
+	const engine = await import("./microsandbox.ts");
+	if (options.sandboxEngine !== engine.engineName()) {
+		return refusedSandbox(
+			`this workspace's sandbox belongs to engine ${options.sandboxEngine}, which this build does not support`,
+		);
+	}
+	return await engine.openSandbox(options.sandbox).catch((error: unknown) => {
+		return refusedSandbox(`cannot attach to the sandbox ${options.sandbox}: ${error instanceof Error ? error.message : String(error)}`);
+	});
+}
+
 // Every resource folder this install reads: the user's, then the workspace's, each with the
-// ecosystem's `.agents` before our own `.acornfall`. An explicit --skill replaces the list.
+// ecosystem's `.agents` before our own `.acornfall`.
+//
+// The workspace's own files live inside the sandbox and the user's live on the host, so reads
+// are routed per path: there is one door to the workspace, and this is it.
 const roots = layerRoots({ home: args.home, workspace: args.workspace });
-const discoveredSkills = await loadSkills(resourceFolders(roots, ["skills"]));
+const files = routingFiles(args.workspace, sandbox);
+const discoveredSkills = await loadSkills(resourceFolders(roots, ["skills"]), files);
 
 // The overlay, the workspace's rules, and its commands. All reloaded on demand, so
 // editing a file does not need a restart.
-let catalog: Catalog = await loadCatalog(roots);
+let catalog: Catalog = await loadCatalog(roots, files);
 reportUnknownKeys(catalog);
 let workspaceRules = await loadWorkspaceRules();
-let commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS));
+let commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS), files);
 
 /**
  * The workspace's rules file. It is its own prompt section rather than more
  * `instructions`, so the context inspector can show it and diff it between requests.
  */
 async function loadWorkspaceRules(): Promise<string | undefined> {
-	const source = await readFile(join(args.workspace, "AGENTS.md"), "utf8").catch(() => null);
-	const text = source?.trim() ?? "";
+	const text = (await files.read(join(args.workspace, "AGENTS.md")))?.trim() ?? "";
 	return text === "" ? undefined : text;
 }
 
@@ -160,12 +196,14 @@ registry.install(
 	}),
 );
 registry.install(
-	skillsExtension(discoveredSkills, (conversationId) => skillFilterByConversation.get(conversationId) ?? null),
+	skillsExtension(discoveredSkills, (conversationId) => skillFilterByConversation.get(conversationId) ?? null, files),
 );
 registry.install(CodingTools);
 
 const settings: HarnessSettings = { toolExecution: "parallel" };
-const env = ({ cwd }: { readonly cwd?: string }) => new NodeExecutionEnv({ cwd: cwd ?? args.workspace });
+// One environment per tool call, all of them over the same sandbox: the id is the sandbox's,
+// which is how the harness knows two calls see the same files.
+const env = ({ cwd }: { readonly cwd?: string }) => new SandboxExecutionEnv(sandbox, cwd ?? args.workspace);
 
 const storage = await openNodeSqliteStorage(args.storage);
 const harness = await Harness.open(
@@ -688,10 +726,10 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 				})),
 			};
 		case "reload":
-			catalog = await loadCatalog(roots);
+			catalog = await loadCatalog(roots, files);
 			reportUnknownKeys(catalog);
 			workspaceRules = await loadWorkspaceRules();
-			commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS));
+			commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS), files);
 			return { agents: catalog.agents.length, commands: commands.length, rules: workspaceRules !== undefined };
 		case "login":
 			return await login(models, command.authId, command.providerId, command.authType);

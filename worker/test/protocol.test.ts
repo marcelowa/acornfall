@@ -212,10 +212,12 @@ describe("the worker protocol", () => {
 	});
 
 	test("expand rewrites a command into what the model will see", async () => {
-		const workspace = join(home, "workspace");
-		await mkdir(join(workspace, ".acornfall", "commands"), { recursive: true });
+		// The install's own commands folder, not the workspace's: this worker runs without a
+		// sandbox, so the workspace has no readable files at all — which is the point of the
+		// refusal, and is asserted in sandbox.test.ts.
+		await mkdir(join(home, "commands"), { recursive: true });
 		await writeFile(
-			join(workspace, ".acornfall", "commands", "protocol.md"),
+			join(home, "commands", "protocol.md"),
 			"---\nname: protocol-command\ndescription: for the test\n---\nIt says $ARGUMENTS.",
 		);
 		await worker.call({ type: "reload" });

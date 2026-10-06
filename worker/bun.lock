@@ -8,6 +8,7 @@
         "@earendil-works/chord": "^1.0.2",
         "@earendil-works/pi-ai": "^1.0.2",
         "@earendil-works/pi-durable": "^1.0.2",
+        "microsandbox": "^0.7.7",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -154,6 +155,8 @@
 
     "@keyv/serialize": ["@keyv/serialize@1.1.1", "", {}, "sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA=="],
 
+    "@microsandbox/types": ["@microsandbox/types@0.7.7", "", {}, "sha512-67/tP2k+tpksQbIIvzbPGtiq3Ai/3242NLTkxTZawelUk+qVvOc3BygAVK+kxoHYJW0fyTtmZ1mYAyJrXLSSEg=="],
+
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 
     "@protobufjs/base64": ["@protobufjs/base64@1.1.2", "", {}, "sha512-AZkcAA5vnN/v4PDqKyMR5lx7hZttPDgClv83E//FMNhR2TMcLUhfRUBHCmSl0oi9zMgDDqRUJkSxO3wm85+XLg=="],
@@ -185,6 +188,16 @@
     "@smithy/types": ["@smithy/types@4.19.0", "", { "dependencies": { "tslib": "^2.6.2" } }, "sha512-r7jh49VJxGerfAcTQA6gXcKc+98zOp/tqRwzYjgOE+iSQsP6cEU1hq2QzbuipmP68QtYdY9wKEhiCQZIzHgZ4Q=="],
 
     "@stablelib/base64": ["@stablelib/base64@1.0.1", "", {}, "sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ=="],
+
+    "@superradcompany/microsandbox-darwin-arm64": ["@superradcompany/microsandbox-darwin-arm64@0.7.7", "", { "os": "darwin", "cpu": "arm64" }, "sha512-vvyMNGytk2R/HpCJXGekNniUuzKbQH+ARZMC4Ne4BxEu9q1gDmx4bfn6NdQ2Gej5oIfQEyiuK7naq3U8/GC2lQ=="],
+
+    "@superradcompany/microsandbox-linux-arm64-gnu": ["@superradcompany/microsandbox-linux-arm64-gnu@0.7.7", "", { "os": "linux", "cpu": "arm64" }, "sha512-/s6icz7ox8jz1vCdr6c3USnX08cDNUZ0SEjFhYVrcmumXrMfjNmfCke7aRBxkmF17uhY/0h1wsmeDZPoUL4wAA=="],
+
+    "@superradcompany/microsandbox-linux-x64-gnu": ["@superradcompany/microsandbox-linux-x64-gnu@0.7.7", "", { "os": "linux", "cpu": "x64" }, "sha512-sn19EZNpHgQ/wFv6S0eyNEh/c5+CBl629h8AG5o94ZYY05tbVDmBqI33wrdA7nGKySbx/2Uni+ecKvGVi0jTgg=="],
+
+    "@superradcompany/microsandbox-win32-arm64-msvc": ["@superradcompany/microsandbox-win32-arm64-msvc@0.7.7", "", { "os": "win32", "cpu": "arm64" }, "sha512-Ggzi1SGFeErCjaNdMiel7siFjHHILVNrTHvnNMPH4VMVGTNnYmmz0LRx8Z6fWLEQrmZe9YsW2Bx1oEvD9mbpKQ=="],
+
+    "@superradcompany/microsandbox-win32-x64-msvc": ["@superradcompany/microsandbox-win32-x64-msvc@0.7.7", "", { "os": "win32", "cpu": "x64" }, "sha512-KCiwNMN1beDzTEMuJ6AK4nJk2DMME3hvv8x4dB12uwpCRoRnIwWajs4rp7/UogZEMV/wO/skhNFJaNzTpt9QWQ=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
@@ -345,6 +358,8 @@
     "locate-path": ["locate-path@6.0.0", "", { "dependencies": { "p-locate": "^5.0.0" } }, "sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw=="],
 
     "long": ["long@5.3.2", "", {}, "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="],
+
+    "microsandbox": ["microsandbox@0.7.7", "", { "dependencies": { "@microsandbox/types": "0.7.7" }, "optionalDependencies": { "@superradcompany/microsandbox-darwin-arm64": "0.7.7", "@superradcompany/microsandbox-linux-arm64-gnu": "0.7.7", "@superradcompany/microsandbox-linux-x64-gnu": "0.7.7", "@superradcompany/microsandbox-win32-arm64-msvc": "0.7.7", "@superradcompany/microsandbox-win32-x64-msvc": "0.7.7" }, "bin": { "msb": "bin/microsandbox.cjs", "microsandbox": "bin/microsandbox.cjs" } }, "sha512-H2ipvZyDATXlQAem3Yhf5OZ6dUxOVJlgC/QMSEVZOBqB3UN3OOqPcpk3Tg7MqkKnKucuUF5GMsAvmb8d8BADXQ=="],
 
     "minimatch": ["minimatch@10.2.6", "", { "dependencies": { "brace-expansion": "^5.0.8" } }, "sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A=="],
 

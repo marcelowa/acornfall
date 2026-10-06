@@ -9,6 +9,7 @@ import { loadSkills, renderSkills, skillBody } from "../src/skills.ts";
 import { layerRoots, resourceFolders } from "../src/config.ts";
 import { FileCredentialStore } from "../src/credentials.ts";
 import { conversationIdOf } from "../src/meta.ts";
+import { hostFiles } from "../src/files.ts";
 
 afterAll(cleanupScratch);
 
@@ -20,7 +21,7 @@ describe("skills", () => {
 		await write(join(root, "silent", "SKILL.md"), "---\nname: silent\n---\nBody");
 		await write(join(root, "loose.md"), "not in a directory");
 
-		const skills = await loadSkills([root]);
+		const skills = await loadSkills([root], hostFiles);
 		expect(skills.map((skill) => skill.name)).toEqual(["documented"]);
 		expect(skills[0]?.description).toBe("does a thing");
 	});
@@ -28,7 +29,7 @@ describe("skills", () => {
 	test("the directory name is the fallback when frontmatter has none", async () => {
 		const root = await tempDir("acornfall-skills-");
 		await write(join(root, "acorn-notes", "SKILL.md"), "---\ndescription: from the folder\n---\nBody");
-		const skills = await loadSkills([root]);
+		const skills = await loadSkills([root], hostFiles);
 		expect(skills[0]?.name).toBe("acorn-notes");
 	});
 
@@ -38,7 +39,7 @@ describe("skills", () => {
 		await write(join(root, "second", "same", "SKILL.md"), "---\nname: same\ndescription: second\n---\nB");
 		await write(join(root, "second", "only", "SKILL.md"), "---\nname: only\ndescription: second only\n---\nC");
 
-		const skills = await loadSkills([join(root, "first"), join(root, "second")]);
+		const skills = await loadSkills([join(root, "first"), join(root, "second")], hostFiles);
 		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
 			["only", "second only"],
 			["same", "second"],
@@ -53,7 +54,7 @@ describe("skills", () => {
 		await write(join(workspace, ".acornfall", "skills", "both", "SKILL.md"), "---\nname: both\ndescription: native\n---\nC");
 
 		const roots = layerRoots({ home: join(root, "home"), workspace, userHome: join(root, "user") });
-		const skills = await loadSkills(resourceFolders(roots, ["skills"]));
+		const skills = await loadSkills(resourceFolders(roots, ["skills"]), hostFiles);
 		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
 			["both", "native"],
 			["eco", "from .agents"],

@@ -9,7 +9,7 @@
  * Resolution is deterministic and explainable: every resolved field records
  * which layer set it. See docs/adr/0004-resource-overlay.md.
  */
-import { readdir, readFile } from "node:fs/promises";
+import type { Files } from "./files.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -220,13 +220,9 @@ function parseFrontmatter(source: string): { values: Record<string, string>; bod
 }
 
 /** A file may be a config object or a small wrapper around one. */
-async function loadConfig(path: string, label: LayerName): Promise<{ contributions: Contributions; path: string } | null> {
-	let text: string;
-	try {
-		text = await readFile(path, "utf8");
-	} catch {
-		return null;
-	}
+async function loadConfig(files: Files, path: string, label: LayerName): Promise<{ contributions: Contributions; path: string } | null> {
+	const text = await files.read(path);
+	if (text === null) return null;
 	let parsed: Record<string, unknown>;
 	try {
 		parsed = JSON.parse(text) as Record<string, unknown>;
@@ -259,13 +255,12 @@ async function loadConfig(path: string, label: LayerName): Promise<{ contributio
 	return { contributions, path };
 }
 
-async function loadAgentDir(directory: string, layer: "global" | "workspace"): Promise<AgentDefinition[]> {
-	const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+async function loadAgentDir(files: Files, directory: string, layer: "global" | "workspace"): Promise<AgentDefinition[]> {
 	const agents: AgentDefinition[] = [];
-	for (const entry of entries) {
-		if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+	for (const entry of await files.list(directory)) {
+		if (entry.directory || !entry.name.endsWith(".md")) continue;
 		const path = join(directory, entry.name);
-		const source = await readFile(path, "utf8").catch(() => null);
+		const source = await files.read(path);
 		if (source === null) continue;
 		const { values, body, unknown } = parseFrontmatter(source);
 		const name = values.name ?? entry.name.replace(/\.md$/, "");
@@ -372,17 +367,17 @@ export function resourceFolders(roots: LayerRoots, names: readonly string[]): st
  * agent is supposed to work in the one folder it could not take instructions from, while leaving
  * its tools free to read the whole machine. Reach is the sandbox's business, and this is not it.
  */
-export async function loadCatalog(roots: LayerRoots): Promise<Catalog> {
+export async function loadCatalog(roots: LayerRoots, files: Files): Promise<Catalog> {
 	const defaults: LayerTrace[] = [];
 	const discovered: AgentDefinition[] = [];
 
 	for (const [layer, folders] of [["global", roots.global], ["workspace", roots.workspace]] as const) {
 		for (const root of folders) {
-			const config = await loadConfig(join(root, "config.json"), layer);
+			const config = await loadConfig(files, join(root, "config.json"), layer);
 			if (config !== null) {
 				defaults.push({ layer, path: config.path, contributes: config.contributions });
 			}
-			discovered.push(...(await loadAgentDir(join(root, "agents"), layer)));
+			discovered.push(...(await loadAgentDir(files, join(root, "agents"), layer)));
 		}
 	}
 

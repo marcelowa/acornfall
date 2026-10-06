@@ -7,6 +7,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { layerRoots, loadCatalog, resolveAgent, type LayerRoots } from "../src/config.ts";
 import { cleanupScratch, tempDir, write } from "./scratch.ts";
+import { hostFiles } from "../src/files.ts";
 
 afterAll(cleanupScratch);
 
@@ -38,7 +39,7 @@ describe("the catalog", () => {
 			"---\nname: local\ndescription: from this workspace\n---\nBody",
 		);
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents.map((agent) => [agent.name, agent.layer])).toEqual([
 			["global", "global"],
 			["local", "workspace"],
@@ -50,7 +51,7 @@ describe("the catalog", () => {
 		await write(join(home, "agents", "same.md"), "---\nname: same\ndescription: global\n---\nGlobal");
 		await write(join(workspace, ".acornfall", "agents", "same.md"), "---\nname: same\ndescription: local\n---\nLocal");
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents).toHaveLength(1);
 		expect(catalog.agents[0]?.description).toBe("local");
 	});
@@ -64,7 +65,7 @@ describe("the catalog", () => {
 		await write(join(workspace, ".acornfall", "agents", "local.md"), "---\nname: local\ndescription: x\n---\nBody");
 		await write(join(home, "config.json"), `{"defaults":{"instructions":"GLOBAL"}}`);
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents).toHaveLength(1);
 		expect(catalog.defaults.map((layer) => layer.layer)).toEqual(["global", "workspace"]);
 		expect(resolveAgent(catalog, undefined).instructions).toBe("GLOBAL\n\nWORKSPACE");
@@ -73,7 +74,7 @@ describe("the catalog", () => {
 	test("unknown frontmatter keys are reported, never silently dropped", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(join(home, "agents", "odd.md"), "---\nname: odd\ndescription: x\ncolour: blue\n---\nBody");
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents[0]?.unknownKeys).toEqual(["colour"]);
 	});
 });
@@ -85,7 +86,7 @@ describe("folding the layers", () => {
 		await write(join(workspace, ".acornfall", "config.json"), `{"defaults":{"instructions":"WORKSPACE"}}`);
 		await write(join(workspace, ".acornfall", "agents", "one.md"), "---\nname: one\n---\nAGENT");
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(resolveAgent(catalog, "one").instructions).toBe("GLOBAL\n\nWORKSPACE\n\nAGENT");
 		expect(resolveAgent(catalog, "one").layers.map((layer) => layer.layer)).toEqual([
 			"global",
@@ -100,7 +101,7 @@ describe("folding the layers", () => {
 		await write(join(workspace, ".acornfall", "config.json"), `{"defaults":{"thinking":"high"}}`);
 		await write(join(workspace, ".acornfall", "agents", "one.md"), "---\nname: one\nmodel: p/agent\n---\nBody");
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, "one");
 		expect(resolved.model).toBe("p/agent");
 		expect(resolved.thinking).toBe("high");
@@ -114,7 +115,7 @@ describe("folding the layers", () => {
 			`{"defaults":{"skills":["b","a"],"allowTools":["bash","read"],"denyTools":["write"]}}`,
 		);
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, undefined);
 		expect(resolved.skills).toEqual(["a", "b"]);
 		expect(resolved.denyTools?.sort()).toEqual(["bash", "write"]);
@@ -128,7 +129,7 @@ describe("folding the layers", () => {
 			join(workspace, ".acornfall", "config.json"),
 			`{"defaults":{"delegation":{"spawn":false,"maxChildren":1}}}`,
 		);
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, undefined);
 		expect(resolved.delegation.spawn).toBe(false);
 		expect(resolved.delegation.maxChildren).toBe(1);
@@ -140,7 +141,7 @@ describe("folding the layers", () => {
 	test("`delegation: none` reads as both permissions off", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(join(workspace, ".acornfall", "agents", "leaf.md"), "---\nname: leaf\ndelegation: none\n---\nBody");
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, "leaf");
 		expect(resolved.delegation.spawn).toBe(false);
 		expect(resolved.delegation.peers).toBe(false);
@@ -149,7 +150,7 @@ describe("folding the layers", () => {
 	test("a definition that does not exist resolves to the layered defaults", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(join(home, "config.json"), `{"defaults":{"instructions":"GLOBAL"}}`);
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, "never-heard-of-it");
 		expect(resolved.name).toBe("default");
 		expect(resolved.instructions).toBe("GLOBAL");
@@ -164,7 +165,7 @@ describe("guards", () => {
 			join(workspace, ".acornfall", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf"}]}}}`,
 		);
-		expect(loadCatalog(rootsOf({ home, workspace, user }))).rejects.toThrow(/needs a reason/);
+		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(/needs a reason/);
 	});
 
 	test("a guard with neither matcher is refused", async () => {
@@ -173,7 +174,7 @@ describe("guards", () => {
 			join(workspace, ".acornfall", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","reason":"because"}]}}}`,
 		);
-		expect(loadCatalog(rootsOf({ home, workspace, user }))).rejects.toThrow(/pattern or outside/);
+		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(/pattern or outside/);
 	});
 
 	test("a pattern that does not compile is refused where it is written", async () => {
@@ -182,7 +183,7 @@ describe("guards", () => {
 			join(workspace, ".acornfall", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"([","reason":"because"}]}}}`,
 		);
-		expect(loadCatalog(rootsOf({ home, workspace, user }))).rejects.toThrow(/does not compile/);
+		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(/does not compile/);
 	});
 
 	test("reads the ecosystem's .agents folder, not only ours", async () => {
@@ -190,7 +191,7 @@ describe("guards", () => {
 		await write(join(workspace, ".agents", "config.json"), `{"defaults":{"instructions":"ECOSYSTEM"}}`);
 		await write(join(workspace, ".agents", "agents", "shared.md"), "---\nname: shared\ndescription: from .agents\n---\nBody");
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents.map((agent) => [agent.name, agent.layer])).toEqual([["shared", "workspace"]]);
 		// The explain view names the file that won, so `.agents` is visibly where it came from.
 		expect(catalog.agents[0]?.source).toContain("/.agents/");
@@ -209,7 +210,7 @@ describe("guards", () => {
 		await write(join(workspace, ".agents", "config.json"), `{"defaults":{"instructions":"WORKSPACE ECOSYSTEM"}}`);
 		await write(join(workspace, ".acornfall", "config.json"), `{"defaults":{"instructions":"WORKSPACE NATIVE"}}`);
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents).toHaveLength(1);
 		expect(catalog.agents[0]?.description).toBe("native");
 		// Instructions concatenate in the order the folders are read, so ours is last and wins
@@ -230,7 +231,7 @@ describe("guards", () => {
 		await write(join(workspace, ".agents", "config.json"), `{"defaults":{"instructions":"ECOSYSTEM"}}`);
 		await write(join(user, ".agents", "config.json"), `{"defaults":{"instructions":"USER"}}`);
 
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents).toHaveLength(1);
 		expect(catalog.defaults.map((layer) => layer.layer)).toEqual(["global", "workspace"]);
 		expect(resolveAgent(catalog, undefined).instructions).toBe("USER\n\nECOSYSTEM");
@@ -246,7 +247,7 @@ describe("guards", () => {
 			join(workspace, ".acornfall", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"write","arg":"path","outside":true,"reason":"workspace"}]}}}`,
 		);
-		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, undefined);
 		expect(resolved.guards.map((guard) => guard.reason)).toEqual(["global", "workspace"]);
 	});

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { expandCommand, loadCommands, parseCommandInvocation } from "../src/commands.ts";
 import { COMMAND_DIRS, layerRoots, resourceFolders } from "../src/config.ts";
 import { cleanupScratch, tempDir, write } from "./scratch.ts";
+import { hostFiles } from "../src/files.ts";
 
 afterAll(cleanupScratch);
 
@@ -57,7 +58,7 @@ describe("loading", () => {
 		await write(join(root, "b.md"), "---\nname: bravo\ndescription: second\nargument-hint: a thing\n---\nBody B");
 		await write(join(root, "a.md"), "---\nname: alpha\ndescription: first\n---\nBody A");
 
-		const commands = await loadCommands([root]);
+		const commands = await loadCommands([root], hostFiles);
 		expect(commands.map((command) => command.name)).toEqual(["alpha", "bravo"]);
 		expect(commands[1]?.description).toBe("second");
 		expect(commands[1]?.argumentHint).toBe("a thing");
@@ -67,14 +68,14 @@ describe("loading", () => {
 	test("the file name is the name when frontmatter does not give one", async () => {
 		const root = await tempDir("acornfall-commands-");
 		await write(join(root, "from-file-name.md"), "Just the body.");
-		const commands = await loadCommands([root]);
+		const commands = await loadCommands([root], hostFiles);
 		expect(commands[0]?.name).toBe("from-file-name");
 	});
 
 	test("a command with no body is not a command", async () => {
 		const root = await tempDir("acornfall-commands-");
 		await write(join(root, "empty.md"), "---\nname: empty\n---\n");
-		expect(await loadCommands([root])).toEqual([]);
+		expect(await loadCommands([root], hostFiles)).toEqual([]);
 	});
 
 	test("a later root shadows an earlier one, which is how a workspace overrides the install", async () => {
@@ -83,7 +84,7 @@ describe("loading", () => {
 		await write(join(first, "deploy.md"), "---\nname: deploy\ndescription: install\n---\nInstall deploy");
 		await write(join(second, "deploy.md"), "---\nname: deploy\ndescription: workspace\n---\nWorkspace deploy");
 
-		const commands = await loadCommands([first, second]);
+		const commands = await loadCommands([first, second], hostFiles);
 		expect(commands).toHaveLength(1);
 		expect(commands[0]?.description).toBe("workspace");
 	});
@@ -98,7 +99,7 @@ describe("loading", () => {
 		await write(join(workspace, ".agents", "prompts", "only-here.md"), "---\nname: only-here\ndescription: prompts only\n---\nBody");
 
 		const roots = layerRoots({ home: join(root, "home"), workspace, userHome: join(root, "user") });
-		const commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS));
+		const commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS), hostFiles);
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["audit", "from commands"],
 			["only-here", "prompts only"],
@@ -119,7 +120,7 @@ describe("loading", () => {
 		await write(join(workspace, ".agents", "commands", "shared.md"), "---\nname: shared\ndescription: only in .agents\n---\nShared");
 
 		const roots = layerRoots({ home, workspace, userHome: user });
-		const commands = await loadCommands(resourceFolders(roots, ["commands"]));
+		const commands = await loadCommands(resourceFolders(roots, ["commands"]), hostFiles);
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["deploy", "native"],
 			["shared", "only in .agents"],
@@ -127,6 +128,6 @@ describe("loading", () => {
 	});
 
 	test("a directory that does not exist is not an error", async () => {
-		expect(await loadCommands(["/nope/not/here"])).toEqual([]);
+		expect(await loadCommands(["/nope/not/here"], hostFiles)).toEqual([]);
 	});
 });

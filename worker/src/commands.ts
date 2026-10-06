@@ -6,7 +6,7 @@
  * than in the interface, so there is one implementation and the transcript records the
  * text the model actually saw.
  */
-import { readdir, readFile, stat } from "node:fs/promises";
+import type { Files } from "./files.ts";
 import { isAbsolute, join, resolve } from "node:path";
 
 export interface Command {
@@ -40,25 +40,20 @@ function parseFrontmatter(source: string): { values: Record<string, string>; bod
 	return { values, body: source.slice(end + 4).trim() };
 }
 
-async function isDirectory(path: string): Promise<boolean> {
-	try {
-		return (await stat(path)).isDirectory();
-	} catch {
-		return false;
-	}
+async function isDirectory(files: Files, path: string): Promise<boolean> {
+	return (await files.stat(path))?.directory === true;
 }
 
 /** Later roots shadow earlier ones, so a workspace command replaces a global one. */
-export async function loadCommands(roots: readonly string[]): Promise<Command[]> {
+export async function loadCommands(roots: readonly string[], files: Files): Promise<Command[]> {
 	const byName = new Map<string, Command>();
 	for (const root of roots) {
 		const base = isAbsolute(root) ? root : resolve(process.cwd(), root);
-		if (!(await isDirectory(base))) continue;
-		const entries = await readdir(base, { withFileTypes: true }).catch(() => []);
-		for (const entry of entries) {
-			if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+		if (!(await isDirectory(files, base))) continue;
+		for (const entry of await files.list(base)) {
+			if (entry.directory || !entry.name.endsWith(".md")) continue;
 			const path = join(base, entry.name);
-			const source = await readFile(path, "utf8").catch(() => null);
+			const source = await files.read(path);
 			if (source === null) continue;
 			const { values, body } = parseFrontmatter(source);
 			const name = values.name ?? entry.name.replace(/\.md$/, "");
