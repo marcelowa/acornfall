@@ -30,7 +30,7 @@ func doctorCommand(argv []string) {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
 
-	manager, err := sandbox.Open(context.Background(), sandbox.Options{Home: resolved, ReportOnly: true})
+	manager, err := reportManager(resolved)
 	if err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
@@ -56,6 +56,17 @@ func doctorCommand(argv []string) {
 	if report.Problem != "" {
 		os.Exit(1)
 	}
+}
+
+// reportManager builds the report-only manager doctor describes. It has to name the engine:
+// without a driver, Open refuses ("sandbox: Driver is required") and doctor can only report
+// that failure, never the tier it exists to diagnose.
+func reportManager(home string) (*sandbox.Manager, error) {
+	return sandbox.Open(context.Background(), sandbox.Options{
+		Home:       home,
+		Driver:     sandbox.NewMicrosandbox(home),
+		ReportOnly: true,
+	})
 }
 
 func yesNo(value bool) string {
