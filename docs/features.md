@@ -174,8 +174,9 @@ and the fix is in the history rather than a workaround:
   platform's job is to make the call and record it.
 - **The sandbox.** `ExecutionEnv` is only the host process today, so there is nothing to assert:
   a workspace's shell can reach anything the user can, and no test pretends otherwise. The tier
-  is decided — one microVM per workspace, microsandbox as the engine, with the policy ours — and
-  the tests come with it.
+  is decided and verified — one microVM per workspace, microsandbox as the engine, the workspace
+  mounted at its own path and nothing else, no network ([ADR 0012](adr/0012-sandbox.md)) — and
+  the tests come with the code.
 - **Memory and self-improvement.** Designed, not built (see `docs/adr/`).
 - **The interface.** `make ui` still covers the client, but the client is being rebuilt, so no
   feature above depends on it.

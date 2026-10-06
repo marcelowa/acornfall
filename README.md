@@ -117,6 +117,9 @@ make dev
   `.agents/` (the ecosystem's name, so a bundle written for another harness works) or
   `.acornfall/`, which wins when a folder has both. Each workspace runs its own
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
+- **Sandboxed execution**: what the agent *runs* runs in a microVM — one per workspace, the
+  workspace mounted at its own path and nothing else, no network. The policy is one generated
+  file. See `docs/adr/0012-sandbox.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
   `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
   name, `prompts/` — expanded server-side so the transcript records what the model saw.
