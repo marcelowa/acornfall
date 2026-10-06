@@ -97,12 +97,7 @@ describe("loading", () => {
 		// And one that only exists as a prompt, which is the case a shared bundle has.
 		await write(join(workspace, ".agents", "prompts", "only-here.md"), "---\nname: only-here\ndescription: prompts only\n---\nBody");
 
-		const roots = layerRoots({
-			home: join(root, "home"),
-			workspace,
-			trusted: true,
-			userHome: join(root, "user"),
-		});
+		const roots = layerRoots({ home: join(root, "home"), workspace, userHome: join(root, "user") });
 		const commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS));
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["audit", "from commands"],
@@ -123,7 +118,7 @@ describe("loading", () => {
 		await write(join(workspace, ".acornfall", "commands", "deploy.md"), "---\nname: deploy\ndescription: native\n---\nNative");
 		await write(join(workspace, ".agents", "commands", "shared.md"), "---\nname: shared\ndescription: only in .agents\n---\nShared");
 
-		const roots = layerRoots({ home, workspace, trusted: true, userHome: user });
+		const roots = layerRoots({ home, workspace, userHome: user });
 		const commands = await loadCommands(resourceFolders(roots, ["commands"]));
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["deploy", "native"],

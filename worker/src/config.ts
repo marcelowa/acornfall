@@ -330,25 +330,20 @@ const NATIVE_DIR = ".acornfall";
 export interface LayerRoots {
 	/** The user's: the ecosystem's shared folder first, then the install's own. */
 	global: readonly string[];
-	/** The workspace's, or empty when it is untrusted. */
+	/** The workspace's: the ecosystem's folder first, then ours. */
 	workspace: readonly string[];
 }
 
 export function layerRoots(options: {
 	home: string;
 	workspace: string;
-	trusted: boolean;
 	/** The user's home directory, for `~/.agents`. Injected so a test never reads the real one. */
 	userHome?: string;
 }): LayerRoots {
 	const user = options.userHome ?? homedir();
 	return {
 		global: [join(user, ECOSYSTEM_DIR), options.home],
-		// An untrusted workspace contributes nothing, including the folder a clone is most
-		// likely to carry.
-		workspace: options.trusted
-			? [join(options.workspace, ECOSYSTEM_DIR), join(options.workspace, NATIVE_DIR)]
-			: [],
+		workspace: [join(options.workspace, ECOSYSTEM_DIR), join(options.workspace, NATIVE_DIR)],
 	};
 }
 
@@ -369,12 +364,13 @@ export function resourceFolders(roots: LayerRoots, names: readonly string[]): st
 }
 
 /**
- * Reads every folder the install has, in order.
+ * Reads every folder the install has, in order: the user's, then the workspace's.
  *
- * Trust is already decided by the roots: `layerRoots` gives an untrusted workspace none. That
- * matters because a workspace's files are instructions from a folder, and folders are things
- * you clone — an `AGENTS.md` or an agent definition in an untrusted repository is prompt
- * injection. Untrusted means the folder and nothing else.
+ * Every workspace's own resources are read. A workspace used to carry a trust flag that decided
+ * this, on the reasoning that a workspace is often a repository somebody else wrote and its
+ * `AGENTS.md` is prompt injection; what that flag actually did was make the *only* folder the
+ * agent is supposed to work in the one folder it could not take instructions from, while leaving
+ * its tools free to read the whole machine. Reach is the sandbox's business, and this is not it.
  */
 export async function loadCatalog(roots: LayerRoots): Promise<Catalog> {
 	const defaults: LayerTrace[] = [];

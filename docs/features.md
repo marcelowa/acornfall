@@ -76,7 +76,7 @@ The chain is **conversation → its definition → this workspace → the instal
 |---|---|---|
 | W1 | A workspace is a folder with its own harness, storage, and history; a second one is created by name and starts on demand. | `TestWorkspacesAreIsolatedAndStartOnDemand` |
 | W2 | The interface creates workspaces inside one folder: a path is refused, not ignored. An existing folder of that name is adopted. | `TestWorkspaceCreationTakesANameAndRefusesAPath` |
-| W3 | Trust decides whether a workspace's rules, guards, agents, and commands are read at all; untrusted means the folder and nothing else. | `TestTrustDecidesWhetherAWorkspaceIsRead` |
+| W3 | A workspace's own rules, guards, agents, and commands are read. The `trusted` flag that used to gate this is gone, and the API refuses it rather than ignoring it. | `TestAWorkspacesOwnResourcesAreRead`, `TestTheTrustFlagIsGone` |
 | W4 | Removing forgets a workspace and stops its worker; it never deletes the folder or the history, and general cannot be removed. | `TestRemovingAWorkspaceKeepsItsFolderAndHistory` |
 | W5 | A broken resource file is reported by that workspace, not fatal to the gateway, and fixing the file is enough. | `TestABrokenWorkspaceFileIsReportedAndHeals` |
 | W6 | Idle workers are evicted; a watched or busy one is not. | `TestEvictionStopsOnlyIdleUnwatchedWorkspaces` |
@@ -94,7 +94,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | R7 | Slash commands come from two layers, the workspace shadowing the install, and the listing says which file each came from. | `TestCommandsComeFromBothLayersAndTheWorkspaceWins` |
 | R8 | Expansion happens server-side, so the transcript records what the model saw; arguments are appended when there is no placeholder. | `TestCommandExpansionIsWhatTheModelSees`, `TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder` + `worker/test/commands.test.ts` |
 | R9 | A message that merely starts with a slash is not rewritten. | `TestAnUnknownCommandIsSentAsWritten` |
-| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both, and an untrusted workspace contributes neither. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
+| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
 
 ## Guards
 
@@ -172,9 +172,10 @@ and the fix is in the history rather than a workaround:
   refusal are right, and those are covered.
 - **The model's judgement.** Nothing here asserts that an agent does something sensible. The
   platform's job is to make the call and record it.
-- **The sandbox.** `ExecutionEnv` is only the host process today, so there is nothing to
-  assert: ADR 0009 and the `bwrap` tier are still ahead. Until then, a trusted workspace's
-  shell can reach anything the user can, and no test pretends otherwise.
+- **The sandbox.** `ExecutionEnv` is only the host process today, so there is nothing to assert:
+  a workspace's shell can reach anything the user can, and no test pretends otherwise. The tier
+  is decided — one microVM per workspace, microsandbox as the engine, with the policy ours — and
+  the tests come with it.
 - **Memory and self-improvement.** Designed, not built (see `docs/adr/`).
 - **The interface.** `make ui` still covers the client, but the client is being rebuilt, so no
   feature above depends on it.

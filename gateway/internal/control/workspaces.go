@@ -50,9 +50,6 @@ type Workspace struct {
 	Title string `json:"title"`
 	// General marks the default workspace. Exactly one workspace is general.
 	General bool `json:"general"`
-	// Trusted gates the workspace's own resources: its AGENTS.md, config, agents,
-	// skills, and commands. An untrusted workspace is a folder and nothing else.
-	Trusted bool `json:"trusted"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
@@ -210,7 +207,7 @@ func (w *Workspaces) Get(name string) (Workspace, bool) {
 //
 // A folder of that name already there is adopted rather than refused, so a workspace the
 // reader prepared themselves works.
-func (w *Workspaces) Create(name string, trusted bool) (Workspace, error) {
+func (w *Workspaces) Create(name string) (Workspace, error) {
 	if strings.TrimSpace(name) == "" {
 		return Workspace{}, errors.New("a workspace needs a name")
 	}
@@ -221,7 +218,7 @@ func (w *Workspaces) Create(name string, trusted bool) (Workspace, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return Workspace{}, err
 	}
-	workspace := Workspace{Name: name, Path: path, Title: name, Trusted: trusted}
+	workspace := Workspace{Name: name, Path: path, Title: name}
 	if err := w.Add(workspace); err != nil {
 		return Workspace{}, err
 	}
@@ -262,10 +259,10 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	workspace.Name = existing.Name
 	w.registry[workspace.Name] = workspace
 	control := w.controls[workspace.Name]
-	// Trust and the folder are passed to the worker when it starts, so a change to either
-	// only takes effect in a new process. Stopping it here is what makes the toggle mean
-	// something immediately instead of at the next idle eviction.
-	restart := control != nil && (existing.Trusted != workspace.Trusted || existing.Path != workspace.Path)
+	// The folder is passed to the worker when it starts, so a change only takes effect in a
+	// new process. Stopping it here is what makes a move mean something immediately instead of
+	// at the next idle eviction.
+	restart := control != nil && existing.Path != workspace.Path
 	if restart {
 		delete(w.controls, workspace.Name)
 	}
@@ -599,9 +596,33 @@ func (w *Workspaces) registryPath() string {
 // would be a concern in the wrong file.
 type RegistryFile struct {
 	// Path is where it was read from; not part of the file.
-	Path          string      `json:"-"`
+	Path string `json:"-"`
+	// dropped says the file mentioned keys this build no longer writes, so the caller can
+	// rewrite it. Not part of the file either.
+	dropped       bool
 	WorkspacesDir string      `json:"workspacesDir,omitempty"`
 	Workspaces    []Workspace `json:"workspaces"`
+}
+
+// droppedKeys reports whether the file on disk mentions a key this build no longer writes.
+//
+// A workspace used to carry `trusted`. Nothing reads it any more, and a stale value that
+// nothing reads is a value something can read again by accident — so the first load that sees
+// one rewrites the file without it, rather than leaving it there for a later version to
+// rediscover and mistrust.
+func droppedKeys(payload []byte) bool {
+	var raw struct {
+		Workspaces []map[string]json.RawMessage `json:"workspaces"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return false
+	}
+	for _, record := range raw.Workspaces {
+		if _, found := record["trusted"]; found {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadRegistryFile reads a registry, tolerating absence.
@@ -618,6 +639,7 @@ func LoadRegistryFile(path string) (RegistryFile, error) {
 		return registry, fmt.Errorf("%s: %w", path, err)
 	}
 	registry.Path = path
+	registry.dropped = droppedKeys(payload)
 	return registry, nil
 }
 
@@ -643,6 +665,14 @@ func (w *Workspaces) loadRegistry() error {
 	if err != nil {
 		return err
 	}
+	// Anything the file says that we no longer write is dropped on the way out, once.
+	defer func() {
+		if file.dropped {
+			if err := w.persist(); err != nil {
+				workerpool.Log("rewriting the registry without old keys: %v", err)
+			}
+		}
+	}()
 	recorded := file.WorkspacesDir
 	for _, workspace := range file.Workspaces {
 		w.registry[workspace.Name] = workspace
@@ -683,13 +713,10 @@ func (w *Workspaces) loadRegistry() error {
 			return err
 		}
 		w.registry[GeneralWorkspaceName] = Workspace{
-			Name:  GeneralWorkspaceName,
-			Path:  absolute,
-			Title: filepath.Base(absolute),
-			// The folder the install was started in is the reader's own; anything else is
-			// a folder they pointed at, and gets no resources until they say so.
+			Name:    GeneralWorkspaceName,
+			Path:    absolute,
+			Title:   filepath.Base(absolute),
 			General: true,
-			Trusted: true,
 		}
 		if err := w.persist(); err != nil {
 			return err

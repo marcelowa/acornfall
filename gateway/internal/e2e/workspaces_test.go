@@ -1,11 +1,11 @@
 package e2e
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // Each workspace is its own everything: its own folder, its own harness process, its own
@@ -133,27 +133,21 @@ func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
 	}
 }
 
-// Trust decides whether a workspace's own resources are read at all: its rules, its guards,
-// its agents, its commands. Untrusted means the folder and nothing else.
-func TestTrustDecidesWhetherAWorkspaceIsRead(t *testing.T) {
+// A workspace's own resources are read: its rules, its guards, its agents, its commands.
+//
+// There used to be a trust flag that decided this, and the second half of this test used to
+// flip it and watch everything disappear. What that bought was thin: the folder the agent works
+// in was the one folder it could not take instructions from, while its tools stayed free to read
+// the whole machine. Reach is the sandbox's business, and this is not it.
+func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 	guard := `{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf","reason":"no destructive commands here"}]}}}`
 	s := start(t,
-		withScript(
-			scriptRule{
-				Match: "tidy up",
-				Tools: []scriptTool{{Name: "bash", Args: map[string]any{"command": "rm -rf build"}}},
-				Reply: "cleaned up",
-			},
-			// A distinct reply for the second phase: waiting for a string the transcript already
-			// contains would pass without the second prompt having been answered at all.
-			scriptRule{
-				Match: "sweep up",
-				Tools: []scriptTool{{Name: "bash", Args: map[string]any{"command": "rm -rf build"}}},
-				Reply: "swept up",
-			},
-		),
+		withScript(scriptRule{
+			Match: "tidy up",
+			Tools: []scriptTool{{Name: "bash", Args: map[string]any{"command": "rm -rf build"}}},
+			Reply: "cleaned up",
+		}),
 		withSetup(func(t *testing.T, s *system) {
-			// Trusted to begin with, so the same fixtures can be read and then ignored.
 			s.writeWorkspace(t, "AGENTS.md", "WORKSPACE RULES MARKER: keep the build directory")
 			s.writeWorkspace(t, ".acornfall/config.json", guard)
 			s.writeWorkspace(t, ".acornfall/agents/local.md", "---\nname: local-agent\ndescription: from this workspace\n---\nBody.")
@@ -161,12 +155,11 @@ func TestTrustDecidesWhetherAWorkspaceIsRead(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	c.post("/api/workspaces/general/update", map[string]any{"trusted": true}, nil)
-
 	root := c.waitForConversation("general")
+
 	got := c.state("general")
 	if len(got.Agents) != 1 || got.Agents[0].Name != "local-agent" {
-		t.Errorf("a trusted workspace's agents should be offered, got %+v", got.Agents)
+		t.Errorf("a workspace's agents should be offered, got %+v", got.Agents)
 	}
 	var commands struct {
 		Commands []struct {
@@ -182,51 +175,50 @@ func TestTrustDecidesWhetherAWorkspaceIsRead(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("a trusted workspace's commands should be offered, got %+v", commands.Commands)
+		t.Errorf("a workspace's commands should be offered, got %+v", commands.Commands)
+	}
+	// The layer traces name the file each folder contributed, which is how a reader can tell
+	// where a rule came from at all.
+	if len(got.Defaults) == 0 || got.Defaults[len(got.Defaults)-1].Path == "" {
+		t.Errorf("the workspace's config should be a reported layer, got %+v", got.Defaults)
 	}
 
-	// A prompt is what builds a system entry, so the prompt is where "what does the model
-	// see" is answerable.
+	// A prompt is what builds a system entry, so the prompt is where "what does the model see"
+	// is answerable.
 	c.prompt("general", root, "tidy up")
 	running := c.waitForText("general", root, "cleaned up")
 	if !strings.Contains(running.systemSections()["workspace-rules"], "WORKSPACE RULES MARKER") {
-		t.Errorf("a trusted workspace's AGENTS.md should reach the prompt, got %q", running.systemSections()["workspace-rules"])
+		t.Errorf("a workspace's AGENTS.md should reach the prompt, got %q", running.systemSections()["workspace-rules"])
 	}
-	// The guard from the workspace's own config blocks the call it was written for.
 	if !strings.Contains(running.lastToolResult(), "no destructive commands here") {
-		t.Errorf("a trusted workspace's guard should block, got %q", running.lastToolResult())
+		t.Errorf("a workspace's guard should block, got %q", running.lastToolResult())
+	}
+}
+
+// The flag is gone, and a caller that still sends it is told so rather than humoured: a request
+// for the old behaviour that quietly gets the new one is a lie in the other direction.
+func TestTheTrustFlagIsGone(t *testing.T) {
+	s := start(t)
+	c := s.client()
+
+	status, body := c.postStatus("/api/workspaces", map[string]any{"name": "untrusted-one", "trusted": false})
+	if status != http.StatusBadRequest {
+		t.Errorf("creating with a trust flag should be refused, got %d", status)
+	}
+	if !strings.Contains(body, "no trust flag") {
+		t.Errorf("the refusal should say why, got %q", body)
 	}
 
-	// Untrusted: the same files are ignored. Trust is passed to the worker when it starts, so
-	// flipping it restarts this workspace's harness.
-	c.post("/api/workspaces/general/update", map[string]any{"trusted": false}, nil)
-	c.waitIdle("general", root, 30*time.Second)
-
-	untrusted := c.state("general")
-	if untrusted.Workspace.Trusted {
-		t.Fatal("trust should have been withdrawn")
+	status, body = c.postStatus("/api/workspaces/general/update", map[string]any{"trusted": false})
+	if status != http.StatusBadRequest {
+		t.Errorf("updating with a trust flag should be refused, got %d", status)
 	}
-	if len(untrusted.Agents) != 0 {
-		t.Errorf("an untrusted workspace contributes no agents, got %+v", untrusted.Agents)
-	}
-	for _, trace := range untrusted.Defaults {
-		if trace.Layer == "workspace" {
-			t.Errorf("an untrusted workspace contributes no config layer, got %+v", trace)
-		}
-	}
-	c.get("/api/workspaces/general/commands", &commands)
-	for _, command := range commands.Commands {
-		if command.Name == "local-command" {
-			t.Error("an untrusted workspace's commands must not be offered")
-		}
+	if !strings.Contains(body, "no trust flag") {
+		t.Errorf("the refusal should say why, got %q", body)
 	}
 
-	c.prompt("general", root, "sweep up")
-	plain := c.waitForText("general", root, "swept up")
-	if strings.Contains(plain.systemSections()["workspace-rules"], "WORKSPACE RULES MARKER") {
-		t.Errorf("an untrusted workspace's rules must not reach the prompt, got %q", plain.systemSections()["workspace-rules"])
-	}
-	if strings.Contains(plain.lastToolResult(), "no destructive commands here") {
-		t.Errorf("an untrusted workspace's guard must not apply, got %q", plain.lastToolResult())
+	// And the workspace it was aimed at is untouched and still serving.
+	if got := c.state("general"); got.Workspace.Name != "general" || !got.WorkerUp {
+		t.Errorf("a refused update should change nothing, got %+v", got.Workspace)
 	}
 }

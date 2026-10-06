@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,13 +50,12 @@ type Options struct {
 }
 
 // WorkspaceState is a workspace as the interface needs it: what it is called, where it
-// points, whether its own resources are trusted, and whether its worker is running.
+// points, and whether its worker is running.
 type WorkspaceState struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
 	Title   string `json:"title"`
 	General bool   `json:"general"`
-	Trusted bool   `json:"trusted"`
 	Running bool   `json:"running"`
 }
 
@@ -333,9 +331,6 @@ func (c *Control) startWorker(ctx context.Context) error {
 		"--storage", c.opts.StoragePath,
 		"--credentials", c.opts.Credentials,
 		"--home", c.opts.Home,
-		// Whether this workspace's own resources may be read at all. Passed to the worker
-		// rather than enforced here, because the worker is what reads the files.
-		"--trusted", strconv.FormatBool(c.opts.Workspace.Trusted),
 	)
 	if err := ctx.Err(); err != nil {
 		return err
@@ -661,7 +656,6 @@ func (c *Control) StateFor(conversationID string) State {
 			Path:    c.opts.Workspace.Path,
 			Title:   c.opts.Workspace.Title,
 			General: c.opts.Workspace.General,
-			Trusted: c.opts.Workspace.Trusted,
 			Running: c.workerUp,
 		},
 		Workspaces:    workspaces,

@@ -52,7 +52,7 @@ describe("skills", () => {
 		await write(join(workspace, ".agents", "skills", "both", "SKILL.md"), "---\nname: both\ndescription: ecosystem\n---\nB");
 		await write(join(workspace, ".acornfall", "skills", "both", "SKILL.md"), "---\nname: both\ndescription: native\n---\nC");
 
-		const roots = layerRoots({ home: join(root, "home"), workspace, trusted: true, userHome: join(root, "user") });
+		const roots = layerRoots({ home: join(root, "home"), workspace, userHome: join(root, "user") });
 		const skills = await loadSkills(resourceFolders(roots, ["skills"]));
 		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
 			["both", "native"],

@@ -75,8 +75,6 @@ interface Args {
 	workspace: string;
 	/** The installation folder: global resources and shared state. */
 	home: string;
-	/** Whether this workspace's own resources may be read at all. */
-	trusted: boolean;
 	storage: string;
 	credentials: string;
 }
@@ -99,11 +97,9 @@ function parseArgs(argv: readonly string[]): Args {
 	const defaults = (name: string) => join(workspace, ".acornfall", name);
 	const credentials = resolve(values.get("credentials") ?? defaults("credentials.json"));
 	const home = resolve(values.get("home") ?? dirname(credentials));
-	const trusted = (values.get("trusted") ?? "true") !== "false";
 	return {
 		workspace,
 		home,
-		trusted,
 		storage: resolve(values.get("storage") ?? defaults("session.sqlite")),
 		credentials,
 	};
@@ -117,7 +113,7 @@ const models = builtinModels({ credentials });
 
 // Every resource folder this install reads: the user's, then the workspace's, each with the
 // ecosystem's `.agents` before our own `.acornfall`. An explicit --skill replaces the list.
-const roots = layerRoots({ home: args.home, workspace: args.workspace, trusted: args.trusted });
+const roots = layerRoots({ home: args.home, workspace: args.workspace });
 const discoveredSkills = await loadSkills(resourceFolders(roots, ["skills"]));
 
 // The overlay, the workspace's rules, and its commands. All reloaded on demand, so
@@ -132,7 +128,6 @@ let commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS));
  * `instructions`, so the context inspector can show it and diff it between requests.
  */
 async function loadWorkspaceRules(): Promise<string | undefined> {
-	if (!args.trusted) return undefined;
 	const source = await readFile(join(args.workspace, "AGENTS.md"), "utf8").catch(() => null);
 	const text = source?.trim() ?? "";
 	return text === "" ? undefined : text;

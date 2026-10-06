@@ -437,7 +437,6 @@ type workspaceRef struct {
 	Path    string `json:"path"`
 	Title   string `json:"title"`
 	General bool   `json:"general"`
-	Trusted bool   `json:"trusted"`
 	Running bool   `json:"running"`
 }
 

@@ -924,9 +924,8 @@ async function renderCommands() {
 }
 
 /**
- * Workspaces are folders the agent works in, each with its own worker, storage, and trust
- * decision. This is where they are created and where trust is decided, because a workspace
- * whose resources are not trusted is a folder and nothing else.
+ * Workspaces are folders the agent works in, each with its own worker and storage. This is
+ * where they are created and forgotten.
  */
 async function renderWorkspaces() {
 	let listing = { workspaces: [], workspacesDir: state?.workspacesDir ?? "" };
@@ -947,10 +946,6 @@ async function renderWorkspaces() {
 					<div class="provider-meta">${escapeHtml(workspace.name)} · ${escapeHtml(workspace.path)}</div>
 				</div>
 				<div class="provider-actions">
-					<label class="mode" title="Untrusted means the folder and nothing else: its AGENTS.md, agents, skills, and commands are not read.">
-						<input type="checkbox" data-trust="${escapeHtml(workspace.name)}" ${workspace.trusted ? "checked" : ""} />
-						<span>trusted</span>
-					</label>
 					${
 						workspace.general
 							? ""
@@ -967,7 +962,6 @@ async function renderWorkspaces() {
 		${rows}
 		<form id="workspace-form" class="workspace-form">
 			<input name="name" placeholder="new workspace name" autocomplete="off" />
-			<label class="mode"><input name="trusted" type="checkbox" /><span>trusted</span></label>
 			<button class="primary" type="submit">Create</button>
 		</form>
 		<p class="provider-meta">New workspaces are created in <code>${escapeHtml(listing.workspacesDir ?? "?")}</code>.
@@ -980,10 +974,7 @@ async function renderWorkspaces() {
 		event.preventDefault();
 		const data = new FormData(form);
 		try {
-			await post("/api/workspaces", {
-				name: String(data.get("name") ?? "").trim(),
-				trusted: data.get("trusted") === "on",
-			});
+			await post("/api/workspaces", { name: String(data.get("name") ?? "").trim() });
 			await loadState();
 			await renderWorkspaces();
 		} catch (error) {
@@ -991,18 +982,6 @@ async function renderWorkspaces() {
 		}
 	});
 
-	for (const box of els.sheetBody.querySelectorAll("[data-trust]")) {
-		box.addEventListener("change", async () => {
-			try {
-				await post(`/api/workspaces/${encodeURIComponent(box.dataset.trust)}/update`, {
-					trusted: box.checked,
-				});
-				await loadState();
-			} catch (error) {
-				setStatus(String(error.message ?? error), "offline");
-			}
-		});
-	}
 	for (const button of els.sheetBody.querySelectorAll("[data-forget]")) {
 		button.addEventListener("click", async () => {
 			try {
@@ -1631,7 +1610,7 @@ function renderWorkspacePicker() {
 	const current = activeWorkspace();
 	const key = JSON.stringify([
 		current,
-		workspaces.map((w) => [w.name, w.title, w.running, w.trusted]),
+		workspaces.map((w) => [w.name, w.title, w.running]),
 		(state?.providers ?? []).filter((provider) => provider.authenticated).length,
 		(state?.providers ?? []).length,
 	]);
@@ -1651,10 +1630,8 @@ function renderWorkspacePicker() {
 	els.workspace.textContent =
 		active === undefined
 			? ""
-			: `${active.path}${active.trusted ? "" : " · resources untrusted"}  ·  ${connected}/${
-					(state?.providers ?? []).length
-				} providers`;
-	els.workspace.title = active?.trusted === false ? "This workspace's own AGENTS.md, skills, and agents are not loaded" : "";
+			: `${active.path}  ·  ${connected}/${(state?.providers ?? []).length} providers`;
+	els.workspace.title = "";
 }
 
 function renderAgentPicker() {

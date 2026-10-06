@@ -35,7 +35,7 @@ class Worker {
 	#nextId = 0;
 
 	constructor(directory: string, home: string, script: string) {
-		this.#process = Bun.spawn(["bun", "run", "src/main.ts", "--workspace", directory, "--storage", join(home, "session.sqlite"), "--credentials", join(home, "credentials.json"), "--home", home, "--trusted", "true"], {
+		this.#process = Bun.spawn(["bun", "run", "src/main.ts", "--workspace", directory, "--storage", join(home, "session.sqlite"), "--credentials", join(home, "credentials.json"), "--home", home], {
 			cwd: workerDir,
 			env: { ...process.env, ACORNFALL_DEV_SCRIPT: script },
 			stdin: "pipe",

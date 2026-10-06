@@ -115,8 +115,7 @@ make dev
   showing which layer contributed what. See `docs/adr/0004-resource-overlay.md`.
 - **Workspaces**: a folder, its own `AGENTS.md`, config, agents, skills, and commands — under
   `.agents/` (the ecosystem's name, so a bundle written for another harness works) or
-  `.acornfall/`, which wins when a folder has both — and a trust decision that decides whether
-  any of it is read. Each workspace runs its own
+  `.acornfall/`, which wins when a folder has both. Each workspace runs its own
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
   `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
@@ -124,8 +123,8 @@ make dev
 - **Guards**: declarative rules that block a tool call and say why — a command pattern, or a
   path outside the workspace — accumulating across layers and visible in the inspector.
 - **Workspaces are managed from the interface**: create by name inside the workspaces folder
-  (`--workspaces-dir`, default `~/acornfall/workspaces`), flip trust, forget one (which never
-  deletes the folder or the history). Pointing a workspace at a folder elsewhere is
+  (`--workspaces-dir`, default `~/acornfall/workspaces`), and forget one (which never deletes
+  the folder or the history). Pointing a workspace at a folder elsewhere is
   `acornfall workspace add <name> <folder>`, because the interface stays inside one
   directory.
 - **Delegation**: `delegate` hands a task to a subagent and waits; `subagent` starts one

@@ -582,7 +582,6 @@ try {
 		const dir = (await (await fetch("/api/workspaces")).json()).workspacesDir;
 		const form = document.querySelector("#workspace-form");
 		form.querySelector('[name="name"]').value = "check-made";
-		form.querySelector('[name="trusted"]').checked = false;
 		form.requestSubmit();
 		await new Promise((resolve) => setTimeout(resolve, 1500));
 		const listing = await (await fetch("/api/workspaces")).json();
@@ -591,14 +590,12 @@ try {
 			dir,
 			created: made !== undefined,
 			insideDir: made?.path.startsWith(`${dir}/`) === true,
-			trusted: made?.trusted,
 			titleMatchesName: made?.title === "check-made",
 		};
 	});
 	check("the form creates a workspace from a name alone", created.created, JSON.stringify(created));
 	check("it lands inside the workspaces folder", created.insideDir, JSON.stringify(created));
 	check("its title defaults to its name, so the list and selector agree", created.titleMatchesName);
-	check("trust is recorded as chosen", created.trusted === false, JSON.stringify(created));
 	// Asked from here rather than from the page: a deliberate 400 is a console error in the
 	// browser, and the checks count those.
 	const refusal = await fetch(`${url.replace(/\/$/, "")}/api/workspaces`, {

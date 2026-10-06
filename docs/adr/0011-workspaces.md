@@ -5,8 +5,9 @@ Date: 2026-10-04
 
 ## What a workspace is
 
-A **folder, a resource bundle, and a trust decision**. A conversation belongs to exactly
-one, for life. It is not a sandbox: isolation is the `ExecutionEnv` seam, as it is in dsh.
+A **folder and a resource bundle**. A conversation belongs to exactly one, for life. It is not
+a sandbox: isolation is the `ExecutionEnv` seam and one microVM per workspace, decided but not
+yet built — see "Trust, and why it went" below for what replaced the trust flag.
 
 ## One worker per workspace
 
@@ -102,34 +103,39 @@ workspace each worker simply receives a different workspace path.
 A name clash between two workspaces needs no rule: a conversation sees one workspace, so
 resolution has one answer for it.
 
-## Trust is configuration, not a prompt
+## Trust, and why it went
 
-A workspace's files are instructions from a folder, and folders are things you clone. An
-`AGENTS.md` in an untrusted repo is prompt injection; a skill that says "run this script"
-is worse. Trust is therefore a field on the workspace record with a global default in
-`config.json` — no interactive prompt, which the UI cannot do anyway.
+**Removed.** This section is kept because the reasoning is worth remembering, and because the
+thing it was protecting against was real — it was just in the wrong place.
 
-**Untrusted means the folder and nothing else**: the workspace's `AGENTS.md`, config,
-agents, skills, and commands are not loaded. Global resources still apply. The flag is
-passed to the worker, because the worker is what reads the files — and changing it, like
-changing the folder, stops that workspace's worker, since both are read at startup rather
-than per request.
+A workspace carried a `trusted` flag: when off, the workspace's `AGENTS.md`, config, agents,
+skills, and commands were not loaded (global resources still applied). The reasoning was that a
+workspace is often a repository somebody else wrote, and an `AGENTS.md` in a cloned repo is
+prompt injection — a skill that says "run this script" is worse. The flag was configuration
+rather than a prompt, because the interface cannot ask a question anyway.
 
-Verified by flipping the switch on a workspace with a rules file and a command: with trust
-the command is listed and the rules reach the prompt as their own section; without it the
-list is empty and the only layer left is global.
+What it actually did was make the *one folder the agent is supposed to work in* the one folder
+it could not take instructions from, while leaving its tools free to read the whole machine. The
+instruction channel was closed and the reach was not. Two consequences followed: the flag made
+work worse (a repo's own rules are usually why you pointed an agent at it), and it gave a
+false sense of safety, because "untrusted" read as "contained" and nothing was contained.
 
-**Trust is per workspace, not per repository**: a repository cloned *inside* a trusted
-workspace inherits that trust, so its `AGENTS.md` is read. That is the honest limit of a
-workspace-level decision, and the place to fix it is a per-directory rule rather than an
-interactive prompt.
+The lever for that is capability, not reading. Reach is the sandbox's business: one microVM per
+workspace, with the workspace mounted and nothing else, egress limited to the model endpoint,
+and a policy layer for what a conversation may do. A workspace's own files are read, and the
+question "should this folder's text steer the model" becomes a policy decision — later, and in
+one place, rather than a boolean on the record that silently changed which files existed.
+
+Every workspace's resources are read now, and the API **refuses** a `trusted` field rather than
+ignoring it: a caller asking for the old behaviour should be told, not humoured.
+`TestAWorkspacesOwnResourcesAreRead` pins the reading; `TestTheTrustFlagIsGone` pins the refusal.
 
 ## Hooks: guards, declaratively
 
 durable's hooks are code registered in the process, so a workspace hook file would execute
-workspace-provided code inside the worker. That is a trust decision, so it comes later. What
-ships first is the half that is configuration: **guards on tool calls**, which can only deny
-and must say why.
+workspace-provided code inside the worker. That is a security decision, not a configuration
+field, so it comes later and behind the sandbox. What ships first is the half that is
+configuration: **guards on tool calls**, which can only deny and must say why.
 
 ```json
 { "defaults": { "hooks": { "guards": [
@@ -190,7 +196,7 @@ behind.
 
 ## Managing workspaces, and who may point at what
 
-The interface can list workspaces, create one **by name**, flip its trust, and forget it.
+The interface can list workspaces, create one **by name**, and forget it.
 Removing unregisters it and stops its worker; it never deletes the folder or the history,
 the same way deleting a conversation is a tombstone.
 

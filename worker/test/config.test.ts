@@ -24,8 +24,8 @@ async function scratch(): Promise<{ home: string; workspace: string; user: strin
 }
 
 /** The roots as the worker builds them, with the user's home injected. */
-function rootsOf(parts: { home: string; workspace: string; user: string }, trusted = true): LayerRoots {
-	return layerRoots({ home: parts.home, workspace: parts.workspace, trusted, userHome: parts.user });
+function rootsOf(parts: { home: string; workspace: string; user: string }): LayerRoots {
+	return layerRoots({ home: parts.home, workspace: parts.workspace, userHome: parts.user });
 }
 
 
@@ -55,20 +55,19 @@ describe("the catalog", () => {
 		expect(catalog.agents[0]?.description).toBe("local");
 	});
 
-	test("an untrusted workspace contributes nothing, not even its config", async () => {
+	// A workspace used to carry a trust flag that decided whether any of this was read. It is
+	// read unconditionally now: the folder the agent works in is the folder it takes
+	// instructions from, and what an agent may *touch* is the sandbox's business.
+	test("a workspace's own config and definitions are read", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(join(workspace, ".acornfall", "config.json"), `{"defaults":{"instructions":"WORKSPACE"}}`);
 		await write(join(workspace, ".acornfall", "agents", "local.md"), "---\nname: local\ndescription: x\n---\nBody");
 		await write(join(home, "config.json"), `{"defaults":{"instructions":"GLOBAL"}}`);
 
-		const untrusted = await loadCatalog(rootsOf({ home, workspace, user }, false));
-		expect(untrusted.agents).toEqual([]);
-		expect(untrusted.defaults.map((layer) => layer.layer)).toEqual(["global"]);
-		expect(resolveAgent(untrusted, undefined).instructions).toBe("GLOBAL");
-
-		const trusted = await loadCatalog(rootsOf({ home, workspace, user }));
-		expect(trusted.agents).toHaveLength(1);
-		expect(resolveAgent(trusted, undefined).instructions).toBe("GLOBAL\n\nWORKSPACE");
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		expect(catalog.agents).toHaveLength(1);
+		expect(catalog.defaults.map((layer) => layer.layer)).toEqual(["global", "workspace"]);
+		expect(resolveAgent(catalog, undefined).instructions).toBe("GLOBAL\n\nWORKSPACE");
 	});
 
 	test("unknown frontmatter keys are reported, never silently dropped", async () => {
@@ -225,17 +224,16 @@ describe("guards", () => {
 		]);
 	});
 
-	test("an untrusted workspace contributes neither folder", async () => {
+	test("the workspace's ecosystem folder is read as well as ours", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(join(workspace, ".agents", "agents", "eco.md"), "---\nname: eco\ndescription: x\n---\nBody");
 		await write(join(workspace, ".agents", "config.json"), `{"defaults":{"instructions":"ECOSYSTEM"}}`);
 		await write(join(user, ".agents", "config.json"), `{"defaults":{"instructions":"USER"}}`);
 
-		const untrusted = await loadCatalog(rootsOf({ home, workspace, user }, false));
-		expect(untrusted.agents).toEqual([]);
-		// The user's own is not the workspace's, so it stays.
-		expect(untrusted.defaults.map((layer) => layer.layer)).toEqual(["global"]);
-		expect(resolveAgent(untrusted, undefined).instructions).toBe("USER");
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }));
+		expect(catalog.agents).toHaveLength(1);
+		expect(catalog.defaults.map((layer) => layer.layer)).toEqual(["global", "workspace"]);
+		expect(resolveAgent(catalog, undefined).instructions).toBe("USER\n\nECOSYSTEM");
 	});
 
 	test("guards accumulate: one added anywhere holds everywhere", async () => {

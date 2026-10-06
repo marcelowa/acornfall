@@ -114,10 +114,17 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name    string  `json:"name"`
 		Title   string  `json:"title"`
-		Trusted bool    `json:"trusted"`
 		Path    *string `json:"path"`
+		Trusted *bool   `json:"trusted"`
 	}
 	if !decode(w, r, &body) {
+		return
+	}
+	if body.Trusted != nil {
+		// Refused rather than ignored, for the same reason as a path: a workspace used to carry
+		// a trust flag that decided whether its own resources were read, and it does not any
+		// more. A caller that asks for the old behaviour should be told, not humoured.
+		http.Error(w, "every workspace's own agents, skills, commands, and rules are read; there is no trust flag", http.StatusBadRequest)
 		return
 	}
 	if body.Path != nil {
@@ -126,7 +133,7 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "workspaces are created inside "+s.workspaces.Dir()+"; use `acornfall workspace add` for a folder elsewhere", http.StatusBadRequest)
 		return
 	}
-	workspace, err := s.workspaces.Create(body.Name, body.Trusted)
+	workspace, err := s.workspaces.Create(body.Name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -158,11 +165,12 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	if body.Trusted != nil {
+		http.Error(w, "every workspace's own agents, skills, commands, and rules are read; there is no trust flag", http.StatusBadRequest)
+		return
+	}
 	if body.Title != nil {
 		existing.Title = *body.Title
-	}
-	if body.Trusted != nil {
-		existing.Trusted = *body.Trusted
 	}
 	if err := s.workspaces.Update(existing); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)

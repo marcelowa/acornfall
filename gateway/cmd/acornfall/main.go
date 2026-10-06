@@ -256,7 +256,6 @@ gateway picks the change up on its next start.
 func workspaceCommand(argv []string) {
 	flags := flag.NewFlagSet("workspace", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "the acornfall folder")
-	trusted := flags.Bool("trusted", false, "read this workspace's own agents, skills, commands, and rules")
 	if err := flags.Parse(argv); err != nil {
 		return
 	}
@@ -286,31 +285,15 @@ func workspaceCommand(argv []string) {
 			if workspace.General {
 				marker = "*"
 			}
-			trust := "untrusted"
-			if workspace.Trusted {
-				trust = "trusted  "
-			}
-			fmt.Printf("%s %-16s %s  %s\n", marker, workspace.Name, trust, workspace.Path)
+			fmt.Printf("%s %-16s %s\n", marker, workspace.Name, workspace.Path)
 		}
 		fmt.Printf("\nworkspaces folder: %s\n", registry.WorkspacesDir)
 	case "add":
-		// Scanned by hand: Go's flag package stops at the first non-flag argument, so
-		// `add <name> <folder> --trusted` would otherwise read as three positionals and a
-		// flag that silently did nothing.
-		positional := make([]string, 0, 2)
-		for _, arg := range args[1:] {
-			switch arg {
-			case "--trusted", "-trusted":
-				*trusted = true
-			default:
-				positional = append(positional, arg)
-			}
-		}
-		if len(positional) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> <folder> [--trusted]")
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> <folder>")
 			os.Exit(2)
 		}
-		name, folder := positional[0], positional[1]
+		name, folder := args[1], args[2]
 		absolute, err := filepath.Abs(folder)
 		if err != nil {
 			log.Fatalf("acornfall: %v", err)
@@ -324,12 +307,12 @@ func workspaceCommand(argv []string) {
 			}
 		}
 		registry.Workspaces = append(registry.Workspaces, control.Workspace{
-			Name: name, Path: absolute, Title: name, Trusted: *trusted,
+			Name: name, Path: absolute, Title: name,
 		})
 		if err := control.SaveRegistryFile(registry); err != nil {
 			log.Fatalf("acornfall: %v", err)
 		}
-		fmt.Printf("added %s at %s (%s)\n", name, absolute, trustLabel(*trusted))
+		fmt.Printf("added %s at %s\n", name, absolute)
 	case "remove":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: acornfall workspace remove <name>")
@@ -359,13 +342,6 @@ func workspaceCommand(argv []string) {
 		fmt.Fprintf(os.Stderr, "unknown workspace command %q\n", args[0])
 		os.Exit(2)
 	}
-}
-
-func trustLabel(trusted bool) string {
-	if trusted {
-		return "trusted"
-	}
-	return "untrusted"
 }
 
 func resolveDataDir(flagValue string) (string, error) {
