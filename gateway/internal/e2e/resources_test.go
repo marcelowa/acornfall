@@ -1,6 +1,9 @@
 package e2e
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -360,6 +363,87 @@ func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {
 	root := c.waitForConversation("general")
 	c.prompt("general", root, "after the fix")
 	c.waitForText("general", root, "fixed")
+}
+
+// A global skill is read from the host, so its body arrives as text — and the directory it
+// names has to exist inside the sandbox, or an instruction like "run scripts/run.sh" fails
+// at the first command while the model has no way to tell why. The resource folders are
+// mounted at their own paths, read-only, and config.json when it is there.
+func TestAGlobalSkillsScriptRunsInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+	maybeSandbox(t)
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "load the global skill",
+				Tools: []scriptTool{{Name: "skill", Args: map[string]any{"name": "greeting"}}},
+				Reply: "loaded the skill",
+			},
+			scriptRule{
+				Match: "run the script",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					// The user message carries the command, because the directory is the one the
+					// skill reported a moment ago and only the transcript knows it.
+					"command": map[string]any{"$fromTranscript": `RUN: (.*)`},
+				}}},
+				Reply: "ran the global script",
+			},
+		),
+		withSetup(func(t *testing.T, s *system) {
+			s.writeHome(t, ".agents/skills/greeting/SKILL.md",
+				"---\nname: greeting\ndescription: greets from a script\n---\nRun scripts/run.sh from this directory.")
+			// The write is what proves the mount is read-only: the skill's own folder is the
+			// thing self-modification would edit, so it is the thing the engine must refuse.
+			s.writeHome(t, ".agents/skills/greeting/run.sh",
+				"echo GLOBAL-SCRIPT-RAN\n"+
+					"if echo x > \"$(dirname \"$0\")/marker\" 2>/dev/null; then echo SKILL-WRITABLE; else echo SKILL-READ-ONLY; fi\n")
+			s.writeHome(t, "config.json", `{"defaults":{"instructions":"INSTALL CONFIG MARKER"}}`)
+		}),
+	)
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	c.prompt("general", root, "load the global skill")
+	loaded := c.waitForText("general", root, "loaded the skill")
+	skillResult := loaded.toolResults()[0]
+	directory := skillDirectory(t, skillResult)
+	if _, err := os.Stat(filepath.Join(directory, "run.sh")); err != nil {
+		t.Fatalf("the skill should report where its instructions are: %v", err)
+	}
+
+	c.prompt("general", root, fmt.Sprintf("run the script \u2014 RUN: sh %s && cat %s",
+		filepath.Join(directory, "run.sh"), filepath.Join(s.Home, "config.json")))
+	got := c.waitForText("general", root, "ran the global script")
+
+	ran := got.lastToolResult()
+	if !strings.Contains(ran, "GLOBAL-SCRIPT-RAN") {
+		t.Errorf("the global script should run inside the sandbox, got %q", ran)
+	}
+	if strings.Contains(ran, "SKILL-WRITABLE") {
+		t.Errorf("the skill folder must be mounted read-only, got %q", ran)
+	}
+	if !strings.Contains(ran, "SKILL-READ-ONLY") {
+		t.Errorf("the script should report the refusal, got %q", ran)
+	}
+	if !strings.Contains(ran, "INSTALL CONFIG MARKER") {
+		t.Errorf("the install config.json should be readable inside the sandbox, got %q", ran)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "marker")); err == nil {
+		t.Error("a write into a resource folder escaped the read-only mount")
+	}
+}
+
+// skillDirectory reads the directory the skill tool reported, which is the path the model
+// would use from the instructions.
+func skillDirectory(t *testing.T, result string) string {
+	t.Helper()
+	for _, line := range strings.Split(result, "\n") {
+		if directory, found := strings.CutPrefix(line, "Directory: "); found {
+			return strings.TrimSpace(directory)
+		}
+	}
+	t.Fatalf("the skill result should name its directory, got %q", result)
+	return ""
 }
 
 func sectionValues(sections map[string]string) []string {

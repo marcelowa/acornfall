@@ -69,12 +69,15 @@ type Workspace struct {
 const NetworkOff = "off"
 
 // SandboxPolicy is what this workspace's sandbox is allowed to be. It is derived rather than
-// stored so that a new field cannot be forgotten in one of the two places.
-func (w Workspace) SandboxPolicy() sandbox.Policy {
+// stored so that a new field cannot be forgotten in one of the two places. `home` is the
+// installation folder and `userHome` is the user's, because the global resources live in two
+// places and the worker reads both: the sandbox mounts the same paths at the same strings.
+func (w Workspace) SandboxPolicy(home, userHome string) sandbox.Policy {
 	return sandbox.Policy{
 		Image:     w.Image,
 		Workspace: w.Path,
 		Egress:    w.Network != NetworkOff,
+		Global:    sandbox.GlobalPaths(home, userHome),
 	}
 }
 
@@ -101,6 +104,10 @@ func Views(list []Workspace) []WorkspaceState {
 type WorkspacesOptions struct {
 	// Home is the installation folder: global resources, credentials, and state.
 	Home string
+	// UserHome is the user's home folder, where `~/.agents` lives. It is resolved at the
+	// entry point so that the sandbox mount list and the worker's reads are built from the
+	// same answer.
+	UserHome string
 	// GeneralPath is the general workspace's folder, from --workspace.
 	GeneralPath string
 	// WorkspacesDir is where workspaces are created, from --workspaces-dir. Empty means
@@ -386,6 +393,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		Registry:      w.List,
 		WorkspacesDir: w.Dir(),
 		Home:          w.opts.Home,
+		UserHome:      w.opts.UserHome,
 		StoragePath:   filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
 		SettingsPath:  filepath.Join(w.opts.Home, "state", name, "settings.json"),
 		Sandbox:       w.opts.Sandbox,

@@ -32,6 +32,10 @@ type Options struct {
 	Workspace Workspace
 	// Home is the installation folder: global resources and shared credentials.
 	Home string
+	// UserHome is the user's home folder, for `~/.agents`, which a sandbox mounts read-only
+	// beside the install's own resource folders. The entry point resolves it and fails when it
+	// cannot, so a control always has one.
+	UserHome string
 	// StoragePath is this workspace's durable storage. One storage per workspace, because
 	// conversation ids are only unique inside one.
 	StoragePath string
@@ -678,7 +682,7 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 		state.Problem = problem.Error()
 		return state
 	}
-	policy := c.opts.Workspace.SandboxPolicy()
+	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome)
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()
 		workerpool.Log("sandbox for %s: %v", c.opts.Workspace.Name, err)

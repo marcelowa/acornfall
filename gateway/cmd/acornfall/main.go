@@ -71,6 +71,17 @@ func serve(argv []string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	// The user's home is resolved here rather than inside control: the sandbox mounts `~/.agents`
+	// at the same path the worker reads it from, and both have to be answering about the same
+	// folder. The resource folders are created now so a sandbox always has somewhere to mount
+	// from, even before anything has been written to them.
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot tell where the user's home is: %w", err)
+	}
+	if err := sandbox.EnsureGlobal(dir, userHome); err != nil {
+		return err
+	}
 	// The general workspace's folder: the folder the install was started in, unless told
 	// otherwise. An existing single-workspace install therefore keeps working where it was.
 	general := *workspace
@@ -106,6 +117,7 @@ func serve(argv []string) error {
 
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
 		Home:          dir,
+		UserHome:      userHome,
 		GeneralPath:   general,
 		WorkspacesDir: *workspacesDir,
 		WorkerCommand: command,
