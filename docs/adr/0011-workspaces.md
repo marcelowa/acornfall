@@ -121,10 +121,12 @@ work worse (a repo's own rules are usually why you pointed an agent at it), and 
 false sense of safety, because "untrusted" read as "contained" and nothing was contained.
 
 The lever for that is capability, not reading. Reach is the sandbox's business: one microVM per
-workspace, with the workspace mounted and nothing else, egress limited to the model endpoint,
-and a policy layer for what a conversation may do. A workspace's own files are read, and the
-question "should this folder's text steer the model" becomes a policy decision — later, and in
-one place, rather than a boolean on the record that silently changed which files existed.
+workspace, with the workspace mounted read-write and the global resource folders read-only at
+their own paths ([ADR 0014](0014-global-resources-in-the-sandbox.md)), egress limited to the
+model endpoint, and a policy layer for what a conversation may do. A workspace's own files are
+read, and the question "should this folder's text steer the model" becomes a policy decision —
+later, and in one place, rather than a boolean on the record that silently changed which files
+existed.
 
 Every workspace's resources are read now, and the API **refuses** a `trusted` field rather than
 ignoring it: a caller asking for the old behaviour should be told, not humoured.

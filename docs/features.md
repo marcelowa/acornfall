@@ -100,6 +100,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | R8 | Expansion happens server-side, so the transcript records what the model saw; arguments are appended when there is no placeholder. | `TestCommandExpansionIsWhatTheModelSees`, `TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder` + `worker/test/commands.test.ts` |
 | R9 | A message that merely starts with a slash is not rewritten. | `TestAnUnknownCommandIsSentAsWritten` |
 | R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
+| R11 | The global resource folders are mounted into every sandbox at their own paths, read-only, so a skill's instructions can name a script and have it run. The install folder itself — credentials, token, state — is never mounted. | `TestAGlobalSkillsScriptRunsInsideTheWorkspace`, `TestGlobalPathsAreTheResourceFoldersAndNeverTheInstall`, `TestRenderMountsTheGlobalsReadOnly` |
 
 ## Guards
 
@@ -178,7 +179,9 @@ and the fix is in the history rather than a workaround:
 - **The model's judgement.** Nothing here asserts that an agent does something sensible. The
   platform's job is to make the call and record it.
 - **The sandbox needs a hypervisor.** One microVM per workspace runs commands and file
-  operations, with the workspace mounted at its own path ([ADR 0012](adr/0012-sandbox.md)).
+  operations, with the workspace mounted at its own path and the global resource folders
+  read-only at theirs ([ADR 0012](adr/0012-sandbox.md),
+  [ADR 0014](adr/0014-global-resources-in-the-sandbox.md)).
   Everything that can be tested without one is: the environment, the path routing, and the
   refusal run against a fake sandbox, and the policy and the lifecycle against a fake engine.
   The end-to-end tests that use a real workspace — its `AGENTS.md`, `.agents/`, skills,

@@ -118,10 +118,13 @@ make dev
   `.acornfall/`, which wins when a folder has both. Each workspace runs its own
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
 - **Sandboxed execution**: what the agent *runs* runs in a microVM — one per workspace, the
-  workspace mounted at its own path and nothing else, no network — and so does every file the
-  agent reads or writes. The worker stays outside it, next to the provider key. When the engine
+  workspace mounted read-write at its own path and the global resource folders (`~/.agents`,
+  the install's agents/skills/prompts/commands) read-only at theirs, nothing else, no network —
+  and so does every file the agent reads or writes. The worker stays outside it, next to the
+  provider key. A skill's script therefore runs where its instructions say it lives, while the
+  install's credentials, token, and state are not paths inside the guest. When the engine
   or the hypervisor is missing the tools refuse rather than run on the host; `acornfall doctor`
-  says which it is. See `docs/adr/0012-sandbox.md`.
+  says which it is. See `docs/adr/0012-sandbox.md` and `docs/adr/0014-global-resources-in-the-sandbox.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
   `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
   name, `prompts/` — expanded server-side so the transcript records what the model saw.

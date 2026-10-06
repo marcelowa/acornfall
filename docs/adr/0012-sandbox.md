@@ -52,6 +52,8 @@ network: none               # omitted means egress is allowed — see below
 idle_timeout: 30m           # a sandbox nobody used stops itself
 mounts:
   - /home/me/work:/home/me/work:uid=1000,gid=1000
+  - /home/me/.agents:/home/me/.agents:ro
+  - /home/me/.acornfall/skills:/home/me/.acornfall/skills:ro
 ```
 
 Egress **defaults on** for a new workspace and is a per-workspace switch (on/off only, for now),
@@ -60,8 +62,10 @@ project's environment — a `golang:` image, a `rust:` image, a devcontainer-sty
 settable with `--image`. Bun is the *worker's* runtime and has no business in the guest.
 
 The workspace is mounted read-write **at its own path**, so a path in the model's world and in
-the user's world are the same string and no translation exists anywhere. That mount is the only
-door into the host; the worker is not on the host side of it.
+the user's world are the same string and no translation exists anywhere. The global resource
+folders are mounted read-only at theirs for the same reason
+([ADR 0014](0014-global-resources-in-the-sandbox.md)). Those mounts are the only doors into
+the host; the worker is not on the host side of any of them.
 
 `acornfall workspace list` shows what each workspace will run in; the policy file is written
 next to the workspace's state, so a person can read what it is allowed to be.
@@ -73,11 +77,14 @@ next to the workspace's state, so a person can read what it is allowed to be.
 | the protocol to the gateway | every command (`bash`, `sed`, `grep`, `git`, …) |
 | the model call, with the provider key | every file read or written through a tool |
 | its own storage: `<home>/state/<ws>` | the workspace's resource files |
-| global resources: `~/.agents`, `<home>` | anything those commands create |
-| deciding tool calls, evaluating guards, spawning subagents | — |
+| global resources: `~/.agents`, `<home>` | the global resource folders: `~/.agents` and the install's agents, skills, and prompts, read-only |
+| deciding tool calls, evaluating guards, spawning subagents | anything those commands create |
 
-None of what the worker holds is mounted into the sandbox — verified: inside a sandbox `/home`
-is empty, and `<home>/credentials.json` and `<home>/state` are not paths that exist.
+None of what the worker holds is mounted into the sandbox: `<home>/credentials.json` and
+`<home>/state` are not paths that exist inside it, and the global resources are there only
+because a skill's instructions name their own directory and the script beside them has to
+run — read-only, so the instructions cannot be rewritten from inside
+([ADR 0014](0014-global-resources-in-the-sandbox.md)).
 
 Reads are routed per path (`worker/src/files.ts`): under the workspace they go to the sandbox,
 elsewhere to the host. The user's own folders are the host's business; the workspace's are the
