@@ -228,6 +228,11 @@ func (p Policy) render(o owner) []byte {
 	}
 	b.WriteString("mounts:\n")
 	b.WriteString("  - " + yamlString(p.mount(o)) + "\n")
+	for _, path := range p.Global {
+		// `ro` is the decision, not a detail: the agent reads its instructions and runs their
+		// scripts, and editing them from inside would be self-modification.
+		b.WriteString("  - " + yamlString(path+":"+path+":ro") + "\n")
+	}
 	return []byte(b.String())
 }
 

@@ -169,7 +169,8 @@ func TestLoadNamesAnswerForBothPlatforms(t *testing.T) {
 // The policy file is the engine's format, so it is the driver that owns it. A mount is full
 // of colons and none of them need quoting; a folder called "a: b" does.
 func TestRenderPinsTheWholePolicy(t *testing.T) {
-	policy := Policy{Image: "golang:1.24", CPUs: 4, Memory: "4G", Egress: true, Workspace: "/home/me/work", IdleTimeout: "1h"}
+	policy := Policy{Image: "golang:1.24", CPUs: 4, Memory: "4G", Egress: true, Workspace: "/home/me/work", IdleTimeout: "1h",
+		Global: []string{"/home/me/.agents"}}
 	got := string(policy.render(owner{uid: 1000, gid: 1000, mapFiles: true}))
 	want := "" +
 		"image: golang:1.24\n" +
@@ -177,9 +178,29 @@ func TestRenderPinsTheWholePolicy(t *testing.T) {
 		"memory: 4G\n" +
 		"idle_timeout: 1h\n" +
 		"mounts:\n" +
-		"  - /home/me/work:/home/me/work:uid=1000,gid=1000\n"
+		"  - /home/me/work:/home/me/work:uid=1000,gid=1000\n" +
+		"  - /home/me/.agents:/home/me/.agents:ro\n"
 	if got != want {
 		t.Errorf("policy rendered as:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The resources are mounted read-only: the agent reads its instructions and runs their
+// scripts, and a write into them from inside the sandbox is refused rather than quietly
+// changing the instructions every future conversation will read.
+func TestRenderMountsTheGlobalsReadOnly(t *testing.T) {
+	policy := Policy{Workspace: "/w", Global: []string{"/home/me/.agents", "/home/me/.acornfall/config.json"}}
+	got := string(policy.render(owner{mapFiles: false}))
+	for _, want := range []string{
+		"  - /home/me/.agents:/home/me/.agents:ro\n",
+		"  - /home/me/.acornfall/config.json:/home/me/.acornfall/config.json:ro\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the global resource %q should be mounted read-only, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "/w:/w:ro") {
+		t.Errorf("the workspace stays writable; read-only is for the resources, got:\n%s", got)
 	}
 }
 

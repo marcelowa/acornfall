@@ -12,6 +12,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -33,6 +35,12 @@ type Policy struct {
 	// Workspace is the host folder mounted into the sandbox at the same path, which is what
 	// makes a path mean the same thing on both sides.
 	Workspace string
+	// Global lists host resource folders the sandbox mounts read-only at their own paths: the
+	// user's `~/.agents` bundle and the install's agents, skills, and prompt templates. A
+	// skill's instructions can then name `scripts/check.sh` and have it be a command that
+	// works. Read-only because editing them is self-modification, which belongs behind review
+	// (issue #17). GlobalPaths builds it.
+	Global []string
 	// IdleTimeout stops a sandbox nobody is using. Empty takes the default.
 	IdleTimeout string
 	// Owned lists paths inside the workspace that belong to the sandbox rather than to the
@@ -65,6 +73,50 @@ func (p Policy) withDefaults() Policy {
 		p.IdleTimeout = DefaultIdleTimeout
 	}
 	return p
+}
+
+// ecosystemDir is the rest of the ecosystem's name for a resource bundle. The worker reads
+// it as well as the install's own folders, so a bundle written for another harness works
+// here, and the sandbox has to see the same paths the worker read the instructions from.
+const ecosystemDir = ".agents"
+
+// globalFolders are the install's resource folders, which exist in every install so that a
+// sandbox's mount always resolves: the user's bundle in full, then the install's own. The
+// prompt-template folder has two names because both are read.
+func globalFolders(home, userHome string) []string {
+	folders := []string{filepath.Join(userHome, ecosystemDir)}
+	for _, name := range []string{"agents", "skills", "prompts", "commands"} {
+		folders = append(folders, filepath.Join(home, name))
+	}
+	return folders
+}
+
+// GlobalPaths is what a workspace's sandbox mounts read-only at the same paths. A file is
+// only mountable if it is there when the sandbox is created, so `<home>/config.json` is
+// included when it exists and not otherwise; adding one later needs the sandbox recreated.
+//
+// `<home>` itself is deliberately absent: it holds credentials.json, token, and state/, and
+// the agent has no business reading any of them. That is the whole reason the list is
+// explicit. See docs/adr/0014-global-resources-in-the-sandbox.md.
+func GlobalPaths(home, userHome string) []string {
+	paths := globalFolders(home, userHome)
+	config := filepath.Join(home, "config.json")
+	if info, err := os.Stat(config); err == nil && !info.IsDir() {
+		paths = append(paths, config)
+	}
+	return paths
+}
+
+// EnsureGlobal creates the folders GlobalPaths names, so a fresh install has somewhere to
+// mount from. It does not create config.json: an empty one would be a decision about
+// defaults nobody made, and the mount is skipped while the file is absent.
+func EnsureGlobal(home, userHome string) error {
+	for _, folder := range globalFolders(home, userHome) {
+		if err := os.MkdirAll(folder, 0o700); err != nil {
+			return fmt.Errorf("create %s: %w", folder, err)
+		}
+	}
+	return nil
 }
 
 // Name is the engine-level name for a workspace's sandbox. It is derived from the path so
