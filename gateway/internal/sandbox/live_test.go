@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+// liveDriver is the real engine, with its state directory shared when the environment names
+// one. A fresh directory per run means a fresh pull of the image every run, which is how a
+// suite meets a registry's anonymous rate limit; the shared directory is also what the e2e
+// suite's image cache is.
+func liveDriver(home string) *Microsandbox {
+	driver := NewMicrosandbox(home)
+	if state := os.Getenv("ACORNFALL_SANDBOX_STATE"); state != "" {
+		driver = driver.WithStateDir(state)
+	}
+	return driver
+}
+
 // Live: only where a hypervisor exists. Proves the CLI shapes against the real engine.
 func TestLiveProduceAndStop(t *testing.T) {
 	if os.Getenv("ACORNFALL_LIVE_SANDBOX") == "" {
@@ -20,7 +32,7 @@ func TestLiveProduceAndStop(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "hello.txt"), []byte("from the host\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := Open(context.Background(), Options{Home: home, Log: t.Logf})
+	manager, err := Open(context.Background(), Options{Home: home, Driver: liveDriver(home), Log: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
