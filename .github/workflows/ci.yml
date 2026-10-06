@@ -8,6 +8,15 @@ name: ci
 on:
   push:
   pull_request:
+  # The slow tier needs a hypervisor, which GitHub-hosted runners do not have, so it is run
+  # on demand and names the runner: a self-hosted label with /dev/kvm. The default path must
+  # never depend on it (see the sandbox job below).
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "A runner with /dev/kvm (a self-hosted label, or a larger runner with nested virtualisation)"
+        required: true
+        type: string
 
 jobs:
   verify:
@@ -56,4 +65,22 @@ jobs:
       - name: Nothing to check
         if: steps.range.outputs.value == ''
         run: echo "the first push to a branch has no range behind it; skipping"
+
+  sandbox:
+    # `make test-sandbox` boots real microVMs, so it runs only where somebody dispatched it to
+    # a hypervisor. It fails rather than skips when /dev/kvm is missing, because a slow tier
+    # that silently does nothing is how this bug class survives.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: gateway/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: make deps
+      - run: make test-sandbox
 
