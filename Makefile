@@ -12,7 +12,7 @@ URL ?= http://$(ADDR)
 INSECURE ?= 1
 OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 
-.PHONY: help deps build typecheck lint tools commits check test ui vendor run dev fmt clean
+.PHONY: help deps build typecheck lint tools commits check test test-sandbox ui vendor run dev fmt clean
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -50,17 +50,40 @@ lint: typecheck ## the static rules; fails on the first one broken
 commits: ## check commit messages (RANGE=origin/main..HEAD by default)
 	node scripts/check-commits.mjs $(RANGE)
 
+# The slow tier's image cache, shared across runs and across both the Go and worker suites so
+# an image is pulled once per machine. Nothing may delete it: a fresh state directory per run
+# is how a suite meets a registry's anonymous rate limit. /tmp keeps it short enough for the
+# engine's runtime sockets (docs/adr/0012-sandbox.md).
+SANDBOX_STATE ?= /tmp/acornfall-e2e-sandboxes
+
 check: typecheck ## fast: the compiler and the unit tests, no processes
 	cd worker && bun test
-	# -count=1 because the end-to-end suite's inputs include worker/src and gateway/web, which
-	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
-	cd gateway && go test -short -count=1 ./...
+	# -count=1 because the suite's inputs include worker/src and gateway/web, which Go's test
+	# cache cannot see: a cached pass would be a pass for code that has changed.
+	# The end-to-end suite is excluded: it starts a gateway and a worker per test, and that is
+	# its own tier (`make test`). A gate that takes a minute is a gate nobody runs.
+	cd gateway && go test -short -count=1 $$(go list ./... | grep -v /internal/e2e)
 
-test: lint ## everything: static rules, unit tests, the worker protocol, and the features
+test: lint ## the default tier: units and the feature suite, no hypervisor needed
 	cd worker && bun test
-	# -count=1 because the end-to-end suite's inputs include worker/src and gateway/web, which
-	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
-	cd gateway && go test -race -count=1 ./...
+	# ACORNFALL_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
+	# the same command behaves the same on a machine with /dev/kvm and in CI. -short skips the
+	# tests whose assertions need a sandbox; the rest of the feature suite runs in parallel.
+	# -count=1 because the suite's inputs include worker/src and gateway/web, which Go's test
+	# cache cannot see: a cached pass would be a pass for code that has changed.
+	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel 6 ./...
+
+test-sandbox: ## the slow tier: real microVMs and the engine's own checks
+	@if [ "$$(uname -s)" = "Linux" ] && [ ! -r /dev/kvm ]; then \
+		echo "make test-sandbox needs a hypervisor and /dev/kvm is not readable; see docs/adr/0012-sandbox.md"; exit 1; \
+	fi
+	@if [ "$$(uname -s)" = "Darwin" ] && [ "$$(sysctl -n kern.hv_support 2>/dev/null)" != "1" ]; then \
+		echo "make test-sandbox needs a hypervisor and this Mac reports none; see docs/adr/0012-sandbox.md"; exit 1; \
+	fi
+	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a
+	# suite of skips. The tier is serial-ish because two microVMs are already two machines.
+	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_INTEGRATION=1 MSB_HOME=$(SANDBOX_STATE) bun test test/sandbox.integration.test.ts
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -parallel 2 ./...
 
 run: build ## run against the current directory
 	./$(BIN) --addr $(ADDR) $(OPTS) --workspace $(CURDIR)

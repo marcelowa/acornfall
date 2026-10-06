@@ -152,9 +152,6 @@ type system struct {
 // start boots the gateway against a scratch installation and stops it when the test ends.
 func start(t *testing.T, opts ...func(*settings)) *system {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("the end-to-end suite starts processes; run without -short")
-	}
 	if skipReason != "" {
 		t.Skip(skipReason)
 	}
@@ -195,7 +192,8 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	s.Home = shortHome
 	// A stable path, not a per-run one: it holds the image every sandbox boots from, and a
 	// fresh directory per run means a registry pull per run — which is how a suite runs into
-	// an anonymous pull limit. The sandboxes themselves are removed per test by their label.
+	// an anonymous pull limit. The sandboxes themselves are removed by the tests that made
+	// them, when they end.
 	s.SandboxState = filepath.Join(os.TempDir(), "acornfall-e2e-sandboxes")
 	s.WorkspacesDir = filepath.Join(t.TempDir(), "workspaces")
 	s.General = filepath.Join(t.TempDir(), "general")
@@ -324,10 +322,6 @@ func (s *system) sandboxesOwnedByTest() []string {
 	return names
 }
 
-// requireSandbox skips a test that needs the workspace's own files, because those files live
-// inside a sandbox now. The gateway refuses to run tools where there is no hypervisor, which
-// is the behaviour ADR 0012 asks for — so the tests that need one have to skip rather than
-// pretend, and this is the only place that decision is made.
 // keepSandboxes leaves the sandboxes a test made in place, which is what somebody debugging a
 // sandbox failure wants: the machine is then still there to look at.
 func keepSandboxes() bool {
@@ -343,9 +337,18 @@ func engineBinary(home string) string {
 	return matches[0]
 }
 
-// maybeSandbox is used at the top of a test, before a system exists.
+// maybeSandbox is used at the top of a test, before a system exists. It is the only place the
+// decision is made, because a test that needs the workspace's own files needs a sandbox: the
+// gateway refuses to run tools where there is none, which is the behaviour ADR 0012 asks for,
+// so the test skips rather than pretending.
+//
+// -short is the sandbox tier's boundary: `make test` runs the feature suite with sandboxes
+// forced off, and the sandbox tests skip; `make test-sandbox` runs them for real.
 func maybeSandbox(t *testing.T) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("this test needs a sandbox; make test-sandbox runs it")
+	}
 	if reason := sandboxUnavailable(); reason != "" {
 		t.Skipf("this machine cannot run a sandbox: %s", reason)
 	}
