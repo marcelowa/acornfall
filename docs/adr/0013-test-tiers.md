@@ -90,3 +90,15 @@ of the removal list entirely.
   of never naming what the test does not own.
 - Prepared images and snapshots are the next slow piece; they get a suite and a target in this
   same shape.
+
+## Follow-up: the suite itself was slow too
+
+The tier shape above is unchanged, but the fast tier was still 33s because the tests, not just
+the serialization, were paying for time nobody needed. Three tests streamed scripted tokens at
+2/s because the harness could only observe "running" through the cached state, which a
+3-second poll keeps current — so a run had to outlive a poll to be visible at all. Looking at
+run state through the refreshed listing made that artificial slowness unnecessary, and the
+keepalive test was watching a 3-second ticker for five seconds. The end-to-end package is
+**5.5-8s** now (twelve consecutive `-parallel 6` runs green), ~12s under `-race`; `make test`
+spends the rest on `make lint` (tsc 5.6s + eslint 7.2s, run one after the other). The decision
+in this ADR is what stays: a slow piece gets its own suite and its own target.

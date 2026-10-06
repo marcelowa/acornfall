@@ -143,7 +143,7 @@ rather than pretending to have checked:
 | commit message shape | `scripts/check-commits.mjs`, over a pull request's commits in CI |
 
 `make check` is the fast loop (types and unit tests, ~6s). `make test` adds the end-to-end suite
-against a real gateway with the sandbox tier forced off, under `-race` (~35s, no hypervisor
+against a real gateway with the sandbox tier forced off, under `-race` (~25s, no hypervisor
 needed). `make test-sandbox` is the slow tier: real microVMs, the engine's checks, and the
 worker's SDK suite, on a machine that has a hypervisor. `make tools` installs the linters.
 
