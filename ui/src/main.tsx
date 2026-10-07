@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Stack } from "@/components/layout/stack";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Heading } from "@/components/typography/heading";
 import { Text } from "@/components/typography/text";
 import { Shell } from "@/screens/shell";
@@ -10,15 +11,15 @@ import "@/styles/globals.css";
 /**
  * The development harness, not the app. The app's wiring is its own issue; this mounts the
  * dumb shell with placeholder slots so `bun run dev` and `bun run build` exercise the whole
- * chain, and the theme toggle — the only logic in the foundation — sits at the entry point,
- * where logic belongs.
+ * chain, and the theme — the state and the click handler — lives at the entry point, where
+ * logic belongs.
  */
 function Harness() {
-	const [dark, setDark] = useState(false);
+	const [theme, setTheme] = useState<"light" | "dark">("light");
 
 	useEffect(() => {
-		document.documentElement.classList.toggle("dark", dark);
-	}, [dark]);
+		document.documentElement.classList.toggle("dark", theme === "dark");
+	}, [theme]);
 
 	const rail = (
 		<Stack gap="sm" padding="md" fill className="border-r border-border bg-card">
@@ -40,11 +41,18 @@ function Harness() {
 	);
 
 	const composer = (
-		<Stack direction="horizontal" gap="sm" padding="md" className="border-t border-border">
+		<Stack
+			direction="horizontal"
+			gap="sm"
+			align="center"
+			padding="md"
+			className="border-t border-border"
+		>
 			<Button size="sm">Send</Button>
-			<Button variant="outline" size="sm" onClick={() => setDark((value) => !value)}>
-				{dark ? "Light" : "Dark"}
-			</Button>
+			<ThemeToggle
+				theme={theme}
+				onToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+			/>
 		</Stack>
 	);
 
