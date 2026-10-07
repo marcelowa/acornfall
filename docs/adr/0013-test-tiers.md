@@ -38,11 +38,12 @@ honest.**
   behaves the same on every machine, including CI. Measured 33s against 506s.
 - **`make test-sandbox` is the slow tier.** The tests that need a real workspace, plus the
   worker's SDK suite and the live engine test, without `-short`, with
-  `ACORNFALL_LIVE_SANDBOX=1` and `ACORNFALL_SANDBOX_INTEGRATION=1`, at low parallelism, sharing
-  the image cache under `/tmp/acornfall-e2e-sandboxes`. A test that needs no workspace declares
-  it with `notSandbox` and skips: starting a worker provisions its sandbox whether the test
-  uses it or not, and the rest of the feature suite already ran in the fast tier — running all
-  of it again was 294s against 126s for the 18 tests that need one. It **fails** where there is
+  `ACORNFALL_LIVE_SANDBOX=1` and `ACORNFALL_SANDBOX_INTEGRATION=1`, one sandbox per core
+  (`SANDBOX_PARALLEL`, 6 here: 125s at 2, 85s at 4, 72s at 6, 76s at 8), sharing the image
+  cache under `/tmp/acornfall-e2e-sandboxes`. A test that needs no workspace declares it with
+  `notSandbox` and skips: starting a worker provisions its sandbox whether the test uses it or
+  not, and the rest of the feature suite already ran in the fast tier — running all of it
+  again was 294s against 126s for the tests that need one. It **fails** where there is
   no hypervisor rather than skipping: a slow tier that silently does nothing is how the bug
   class it exists for survives.
 - **`testing.Short()` is the boundary**, and `maybeSandbox` is the one function that decides
@@ -106,3 +107,14 @@ keepalive test was watching a 3-second ticker for five seconds. The end-to-end p
 **5.5-8s** now (twelve consecutive `-parallel 6` runs green), ~12s under `-race`; `make test`
 spends the rest on `make lint` (tsc 5.6s + eslint 7.2s, run one after the other). The decision
 in this ADR is what stays: a slow piece gets its own suite and its own target.
+
+One of the sandbox tests, `TestTheTrustFlagIsGone`, turned out to touch no sandbox at all — it
+asserts the API refuses a `trusted` field — and moved to the fast tier. Of the remaining 17,
+**four exercise the sandbox's execution and file surface**: a tool call runs and its output is
+recorded, a global skill's script runs inside the read-only mount, a guard refuses a call, and
+a broken workspace file is reported and heals. The other thirteen are feature tests whose
+files live in the workspace: the sandbox is their environment, not their subject. They are
+also the only end-to-end run of the overlay, commands, skills, and delegation defaults, so
+they stay. At `-parallel 6` the four measure 24s and the thirteen 57s of the 72s; the engine
+implementation is covered more directly by the live driver test and the worker's SDK test,
+which are seconds.

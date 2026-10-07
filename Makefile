@@ -56,6 +56,12 @@ commits: ## check commit messages (RANGE=origin/main..HEAD by default)
 # engine's runtime sockets (docs/adr/0012-sandbox.md).
 SANDBOX_STATE ?= /tmp/acornfall-e2e-sandboxes
 
+# How many workspace sandboxes the slow tier runs at once. Six is one per core on the machine
+# this was measured on: the 17 sandbox tests took 125s at 2, 85s at 4, 72s at 6, and 76s at 8
+# (contention). Override per machine; each sandbox asks for 2 cpus and 2G. The tier is not
+# "serial-ish" for a reason any more — the per-test cleanup made parallel VMs safe.
+SANDBOX_PARALLEL ?= 6
+
 check: typecheck ## fast: the compiler and the unit tests, no processes
 	cd worker && bun test
 	# -count=1 because the suite's inputs include worker/src and gateway/web, which Go's test
@@ -84,9 +90,8 @@ test-sandbox: ## the slow tier: real microVMs and the engine's own checks
 	# suite of skips. ACORNFALL_SANDBOX_ONLY cuts the end-to-end suite to the tests that asked
 	# for a real workspace: starting a worker provisions a sandbox even for a test that never
 	# uses one, and the others already ran in the fast tier against the refusal path.
-	# The tier is serial-ish because two microVMs are already two machines.
 	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_INTEGRATION=1 MSB_HOME=$(SANDBOX_STATE) bun test test/sandbox.integration.test.ts
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -parallel 2 ./...
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -parallel $(SANDBOX_PARALLEL) ./...
 
 run: build ## run against the current directory
 	./$(BIN) --addr $(ADDR) $(OPTS) --workspace $(CURDIR)
