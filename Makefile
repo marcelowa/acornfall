@@ -22,6 +22,13 @@ STATICCHECK := $(GOBIN)/staticcheck
 # modernize lives inside gopls, so the path looks wrong and is not: it is the analyzer gopls
 # serves to editors, published as a vet tool. Installing it pulls the toolchain gopls needs.
 MODERNIZE := $(GOBIN)/modernize
+# The language version the gateway is written against, from its own go.mod. The linters must
+# be built with at least it: a staticcheck built by an older Go refuses to read newer sources
+# and reports the toolchain's standard library as broken. `go install pkg@version` ignores
+# this module, so the version is forced. GOTOOLCHAIN wants a full version, and a `go 1.27`
+# directive names go1.27.0.
+GO_VERSION := $(shell awk '/^go /{print $$2; exit}' gateway/go.mod)
+GO_TOOLCHAIN := go$(if $(filter 2,$(words $(subst ., ,$(GO_VERSION)))),$(GO_VERSION).0,$(GO_VERSION))
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -34,7 +41,7 @@ build: ## build the gateway binary
 	cd gateway && go build -o ../$(BIN) ./cmd/acornfall
 
 tools: ## install the linters used by `make lint`
-	go install honnef.co/go/tools/cmd/staticcheck@latest
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install honnef.co/go/tools/cmd/staticcheck@latest
 	cd worker && bun install
 
 typecheck: ## the compiler's opinion, without running anything
@@ -55,7 +62,7 @@ lint: typecheck ## the static rules; fails on the first one broken
 # than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a
 # loop, not a wrong answer. It is a prompt, not a gate, and a daily workflow prompts with it.
 modernize: ## the idiom analyzer; a daily workflow runs it, `make lint` does not
-	go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest
 	cd gateway && go vet -vettool=$(MODERNIZE) ./... && echo "modernize: clean"
 
 commits: ## check commit messages (RANGE=origin/main..HEAD by default)

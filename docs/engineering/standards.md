@@ -135,7 +135,7 @@ rather than pretending to have checked:
 |---|---|
 | Go formatting | `gofmt -l` |
 | Go correctness | `go vet ./...` |
-| Go beyond vet | `staticcheck ./...` (2025.1+ for Go 1.24) |
+| Go beyond vet | `staticcheck ./...` (2026.2+ for Go 1.27) |
 | Go idioms | `make modernize` — deliberately not in `make lint`: it is the one Go check that costs seconds, and what it finds is drift, so a daily workflow runs it as a prompt rather than a gate |
 | no `init()` in the gateway | a grep, because the rule is absolute |
 | TypeScript types | `bun run typecheck` |
