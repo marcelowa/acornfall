@@ -41,7 +41,10 @@ export function ConversationList({
 	);
 
 	return (
-		<div data-slot="conversation-list" className={cn("flex flex-col gap-1", className)}>
+		<div
+			data-slot="conversation-list"
+			className={cn("flex h-full min-h-0 flex-col gap-1 overflow-y-auto", className)}
+		>
 			<Text as="h2" size="sm" weight="semibold" className="px-2 pb-1">
 				{title}
 			</Text>

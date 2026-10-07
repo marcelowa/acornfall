@@ -111,7 +111,9 @@ export function Split({
 			style={width}
 		>
 			<aside className="relative hidden min-h-0 min-w-0 flex-col lg:flex">
-				{aside}
+				{/* The pane clips; its content owns its scroll. The handle stays outside the clip so
+				 * a drag does not lose the half that sits on the border. */}
+				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">{aside}</div>
 				{onAsideWidthChange === undefined ? null : (
 					<div
 						role="separator"
@@ -136,7 +138,7 @@ export function Split({
 					/>
 				)}
 			</aside>
-			<div className="flex min-h-0 min-w-0 flex-col">
+			<div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
 				<div className="flex items-center gap-1 border-b border-border px-1 py-0.5 lg:hidden">
 					<Sheet open={open} onOpenChange={setOpen}>
 						<SheetTrigger asChild>
@@ -166,7 +168,9 @@ export function Split({
 				{children}
 			</div>
 			{end === undefined ? null : (
-				<aside className="hidden min-h-0 min-w-0 flex-col 2xl:flex">{end}</aside>
+				<aside className="hidden min-h-0 min-w-0 flex-col overflow-hidden 2xl:flex">
+					{end}
+				</aside>
 			)}
 		</div>
 	);

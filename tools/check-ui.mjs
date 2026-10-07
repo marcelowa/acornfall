@@ -88,6 +88,30 @@ try {
 	await page.waitForSelector("[data-slot=splitter]", { timeout: 10000 });
 	check("the rail renders", true);
 
+	// 2. The rail is a pane, not the page: a long list scrolls inside it, and the document
+	// itself never grows — a page that scrolls moves every panel, including the ones that
+	// were meant to stay put.
+	const geometry = await page.evaluate(() => {
+		const list = document.querySelector("[data-slot=conversation-list]");
+		return {
+			documentScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+			documentHeight: document.documentElement.scrollHeight,
+			windowHeight: window.innerHeight,
+			listOverflowY: list === null ? "" : getComputedStyle(list).overflowY,
+			listScrolls: list !== null && list.scrollHeight > list.clientHeight,
+		};
+	});
+	check(
+		"the page itself does not scroll",
+		!geometry.documentScrolls,
+		`${geometry.documentHeight}px of document in a ${geometry.windowHeight}px window`,
+	);
+	check(
+		"a rail that overflows scrolls inside its pane",
+		!geometry.listScrolls || geometry.listOverflowY === "auto",
+		`overflow-y: ${geometry.listOverflowY}`,
+	);
+
 	// 1. The splitter resizes the rail and the choice survives a reload.
 	const railWidth = () =>
 		page.evaluate(() => document.querySelector("aside")?.getBoundingClientRect().width ?? 0);
@@ -151,9 +175,15 @@ try {
 			JSON.stringify(clipped),
 		);
 
-		// 3. Controls are per pane: copy everywhere, a format toggle on assistant panes only.
+		// 4. Controls are per pane: copy on every rendered reply and tool card, a format toggle
+		// on assistant replies only. Two kinds of pane are the exception on purpose: a live pane
+		// (its text is incomplete) and a failure pane (there is nothing to toggle or copy).
 		const controls = await page.evaluate(() =>
-			[...document.querySelectorAll("[data-slot=assistant], [data-slot=tool]")].map((pane) => {
+			[
+				...document.querySelectorAll(
+					"[data-slot=assistant]:not([data-live]):not([data-error]), [data-slot=tool]",
+				),
+			].map((pane) => {
 				const labels = [...pane.querySelectorAll("button")].map((button) => button.textContent?.trim());
 				return {
 					slot: pane.dataset.slot,
@@ -176,13 +206,15 @@ try {
 
 		const paneState = () =>
 			page.evaluate(() =>
-				[...document.querySelectorAll("[data-slot=assistant]")].map((pane) => ({
-					raw: pane.querySelector(".markdown") === null,
-					label:
-						[...pane.querySelectorAll("button")]
-							.map((b) => b.textContent?.trim())
-							.find((label) => label === "Raw" || label === "Formatted") ?? "",
-				})),
+				[...document.querySelectorAll("[data-slot=assistant]:not([data-live]):not([data-error])")].map(
+					(pane) => ({
+						raw: pane.querySelector(".markdown") === null,
+						label:
+							[...pane.querySelectorAll("button")]
+								.map((b) => b.textContent?.trim())
+								.find((label) => label === "Raw" || label === "Formatted") ?? "",
+					}),
+				),
 			);
 		const clickToggle = (label) =>
 			page.evaluate((wanted) => {
