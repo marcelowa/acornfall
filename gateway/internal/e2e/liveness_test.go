@@ -13,6 +13,7 @@ import (
 // subagent is a real conversation with the parent recorded on it.
 func TestDelegateWaitsForTheChildAndReturnsItsAnswer(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(
 		scriptRule{
 			Match: "delegate this",
@@ -52,6 +53,7 @@ func TestDelegateWaitsForTheChildAndReturnsItsAnswer(t *testing.T) {
 // conversation that made it, and it outlives it.
 func TestAPeerIsANormalConversation(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(
 		scriptRule{
 			Match: "make a peer",
@@ -84,6 +86,7 @@ func TestAPeerIsANormalConversation(t *testing.T) {
 // names what this conversation made and what each one has spent.
 func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(
 		scriptRule{
 			Match: "start a helper",
@@ -178,6 +181,7 @@ func TestASpawnedChildsLevelFollowsTheDocumentedOrder(t *testing.T) {
 // model the answer would come back.
 func TestASendByConversationIdReportsItsAnswer(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(
 		scriptRule{
 			Match: "start a helper",
@@ -319,6 +323,7 @@ func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
 // their transcripts are all still there afterwards.
 func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(
 		scriptRule{Match: "before the crash", Reply: "BEFORE MARKER"},
 		scriptRule{Match: "after the crash", Reply: "AFTER MARKER"},
@@ -365,6 +370,7 @@ func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 // shown, so the new process picks it up from the last commit.
 func TestAnInterruptedRunFinishesAfterARestart(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t,
 		withSlowModel(),
 		withScript(scriptRule{Match: "the long one", Reply: "a slow answer that goes on and on and on and on and on and finally says FINISHED"}),

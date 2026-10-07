@@ -12,6 +12,7 @@ import (
 // history. A second workspace is created by name and is usable immediately.
 func TestWorkspacesAreIsolatedAndStartOnDemand(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "in the other workspace", Reply: "answered elsewhere"}))
 	c := s.client()
 
@@ -62,6 +63,7 @@ func TestWorkspacesAreIsolatedAndStartOnDemand(t *testing.T) {
 // ignored, because accepting and dropping it would be a field that does nothing.
 func TestWorkspaceCreationTakesANameAndRefusesAPath(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t)
 	c := s.client()
 
@@ -99,6 +101,7 @@ func TestWorkspaceCreationTakesANameAndRefusesAPath(t *testing.T) {
 // general one cannot be removed at all.
 func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "remember me", Reply: "remembered"}))
 	c := s.client()
 

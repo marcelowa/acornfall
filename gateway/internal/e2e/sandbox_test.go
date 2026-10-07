@@ -17,6 +17,7 @@ func TestForcedNoSandboxRefusesInsteadOfFallingBack(t *testing.T) {
 		t.Skip("ACORNFALL_NO_SANDBOX=1 is what this asserts; make test sets it")
 	}
 	t.Parallel()
+	notSandbox(t)
 	s := start(t)
 	c := s.client()
 	c.waitForConversation("general")

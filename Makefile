@@ -81,9 +81,12 @@ test-sandbox: ## the slow tier: real microVMs and the engine's own checks
 		echo "make test-sandbox needs a hypervisor and this Mac reports none; see docs/adr/0012-sandbox.md"; exit 1; \
 	fi
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a
-	# suite of skips. The tier is serial-ish because two microVMs are already two machines.
+	# suite of skips. ACORNFALL_SANDBOX_ONLY cuts the end-to-end suite to the tests that asked
+	# for a real workspace: starting a worker provisions a sandbox even for a test that never
+	# uses one, and the others already ran in the fast tier against the refusal path.
+	# The tier is serial-ish because two microVMs are already two machines.
 	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_INTEGRATION=1 MSB_HOME=$(SANDBOX_STATE) bun test test/sandbox.integration.test.ts
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -parallel 2 ./...
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -parallel 2 ./...
 
 run: build ## run against the current directory
 	./$(BIN) --addr $(ADDR) $(OPTS) --workspace $(CURDIR)

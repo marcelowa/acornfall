@@ -68,6 +68,7 @@ func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 // it applies to running workspaces without a restart.
 func TestInstallDefaultsApplyToEveryWorkspace(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t)
 	c := s.client()
 	c.createWorkspace("second")
@@ -104,6 +105,7 @@ func TestInstallDefaultsApplyToEveryWorkspace(t *testing.T) {
 // happens to be listed first, and the state calls it what it is: the last resort.
 func TestTheLastResortRunsWhenNothingIsSet(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t)
 	c := s.client()
 

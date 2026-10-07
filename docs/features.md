@@ -11,7 +11,7 @@ Each feature is covered at the lowest level that can decide it:
 | Unit (Go) | `go test ./...` | Resolution, registries, lock order, arities. Milliseconds, no processes. |
 | Unit (worker) | `bun test` (from `worker/`) | The overlay, guards, commands, skills, credentials, the worker protocol. Under a second. |
 | Feature (end to end) | `go test ./internal/e2e/...` | A real gateway, a real worker, and a scripted provider over HTTP: everything a client can see. |
-| Sandbox (end to end and the worker SDK) | `make test-sandbox` | The end-to-end suite against real microVMs, and the SDK's own streaming, kill, and file operations. Needs a hypervisor. |
+| Sandbox (end to end and the worker SDK) | `make test-sandbox` | The end-to-end tests that need a real workspace, against real microVMs, and the SDK's own streaming, kill, and file operations. Needs a hypervisor. |
 | Interface | `make ui` | The browser client. Kept, but the client is being rebuilt, so nothing here depends on it. |
 
 `make test` is the default gate: `-short -race`, the worker units, the Go units, and the
@@ -187,7 +187,8 @@ and the fix is in the history rather than a workaround:
   The end-to-end tests that use a real workspace — its `AGENTS.md`, `.agents/`, skills,
   commands, guards — skip under `-short` and run in `make test-sandbox`, which fails rather
   than skips where there is no hypervisor, and the worker's file operations and streaming
-  execution are exercised against the real SDK there too
+  execution are exercised against the real SDK there too; the tests that need no workspace
+  skip in that tier, because they already ran in the fast one
   ([ADR 0013](adr/0013-test-tiers.md)).
 - **Memory and self-improvement.** Designed, not built (see `docs/adr/`).
 - **The interface.** `make ui` still covers the client, but the client is being rebuilt, so no

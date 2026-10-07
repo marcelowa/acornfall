@@ -13,6 +13,7 @@ import (
 // it is the root one.
 func TestAFreshInstallHasARootConversation(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t)
 	c := s.client()
 
@@ -48,6 +49,7 @@ func TestAFreshInstallHasARootConversation(t *testing.T) {
 // storage is append-only, so the transcript has to survive it.
 func TestConversationLifecycle(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
 	c := s.client()
 
@@ -99,6 +101,7 @@ func TestConversationLifecycle(t *testing.T) {
 // without anyone naming anything.
 func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "what is the capital", Reply: "Paris."}))
 	c := s.client()
 
@@ -121,6 +124,7 @@ func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
 // not keep the message it branched from. It is how "say that again, differently" works.
 func TestForkBranchesBeforeATurn(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(
 		scriptRule{Match: "first question", Reply: "first answer"},
 		scriptRule{Match: "second question", Reply: "second answer"},
@@ -175,6 +179,7 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 // was sent, the assistant's answer, and spend that is attributed to this conversation.
 func TestPromptRoundTrip(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "say hello", Reply: "Hello from the script."}))
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -272,6 +277,7 @@ func conversationByID(t *testing.T, list []conversation, id string) conversation
 
 func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "think hard", Reply: "Thought."}))
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -308,6 +314,7 @@ func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 // silently replaced.
 func TestUnusableChoicesAreRefused(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t)
 	c := s.client()
 	root := c.waitForConversation("general")

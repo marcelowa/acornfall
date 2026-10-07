@@ -36,11 +36,15 @@ honest.**
 - **`make test` is the fast tier.** `-short -race`, the worker units, the Go units, and the
   end-to-end suite with `ACORNFALL_NO_SANDBOX=1` and `-parallel 6`. It needs no hypervisor and
   behaves the same on every machine, including CI. Measured 33s against 506s.
-- **`make test-sandbox` is the slow tier.** The same suites without `-short`, with
-  `ACORNFALL_LIVE_SANDBOX=1` and the worker's `ACORNFALL_SANDBOX_INTEGRATION=1`, at low
-  parallelism, sharing the image cache under `/tmp/acornfall-e2e-sandboxes`. It **fails**
-  where there is no hypervisor rather than skipping: a slow tier that silently does nothing is
-  how the bug class it exists for survives.
+- **`make test-sandbox` is the slow tier.** The tests that need a real workspace, plus the
+  worker's SDK suite and the live engine test, without `-short`, with
+  `ACORNFALL_LIVE_SANDBOX=1` and `ACORNFALL_SANDBOX_INTEGRATION=1`, at low parallelism, sharing
+  the image cache under `/tmp/acornfall-e2e-sandboxes`. A test that needs no workspace declares
+  it with `notSandbox` and skips: starting a worker provisions its sandbox whether the test
+  uses it or not, and the rest of the feature suite already ran in the fast tier — running all
+  of it again was 294s against 126s for the 18 tests that need one. It **fails** where there is
+  no hypervisor rather than skipping: a slow tier that silently does nothing is how the bug
+  class it exists for survives.
 - **`testing.Short()` is the boundary**, and `maybeSandbox` is the one function that decides
   it. A test that needs the workspace's own files calls it and skips under `-short`; the rest
   of the end-to-end suite runs in both tiers.

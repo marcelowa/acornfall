@@ -62,6 +62,7 @@ func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
 // A message that merely starts with a slash is not a command unless it names one.
 func TestAnUnknownCommandIsSentAsWritten(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "/not-a-command", Reply: "understood"}))
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -114,6 +115,7 @@ func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
 // it up rather than being replaced by a second one.
 func TestSteeringJoinsTheRunningTurn(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t,
 		withSlowModel(),
 		withScript(
@@ -149,6 +151,7 @@ func TestSteeringJoinsTheRunningTurn(t *testing.T) {
 // conversation is usable again afterwards.
 func TestAbortStopsTheRun(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t,
 		withSlowModel(),
 		withScript(
@@ -187,6 +190,7 @@ func TestAbortStopsTheRun(t *testing.T) {
 // promised.
 func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "hello stream", Reply: "streamed"}))
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -208,6 +212,7 @@ func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 // The conversation listing and the usage report are what a client shows beside the transcript.
 func TestUsageIsReportedForAWorkspace(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "spend something", Reply: "spent"}))
 	c := s.client()
 	root := c.waitForConversation("general")

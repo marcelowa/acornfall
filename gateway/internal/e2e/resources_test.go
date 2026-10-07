@@ -237,6 +237,7 @@ func TestReloadPicksUpANewDefinition(t *testing.T) {
 // asks for it. An agent that names its skills offers only those.
 func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 	t.Parallel()
+	notSandbox(t)
 	s := start(t,
 		withScript(
 			scriptRule{Match: "with skills", Reply: "offered"},

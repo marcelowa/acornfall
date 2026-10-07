@@ -345,6 +345,19 @@ func engineBinary(home string) string {
 	return matches[0]
 }
 
+// notSandbox marks a test that needs no real workspace. The sandbox tier exists for the tests
+// that do, and this one already ran in the fast tier, where the tools take the refusal path.
+// Without this a test that never asked for a sandbox still boots one there, because starting
+// a workspace's worker provisions its sandbox — and the tier was spending most of its five
+// minutes re-running the fast suite that way: 294s for all 41 tests, 123s for the 18 that
+// need a real workspace.
+func notSandbox(t *testing.T) {
+	t.Helper()
+	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" {
+		t.Skip("the sandbox tier runs the tests that need a real workspace; this one ran in the fast tier")
+	}
+}
+
 // maybeSandbox is used at the top of a test, before a system exists. It is the only place the
 // decision is made, because a test that needs the workspace's own files needs a sandbox: the
 // gateway refuses to run tools where there is none, which is the behaviour ADR 0012 asks for,
