@@ -84,10 +84,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.workspaceRemove)
 
 	// /c/<workspace>/<conversation> is a conversation, /w/<workspace> is a workspace with
-	// whichever conversation it lands on. The client reads both from the path.
+	// whichever conversation it lands on, and the interface's own screens are routes too so a
+	// reload and a shared link land where someone was.
 	mux.HandleFunc("GET /c/{ws}/{id}", s.page)
 	mux.HandleFunc("GET /c/{id}", s.page)
 	mux.HandleFunc("GET /w/{ws}", s.page)
+	mux.HandleFunc("GET /settings", s.page)
+	mux.HandleFunc("GET /workspaces", s.page)
 	mux.Handle("GET /", noCache(http.FileServerFS(s.static)))
 	return mux
 }

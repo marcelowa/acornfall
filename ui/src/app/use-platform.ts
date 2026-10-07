@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	abortConversation,
+	createConversation as createConversationRequest,
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
 	fetchState,
@@ -49,21 +50,26 @@ const SEEN_KEY = "acornfall.seen";
 const THEME_KEY = "acornfall.ui.theme";
 
 interface Route {
+	/** Which of the interface's screens is in view; the conversation is the one behind them. */
+	screen: Screen;
 	workspace: string;
 	conversation: string;
 }
 
+/** The screens the URL can name. A conversation is one of them, because it has a URL too. */
+export type Screen = "conversation" | "workspaces" | "settings";
+
 /**
- * The theme someone chose, or null while the system is still the one deciding. The stored
- * value is JSON, as every other preference here is.
+ * The theme someone chose. `system` is the default and a choice like any other: picking it
+ * back up means following the system again, which is not the same as having chosen light.
  */
-function storedTheme(): "light" | "dark" | null {
+function storedTheme(): "light" | "dark" | "system" {
 	try {
 		const raw = window.localStorage.getItem(THEME_KEY);
 		const value: unknown = raw === null ? null : JSON.parse(raw);
-		return value === "light" || value === "dark" ? value : null;
+		return value === "light" || value === "dark" || value === "system" ? value : "system";
 	} catch {
-		return null;
+		return "system";
 	}
 }
 
@@ -71,20 +77,38 @@ function systemTheme(): "light" | "dark" {
 	return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-/** The URL scheme the gateway already routes: /c/<workspace>/<conversation> and /w/<workspace>. */
+/** The URL scheme the gateway routes: /c/<workspace>/<conversation>, /w/<workspace>, and the
+ * two screens. Settings remembers the workspace in a query so a reload shows the one it was
+ * about; the workspace list is about all of them. */
 function fromUrl(): Route {
-	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(window.location.pathname);
+	const path = window.location.pathname;
+	if (path === "/settings" || path === "/settings/") {
+		return {
+			screen: "settings",
+			workspace: new URLSearchParams(window.location.search).get("workspace") ?? "",
+			conversation: "",
+		};
+	}
+	if (path === "/workspaces" || path === "/workspaces/") {
+		return { screen: "workspaces", workspace: "", conversation: "" };
+	}
+	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(path);
 	if (conversation !== null) {
 		return {
+			screen: "conversation",
 			workspace: decodeURIComponent(conversation[1] ?? ""),
 			conversation: decodeURIComponent(conversation[2] ?? ""),
 		};
 	}
-	const workspace = /^\/w\/([^/]+)\/?$/.exec(window.location.pathname);
+	const workspace = /^\/w\/([^/]+)\/?$/.exec(path);
 	if (workspace !== null) {
-		return { workspace: decodeURIComponent(workspace[1] ?? ""), conversation: "" };
+		return {
+			screen: "conversation",
+			workspace: decodeURIComponent(workspace[1] ?? ""),
+			conversation: "",
+		};
 	}
-	return { workspace: "", conversation: "" };
+	return { screen: "conversation", workspace: "", conversation: "" };
 }
 
 /** Preferences are ours and local; a corrupt value is a fresh start, not a crash. */
@@ -121,7 +145,14 @@ export interface Platform {
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
 	workspaces: WorkspaceSummary[];
+	/** The screen in view: a conversation, the workspace list, or settings. */
+	screen: Screen;
+	showScreen: (screen: Screen) => void;
+	/** A conversation belongs to a workspace for life, so switching means starting over: the
+	 * transcript is cleared and the next one arrives with the workspace. */
 	selectWorkspace: (name: string) => void;
+	/** A new conversation in the workspace in view, created and opened. */
+	newConversation: () => void;
 	/** Where the active workspace's tools actually run. */
 	sandbox?: SandboxSummary | undefined;
 	/** What the defaults resolve to, and the layer each came from. */
@@ -139,6 +170,7 @@ export interface Platform {
 	setWorkspace: (change: { image: string; network: string }) => void;
 	createWorkspace: (name: string) => void;
 	removeWorkspace: (name: string) => void;
+	renameWorkspace: (name: string, title: string) => void;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	/** The worker can take a steering input mid-turn; without it the choice is stop or queue. */
@@ -166,7 +198,11 @@ export interface Platform {
 	/** The desktop column: false keeps it open, which is the default. */
 	railCollapsed: boolean;
 	toggleRail: () => void;
+	/** The effective theme, which is the system's until a choice says otherwise. */
 	theme: "light" | "dark";
+	/** What was chosen: light, dark, or following the system. */
+	themeChoice: "light" | "dark" | "system";
+	setThemeChoice: (choice: "light" | "dark" | "system") => void;
 	select: (id: string) => void;
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
@@ -175,7 +211,6 @@ export interface Platform {
 	abort: () => void;
 	setRailWidth: (width: number) => void;
 	setRailOpen: (open: boolean) => void;
-	toggleTheme: () => void;
 }
 
 /**
@@ -203,8 +238,8 @@ export function usePlatform(): Platform {
 		() => read<string | null>(INSPECTOR_MAXIMIZED_KEY, null) ?? undefined,
 	);
 	const [system, setSystem] = useState<"light" | "dark">(systemTheme);
-	const [choice, setChoice] = useState<"light" | "dark" | null>(storedTheme);
-	const theme = choice ?? system;
+	const [choice, setChoice] = useState<"light" | "dark" | "system">(storedTheme);
+	const theme = choice === "system" ? system : choice;
 	const [connection, setConnection] = useState<"live" | "reconnecting">("live");
 	const [failure, setFailure] = useState<string | undefined>(undefined);
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
@@ -297,8 +332,7 @@ export function usePlatform(): Platform {
 
 	useEffect(() => {
 		document.documentElement.classList.toggle("dark", theme === "dark");
-		if (choice === null) window.localStorage.removeItem(THEME_KEY);
-		else window.localStorage.setItem(THEME_KEY, JSON.stringify(choice));
+		window.localStorage.setItem(THEME_KEY, JSON.stringify(choice));
 	}, [theme, choice]);
 
 	// The commands the server would expand. They are fetched per workspace, once: the list
@@ -457,9 +491,37 @@ export function usePlatform(): Platform {
 				`/c/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
 			);
 			setRailOpen(false);
-			setRoute({ workspace: name, conversation: id });
+			setRoute({ screen: "conversation", workspace: name, conversation: id });
 		},
 		[state, workspace],
+	);
+
+	/** The rail is the way between the screens; each one keeps its own URL so a reload and a
+	 * shared link land where someone was. */
+	const showScreen = useCallback(
+		(screen: Screen) => {
+			if (screen === "conversation") {
+				const name = state?.workspace.name ?? workspace;
+				const id = state?.conversation?.id ?? activeId;
+				window.history.pushState(
+					null,
+					"",
+					id === ""
+						? `/w/${encodeURIComponent(name)}`
+						: `/c/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
+				);
+			} else {
+				// Settings are about a workspace; the list is about all of them.
+				const query =
+					screen === "settings" ? `?workspace=${encodeURIComponent(workspace)}` : "";
+				window.history.pushState(null, "", `/${screen}${query}`);
+			}
+			setRailOpen(false);
+			// The conversation stays the one behind the screen: the stream keeps following it, so
+			// coming back shows what happened while the screen was open.
+			setRoute((current) => ({ ...current, screen }));
+		},
+		[state, workspace, activeId],
 	);
 
 	/** Every command goes through here: a success clears the last refusal, a failure is it. */
@@ -540,7 +602,7 @@ export function usePlatform(): Platform {
 		window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
 		setRailOpen(false);
 		setView(undefined);
-		setRoute({ workspace: name, conversation: "" });
+		setRoute({ screen: "conversation", workspace: name, conversation: "" });
 	}, []);
 
 	const setWorkspace = useCallback(
@@ -552,17 +614,68 @@ export function usePlatform(): Platform {
 
 	const createWorkspace = useCallback(
 		(name: string) => {
-			act(createWorkspaceRequest(name), () => void reload());
+			act(
+				createWorkspaceRequest(name).then(() => createConversationRequest(name)),
+				() => {
+					// A new workspace is opened the way it is meant to be used: with an empty
+					// conversation ready, not an empty screen and a button to press.
+					void createConversationRequest(name)
+						.then((created) => {
+							const id = created.conversation?.id ?? "";
+							window.history.pushState(
+								null,
+								"",
+								`/c/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
+							);
+							setView(undefined);
+							setRoute({ screen: "conversation", workspace: name, conversation: id });
+						})
+						.catch(reportError);
+				},
+			);
 		},
-		[act, reload],
+		[act, reportError],
 	);
 
 	const removeWorkspace = useCallback(
 		(name: string) => {
-			act(removeWorkspaceRequest(name), () => void reload());
+			act(removeWorkspaceRequest(name), () => {
+				// Forgetting the workspace in view leaves nowhere to stand, so the general one
+				// takes over rather than an error about a workspace that just went away.
+				if (name === workspace) {
+					window.history.pushState(null, "", "/w/general");
+					setView(undefined);
+					setRoute({ screen: "conversation", workspace: "general", conversation: "" });
+					return;
+				}
+				void reload();
+			});
+		},
+		[act, workspace, reload],
+	);
+
+	const renameWorkspace = useCallback(
+		(name: string, title: string) => {
+			act(updateWorkspace(name, { title }), () => void reload());
 		},
 		[act, reload],
 	);
+
+	const newConversation = useCallback(() => {
+		void createConversationRequest(workspace)
+			.then((created) => {
+				setFailure(undefined);
+				const id = created.conversation?.id ?? "";
+				window.history.pushState(
+					null,
+					"",
+					`/c/${encodeURIComponent(workspace)}/${encodeURIComponent(id)}`,
+				);
+				setView(undefined);
+				setRoute({ screen: "conversation", workspace, conversation: id });
+			})
+			.catch(reportError);
+	}, [workspace, reportError]);
 
 	const setDefault = useCallback(
 		(kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => {
@@ -631,6 +744,11 @@ export function usePlatform(): Platform {
 		railCollapsed,
 		toggleRail,
 		theme,
+		themeChoice: choice,
+		setThemeChoice: setChoice,
+		screen: route.screen,
+		showScreen,
+		newConversation,
 		select,
 		rename,
 		hide,
@@ -639,6 +757,6 @@ export function usePlatform(): Platform {
 		abort,
 		setRailWidth,
 		setRailOpen,
-		toggleTheme: () => setChoice(theme === "dark" ? "light" : "dark"),
+		renameWorkspace,
 	};
 }

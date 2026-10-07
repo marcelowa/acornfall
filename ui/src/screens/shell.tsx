@@ -15,11 +15,16 @@ import { Stack } from "@/components/layout/stack";
 export interface ShellProps {
 	rail: ReactNode;
 	transcript: ReactNode;
-	composer: ReactNode;
+	/** Below the transcript. A screen that is not a conversation has no composer, so this is
+	 * the one slot that can be absent. */
+	composer?: ReactNode | undefined;
 	/** The context inspector: a pane of its own from 2xl up, where there is room for it. */
 	inspector?: ReactNode | undefined;
 	/** The small-screen bar's content, beside the rail toggle. The conversation title, usually. */
 	bar?: ReactNode | undefined;
+	/** Above everything in the main pane: the last refused action, usually. It sits here rather
+	 * than in the composer so a screen that is not a conversation still shows it. */
+	notice?: ReactNode | undefined;
 	railOpen?: boolean | undefined;
 	onRailOpenChange?: ((open: boolean) => void) | undefined;
 	/** The desktop column: false keeps it open, which is the default. */
@@ -36,6 +41,7 @@ export function Shell({
 	composer,
 	inspector,
 	bar,
+	notice,
 	railOpen,
 	onRailOpenChange,
 	railCollapsed,
@@ -59,6 +65,7 @@ export function Shell({
 				{/* The transcript owns its own scrolling: it knows when it is following the end and
 				 * when the reader has scrolled away from it. */}
 				<Stack gap="none" fill>
+					{notice}
 					{transcript}
 				</Stack>
 				{composer}

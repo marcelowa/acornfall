@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChevronsUpDown, Plus, Settings } from "lucide-react";
 import type { DefaultScope } from "./client";
 import type { BusyAction } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
@@ -9,13 +10,15 @@ import { ContextPanel } from "@/components/inspector/context-panel";
 import { Inspector } from "@/components/inspector/inspector";
 import { RunPanel } from "@/components/inspector/run-panel";
 import { SandboxPanel } from "@/components/inspector/sandbox-panel";
-import { WorkspaceList } from "@/components/workspace/workspace-list";
 import { Stack } from "@/components/layout/stack";
+import { Measure } from "@/components/layout/measure";
+import { ErrorStrip } from "@/components/ui/error-strip";
 import { Picker } from "@/components/composer/picker";
-import { SettingsSheet } from "@/components/settings/settings-sheet";
+import { SettingsScreen } from "@/components/settings/settings-screen";
+import { WorkspacesScreen } from "@/components/workspace/workspaces-screen";
 import { Transcript } from "@/components/transcript/transcript";
+import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
 import { Shell } from "@/screens/shell";
@@ -62,13 +65,23 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		});
 	};
 
+	const activeWorkspace = platform.workspaces.find((workspace) => workspace.active);
+
+	// Three zones: the workspace on top, its conversations scrolling in the middle, and the two
+	// things that are always worth reaching at the bottom.
 	const rail = (
 		<div className="h-full border-r border-border bg-card p-2">
 			<Stack gap="sm" fill>
-				<WorkspaceList
-					workspaces={platform.workspaces}
-					onSelect={platform.selectWorkspace}
-				/>
+				<Button
+					variant="ghost"
+					size="sm"
+					className="w-full justify-between"
+					aria-label="Workspaces"
+					onClick={() => platform.showScreen("workspaces")}
+				>
+					<span className="truncate">{activeWorkspace?.title ?? "Workspaces"}</span>
+					<ChevronsUpDown />
+				</Button>
 				<ConversationList
 					conversations={platform.conversations}
 					deleted={platform.deleted}
@@ -85,6 +98,26 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					onHide={(id) => platform.hide(id, true)}
 					onRestore={(id) => platform.hide(id, false)}
 				/>
+				<Stack gap="2xs">
+					<Button
+						size="sm"
+						aria-label="New conversation"
+						onClick={platform.newConversation}
+					>
+						<Plus />
+						New conversation
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="justify-start"
+						aria-label="Settings"
+						onClick={() => platform.showScreen("settings")}
+					>
+						<Settings />
+						Settings
+					</Button>
+				</Stack>
 			</Stack>
 		</div>
 	);
@@ -164,6 +197,70 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
+	const defaults = (
+		<Stack gap="sm">
+			<ToggleGroup
+				type="single"
+				value={scope}
+				onValueChange={(next) => {
+					if (next === "workspace" || next === "install") setScope(next);
+				}}
+				variant="outline"
+				size="sm"
+				spacing={0}
+				aria-label="Default scope"
+			>
+				<ToggleGroupItem value="workspace">This workspace</ToggleGroupItem>
+				<ToggleGroupItem value="install">Every workspace</ToggleGroupItem>
+			</ToggleGroup>
+			<Picker
+				label="Model"
+				value={platform.defaults.model.split("/").at(-1) ?? ""}
+				origin={platform.defaults.modelOrigin}
+				groups={platform.model.groups}
+				onSelect={(value) => platform.setDefault("model", scope, value)}
+			/>
+			<Picker
+				label="Thinking"
+				value={platform.defaults.thinking}
+				origin={platform.defaults.thinkingOrigin}
+				groups={platform.thinking.groups}
+				onSelect={(value) => platform.setDefault("thinking", scope, value)}
+			/>
+			<Picker
+				label="Agent"
+				value={platform.defaults.agent}
+				placeholder="built in"
+				origin={platform.defaults.agentOrigin}
+				groups={platform.agent.groups}
+				onSelect={(value) => platform.setDefault("agent", scope, value)}
+			/>
+		</Stack>
+	);
+
+	// The screens replace the conversation rather than sitting over it: they are places, and
+	// the rail is how you leave and how you come back.
+	const screen =
+		platform.screen === "workspaces" ? (
+			<WorkspacesScreen
+				workspaces={platform.workspaces}
+				onSelect={platform.selectWorkspace}
+				onCreate={platform.createWorkspace}
+				onRename={platform.renameWorkspace}
+				onForget={platform.removeWorkspace}
+				onClose={() => platform.showScreen("conversation")}
+			/>
+		) : platform.screen === "settings" ? (
+			<SettingsScreen
+				theme={platform.themeChoice}
+				onThemeChange={platform.setThemeChoice}
+				workspace={activeWorkspace}
+				onUpdateWorkspace={platform.setWorkspace}
+				defaults={defaults}
+				onClose={() => platform.showScreen("conversation")}
+			/>
+		) : undefined;
+
 	return (
 		<Shell
 			rail={rail}
@@ -175,127 +272,78 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			railWidth={platform.railWidth}
 			onRailWidthChange={platform.setRailWidth}
 			inspector={inspector}
-			transcript={<Transcript entries={platform.entries} onFork={platform.fork} />}
+			notice={
+				platform.failure === undefined ? undefined : (
+					<Measure size="wide" padding="md">
+						<ErrorStrip message={platform.failure} onDismiss={platform.clearFailure} />
+					</Measure>
+				)
+			}
+			transcript={screen ?? <Transcript entries={platform.entries} onFork={platform.fork} />}
 			composer={
-				<Composer
-					value={draft}
-					onChange={setDraft}
-					onSend={submit}
-					onAbort={platform.abort}
-					running={platform.active?.running === true}
-					steerable={platform.steerable}
-					busyAction={busyAction}
-					onBusyActionChange={setBusyAction}
-					disabled={platform.active === undefined || !platform.workerUp}
-					placeholder={
-						platform.active === undefined ? "Pick a conversation" : "Send a message"
-					}
-					error={platform.failure}
-					onDismissError={platform.clearFailure}
-					above={
-						slashWord === null ? undefined : (
-							<SlashMenu commands={slashMatches} onSelect={setDraft} />
-						)
-					}
-					controls={
-						<>
-							{/* Ambient state first: a dropped stream or a dead harness is the thing to know
-							 * before choosing a model. Nothing renders while everything is well. */}
-							{platform.workerUp ? (
-								platform.connection === "reconnecting" ? (
-									<StatusPill state="reconnecting" />
-								) : null
-							) : (
-								<StatusPill state="harness-down" detail={platform.workerError} />
-							)}
-							<Picker
-								label="Model"
-								value={platform.model.value}
-								origin={platform.model.origin}
-								groups={platform.model.groups}
-								onSelect={platform.model.onSelect}
-								disabled={platform.model.disabled}
-							/>
-							<Picker
-								label="Thinking"
-								value={platform.thinking.value}
-								origin={platform.thinking.origin}
-								note={platform.thinking.note}
-								groups={platform.thinking.groups}
-								onSelect={platform.thinking.onSelect}
-								disabled={platform.thinking.disabled}
-							/>
-							<Picker
-								label="Agent"
-								value={platform.agent.value}
-								origin={platform.agent.origin}
-								groups={platform.agent.groups}
-								onSelect={platform.agent.onSelect}
-								disabled={platform.agent.disabled}
-							/>
-							<ThemeToggle theme={platform.theme} onToggle={platform.toggleTheme} />
-							<SettingsSheet
-								workspace={platform.workspaces.find(
-									(workspace) => workspace.active,
+				screen === undefined ? (
+					<Composer
+						value={draft}
+						onChange={setDraft}
+						onSend={submit}
+						onAbort={platform.abort}
+						running={platform.active?.running === true}
+						steerable={platform.steerable}
+						busyAction={busyAction}
+						onBusyActionChange={setBusyAction}
+						disabled={platform.active === undefined || !platform.workerUp}
+						placeholder={
+							platform.active === undefined ? "Pick a conversation" : "Send a message"
+						}
+						above={
+							slashWord === null ? undefined : (
+								<SlashMenu commands={slashMatches} onSelect={setDraft} />
+							)
+						}
+						controls={
+							<>
+								{/* Ambient state first: a dropped stream or a dead harness is the thing to know
+								 * before choosing a model. Nothing renders while everything is well. */}
+								{platform.workerUp ? (
+									platform.connection === "reconnecting" ? (
+										<StatusPill state="reconnecting" />
+									) : null
+								) : (
+									<StatusPill
+										state="harness-down"
+										detail={platform.workerError}
+									/>
 								)}
-								workspaces={platform.workspaces}
-								onUpdateWorkspace={platform.setWorkspace}
-								onCreateWorkspace={platform.createWorkspace}
-								onRemoveWorkspace={platform.removeWorkspace}
-								defaults={
-									<Stack gap="sm">
-										<ToggleGroup
-											type="single"
-											value={scope}
-											onValueChange={(next) => {
-												if (next === "workspace" || next === "install")
-													setScope(next);
-											}}
-											variant="outline"
-											size="sm"
-											spacing={0}
-											aria-label="Default scope"
-										>
-											<ToggleGroupItem value="workspace">
-												This workspace
-											</ToggleGroupItem>
-											<ToggleGroupItem value="install">
-												Every workspace
-											</ToggleGroupItem>
-										</ToggleGroup>
-										<Picker
-											label="Model"
-											value={platform.defaults.model.split("/").at(-1) ?? ""}
-											origin={platform.defaults.modelOrigin}
-											groups={platform.model.groups}
-											onSelect={(value) =>
-												platform.setDefault("model", scope, value)
-											}
-										/>
-										<Picker
-											label="Thinking"
-											value={platform.defaults.thinking}
-											origin={platform.defaults.thinkingOrigin}
-											groups={platform.thinking.groups}
-											onSelect={(value) =>
-												platform.setDefault("thinking", scope, value)
-											}
-										/>
-										<Picker
-											label="Agent"
-											value={platform.defaults.agent}
-											origin={platform.defaults.agentOrigin}
-											groups={platform.agent.groups}
-											onSelect={(value) =>
-												platform.setDefault("agent", scope, value)
-											}
-										/>
-									</Stack>
-								}
-							/>
-						</>
-					}
-				/>
+								<Picker
+									label="Model"
+									value={platform.model.value}
+									origin={platform.model.origin}
+									groups={platform.model.groups}
+									onSelect={platform.model.onSelect}
+									disabled={platform.model.disabled}
+								/>
+								<Picker
+									label="Thinking"
+									value={platform.thinking.value}
+									origin={platform.thinking.origin}
+									note={platform.thinking.note}
+									groups={platform.thinking.groups}
+									onSelect={platform.thinking.onSelect}
+									disabled={platform.thinking.disabled}
+								/>
+								<Picker
+									label="Agent"
+									value={platform.agent.value}
+									placeholder="built in"
+									origin={platform.agent.origin}
+									groups={platform.agent.groups}
+									onSelect={platform.agent.onSelect}
+									disabled={platform.agent.disabled}
+								/>
+							</>
+						}
+					/>
+				) : undefined
 			}
 		/>
 	);

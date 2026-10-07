@@ -7,8 +7,8 @@
 // need a DOM, not a browser, and the host parser is the thing that varies. This suite only
 // has to prove the pane renders through the real bundle.
 //
-// The inspector and the settings sheet are not here yet; they arrive with #13, and the
-// assertions that covered the old client's versions of them belong there.
+// The inspector's overlay is not here yet; it arrives with #13, and the assertions that
+// covered the old client's version of it belong there.
 //
 // Needs a gateway on --addr; run with: bun run tools/check-ui.mjs [url]
 import puppeteer from "puppeteer-core";
@@ -25,6 +25,27 @@ const check = (label, ok, detail) => {
 	}
 	failures.push(`${label}${detail === undefined ? "" : `: ${detail}`}`);
 };
+
+/**
+ * Click through the page's own DOM. A mouse dispatch on an element a re-render can replace
+ * mid-click hangs the protocol, and the clicks here navigate, which re-renders everything.
+ */
+async function press(page, selector) {
+	// A navigation can replace the execution context while this is evaluating; the click was
+	// the point, so a retry is honest and a thrown context is not.
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			return await page.evaluate((wanted) => {
+				const element = document.querySelector(wanted);
+				element?.click();
+				return element !== null;
+			}, selector);
+		} catch {
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+	}
+	return false;
+}
 
 const PANES = "[data-slot=transcript] [data-slot=user], [data-slot=transcript] [data-slot=assistant], [data-slot=transcript] [data-slot=tool], [data-slot=transcript] [data-slot=notice]";
 
@@ -96,100 +117,143 @@ try {
 		await page.evaluate(() => document.querySelector("[data-slot=status-pill]") === null),
 	);
 
-	// The rail names its workspace first: a conversation belongs to exactly one, so the
-	// workspace is the choice that comes before it. Switching starts over.
-	const activeWorkspace = await page.evaluate(
-		() =>
-			document
-				.querySelector("[data-slot=workspace-row][data-active='true']")
-				?.getAttribute("data-name") ?? "",
+	// The rail's top button names the workspace in view and opens the screen that changes it.
+	const workspaceButton = await page.$("button[aria-label='Workspaces']");
+	check("the rail names the workspace on top", workspaceButton !== null);
+	const workspaceState = await page.evaluate(async () => {
+		const state = await (await fetch("/api/state")).json();
+		return {
+			active: state.workspace.name,
+			title: (state.workspaces ?? []).find((item) => item.active)?.title ?? "",
+			count: (state.workspaces ?? []).length,
+		};
+	});
+	const buttonText =
+		workspaceButton === null ? "" : await workspaceButton.evaluate((element) => element.textContent ?? "");
+	check(
+		"the button says which workspace this is",
+		buttonText.includes(workspaceState.title),
+		buttonText.trim(),
 	);
-	check("the rail names the workspace in view", activeWorkspace !== "", activeWorkspace);
-	const otherWorkspace = await page.evaluate((active) => {
-		const rows = [...document.querySelectorAll("[data-slot=workspace-row]")];
-		return rows.find((row) => row.getAttribute("data-name") !== active)?.getAttribute("data-name") ?? "";
-	}, activeWorkspace);
-	if (otherWorkspace !== "" && activeWorkspace !== "") {
-		await page.click(`[data-slot=workspace-row][data-name="${otherWorkspace}"]`);
-		await page.waitForFunction(
-			(name) => window.location.pathname === `/w/${name}`,
-			{ timeout: 10000 },
-			otherWorkspace,
+
+	if (workspaceButton !== null) {
+		await press(page, "button[aria-label='Workspaces']");
+		await page.waitForFunction(() => window.location.pathname === "/workspaces", {
+			timeout: 10000,
+		});
+		const rows = await page.evaluate(() =>
+			[...document.querySelectorAll("[data-slot=workspaces-screen] [data-slot=workspace-row]")].map(
+				(row) => ({
+					name: row.getAttribute("data-name"),
+					active: row.getAttribute("data-active") === "true",
+				}),
+			),
 		);
-		// The route changes first; the workspace's own state arrives with its fetch.
-		const marked = await page
-			.waitForFunction(
-				(name) =>
-					document
-						.querySelector("[data-slot=workspace-row][data-active='true']")
-						?.getAttribute("data-name") === name,
+		check(
+			"the workspace button opens the workspaces screen",
+			rows.length === workspaceState.count,
+			`${rows.length} rows, ${workspaceState.count} workspaces`,
+		);
+		check(
+			"the screen marks the workspace in view",
+			rows.find((row) => row.active)?.name === workspaceState.active,
+			JSON.stringify(rows),
+		);
+		// The conversation is behind the screen, not gone: the rail is still the way back.
+		check(
+			"the rail stays while a screen is open",
+			(await page.$("[data-slot=conversation-list]")) !== null,
+		);
+
+		const otherWorkspace = rows.find((row) => !row.active)?.name ?? "";
+		if (otherWorkspace !== "") {
+			await press(page, `[data-slot=workspace-row][data-name="${otherWorkspace}"] button`);
+			await page.waitForFunction(
+				(name) => window.location.pathname === `/w/${name}`,
 				{ timeout: 15000 },
 				otherWorkspace,
-			)
-			.then(() => true)
-			.catch(() => false);
-		const nowActive = await page.evaluate(
-			() =>
-				document
-					.querySelector("[data-slot=workspace-row][data-active='true']")
-					?.getAttribute("data-name") ?? "",
-		);
-		check(
-			"switching a workspace moves the route and the mark",
-			marked && nowActive === otherWorkspace,
-			`${activeWorkspace} → ${nowActive}`,
-		);
-		// Back where it started, so the rest of the suite runs against the same workspace.
-		await page.click(`[data-slot=workspace-row][data-name="${activeWorkspace}"]`);
-		await page.waitForFunction(
-			(name) =>
-				window.location.pathname === `/w/${name}` &&
-				document
-					.querySelector("[data-slot=workspace-row][data-active='true']")
-					?.getAttribute("data-name") === name,
-			{ timeout: 15000 },
-			activeWorkspace,
-		);
-		await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
+			);
+			// Opening a workspace leaves the screen: it lands on that workspace's conversation.
+			const landed = await page
+				.waitForSelector("[data-slot=composer]", { timeout: 15000 })
+				.then(() => true)
+				.catch(() => false);
+			check(
+				"opening a workspace lands on it, out of the screen",
+				landed &&
+					(await page.evaluate(() => document.querySelector("[data-slot=workspaces-screen]") === null)),
+			);
+			// Back where it started, so the rest of the suite runs against the same workspace.
+			await press(page, "button[aria-label='Workspaces']");
+			await page.waitForFunction(() => window.location.pathname === "/workspaces", {
+				timeout: 10000,
+			});
+			await press(
+				page,
+				`[data-slot=workspace-row][data-name="${workspaceState.active}"] button`,
+			);
+			await page.waitForFunction(
+				(name) => window.location.pathname === `/w/${name}`,
+				{ timeout: 15000 },
+				workspaceState.active,
+			);
+			await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
+		}
 	}
 
-	// The settings sheet: hidden until asked for, then the workspace, its defaults, and the
-	// other workspaces. This is the check the old client's suite made first, because a
-	// visible overlay swallows the first interaction and turns one bug into a trail.
+	// The settings screen: the theme, the workspace in view, and what its defaults resolve to.
+	// It is a screen rather than a sheet, so the conversation stays behind it and the rail is
+	// how you leave and how you come back.
 	const settingsTrigger = await page.$("button[aria-label='Settings']");
-	check("the settings trigger is on screen", settingsTrigger !== null);
+	check("the settings trigger is in the rail", settingsTrigger !== null);
+	check(
+		"no screen is over the conversation to start with",
+		await page.evaluate(() => document.querySelector("[data-slot=settings-screen]") === null),
+	);
 	if (settingsTrigger !== null) {
+		await press(page, "button[aria-label='Settings']");
+		await page.waitForSelector("[data-slot=settings-screen]", { timeout: 5000 });
 		check(
-			"the settings sheet starts hidden",
-			await page.evaluate(() => document.querySelector('[role="dialog"]') === null),
+			"settings has a URL of its own",
+			await page.evaluate(() => window.location.pathname === "/settings"),
 		);
-		await settingsTrigger.click();
-		await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-		const sheetText = await page.evaluate(
-			() => document.querySelector('[role="dialog"]')?.textContent ?? "",
+		const settingsText = await page.evaluate(
+			() => document.querySelector("[data-slot=settings-screen]")?.textContent ?? "",
 		);
 		const activePath = await page.evaluate(async () => {
 			const state = await (await fetch("/api/state")).json();
 			return state.workspace.path;
 		});
 		check(
-			"the sheet says where this workspace points",
-			sheetText.includes(activePath),
+			"settings says where this workspace points",
+			settingsText.includes(activePath),
 			activePath,
 		);
-		check("the sheet shows the defaults", sheetText.includes("Defaults"), sheetText.slice(0, 60));
-		check("the sheet lists the workspaces", sheetText.includes("Workspaces"));
+		check("settings shows the defaults", settingsText.includes("Defaults"));
+		check(
+			"settings offers light, dark, and system",
+			["Light", "Dark", "System"].every((label) => settingsText.includes(label)),
+		);
+		check(
+			"settings keeps the composer out of the way",
+			(await page.$("[data-slot=composer]")) === null,
+		);
 
-		// A refused action shows the server's own sentence, above the composer, until dismissed.
-		await page.type('[role="dialog"] input[aria-label="New workspace name"]', "ui-check/refused");
-		const added = await page.evaluate(() => {
-			const add = [...document.querySelectorAll('[role="dialog"] button')].find(
-				(button) => button.textContent?.trim() === "Add",
+		// A refused action shows the server's own sentence, until it is dismissed — and it does
+		// so on a screen too, which is why the strip sits in the shell and not in the composer.
+		await press(page, "button[aria-label='Back to the conversation']");
+		await page.waitForSelector("[data-slot=composer]", { timeout: 5000 });
+		await press(page, "button[aria-label='Workspaces']");
+		await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 5000 });
+		await page.type("[data-slot=workspaces-create] input", "ui-check/refused");
+		const created = await page.evaluate(() => {
+			const create = [...document.querySelectorAll("[data-slot=workspaces-create] button")].find(
+				(button) => button.textContent?.trim() === "Create",
 			);
-			add?.click();
-			return add !== undefined;
+			create?.click();
+			return create !== undefined;
 		});
-		check("the create form has an Add button", added);
+		check("the create form has a Create button", created);
 		const strip = await page
 			.waitForSelector("[data-slot=error-strip]", { timeout: 10000 })
 			.catch(() => null);
@@ -207,11 +271,44 @@ try {
 			);
 			check("the error strip can be dismissed", dismissed);
 		}
-		await page.keyboard.press("Escape");
-		await page.waitForFunction(() => document.querySelector('[role="dialog"]') === null, {
-			timeout: 5000,
+		await press(page, "button[aria-label='Back to the conversation']");
+		await page.waitForSelector("[data-slot=composer]", { timeout: 5000 });
+	}
+
+	// The bottom of the rail: a new conversation is created and opened, not a button that
+	// leaves you looking at an empty screen. It is tombstoned afterwards, so a suite run does
+	// not leave a trail of empty conversations behind it.
+	const beforeNew = await page.evaluate(() => window.location.pathname);
+	check(
+		"the rail offers a new conversation",
+		(await page.$("button[aria-label='New conversation']")) !== null,
+	);
+	if (await press(page, "button[aria-label='New conversation']")) {
+		const opened = await page
+			.waitForFunction(
+				(previous) =>
+					window.location.pathname.startsWith("/c/") &&
+					window.location.pathname !== previous,
+				{ timeout: 15000 },
+				beforeNew,
+			)
+			.then(() => true)
+			.catch(() => false);
+		check("a new conversation is created and opened", opened, beforeNew);
+		const created = await page.evaluate(async () => {
+			const state = await (await fetch("/api/state")).json();
+			return state.conversation?.id ?? "";
 		});
-		check("the settings sheet closes", true);
+		check("the new conversation is the one in view", created !== "", created);
+		if (created !== "") {
+			await page.evaluate(async (id) => {
+				await fetch(`/api/workspaces/general/conversations/${id}/hide`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ hidden: true }),
+				});
+			}, created);
+		}
 	}
 
 	// 2. The rail is a pane, not the page: a long list scrolls inside it, and the document
@@ -437,7 +534,8 @@ try {
 		}
 	}
 
-	// 4. The theme: the system decides until someone says otherwise, and a choice is remembered.
+	// 4. The theme: the system decides until someone chooses, and the choice is made in settings
+	// and remembered there. Three options, so following the system is a choice too.
 	const isDark = () => page.evaluate(() => document.documentElement.classList.contains("dark"));
 
 	await page.evaluate(() => localStorage.removeItem("acornfall.ui.theme"));
@@ -451,20 +549,31 @@ try {
 	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
 	check("a light system gets the light theme", !(await isDark()), "came up dark");
 
-	const themeButton = await page.$("button[aria-label^='Switch to the']");
-	check("the theme toggle is on screen", themeButton !== null);
-	if (themeButton !== null) {
-		await themeButton.click();
-		check("the toggle overrides the system", await isDark(), "the click did not darken the page");
-		// The system still says light; the explicit choice still wins.
-		await page.reload({ waitUntil: "domcontentloaded" });
-		await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
-		check(
-			"an explicit choice survives a reload even against the system",
-			await isDark(),
-			"the reload forgot the choice",
-		);
-	}
+	const chooseTheme = (label) =>
+		page.evaluate((wanted) => {
+			const button = [...document.querySelectorAll("[data-slot=settings-theme] button")].find(
+				(element) => element.textContent?.trim() === wanted,
+			);
+			button?.click();
+			return button !== undefined;
+		}, label);
+
+	await press(page, "button[aria-label='Settings']");
+	await page.waitForSelector("[data-slot=settings-screen]", { timeout: 5000 });
+	check("the settings screen has a Dark choice", await chooseTheme("Dark"));
+	// The system still says light; the explicit choice still wins.
+	check("choosing dark overrides the system", await isDark(), "the click did not darken the page");
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await page.waitForSelector("[data-slot=settings-screen]", { timeout: 15000 });
+	check(
+		"an explicit choice survives a reload even against the system",
+		await isDark(),
+		"the reload forgot the choice",
+	);
+	check("the settings screen still has a System choice", await chooseTheme("System"));
+	check("choosing system follows the machine again", !(await isDark()), "stayed dark");
+	await press(page, "button[aria-label='Back to the conversation']");
+	await page.waitForSelector("[data-slot=composer]", { timeout: 5000 });
 
 	// 5. The composer says what it will run and where each value came from, and a slash
 	// offers the commands the server would expand.

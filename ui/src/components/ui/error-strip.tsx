@@ -10,9 +10,9 @@ export interface ErrorStripProps {
 }
 
 /**
- * The last refused action, above the composer. It stays until it is dismissed — a failure
- * worth telling someone about is worth leaving where they will read it — and the next
- * successful action clears it.
+ * The last refused action. It stays until it is dismissed — a failure worth telling someone
+ * about is worth leaving where they will read it — and the next successful action clears it.
+ * Where it sits is the shell's business, so it carries no margin of its own.
  */
 export function ErrorStrip({ message, onDismiss, className }: ErrorStripProps) {
 	return (
@@ -20,7 +20,7 @@ export function ErrorStrip({ message, onDismiss, className }: ErrorStripProps) {
 			data-slot="error-strip"
 			role="alert"
 			className={cn(
-				"mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive-subtle px-3 py-2",
+				"flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive-subtle px-3 py-2",
 				className,
 			)}
 		>

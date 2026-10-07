@@ -135,20 +135,3 @@ export const SteerChosen: Story = {
 		busyAction: "steer" as BusyAction,
 	},
 };
-
-/** A refused action, in the server's own words, above the textarea until it is dismissed. */
-export const WithError: Story = {
-	args: {
-		value: "",
-		onChange: noop,
-		onSend: noop,
-		onAbort: noop,
-		running: false,
-		steerable: true,
-		busyAction: "steer",
-		onBusyActionChange: noop,
-		controls,
-		error: 'a workspace name cannot contain a slash or a space: "ui-check/refused"',
-		onDismissError: noop,
-	},
-};

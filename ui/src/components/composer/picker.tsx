@@ -34,7 +34,7 @@ export interface PickerProps {
 export function Picker({
 	label,
 	value,
-	placeholder = "default",
+	placeholder = "not set",
 	origin,
 	note,
 	groups,

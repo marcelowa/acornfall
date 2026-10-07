@@ -1,4 +1,4 @@
-import type { ElementType, ReactNode } from "react";
+import type { ComponentPropsWithoutRef, ElementType, ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 import { gapScale, paddingScale } from "./spacing";
@@ -53,11 +53,12 @@ const stackVariants = cva("flex", {
 	},
 });
 
-export type StackProps = VariantProps<typeof stackVariants> & {
-	as?: ElementType;
-	className?: string;
-	children: ReactNode;
-};
+export type StackProps = VariantProps<typeof stackVariants> &
+	Omit<ComponentPropsWithoutRef<"div">, "className" | "children"> & {
+		as?: ElementType;
+		className?: string;
+		children: ReactNode;
+	};
 
 export function Stack({
 	as: Comp = "div",
@@ -70,9 +71,11 @@ export function Stack({
 	padding,
 	scroll,
 	fill,
+	...rest
 }: StackProps) {
 	return (
 		<Comp
+			{...rest}
 			className={cn(
 				stackVariants({ direction, gap, align, justify, padding, scroll, fill }),
 				className,

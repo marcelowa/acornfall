@@ -151,6 +151,13 @@ export function createWorkspace(name: string): Promise<void> {
 	return post("/api/workspaces", { name });
 }
 
+/** A new conversation, created and selected; the answer is the state it is now in. */
+export async function createConversation(workspace: string): Promise<WireState> {
+	const response = await fetch(workspacePath(workspace, "/conversations"), { method: "POST" });
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as WireState;
+}
+
 /** A partial update: an absent field is left alone, so `image` and `network` are independent. */
 export interface WorkspaceChange {
 	title?: string;

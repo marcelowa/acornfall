@@ -196,6 +196,10 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			},
 		],
 		selectWorkspace: noop,
+		screen: "conversation",
+		showScreen: noop,
+		newConversation: noop,
+		renameWorkspace: noop,
 		defaults: {
 			model: "opencode-go/deepseek",
 			thinking: "max",
@@ -231,6 +235,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		railOpen: false,
 		railCollapsed: false,
 		theme: "light",
+		themeChoice: "system",
+		setThemeChoice: noop,
 		select: noop,
 		rename: noop,
 		hide: noop,
@@ -240,7 +246,6 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		setRailWidth: noop,
 		setRailOpen: noop,
 		toggleRail: noop,
-		toggleTheme: noop,
 		...overrides,
 	};
 }
@@ -335,6 +340,18 @@ export const RefusedAction: Story = {
 			failure: 'a workspace name cannot contain a slash or a space: "ui-check/refused"',
 		}),
 	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** The workspace list, one screen over: open, rename, forget, or create. */
+export const WorkspacesScreen: Story = {
+	args: { platform: makePlatform({ screen: "workspaces" }) },
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** Settings, the other screen over: the theme, this workspace's sandbox, and its defaults. */
+export const SettingsScreen: Story = {
+	args: { platform: makePlatform({ screen: "settings", themeChoice: "dark", theme: "dark" }) },
 	globals: { viewport: { value: "laptop" } },
 };
 
