@@ -49,6 +49,11 @@ const paletteColour =
  * pages are the one exception — they display the ramps, and they are not application code. */
 const baseToken = /--base-/;
 
+/** The shadcn CLI's canon imports `cn` from a package of that name and installs it; this
+ * project keeps its own four-line helper over clsx and tailwind-merge, and the check is what
+ * stops the package arriving by accident on the next `shadcn add`. */
+const bareCnImport = /from "cn"/;
+
 export function scanSources(files: SourceFile[]): Violation[] {
 	const violations: Violation[] = [];
 
@@ -79,6 +84,13 @@ export function scanSources(files: SourceFile[]): Violation[] {
 				violations.push({
 					...at,
 					rule: "primitive read outside tokens.css",
+					text: trimmed,
+				});
+			}
+			if (bareCnImport.test(line)) {
+				violations.push({
+					...at,
+					rule: "the cn package is not this project's",
 					text: trimmed,
 				});
 			}
