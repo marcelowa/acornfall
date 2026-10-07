@@ -140,6 +140,9 @@ dev: build ## run with the scripted dev provider (no api key needed)
 ui: ## check the interface in a real browser (needs a running gateway)
 	cd tools && bun run check-ui.mjs $(URL)
 
+ui-dev: ## serve the interface from source with vite, proxying /api to the gateway
+	cd ui && VITE_GATEWAY=$(URL) bun run dev
+
 fmt: ## format Go sources
 	cd gateway && gofmt -w .
 

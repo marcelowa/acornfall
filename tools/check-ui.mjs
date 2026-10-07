@@ -30,21 +30,29 @@ const check = (label, ok, detail) => {
  * Click through the page's own DOM. A mouse dispatch on an element a re-render can replace
  * mid-click hangs the protocol, and the clicks here navigate, which re-renders everything.
  */
-async function press(page, selector) {
-	// A navigation can replace the execution context while this is evaluating; the click was
-	// the point, so a retry is honest and a thrown context is not.
+async function inPage(page, fn, arg) {
+	// A navigation replaces the execution context, and an evaluate caught in that window comes
+	// back as "Promise was collected" rather than as an answer. Retrying is honest: the call
+	// is a question about the page, and the page is still there to be asked.
 	for (let attempt = 0; attempt < 3; attempt += 1) {
 		try {
-			return await page.evaluate((wanted) => {
-				const element = document.querySelector(wanted);
-				element?.click();
-				return element !== null;
-			}, selector);
+			return await page.evaluate(fn, arg);
 		} catch {
 			await new Promise((resolve) => setTimeout(resolve, 200));
 		}
 	}
-	return false;
+	return undefined;
+}
+
+/** Click through the page's own DOM: a mouse dispatch on an element a re-render replaces
+ * mid-click hangs the protocol, and the clicks here navigate, which re-renders everything. */
+async function press(page, selector) {
+	const found = await inPage(page, (wanted) => {
+		const element = document.querySelector(wanted);
+		element?.click();
+		return element !== null;
+	}, selector);
+	return found === true;
 }
 
 const PANES = "[data-slot=transcript] [data-slot=user], [data-slot=transcript] [data-slot=assistant], [data-slot=transcript] [data-slot=tool], [data-slot=transcript] [data-slot=notice]";
@@ -58,19 +66,20 @@ async function showConversationWithContent(page) {
 	if (await page.evaluate((selector) => document.querySelectorAll(selector).length > 0, PANES)) {
 		return true;
 	}
-	const picked = await page.evaluate(async () => {
-		const rows = await (await fetch("/api/workspaces/general/conversations")).json();
-		const withContent = (rows ?? []).find(
-			(row) => !row.hidden && row.parent === undefined && row.lastEntryId !== "",
-		);
-		if (withContent === undefined) return "";
-		const button = document.querySelector(
-			`[data-slot=conversation-select][data-conversation="${withContent.id}"]`,
-		);
-		if (button === null) return "";
-		button.click();
-		return withContent.id;
-	});
+	const picked =
+		(await inPage(page, async () => {
+			const rows = await (await fetch("/api/workspaces/general/conversations")).json();
+			const withContent = (rows ?? []).find(
+				(row) => !row.hidden && row.parent === undefined && row.lastEntryId !== "",
+			);
+			if (withContent === undefined) return "";
+			const button = document.querySelector(
+				`[data-slot=conversation-select][data-conversation="${withContent.id}"]`,
+			);
+			if (button === null) return "";
+			button.click();
+			return withContent.id;
+		})) ?? "";
 	if (picked === "") return false;
 	await page.waitForFunction(
 		(selector) => document.querySelectorAll(selector).length > 0,
@@ -88,6 +97,9 @@ const browser = await puppeteer.launch({
 
 try {
 	const page = await browser.newPage();
+	// The app asks before renaming, and a modal dialog blocks the renderer: a stray click on
+	// Rename would otherwise wedge the whole run, close included.
+	page.on("dialog", (dialog) => void dialog.dismiss());
 	await page.setViewport({ width: 1400, height: 900 });
 
 	const problems = [];
@@ -167,7 +179,7 @@ try {
 
 		const otherWorkspace = rows.find((row) => !row.active)?.name ?? "";
 		if (otherWorkspace !== "") {
-			await press(page, `[data-slot=workspace-row][data-name="${otherWorkspace}"] button`);
+			await press(page, `[data-slot=workspace-row][data-name="${otherWorkspace}"] button[aria-label^='Open ']`);
 			await page.waitForFunction(
 				(name) => window.location.pathname === `/w/${name}`,
 				{ timeout: 15000 },
@@ -188,9 +200,15 @@ try {
 			await page.waitForFunction(() => window.location.pathname === "/workspaces", {
 				timeout: 10000,
 			});
+			// The row offers Open only once the state says this workspace is the one in view;
+			// waiting for it is waiting for the fetch, not for a timer.
+			await page.waitForSelector(
+				`[data-slot=workspace-row][data-name="${workspaceState.active}"] button[aria-label^='Open ']`,
+				{ timeout: 15000 },
+			);
 			await press(
 				page,
-				`[data-slot=workspace-row][data-name="${workspaceState.active}"] button`,
+				`[data-slot=workspace-row][data-name="${workspaceState.active}"] button[aria-label^='Open ']`,
 			);
 			await page.waitForFunction(
 				(name) => window.location.pathname === `/w/${name}`,
@@ -311,29 +329,68 @@ try {
 		}
 	}
 
-	// 2. The rail is a pane, not the page: a long list scrolls inside it, and the document
-	// itself never grows — a page that scrolls moves every panel, including the ones that
-	// were meant to stay put.
-	const geometry = await page.evaluate(() => {
+	// 2. The rail is a pane, not the page: the conversations scroll between the workspace button
+	// and the bottom zone, which stays visible, and the document itself never grows — a page that
+	// scrolls moves every panel, including the ones that were meant to stay put. The earlier
+	// version of this check passed while the rail was broken: it only asked whether an overflow
+	// that scrolled was set to scroll, which a list that never scrolled also satisfies.
+	const rail = await page.evaluate(() => {
+		const aside = document.querySelector("aside");
 		const list = document.querySelector("[data-slot=conversation-list]");
+		const settings = document.querySelector("button[aria-label='Settings']");
+		const workspaces = document.querySelector("button[aria-label='Workspaces']");
+		const toggle = document.querySelector("button[aria-label='Hide the rail']");
+		if (aside === null || list === null || settings === null || workspaces === null) return null;
+		const box = (element) => {
+			const rect = element.getBoundingClientRect();
+			return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+		};
+		const chevron = [...workspaces.querySelectorAll("svg")].at(-1) ?? workspaces;
+		const overlaps = (a, b) =>
+			a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 		return {
+			rail: box(aside),
+			list: box(list),
+			settings: box(settings),
+			workspaces: box(workspaces),
+			chevron: box(chevron),
+			toggle: toggle === null ? null : box(toggle),
+			overflowY: getComputedStyle(list).overflowY,
+			scrolls: list.scrollHeight > list.clientHeight + 1,
 			documentScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
-			documentHeight: document.documentElement.scrollHeight,
 			windowHeight: window.innerHeight,
-			listOverflowY: list === null ? "" : getComputedStyle(list).overflowY,
-			listScrolls: list !== null && list.scrollHeight > list.clientHeight,
 		};
 	});
-	check(
-		"the page itself does not scroll",
-		!geometry.documentScrolls,
-		`${geometry.documentHeight}px of document in a ${geometry.windowHeight}px window`,
-	);
-	check(
-		"a rail that overflows scrolls inside its pane",
-		!geometry.listScrolls || geometry.listOverflowY === "auto",
-		`overflow-y: ${geometry.listOverflowY}`,
-	);
+	check("the rail has a workspace button, a list, and a bottom zone", rail !== null);
+	if (rail !== null) {
+		check(
+			"the bottom of the rail stays inside the pane",
+			rail.settings.bottom <= rail.rail.bottom + 1 && rail.settings.top >= rail.rail.top,
+			`settings ends at ${Math.round(rail.settings.bottom)}, rail at ${Math.round(rail.rail.bottom)}`,
+		);
+		check(
+			"the conversations stop where the bottom zone starts",
+			rail.list.bottom <= rail.settings.top + 1,
+			`list ends at ${Math.round(rail.list.bottom)}, settings start at ${Math.round(rail.settings.top)}`,
+		);
+		check(
+			"a long list scrolls rather than pushing the bottom out",
+			!rail.scrolls || rail.overflowY === "auto",
+			`${rail.scrolls ? "scrolls" : "fits"}, overflow-y: ${rail.overflowY}`,
+		);
+		check(
+			"the page itself does not scroll",
+			!rail.documentScrolls,
+			`${Math.round(rail.rail.bottom)}px of rail in a ${rail.windowHeight}px window`,
+		);
+		if (rail.toggle !== null) {
+			check(
+				"the workspace button's chevron clears the rail's own toggle",
+				rail.chevron.right <= rail.toggle.left + 1,
+				`chevron ends at ${Math.round(rail.chevron.right)}, toggle starts at ${Math.round(rail.toggle.left)}`,
+			);
+		}
+	}
 
 	// 1. The splitter resizes the rail and the choice survives a reload.
 	const railWidth = () =>

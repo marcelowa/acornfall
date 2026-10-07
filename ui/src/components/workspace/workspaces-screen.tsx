@@ -90,6 +90,7 @@ export function WorkspacesScreen({
 									<Button
 										size="xs"
 										variant="outline"
+										aria-label={`Open ${workspace.title}`}
 										onClick={() => onSelect(workspace.name)}
 									>
 										Open

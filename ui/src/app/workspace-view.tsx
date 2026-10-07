@@ -69,11 +69,20 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 
 	// Three zones: the workspace on top, its conversations scrolling in the middle, and the two
 	// things that are always worth reaching at the bottom.
+	// Three zones: the workspace on top, its conversations scrolling in the middle, and the two
+	// things that are always worth reaching pinned at the bottom. The stack is what bounds the
+	// middle zone — a rail that is not a flex column has nothing to scroll inside, and a long
+	// list pushes the bottom out of the pane.
 	const rail = (
-		<div className="h-full border-r border-border bg-card p-2">
-			<Stack gap="sm" fill>
+		<Stack gap="sm" fill className="border-r border-border bg-card p-2">
+			{/* The rail's own toggle floats in the top-right corner, so the top zone stops short of
+			 * it: the button's chevron belongs beside its own border, not under a control that is
+			 * not part of it. */}
+			<Stack gap="none" className="shrink-0 pr-8">
 				<Button
-					variant="ghost"
+					// Outlined rather than bare: it opens a screen, and nothing about a line of text
+					// with a chevron after it says that out loud.
+					variant="outline"
 					size="sm"
 					className="w-full justify-between"
 					aria-label="Workspaces"
@@ -82,44 +91,39 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					<span className="truncate">{activeWorkspace?.title ?? "Workspaces"}</span>
 					<ChevronsUpDown />
 				</Button>
-				<ConversationList
-					conversations={platform.conversations}
-					deleted={platform.deleted}
-					activeId={platform.active?.id}
-					onSelect={platform.select}
-					onRename={(id) => {
-						const current = platform.conversations.find(
-							(conversation) => conversation.id === id,
-						);
-						const title = window.prompt("Rename conversation", current?.title ?? "");
-						if (title !== null && title.trim() !== "")
-							platform.rename(id, title.trim());
-					}}
-					onHide={(id) => platform.hide(id, true)}
-					onRestore={(id) => platform.hide(id, false)}
-				/>
-				<Stack gap="2xs">
-					<Button
-						size="sm"
-						aria-label="New conversation"
-						onClick={platform.newConversation}
-					>
-						<Plus />
-						New conversation
-					</Button>
-					<Button
-						variant="ghost"
-						size="sm"
-						className="justify-start"
-						aria-label="Settings"
-						onClick={() => platform.showScreen("settings")}
-					>
-						<Settings />
-						Settings
-					</Button>
-				</Stack>
 			</Stack>
-		</div>
+			<ConversationList
+				conversations={platform.conversations}
+				deleted={platform.deleted}
+				activeId={platform.active?.id}
+				onSelect={platform.select}
+				onRename={(id) => {
+					const current = platform.conversations.find(
+						(conversation) => conversation.id === id,
+					);
+					const title = window.prompt("Rename conversation", current?.title ?? "");
+					if (title !== null && title.trim() !== "") platform.rename(id, title.trim());
+				}}
+				onHide={(id) => platform.hide(id, true)}
+				onRestore={(id) => platform.hide(id, false)}
+			/>
+			<Stack gap="2xs" className="shrink-0">
+				<Button size="sm" aria-label="New conversation" onClick={platform.newConversation}>
+					<Plus />
+					New conversation
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					className="justify-start"
+					aria-label="Settings"
+					onClick={() => platform.showScreen("settings")}
+				>
+					<Settings />
+					Settings
+				</Button>
+			</Stack>
+		</Stack>
 	);
 
 	const barTitle = (
