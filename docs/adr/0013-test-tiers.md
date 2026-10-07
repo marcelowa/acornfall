@@ -35,8 +35,11 @@ honest.**
 
 - **`make test` is the fast tier.** `-short -race`, the worker units, the Go units, the
   tests that need no engine at all against the refusal path, and the thirteen resource tests
-  on the host engine ([ADR 0015](0015-host-engine.md)) with `-parallel 6`. It needs no
-  hypervisor and behaves the same on every machine, including CI. Measured ~30s.
+  on the host engine ([ADR 0015](0015-host-engine.md)), one test per core (`TEST_PARALLEL`).
+  It needs no hypervisor and behaves the same on every machine, including CI. Measured ~30s.
+  Concurrency follows the machine because each test is a gateway and a worker under `-race`;
+  six of those on a two-core CI runner starved the delegation tests, which now also get a
+  two-minute deadline instead of sixty seconds — a bound for failing, not a target.
 - **`make test-sandbox` is the engine boundary.** The live driver test, the worker's SDK
   suite, and the four end-to-end tests that exercise the sandbox itself — a tool call, a global
   mount, a guard, a heal — without `-short`, with `ACORNFALL_LIVE_SANDBOX=1` and

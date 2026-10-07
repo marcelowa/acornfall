@@ -56,6 +56,11 @@ commits: ## check commit messages (RANGE=origin/main..HEAD by default)
 # engine's runtime sockets (docs/adr/0012-sandbox.md).
 SANDBOX_STATE ?= /tmp/acornfall-e2e-sandboxes
 
+# How many end-to-end tests the fast tier runs at once: one per core, because each test is a
+# gateway and a worker under -race, and six of those on a two-core CI runner starve the
+# conversations they are waiting for. Override with TEST_PARALLEL.
+TEST_PARALLEL ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+
 # How many workspace sandboxes the slow tier runs at once. Six is one per core on the machine
 # this was measured on: the 17 sandbox tests took 125s at 2, 85s at 4, 72s at 6, and 76s at 8
 # (contention). Override per machine; each sandbox asks for 2 cpus and 2G. The tier is not
@@ -77,7 +82,7 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# tests whose assertions need a sandbox; the rest of the feature suite runs in parallel.
 	# -count=1 because the suite's inputs include worker/src and gateway/web, which Go's test
 	# cache cannot see: a cached pass would be a pass for code that has changed.
-	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel 6 ./...
+	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel $(TEST_PARALLEL) ./...
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a

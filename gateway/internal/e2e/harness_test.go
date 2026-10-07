@@ -753,7 +753,11 @@ func (c *client) waitIdle(workspace, id string, timeout time.Duration) {
 // re-adopted the conversation it was on.
 func (c *client) waitForConversation(workspace string) string {
 	c.t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
+	// Two minutes, not one: the timeout is a bound for a failing test, not a target, and the
+	// CI runners are several times slower than a development machine — a scripted answer that
+	// takes a second here can take a minute there, and a deadline that a slow machine cannot
+	// meet is a test that fails for the wrong reason.
+	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		if got := c.state(workspace); got.Conversation != nil {
 			return got.Conversation.ID
@@ -772,7 +776,7 @@ func (c *client) waitForConversation(workspace string) string {
 // conversation created a moment ago is therefore always in this one.
 func (c *client) waitForConversationMatching(workspace string, predicate func(conversation) bool) conversation {
 	c.t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		for _, candidate := range c.conversations(workspace) {
 			if predicate(candidate) {
@@ -1018,7 +1022,7 @@ func (c *client) view(workspace, id string) view {
 
 func (c *client) waitForText(workspace, id, want string) view {
 	c.t.Helper()
-	return c.waitView(workspace, id, func(v view) bool { return strings.Contains(v.all(), want) }, 60*time.Second)
+	return c.waitView(workspace, id, func(v view) bool { return strings.Contains(v.all(), want) }, 2*time.Minute)
 }
 
 // streamEvents collects the named events seen within a window, for the checks that are about
