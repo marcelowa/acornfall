@@ -16,8 +16,6 @@ export interface PickerProps {
 	label: string;
 	value?: string | undefined;
 	placeholder?: string | undefined;
-	/** Where this value comes from: "this conversation", "workspace default", "install". */
-	origin?: string | undefined;
 	/** Something the value cannot say by itself: a level that was asked for and not offered. */
 	note?: string | undefined;
 	/** The value cannot run here any more, so it is shown as a problem rather than a choice. */
@@ -29,9 +27,9 @@ export interface PickerProps {
 }
 
 /**
- * One picker, used for all three choices. It always says where the value came from: a
- * conversation that never chose is not the same as one that chose, and the difference is
- * exactly what someone opens this to find out.
+ * One picker, used for all three choices. The label, the value, and the menu — nothing else:
+ * the layers are the settings screen's tabs, and a value that is inherited is shown as the
+ * value it is.
  *
  * An invalid value is shown in the destructive tone with its note, because a pin that cannot
  * run is not a choice to read past.
@@ -40,7 +38,6 @@ export function Picker({
 	label,
 	value,
 	placeholder = "not set",
-	origin,
 	note,
 	invalid = false,
 	groups,
@@ -66,13 +63,6 @@ export function Picker({
 					<span className={cn("truncate", invalid && "text-destructive")}>
 						{value === undefined || value === "" ? placeholder : value}
 					</span>
-					{origin === undefined ? null : (
-						// The layer is worth a line in the menu and not worth the trigger's width on a
-						// phone, where the value itself is what has to fit.
-						<span className="hidden truncate text-muted-foreground sm:inline">
-							· {origin}
-						</span>
-					)}
 					{note === undefined ? null : (
 						<span
 							className={cn(

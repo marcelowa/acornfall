@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
 	failureOf,
-	originLabel,
 	stalePins,
 	textOf,
 	toAgentGroups,
 	toConversation,
 	toModelChoices,
 	toSandbox,
+	toScopeDefaults,
 	toTranscript,
 	toWorkspaces,
 } from "../src/app/map";
@@ -159,13 +159,6 @@ describe("the wire mapping", () => {
 		expect(choices[0]?.thinkingLevels).toEqual(["low", "high"]);
 	});
 
-	test("an origin is said in words", () => {
-		expect(originLabel("workspace")).toBe("workspace default");
-		expect(originLabel("install")).toBe("install default");
-		expect(originLabel("last-resort")).toBe("last resort");
-		expect(originLabel(undefined)).toBeUndefined();
-	});
-
 	test("agents are grouped by layer, with the description a name cannot carry", () => {
 		const groups = toAgentGroups([
 			{ name: "a", source: "/a.md", layer: "workspace", description: "does a" },
@@ -226,6 +219,23 @@ describe("the wire mapping", () => {
 		);
 		expect(workspaces.map((workspace) => workspace.active)).toEqual([false, true]);
 		expect(workspaces[1]?.network).toBe("off");
+	});
+
+	test("a scope's defaults map to picker values, and an empty layer stays empty", () => {
+		expect(
+			toScopeDefaults({
+				model: { provider: "opencode-go", modelId: "deepseek-v4.1-flash" },
+				thinking: "max",
+				agent: "researcher",
+			}),
+		).toEqual({
+			model: "opencode-go/deepseek-v4.1-flash",
+			thinking: "max",
+			agent: "researcher",
+		});
+		// Saying nothing is not the same as agreeing with the layer below.
+		expect(toScopeDefaults({})).toEqual({ model: "", thinking: "", agent: "" });
+		expect(toScopeDefaults(undefined)).toEqual({ model: "", thinking: "", agent: "" });
 	});
 
 	test("a sandbox that is not isolated says so", () => {

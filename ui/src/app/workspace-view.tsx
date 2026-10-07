@@ -198,6 +198,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
+	const scoped = scope === "workspace" ? platform.defaults.workspace : platform.defaults.global;
+
 	const defaults = (
 		<Stack gap="sm">
 			<ToggleGroup
@@ -212,29 +214,28 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				aria-label="Default scope"
 			>
 				<ToggleGroupItem value="workspace">This workspace</ToggleGroupItem>
-				<ToggleGroupItem value="install">Every workspace</ToggleGroupItem>
+				<ToggleGroupItem value="install">Global</ToggleGroupItem>
 			</ToggleGroup>
 			<Picker
+				label="Agent"
+				value={scoped.agent}
+				placeholder="not set"
+				groups={platform.agent.groups}
+				onSelect={(value) => platform.setDefault("agent", scope, value)}
+			/>
+			<Picker
 				label="Model"
-				value={platform.defaults.model.split("/").at(-1) ?? ""}
-				origin={platform.defaults.modelOrigin}
+				value={platform.modelLabel(scoped.model)}
+				placeholder="not set"
 				groups={platform.model.groups}
 				onSelect={(value) => platform.setDefault("model", scope, value)}
 			/>
 			<Picker
 				label="Thinking"
-				value={platform.defaults.thinking}
-				origin={platform.defaults.thinkingOrigin}
-				groups={platform.thinking.groups}
+				value={scoped.thinking}
+				placeholder="not set"
+				groups={platform.thinkingFor(scoped.model)}
 				onSelect={(value) => platform.setDefault("thinking", scope, value)}
-			/>
-			<Picker
-				label="Agent"
-				value={platform.defaults.agent}
-				placeholder="built in"
-				origin={platform.defaults.agentOrigin}
-				groups={platform.agent.groups}
-				onSelect={(value) => platform.setDefault("agent", scope, value)}
 			/>
 		</Stack>
 	);

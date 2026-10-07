@@ -14,6 +14,7 @@ import type {
 	WireMessage,
 	WireProvider,
 	WireSandbox,
+	WireScopeDefaults,
 	WireSender,
 	WireToolSlot,
 	WireView,
@@ -188,22 +189,6 @@ export function toAgentGroups(agents: WireAgentSummary[]): PickerGroup[] {
 	return [...byLayer].map(([layer, options]) => ({ label: layer, options }));
 }
 
-/** The layer a value resolves from, in words: `install` is not something this conversation chose. */
-export function originLabel(origin: string | undefined): string | undefined {
-	switch (origin) {
-		case undefined:
-			return undefined;
-		case "workspace":
-			return "workspace default";
-		case "install":
-			return "install default";
-		case "last-resort":
-			return "last resort";
-		default:
-			return origin;
-	}
-}
-
 /**
  * The whole transcript, committed entries first and the live generation after them — the
  * same order the old client rendered, because a live tool slot is attached to a call whose
@@ -349,5 +334,23 @@ export function stalePins(state: WireState): { model: boolean; agent: boolean } 
 	return {
 		model: model !== "" && model !== "/" && !known,
 		agent: definition !== "" && !(state.agents ?? []).some((one) => one.name === definition),
+	};
+}
+
+/**
+ * One scope's defaults as picker values: the model as `provider/modelId`, and the two names
+ * as they are. Empty means this layer says nothing, which the settings screen shows as such
+ * rather than borrowing the value from the layer below.
+ */
+export function toScopeDefaults(defaults: WireScopeDefaults | undefined): {
+	model: string;
+	thinking: string;
+	agent: string;
+} {
+	const model = defaults?.model;
+	return {
+		model: model === undefined ? "" : `${model.provider}/${model.modelId}`,
+		thinking: defaults?.thinking ?? "",
+		agent: defaults?.agent ?? "",
 	};
 }

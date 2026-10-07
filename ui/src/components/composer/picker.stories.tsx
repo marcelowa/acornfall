@@ -26,24 +26,22 @@ const groups = [
 
 const noop = (): void => undefined;
 
-/** The conversation chose this itself. */
 export const Chosen: Story = {
-	args: { label: "Model", value: "Opus 5", origin: "this conversation", groups, onSelect: noop },
+	args: { label: "Model", value: "Opus 5", groups, onSelect: noop },
 };
 
-/** The conversation never chose: the value and the layer that provided it. */
+/** A value that came from somewhere else is still shown as the value it is. */
 export const Inherited: Story = {
 	args: {
 		label: "Model",
 		value: "Sonnet 6",
-		origin: "workspace default",
 		groups,
 		onSelect: noop,
 	},
 };
 
 export const NothingConfigured: Story = {
-	args: { label: "Model", value: undefined, origin: undefined, groups: [], onSelect: noop },
+	args: { label: "Model", value: undefined, groups: [], onSelect: noop },
 };
 
 export const Disabled: Story = {
@@ -55,7 +53,6 @@ export const Agents: Story = {
 	args: {
 		label: "Agent",
 		value: "release-captain",
-		origin: "this conversation",
 		groups: [
 			{
 				label: "workspace",
@@ -93,7 +90,6 @@ export const StaleValue: Story = {
 	args: {
 		label: "Model",
 		value: "deepseek-v4.2-flash",
-		origin: "this conversation",
 		note: "not available here",
 		invalid: true,
 		groups,

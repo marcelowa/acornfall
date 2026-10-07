@@ -24,7 +24,7 @@ export interface SettingsScreenProps {
 }
 
 /**
- * The settings, as a screen: the theme, what this workspace is, and what its defaults resolve
+ * The settings, as a screen: the theme, what this workspace is, and what each scope defaults
  * to. It is a screen rather than a sheet because these are things you go and look at — the
  * conversation stays where it was, and the rail is the way back.
  *
@@ -91,9 +91,6 @@ export function SettingsScreen({
 								<ToggleGroupItem value="system">System</ToggleGroupItem>
 							</ToggleGroup>
 						</div>
-						<Text size="2xs" tone="muted">
-							System follows the machine, and keeps following it while it is chosen.
-						</Text>
 					</Stack>
 
 					<Stack gap="sm" data-slot="settings-workspace">
@@ -135,8 +132,7 @@ export function SettingsScreen({
 							</ToggleGroup>
 						</Stack>
 						<Text size="2xs" tone="muted">
-							A changed image or network takes effect at the next sandbox, not on the
-							one that is running.
+							Takes effect at the next sandbox.
 						</Text>
 						<div>
 							<Button
@@ -154,8 +150,8 @@ export function SettingsScreen({
 							Defaults
 						</Text>
 						<Text size="2xs" tone="muted">
-							What a new conversation starts from — and which layer said so. A
-							conversation that already exists keeps what it pinned.
+							What a new conversation starts from. An existing one keeps what it
+							pinned.
 						</Text>
 						{defaults}
 					</Stack>

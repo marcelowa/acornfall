@@ -249,6 +249,11 @@ try {
 		);
 		check("settings shows the defaults", settingsText.includes("Defaults"));
 		check(
+			"the defaults have a tab per scope",
+			settingsText.includes("This workspace") && settingsText.includes("Global"),
+			settingsText.slice(0, 80),
+		);
+		check(
 			"settings offers light, dark, and system",
 			["Light", "Dark", "System"].every((label) => settingsText.includes(label)),
 		);
@@ -703,7 +708,7 @@ try {
 	check("the control opens the three choices", opened && dialog !== null);
 	if (dialog !== null) {
 		const inside = await page.evaluate(() =>
-			["Model", "Thinking", "Agent"].map(
+			["Agent", "Model", "Thinking"].map(
 				(label) =>
 					document
 						.querySelector(
@@ -714,13 +719,16 @@ try {
 			),
 		);
 		check(
-			"each choice says which layer its value came from",
-			inside.every((text) => text.includes(":")),
+			"the dialog is the three choices, each labelled once",
+			inside.every((text, index) => {
+				const label = ["Agent", "Model", "Thinking"][index];
+				return text.startsWith(`${label}:`) && text.split(label).length === 2;
+			}),
 			JSON.stringify(inside),
 		);
 		check(
-			"at least one layer is named in the dialog",
-			inside.some((text) => text.includes("·")),
+			"each choice shows its value rather than its layer",
+			inside.every((text) => !text.includes("this conversation")),
 			JSON.stringify(inside),
 		);
 		await page.keyboard.press("Escape");

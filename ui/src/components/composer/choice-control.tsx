@@ -2,15 +2,7 @@ import { ChevronsUpDown } from "lucide-react";
 import type { ChoicePicker } from "@/app/view-models";
 import { Stack } from "@/components/layout/stack";
 import { Button } from "@/components/ui/button";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogHeader,
-	DialogTitle,
-	DialogTrigger,
-} from "@/components/ui/dialog";
-import { Text } from "@/components/typography/text";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "cn";
 import { Picker } from "./picker";
 
@@ -27,11 +19,11 @@ export interface ChoiceControlProps {
 /**
  * The three choices, as one control. They belong together — a model decides which thinking
  * levels exist, and the agent decides the model — and three buttons in a row said otherwise:
- * on a phone they wrapped, and the model's origin label alone was wider than the screen.
+ * on a phone they wrapped, and three triggers took three times the room.
  *
  * The summary reads like the answer to "what will run this": `general ·
- * deepseek-v4.1-flash · max`. The layers are in the dialog, where there is room to say which
- * one a value came from and what changing it would do.
+ * deepseek-v4.1-flash · max`, and the dialog is the three pickers and nothing else — no
+ * title, no explanation, and no label repeated above the label the picker already has.
  */
 export function ChoiceControl({
 	agent,
@@ -88,33 +80,21 @@ export function ChoiceControl({
 					<ChevronsUpDown className="shrink-0" />
 				</Button>
 			</DialogTrigger>
-			<DialogContent className="sm:max-w-md">
-				<DialogHeader>
-					<DialogTitle>What runs this conversation</DialogTitle>
-					<DialogDescription>
-						A conversation pins what it started with. Changing a default shapes the ones
-						that come after it.
-					</DialogDescription>
-				</DialogHeader>
-				<Stack gap="md">
+			<DialogContent className="sm:max-w-md" aria-describedby={undefined}>
+				<Stack gap="sm">
 					{choices.map((choice) => (
-						<Stack key={choice.key} gap="2xs">
-							<Text size="2xs" tone="muted">
-								{choice.label}
-							</Text>
-							<Picker
-								label={choice.label}
-								value={choice.picker.value}
-								placeholder="not set"
-								origin={choice.picker.origin}
-								note={choice.picker.note}
-								invalid={choice.picker.invalid}
-								groups={choice.picker.groups}
-								onSelect={choice.picker.onSelect}
-								disabled={choice.picker.disabled}
-								className="w-full"
-							/>
-						</Stack>
+						<Picker
+							key={choice.key}
+							label={choice.label}
+							value={choice.picker.value}
+							placeholder="not set"
+							note={choice.picker.note}
+							invalid={choice.picker.invalid}
+							groups={choice.picker.groups}
+							onSelect={choice.picker.onSelect}
+							disabled={choice.picker.disabled}
+							className="w-full"
+						/>
 					))}
 				</Stack>
 			</DialogContent>

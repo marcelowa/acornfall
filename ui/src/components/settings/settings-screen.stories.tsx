@@ -45,7 +45,6 @@ const defaults = (
 		<Picker
 			label="Model"
 			value="deepseek-v4.1-flash"
-			origin="workspace default"
 			groups={[
 				{
 					label: "opencode-go",
@@ -60,7 +59,6 @@ const defaults = (
 		<Picker
 			label="Thinking"
 			value="max"
-			origin="install default"
 			groups={[
 				{
 					label: "levels",
@@ -76,7 +74,6 @@ const defaults = (
 		<Picker
 			label="Agent"
 			value="general"
-			origin="last resort"
 			groups={[
 				{
 					label: "agents",

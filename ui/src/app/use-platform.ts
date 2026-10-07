@@ -21,13 +21,13 @@ import {
 } from "./client";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
-	originLabel,
+	stalePins,
 	toAgentGroups,
 	toConversation,
-	stalePins,
 	toModelChoices,
 	toModelGroups,
 	toSandbox,
+	toScopeDefaults,
 	toThinkingGroups,
 	toTranscript,
 	toWorkspaces,
@@ -145,17 +145,17 @@ export interface Platform {
 	newConversation: () => void;
 	/** Where the active workspace's tools actually run. */
 	sandbox?: SandboxSummary | undefined;
-	/** What the defaults resolve to, and the layer each came from. */
+	/** What each scope says, before resolution: one tab per scope in the settings screen. */
 	defaults: {
-		model: string;
-		thinking: string;
-		agent: string;
-		modelOrigin?: string | undefined;
-		thinkingOrigin?: string | undefined;
-		agentOrigin?: string | undefined;
+		workspace: { model: string; thinking: string; agent: string };
+		global: { model: string; thinking: string; agent: string };
 	};
 	/** Set a default, in this workspace or everywhere. */
 	setDefault: (kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => void;
+	/** The name a `provider/modelId` is shown under, when the providers know it. */
+	modelLabel: (value: string) => string;
+	/** The levels a model offers, for the thinking default that follows it. */
+	thinkingFor: (model: string) => PickerGroup[];
 	/** The active workspace's image and network. */
 	setWorkspace: (change: { image: string; network: string }) => void;
 	createWorkspace: (name: string) => void;
@@ -411,14 +411,6 @@ export function usePlatform(): Platform {
 		value: pinnedModel?.label ?? state?.agent.modelId ?? "",
 		invalid: stale.model,
 		note: stale.model ? "not available here" : undefined,
-		origin:
-			state === undefined
-				? undefined
-				: !state.inherited.model
-					? "this conversation"
-					: (state.resolved?.model ?? "") !== ""
-						? "the agent definition"
-						: originLabel(state.defaultsOrigin.model),
 		groups: withDefault(toModelGroups(state?.providers ?? [])),
 		disabled: activeId === "" || modelChoices.length === 0,
 		onSelect: (value) => {
@@ -433,14 +425,6 @@ export function usePlatform(): Platform {
 
 	const thinking: ChoicePicker = {
 		value: thinkingValue,
-		origin:
-			state === undefined
-				? undefined
-				: !state.inherited.thinking
-					? "this conversation"
-					: (state.resolved?.thinking ?? "") !== ""
-						? "the agent definition"
-						: originLabel(state.defaultsOrigin.thinking),
 		note:
 			state !== undefined &&
 			(state.agent.thinkingRequested ?? "") !== "" &&
@@ -456,14 +440,6 @@ export function usePlatform(): Platform {
 		value: agentValue,
 		invalid: stale.agent,
 		note: stale.agent ? "definition is gone" : undefined,
-		origin:
-			state === undefined
-				? undefined
-				: !state.inherited.agent
-					? "this conversation"
-					: // Nothing configured it, so the worker's own agent is what is running: saying
-						// "built in" is truer than leaving the layer blank.
-						(originLabel(state.defaultsOrigin.agent) ?? "built in"),
 		groups: withDefault(toAgentGroups(state?.agents ?? [])),
 		disabled: activeId === "",
 		onSelect: (value) => choose({ definition: value }),
@@ -668,17 +644,26 @@ export function usePlatform(): Platform {
 
 	const defaults = useMemo(
 		() => ({
-			model:
-				state === undefined
-					? ""
-					: `${state.defaultModel.provider}/${state.defaultModel.modelId}`,
-			thinking: state?.defaultThinking ?? "",
-			agent: state?.defaultAgent ?? "",
-			modelOrigin: originLabel(state?.defaultsOrigin.model),
-			thinkingOrigin: originLabel(state?.defaultsOrigin.thinking),
-			agentOrigin: originLabel(state?.defaultsOrigin.agent),
+			workspace: toScopeDefaults(state?.workspaceDefaults),
+			global: toScopeDefaults(state?.installDefaults),
 		}),
 		[state],
+	);
+
+	const modelLabel = useCallback(
+		(value: string): string =>
+			modelChoices.find((choice) => choice.value === value)?.label ??
+			value.split("/").at(-1) ??
+			"",
+		[modelChoices],
+	);
+
+	const thinkingFor = useCallback(
+		(model: string): PickerGroup[] =>
+			toThinkingGroups(
+				modelChoices.find((choice) => choice.value === model)?.thinkingLevels ?? [],
+			),
+		[modelChoices],
 	);
 
 	return {
@@ -704,6 +689,8 @@ export function usePlatform(): Platform {
 		selectWorkspace,
 		defaults,
 		setDefault,
+		modelLabel,
+		thinkingFor,
 		setWorkspace,
 		createWorkspace,
 		removeWorkspace,
