@@ -1,4 +1,5 @@
 import type { TranscriptEntry } from "@/app/view-models";
+import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Text } from "@/components/typography/text";
 import { AssistantMessage } from "./assistant-message";
@@ -14,30 +15,36 @@ export interface TranscriptProps {
 
 export function Transcript({ entries, onOpenConversation, onFork }: TranscriptProps) {
 	if (entries.length === 0) {
-		return <Text tone="muted">No messages yet.</Text>;
+		return (
+			<Measure size="prose" padding="lg">
+				<Text tone="muted">No messages yet.</Text>
+			</Measure>
+		);
 	}
 
 	return (
-		<Stack gap="xl">
-			{entries.map((entry) => {
-				switch (entry.kind) {
-					case "user":
-						return (
-							<UserMessage
-								key={entry.id}
-								entry={entry}
-								onOpenConversation={onOpenConversation}
-								onFork={onFork}
-							/>
-						);
-					case "assistant":
-						return <AssistantMessage key={entry.id} entry={entry} />;
-					case "tool":
-						return <ToolCard key={entry.id} entry={entry} />;
-					case "notice":
-						return <NoticeLine key={entry.id} entry={entry} />;
-				}
-			})}
-		</Stack>
+		<Measure size="prose" padding="lg">
+			<Stack gap="xl">
+				{entries.map((entry) => {
+					switch (entry.kind) {
+						case "user":
+							return (
+								<UserMessage
+									key={entry.id}
+									entry={entry}
+									onOpenConversation={onOpenConversation}
+									onFork={onFork}
+								/>
+							);
+						case "assistant":
+							return <AssistantMessage key={entry.id} entry={entry} />;
+						case "tool":
+							return <ToolCard key={entry.id} entry={entry} />;
+						case "notice":
+							return <NoticeLine key={entry.id} entry={entry} />;
+					}
+				})}
+			</Stack>
+		</Measure>
 	);
 }

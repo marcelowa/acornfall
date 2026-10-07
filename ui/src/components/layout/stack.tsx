@@ -32,8 +32,10 @@ const stackVariants = cva("flex", {
 		padding: paddingScale,
 		scroll: {
 			none: "",
-			vertical: "overflow-y-auto",
-			horizontal: "overflow-x-auto",
+			// Children of a scroll container must not compress: in a flex column an item with
+			// overflow is free to shrink to nothing, and it takes a long conversation to notice.
+			vertical: "overflow-y-auto [&>*]:shrink-0",
+			horizontal: "overflow-x-auto [&>*]:shrink-0",
 		},
 		fill: {
 			true: "min-h-0 min-w-0 flex-1",

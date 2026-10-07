@@ -23,6 +23,17 @@ const preview: Preview = {
 	],
 	parameters: {
 		layout: "fullscreen",
+		// The layout is responsive, so the sizes it changes at are in the toolbar: 1024 (lg)
+		// moves the rail behind the toggle, 1536 (2xl) gives the inspector its room.
+		viewport: {
+			viewports: {
+				phone: { name: "Phone (390)", styles: { width: "390px", height: "844px" } },
+				tablet: { name: "Tablet (834)", styles: { width: "834px", height: "1112px" } },
+				laptop: { name: "Laptop (1280)", styles: { width: "1280px", height: "800px" } },
+				desktop: { name: "Desktop (1600)", styles: { width: "1600px", height: "900px" } },
+				wide: { name: "Wide (1920)", styles: { width: "1920px", height: "1080px" } },
+			},
+		},
 	},
 };
 

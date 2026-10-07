@@ -17,8 +17,10 @@ export interface ConversationRowProps {
 
 /**
  * One rail row: the title, live state as a dot, and identity as text — the rule ADR 0009
- * settled, because a second coloured dot would be three meanings for one shape. A
- * tombstoned row keeps its place under "Deleted" and offers restore instead of delete.
+ * settled, because a second coloured dot would be three meanings for one shape. Identity is
+ * the visible metadata (`#3 ·peer`) and spend lives in the tooltip, as the old client had
+ * it: a 280px rail has room for a title or a column of numbers, not both. A tombstoned row
+ * keeps its place under "Deleted" and offers restore instead of delete.
  *
  * The select target and the row actions are siblings: a button inside a button is not HTML.
  */
@@ -86,7 +88,6 @@ export function ConversationRow({
 					title={title === "" ? undefined : title}
 				>
 					<span>{identity}</span>
-					{spend === "" ? null : <span>{spend}</span>}
 				</span>
 			</button>
 			<span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

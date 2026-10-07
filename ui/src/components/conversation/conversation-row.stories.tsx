@@ -36,9 +36,11 @@ export const Unread: Story = { args: { conversation: { ...base, unread: true } }
 export const Root: Story = { args: { conversation: { ...base, root: true } } };
 export const Peer: Story = { args: { conversation: { ...base, createdBy: "1", running: true } } };
 export const Tombstoned: Story = { args: { conversation: { ...base, hidden: true } } };
-export const WithSpend: Story = {
+/** Spend is visible in the tooltip, not the row: hover it. */
+export const SpendInTooltip: Story = {
 	args: { conversation: { ...base, tokens: 12400, cost: 0.0432 } },
 };
+
 export const LongTitle: Story = {
 	args: {
 		conversation: {
