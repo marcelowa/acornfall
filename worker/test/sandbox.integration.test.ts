@@ -41,6 +41,24 @@ integration(
 			expect(chunks.join("")).toBe("onetwo");
 			expect(chunks.length).toBeGreaterThan(1);
 
+			// An argv runs its program directly, so the shell never parses an argument's text.
+			const argv = await client.exec(["printf", "%s|%s", "a b", "it's"], {});
+			expect(new TextDecoder().decode(argv.stdout)).toBe("a b|it's");
+			expect(client.exec(["definitely-not-a-real-program-xyz"], {})).rejects.toThrow();
+
+			// Clearing the environment keeps the variables the caller named, in both forms, and
+			// a `;` in a script does not split the clearing in half.
+			const clearedArgv = await client.exec(["printenv", "FOO"], {
+				clearEnv: true,
+				env: { FOO: "bar" },
+			});
+			expect(new TextDecoder().decode(clearedArgv.stdout)).toBe("bar\n");
+			const clearedScript = await client.exec("printenv FOO; printf two", {
+				clearEnv: true,
+				env: { FOO: "bar" },
+			});
+			expect(new TextDecoder().decode(clearedScript.stdout)).toBe("bar\ntwo");
+
 			// Killing is inside the sandbox: a command stopped from here must not run its tail
 			// afterwards, which is what a host-side kill leaves behind.
 			await client.mkdir("/tmp/acornfall-integration");

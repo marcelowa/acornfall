@@ -18,7 +18,7 @@ class FakeSandbox implements SandboxClient {
 	readonly name = "acornfall-fake-0000";
 	files = new Map<string, Uint8Array>();
 	directories = new Set<string>(["/"]);
-	execs: { command: string; options: ExecOptions }[] = [];
+	execs: { command: string | readonly string[]; options: ExecOptions }[] = [];
 	renameCalls: { from: string; to: string }[] = [];
 	/** Chunks a command produces, keyed by nothing: whatever `exec` is called with next. */
 	respond = (command: string): { code: number; stdout?: string; stderr?: string } => {
@@ -30,11 +30,11 @@ class FakeSandbox implements SandboxClient {
 	/** What a command streams before it exits, for the streaming and spill tests. */
 	stream: string[] = [];
 
-	async exec(command: string, options: ExecOptions): Promise<ExecResult> {
+	async exec(command: string | readonly string[], options: ExecOptions): Promise<ExecResult> {
 		this.execs.push({ command, options });
 		for (const piece of this.stream)
 			options.onChunk?.({ stream: "stdout", data: new TextEncoder().encode(piece) });
-		const result = this.respond(command);
+		const result = this.respond(typeof command === "string" ? command : command.join(" "));
 		return {
 			code: result.code,
 			stdout: new TextEncoder().encode(result.stdout ?? ""),
@@ -221,7 +221,10 @@ test("aborting a command reports it as aborted and stops it", async () => {
 	const { sandbox, env } = environment();
 	const controller = new AbortController();
 	sandbox.respond = () => ({ code: 143 });
-	sandbox.exec = async (command: string, options: ExecOptions): Promise<ExecResult> => {
+	sandbox.exec = async (
+		command: string | readonly string[],
+		options: ExecOptions,
+	): Promise<ExecResult> => {
 		sandbox.execs.push({ command, options });
 		controller.abort();
 		return {
@@ -239,9 +242,15 @@ test("aborting a command reports it as aborted and stops it", async () => {
 test("a command that runs too long reports a timeout and carries its spilt output", async () => {
 	const { sandbox, env } = environment();
 	sandbox.stream = ["x".repeat(64)];
-	sandbox.exec = async (command: string, options: ExecOptions): Promise<ExecResult> => {
+	sandbox.exec = async (
+		command: string | readonly string[],
+		options: ExecOptions,
+	): Promise<ExecResult> => {
 		sandbox.execs.push({ command, options });
-		if (command.startsWith("mktemp") || command.startsWith("truncate")) {
+		if (
+			typeof command === "string" &&
+			(command.startsWith("mktemp") || command.startsWith("truncate"))
+		) {
 			const answer = sandbox.respond(command);
 			return {
 				code: answer.code,
@@ -286,7 +295,11 @@ test("output that crosses the spill thresholds is written to a file, and small o
 		CONTEXT,
 	);
 	expect(notSpilled.ok && notSpilled.value.spillPath).toBeUndefined();
-	expect(small.sandbox.execs.every((call) => !call.command.startsWith("mktemp"))).toBe(true);
+	expect(
+		small.sandbox.execs.every(
+			(call) => typeof call.command !== "string" || !call.command.startsWith("mktemp"),
+		),
+	).toBe(true);
 });
 
 test("a sandbox that cannot run the command is a spawn error, not a silent success", async () => {

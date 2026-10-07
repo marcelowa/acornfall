@@ -40,11 +40,35 @@ class MicrosandboxClient implements SandboxClient {
 		this.session = session;
 	}
 
-	async exec(command: string, options: ExecOptions): Promise<ExecResult> {
-		const handle = await this.session.execStreamWith("/bin/sh", (builder) => {
-			let configured = builder
-				.arg("-c")
-				.arg(options.clearEnv === true ? `env -i ${command}` : command);
+	async exec(command: string | readonly string[], options: ExecOptions): Promise<ExecResult> {
+		// A string is a shell script; an array is a program and its arguments. Clearing the
+		// environment is `env -i` in both forms, so an argv reaches its program unparsed and a
+		// script keeps the variables the caller named.
+		let program = "/bin/sh";
+		let args: string[];
+		if (typeof command === "string") {
+			args = [
+				"-c",
+				options.clearEnv === true ? clearEnvScript(command, options.env) : command,
+			];
+		} else {
+			const [first, ...rest] = command;
+			if (first === undefined) throw new Error("empty argv: no program to run");
+			if (options.clearEnv === true) {
+				program = "env";
+				args = [
+					"-i",
+					...Object.entries(options.env ?? {}).map(([key, value]) => `${key}=${value}`),
+					first,
+					...rest,
+				];
+			} else {
+				program = first;
+				args = rest;
+			}
+		}
+		const handle = await this.session.execStreamWith(program, (builder) => {
+			let configured = builder.args(args);
 			if (options.cwd !== undefined) configured = configured.cwd(options.cwd);
 			for (const [key, value] of Object.entries(options.env ?? {}))
 				configured = configured.env(key, value);
@@ -167,4 +191,23 @@ function baseName(path: string): string {
 	const trimmed = path.endsWith("/") ? path.slice(0, -1) : path;
 	const index = trimmed.lastIndexOf("/");
 	return index < 0 ? trimmed : trimmed.slice(index + 1);
+}
+
+/**
+ * A script that runs `command` under `/bin/sh` with an empty environment plus `env`.
+ *
+ * The indirection is the point: `env -i printf one; printf two` would clear only the first
+ * statement's environment, because the outer shell parses the `;` before `env` ever runs.
+ */
+function clearEnvScript(command: string, env: Record<string, string> | undefined): string {
+	const assignments = Object.entries(env ?? {}).map(
+		([key, value]) => `${quote(key)}=${quote(value)}`,
+	);
+	const prefix = assignments.length === 0 ? "" : `${assignments.join(" ")} `;
+	return `exec env -i ${prefix}/bin/sh -c ${quote(command)}`;
+}
+
+/** Single quotes, with the one escape that survives them. */
+function quote(value: string): string {
+	return `'${value.replaceAll("'", `'\\''`)}'`;
 }

@@ -17,8 +17,12 @@ import type { Files } from "./files.ts";
 export interface SandboxClient extends Files {
 	/** The engine's name for this sandbox, which is derived from the workspace. */
 	readonly name: string;
-	/** Run a command inside the sandbox. Chunks arrive as they are produced. */
-	exec(command: string, options: ExecOptions): Promise<ExecResult>;
+	/**
+	 * Run a command inside the sandbox. A string goes through a shell; an array runs its
+	 * program directly with the rest as arguments, without a shell to parse them. Chunks
+	 * arrive as they are produced.
+	 */
+	exec(command: string | readonly string[], options: ExecOptions): Promise<ExecResult>;
 	/** File contents, or an error: unlike `read`, a missing file is a failure here. */
 	readBytes(path: string): Promise<Uint8Array>;
 	write(path: string, content: string | Uint8Array): Promise<void>;
