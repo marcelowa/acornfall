@@ -12,9 +12,10 @@ features were tested:
 
 - A microVM costs seconds to create and boot, per workspace, so thirteen end-to-end tests that
   only *read* a workspace's resource files paid for thirteen machines.
-- CI on GitHub-hosted runners has no `/dev/kvm`, so those tests could not run in the default
-  gate at all; the resource overlay, commands, skills, and delegation defaults were only
-  checked locally or in a dispatched job.
+- The resource features were gated on a hypervisor being present and working — a microVM per
+  test, on this machine or in CI with its `/dev/kvm` permissions, image pulls, and boot cost.
+  Thirteen tests that only *read* a workspace's resource files should not have that
+  dependency to test an overlay rule.
 
 ADR 0012 left the question open on purpose: "Running unconfined must be a decision somebody
 made, never a state the system drifted into. Whether there is a config knob that *grants* the
@@ -70,7 +71,8 @@ with its own rules and no isolation gain over the host engine for the tests.
 - `make test` now runs the thirteen resource tests on the host engine. They need no hypervisor,
   take ~0.4s each instead of ~4s, and run in CI. `make test-workspace` is gone; the four tests
   that exercise the microVM's execution, mounts, and read-only behaviour stay in
-  `make test-sandbox` ([ADR 0013](0013-test-tiers.md)).
+  `make test-sandbox`, which also runs on every push since the hosted runners have KVM
+  ([ADR 0013](0013-test-tiers.md)).
 - The host engine is covered by its own suite in the fast tier (`worker/test/host.test.ts` for
   exec, kill, and file operations; `gateway/internal/sandbox/host_test.go` for the driver and
   the engine selection), and one resource test asserts the state reports it as unisolated.

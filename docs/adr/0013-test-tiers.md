@@ -87,8 +87,10 @@ of the removal list entirely.
 
 ## Consequences
 
-- CI's push gate is `make test`; `make test-sandbox` is a `workflow_dispatch` job that takes
-  the KVM-capable runner as an input, because GitHub-hosted runners have no `/dev/kvm`.
+- CI runs everything on every push: `make test` in the verify job and `make test-sandbox`,
+  which boots real microVMs. GitHub's Linux runners do have `/dev/kvm`; it is mode 660
+  `root:kvm`, so the job applies the udev rule that makes it 0666 first. The dispatch input
+  remains for running the microVM suite on another label.
 - The worker's own side of the real engine — streamed exec, killing a command, file
   operations — is now exercised directly, `worker/test/sandbox.integration.test.ts`, instead
   of only through the end-to-end suite.
