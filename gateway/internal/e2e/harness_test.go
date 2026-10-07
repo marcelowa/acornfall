@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,9 +38,17 @@ var (
 	gatewayBin string
 	workerDir  string
 	skipReason string
+	// engineHome is a shared installation of the sandbox engine for the whole run. Every test
+	// gets a fresh home, and a fresh home installs 26MB on first use; on a CI runner that
+	// download took 28 seconds, and four tests doing it at once raced the 30-second startup
+	// wait. The engine is the same release for every test, so it is fetched once and linked.
+	engineHome string
 )
 
 func TestMain(m *testing.M) {
+	// The testing flags are parsed here because testing.Short is read below and panics before
+	// Parse; m.Run parses them again, which is the documented TestMain shape.
+	flag.Parse()
 	_, file, _, _ := runtime.Caller(0)
 	repoRoot = filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
 	workerDir = filepath.Join(repoRoot, "worker")
@@ -76,6 +85,16 @@ func TestMain(m *testing.M) {
 		build.Dir = filepath.Join(repoRoot, "gateway")
 		if out, err := build.CombinedOutput(); err != nil {
 			panic(fmt.Sprintf("build gateway: %v\n%s", err, out))
+		}
+		// One install for the suite, but only when a sandbox can run and the tier is going to
+		// ask for one: the fast tier's host-engine tests never touch the microVM engine.
+		if !testing.Short() && sandboxUnavailable() == "" {
+			shared := filepath.Join(dir, "engine")
+			if err := sandbox.NewMicrosandbox(shared).Install(context.Background(), nil); err != nil {
+				engineHome = ""
+			} else {
+				engineHome = shared
+			}
 		}
 	}
 	code := m.Run()
@@ -210,6 +229,18 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 			t.Fatal(err)
 		}
 	}
+	// The shared engine, linked where a driver looks for it, so the first workspace to start
+	// does not pay for a download per test. A host-engine test never touches this driver.
+	if _, host := hostEngineTests.Load(t.Name()); engineHome != "" && !host {
+		if err := os.MkdirAll(filepath.Join(s.Home, "tools"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(s.Home, "tools", "microsandbox")
+		_ = os.RemoveAll(link)
+		if err := os.Symlink(filepath.Join(engineHome, "tools", "microsandbox"), link); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, fn := range s.cfg.setup {
 		fn(t, s)
 	}
@@ -274,7 +305,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		}
 	})
 
-	addr, err := s.waitForListening(30 * time.Second)
+	addr, err := s.waitForListening(90 * time.Second)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, s.logs.String())
 	}
