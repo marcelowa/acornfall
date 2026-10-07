@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	failureOf,
 	originLabel,
+	stalePins,
 	textOf,
 	toAgentGroups,
 	toConversation,
@@ -10,7 +11,7 @@ import {
 	toTranscript,
 	toWorkspaces,
 } from "../src/app/map";
-import type { WireConversation, WireView } from "../src/app/wire";
+import type { WireConversation, WireState, WireView } from "../src/app/wire";
 
 const conversation = (over: Partial<WireConversation> = {}): WireConversation => ({
 	id: "3",
@@ -236,5 +237,57 @@ describe("the wire mapping", () => {
 		});
 		expect(sandbox.isolated).toBe(false);
 		expect(sandbox.engine).toBe("host");
+	});
+});
+
+describe("pins that outlived what they name", () => {
+	const state = (over: Partial<WireState> = {}): WireState =>
+		({
+			agent: {
+				provider: "opencode-go",
+				modelId: "deepseek-v4.1-flash",
+				thinkingLevel: "max",
+			},
+			providers: [
+				{
+					id: "opencode-go",
+					name: "opencode-go",
+					authenticated: true,
+					models: [{ id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" }],
+				},
+			],
+			agents: [{ name: "researcher" }],
+			...over,
+		}) as WireState;
+
+	test("a pinned model that the provider still offers is not stale", () => {
+		expect(stalePins(state())).toEqual({ model: false, agent: false });
+	});
+
+	test("a pinned model that went away is stale, and so is one whose provider is not connected", () => {
+		expect(
+			stalePins(state({ agent: { provider: "opencode-go", modelId: "gone" } })).model,
+		).toBe(true);
+		const disconnected = state({
+			providers: [
+				{ id: "opencode-go", name: "opencode-go", authenticated: false, models: [] },
+			],
+		});
+		expect(stalePins(disconnected).model).toBe(true);
+	});
+
+	test("a conversation that never pinned a model is inheriting, not stale", () => {
+		expect(stalePins(state({ agent: { provider: "", modelId: "" } })).model).toBe(false);
+	});
+
+	test("a pinned definition that was deleted is stale; one that exists is not", () => {
+		expect(
+			stalePins(state({ agent: { provider: "", modelId: "", definition: "gone" } })).agent,
+		).toBe(true);
+		expect(
+			stalePins(state({ agent: { provider: "", modelId: "", definition: "researcher" } }))
+				.agent,
+		).toBe(false);
+		expect(stalePins(state()).agent).toBe(false);
 	});
 });

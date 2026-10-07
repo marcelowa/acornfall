@@ -20,6 +20,8 @@ export interface PickerProps {
 	origin?: string | undefined;
 	/** Something the value cannot say by itself: a level that was asked for and not offered. */
 	note?: string | undefined;
+	/** The value cannot run here any more, so it is shown as a problem rather than a choice. */
+	invalid?: boolean | undefined;
 	groups: PickerGroup[];
 	onSelect: (value: string) => void;
 	disabled?: boolean | undefined;
@@ -30,6 +32,9 @@ export interface PickerProps {
  * One picker, used for all three choices. It always says where the value came from: a
  * conversation that never chose is not the same as one that chose, and the difference is
  * exactly what someone opens this to find out.
+ *
+ * An invalid value is shown in the destructive tone with its note, because a pin that cannot
+ * run is not a choice to read past.
  */
 export function Picker({
 	label,
@@ -37,6 +42,7 @@ export function Picker({
 	placeholder = "not set",
 	origin,
 	note,
+	invalid = false,
 	groups,
 	onSelect,
 	disabled = false,
@@ -57,7 +63,7 @@ export function Picker({
 					title={value === undefined || value === "" ? undefined : value}
 				>
 					<span className="text-muted-foreground">{label}:</span>
-					<span className="truncate">
+					<span className={cn("truncate", invalid && "text-destructive")}>
 						{value === undefined || value === "" ? placeholder : value}
 					</span>
 					{origin === undefined ? null : (
@@ -68,7 +74,14 @@ export function Picker({
 						</span>
 					)}
 					{note === undefined ? null : (
-						<span className="truncate text-muted-foreground">· {note}</span>
+						<span
+							className={cn(
+								"truncate",
+								invalid ? "text-destructive" : "text-muted-foreground",
+							)}
+						>
+							· {note}
+						</span>
 					)}
 					<ChevronDown className="shrink-0" />
 				</Button>

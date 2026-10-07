@@ -350,3 +350,33 @@ export const SettingsScreen: Story = {
 	args: { platform: makePlatform({ screen: "settings", themeChoice: "dark", theme: "dark" }) },
 	globals: { viewport: { value: "laptop" } },
 };
+
+/**
+ * The same red in the product: this conversation was pinned to a model that the provider no
+ * longer offers, so the line says so instead of quietly running something else.
+ */
+export const StalePin: Story = {
+	args: {
+		platform: makePlatform({
+			model: {
+				value: "deepseek-v4.2-flash",
+				origin: "this conversation",
+				note: "not available here",
+				invalid: true,
+				groups: [
+					{
+						label: "opencode-go",
+						options: [
+							{
+								value: "opencode-go/deepseek-v4.1-flash",
+								label: "DeepSeek V4.1 Flash",
+							},
+						],
+					},
+				],
+				onSelect: noop,
+			},
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};

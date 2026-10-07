@@ -11,6 +11,7 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Text } from "@/components/typography/text";
+import { cn } from "cn";
 import { Picker } from "./picker";
 
 export interface ChoiceControlProps {
@@ -68,14 +69,20 @@ export function ChoiceControl({
 								</span>
 							) : null}
 							<span
-								className={
+								className={cn(
 									choice.key === "model"
 										? "min-w-0 truncate font-medium"
-										: "shrink-0"
-								}
+										: "shrink-0",
+									choice.picker.invalid === true && "text-destructive",
+								)}
 							>
 								{choice.picker.value === "" ? "not set" : choice.picker.value}
 							</span>
+							{choice.picker.invalid === true && choice.picker.note !== undefined ? (
+								<span className="shrink-0 text-destructive">
+									· {choice.picker.note}
+								</span>
+							) : null}
 						</span>
 					))}
 					<ChevronsUpDown className="shrink-0" />
@@ -101,6 +108,7 @@ export function ChoiceControl({
 								placeholder="not set"
 								origin={choice.picker.origin}
 								note={choice.picker.note}
+								invalid={choice.picker.invalid}
 								groups={choice.picker.groups}
 								onSelect={choice.picker.onSelect}
 								disabled={choice.picker.disabled}

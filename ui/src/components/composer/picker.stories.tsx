@@ -87,3 +87,16 @@ export const Agents: Story = {
 		onSelect: noop,
 	},
 };
+
+/** A value that cannot run here any more: shown in red with the reason, not hidden. */
+export const StaleValue: Story = {
+	args: {
+		label: "Model",
+		value: "deepseek-v4.2-flash",
+		origin: "this conversation",
+		note: "not available here",
+		invalid: true,
+		groups,
+		onSelect: noop,
+	},
+};

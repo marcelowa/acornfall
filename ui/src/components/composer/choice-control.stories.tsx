@@ -95,3 +95,21 @@ export const LongValues: Story = {
 	},
 	globals: { viewport: { value: "phone" } },
 };
+
+/**
+ * A pin that outlived its model. The conversation still says what it is pinned to — the point
+ * is that it cannot run, and that the fix is one click away.
+ */
+export const StalePin: Story = {
+	args: {
+		agent,
+		model: {
+			...model,
+			value: "deepseek-v4.2-flash",
+			origin: "this conversation",
+			note: "not available here",
+			invalid: true,
+		},
+		thinking,
+	},
+};

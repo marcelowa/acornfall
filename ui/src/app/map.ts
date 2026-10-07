@@ -17,6 +17,7 @@ import type {
 	WireSender,
 	WireToolSlot,
 	WireView,
+	WireState,
 	WireWorkspace,
 } from "./wire";
 
@@ -329,4 +330,24 @@ export function toTranscript(
 	}
 
 	return transcript;
+}
+
+/**
+ * Which of a conversation's pins can no longer run here. A pin outlives what it names: a
+ * model can leave a provider, a provider can be disconnected, an agent definition can be
+ * deleted — and the conversation stays pinned to it, because pinning is what it does. The
+ * interface marks those, so a conversation that cannot run says so where the choice is made
+ * rather than at the first message.
+ *
+ * Thinking is not here: a level the model cannot express is clamped and reported as
+ * `thinkingRequested`, which is a fallback rather than a failure.
+ */
+export function stalePins(state: WireState): { model: boolean; agent: boolean } {
+	const model = `${state.agent.provider}/${state.agent.modelId}`;
+	const known = toModelChoices(state.providers ?? []).some((choice) => choice.value === model);
+	const definition = state.agent.definition ?? "";
+	return {
+		model: model !== "" && model !== "/" && !known,
+		agent: definition !== "" && !(state.agents ?? []).some((one) => one.name === definition),
+	};
 }

@@ -133,6 +133,9 @@ export interface ChoicePicker {
 	value: string;
 	origin?: string | undefined;
 	note?: string | undefined;
+	/** The pinned value is not something this install can run any more: a model that went
+	 * away, a provider that is no longer connected, a definition that was deleted. */
+	invalid?: boolean | undefined;
 	groups: PickerGroup[];
 	disabled?: boolean | undefined;
 	onSelect: (value: string) => void;

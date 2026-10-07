@@ -24,6 +24,7 @@ import {
 	originLabel,
 	toAgentGroups,
 	toConversation,
+	stalePins,
 	toModelChoices,
 	toModelGroups,
 	toSandbox,
@@ -395,6 +396,11 @@ export function usePlatform(): Platform {
 			? state.agent.definition
 			: (state?.defaultAgent ?? ""));
 
+	// A pin can outlive what it names; the value is still shown — it is what the conversation
+	// is pinned to — and it is marked when it cannot run here any more.
+	const stale = state === undefined ? { model: false, agent: false } : stalePins(state);
+	const pinnedModel = modelChoices.find((choice) => choice.value === effectiveModel);
+
 	/** Every picker can go back to inheriting: a choice has to be undoable. */
 	const withDefault = (groups: PickerGroup[]): PickerGroup[] => [
 		...groups,
@@ -402,10 +408,9 @@ export function usePlatform(): Platform {
 	];
 
 	const model: ChoicePicker = {
-		value:
-			modelChoices.find((choice) => choice.value === effectiveModel)?.label ??
-			state?.agent.modelId ??
-			"",
+		value: pinnedModel?.label ?? state?.agent.modelId ?? "",
+		invalid: stale.model,
+		note: stale.model ? "not available here" : undefined,
 		origin:
 			state === undefined
 				? undefined
@@ -449,6 +454,8 @@ export function usePlatform(): Platform {
 
 	const agent: ChoicePicker = {
 		value: agentValue,
+		invalid: stale.agent,
+		note: stale.agent ? "definition is gone" : undefined,
 		origin:
 			state === undefined
 				? undefined
