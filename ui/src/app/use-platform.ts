@@ -109,7 +109,14 @@ export interface ChoicePicker {
 
 export interface Platform {
 	ready: boolean;
-	error?: string | undefined;
+	/** The stream is following, or trying to be. */
+	connection: "live" | "reconnecting";
+	/** The last action the server refused, in its own words, until it is dismissed or a later
+	 * action succeeds. */
+	failure?: string | undefined;
+	clearFailure: () => void;
+	workerUp: boolean;
+	workerError?: string | undefined;
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
@@ -134,7 +141,6 @@ export interface Platform {
 	removeWorkspace: (name: string) => void;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
-	workerUp: boolean;
 	/** The worker can take a steering input mid-turn; without it the choice is stop or queue. */
 	steerable: boolean;
 	/** Model, thinking, and agent as the conversation resolves them, with their layer. */
@@ -165,7 +171,7 @@ export interface Platform {
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
 	fork: (at: string) => void;
-	send: (text: string, whenBusy: BusyAction) => void;
+	send: (text: string, whenBusy: BusyAction) => Promise<void>;
 	abort: () => void;
 	setRailWidth: (width: number) => void;
 	setRailOpen: (open: boolean) => void;
@@ -199,13 +205,16 @@ export function usePlatform(): Platform {
 	const [system, setSystem] = useState<"light" | "dark">(systemTheme);
 	const [choice, setChoice] = useState<"light" | "dark" | null>(storedTheme);
 	const theme = choice ?? system;
-	const [error, setError] = useState<string | undefined>(undefined);
+	const [connection, setConnection] = useState<"live" | "reconnecting">("live");
+	const [failure, setFailure] = useState<string | undefined>(undefined);
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
 	const [ready, setReady] = useState(false);
 
 	const reportError = useCallback((cause: unknown): void => {
-		setError(cause instanceof Error ? cause.message : String(cause));
+		setFailure(cause instanceof Error ? cause.message : String(cause));
 	}, []);
+
+	const clearFailure = useCallback((): void => setFailure(undefined), []);
 
 	const workspace = route.workspace === "" ? "general" : route.workspace;
 	const activeId =
@@ -229,15 +238,17 @@ export function usePlatform(): Platform {
 				if (cancelled) return;
 				setState(next);
 				setReady(true);
-				setError(undefined);
+				setFailure(undefined);
 			} catch (cause) {
-				if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+				if (!cancelled) setFailure(cause instanceof Error ? cause.message : String(cause));
 			}
 		};
 		void load();
 
 		const source = openStream(workspace, route.conversation, {
-			onOpen: () => undefined,
+			onOpen: () => {
+				if (!cancelled) setConnection("live");
+			},
 			onState: (next) => {
 				if (!cancelled) setState(next);
 			},
@@ -247,7 +258,7 @@ export function usePlatform(): Platform {
 				setSenders(nextSenders);
 			},
 			onReconnecting: () => {
-				if (!cancelled) setError("reconnecting");
+				if (!cancelled) setConnection("reconnecting");
 			},
 		});
 
@@ -260,9 +271,9 @@ export function usePlatform(): Platform {
 	const reload = useCallback(async (): Promise<void> => {
 		try {
 			setState(await fetchState(workspace, route.conversation));
-			setError(undefined);
+			setFailure(undefined);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setFailure(cause instanceof Error ? cause.message : String(cause));
 		}
 	}, [workspace, route.conversation]);
 
@@ -347,7 +358,12 @@ export function usePlatform(): Platform {
 	// the choice is the person's, not a heuristic.
 	const choose = useCallback(
 		(change: AgentChange) => {
-			void setAgent(workspace, activeId, change).then(setState).catch(reportError);
+			void setAgent(workspace, activeId, change)
+				.then((next) => {
+					setState(next);
+					setFailure(undefined);
+				})
+				.catch(reportError);
 		},
 		[workspace, activeId, reportError],
 	);
@@ -446,33 +462,53 @@ export function usePlatform(): Platform {
 		[state, workspace],
 	);
 
+	/** Every command goes through here: a success clears the last refusal, a failure is it. */
+	const act = useCallback(
+		(request: Promise<unknown>, then?: () => void): void => {
+			void request
+				.then(() => {
+					setFailure(undefined);
+					then?.();
+				})
+				.catch(reportError);
+		},
+		[reportError],
+	);
+
 	const rename = useCallback(
 		(id: string, title: string) => {
-			void renameConversation(workspace, id, title).then(reload).catch(reportError);
+			act(renameConversation(workspace, id, title), () => void reload());
 		},
-		[workspace, reload, reportError],
+		[act, workspace, reload],
 	);
 	const hide = useCallback(
 		(id: string, hidden: boolean) => {
-			void hideConversation(workspace, id, hidden).then(reload).catch(reportError);
+			act(hideConversation(workspace, id, hidden), () => void reload());
 		},
-		[workspace, reload, reportError],
+		[act, workspace, reload],
 	);
 	const fork = useCallback(
 		(at: string) => {
-			void forkConversation(workspace, activeId, at).then(reload).catch(reportError);
+			act(forkConversation(workspace, activeId, at), () => void reload());
 		},
-		[workspace, activeId, reload, reportError],
+		[act, workspace, activeId, reload],
 	);
 	const send = useCallback(
-		(text: string, whenBusy: BusyAction) => {
-			void sendMessage(workspace, activeId, text, whenBusy).catch(reportError);
+		async (text: string, whenBusy: BusyAction): Promise<void> => {
+			try {
+				await sendMessage(workspace, activeId, text, whenBusy);
+				setFailure(undefined);
+			} catch (cause) {
+				// The caller restores the draft; the failure is also the strip's to show.
+				reportError(cause);
+				throw cause;
+			}
 		},
 		[workspace, activeId, reportError],
 	);
 	const abort = useCallback(() => {
-		void abortConversation(workspace, activeId).catch(reportError);
-	}, [workspace, activeId, reportError]);
+		act(abortConversation(workspace, activeId));
+	}, [act, workspace, activeId]);
 
 	const setRailWidth = useCallback((width: number) => {
 		setRailWidthState(width);
@@ -509,23 +545,23 @@ export function usePlatform(): Platform {
 
 	const setWorkspace = useCallback(
 		(change: { image: string; network: string }) => {
-			void updateWorkspace(workspace, change).then(reload).catch(reportError);
+			act(updateWorkspace(workspace, change), () => void reload());
 		},
-		[workspace, reload, reportError],
+		[act, workspace, reload],
 	);
 
 	const createWorkspace = useCallback(
 		(name: string) => {
-			void createWorkspaceRequest(name).then(reload).catch(reportError);
+			act(createWorkspaceRequest(name), () => void reload());
 		},
-		[reload, reportError],
+		[act, reload],
 	);
 
 	const removeWorkspace = useCallback(
 		(name: string) => {
-			void removeWorkspaceRequest(name).then(reload).catch(reportError);
+			act(removeWorkspaceRequest(name), () => void reload());
 		},
-		[reload, reportError],
+		[act, reload],
 	);
 
 	const setDefault = useCallback(
@@ -536,9 +572,9 @@ export function usePlatform(): Platform {
 					: kind === "thinking"
 						? setDefaultThinking(workspace, scope, value)
 						: setDefaultAgent(workspace, scope, value);
-			void request.then(reload).catch(reportError);
+			act(request, () => void reload());
 		},
-		[workspace, reload, reportError],
+		[act, workspace, reload],
 	);
 
 	const defaults = useMemo(
@@ -558,13 +594,16 @@ export function usePlatform(): Platform {
 
 	return {
 		ready,
-		error,
+		connection,
+		failure,
+		clearFailure,
 		conversations,
 		deleted,
 		entries,
 		active:
 			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
 		workerUp: state?.workerUp ?? false,
+		workerError: state?.workerError,
 		steerable: state?.capabilities.steer ?? false,
 		model,
 		thinking,

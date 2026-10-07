@@ -54,8 +54,11 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			return;
 		}
 		if (platform.active === undefined) return;
-		platform.send(text, busyAction);
 		setDraft("");
+		// A refused send keeps what was typed: the draft comes back if nothing else does.
+		void platform.send(text, busyAction).catch(() => {
+			setDraft((current) => (current === "" ? text : current));
+		});
 	};
 
 	const rail = (
@@ -182,10 +185,12 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					steerable={platform.steerable}
 					busyAction={busyAction}
 					onBusyActionChange={setBusyAction}
-					disabled={platform.active === undefined}
+					disabled={platform.active === undefined || !platform.workerUp}
 					placeholder={
 						platform.active === undefined ? "Pick a conversation" : "Send a message"
 					}
+					error={platform.failure}
+					onDismissError={platform.clearFailure}
 					above={
 						slashWord === null ? undefined : (
 							<SlashMenu commands={slashMatches} onSelect={setDraft} />

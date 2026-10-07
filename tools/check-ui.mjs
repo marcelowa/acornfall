@@ -71,7 +71,11 @@ try {
 
 	const problems = [];
 	page.on("console", (message) => {
-		if (message.type() === "error") problems.push(`console: ${message.text()}`);
+		if (message.type() !== "error") return;
+		// The suite asks the server for one refusal on purpose (a workspace name that is a
+		// path). The browser logs the 409; the app shows it in the error strip.
+		if (/Failed to load resource.*409/.test(message.text())) return;
+		problems.push(`console: ${message.text()}`);
 	});
 	page.on("pageerror", (error) => problems.push(`page: ${error.message}`));
 	page.on("requestfailed", (request) => {
@@ -87,6 +91,10 @@ try {
 	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
 	await page.waitForSelector("[data-slot=splitter]", { timeout: 10000 });
 	check("the rail renders", true);
+	check(
+		"nothing announces a healthy connection",
+		await page.evaluate(() => document.querySelector("[data-slot=status-pill]") === null),
+	);
 
 	// The rail names its workspace first: a conversation belongs to exactly one, so the
 	// workspace is the choice that comes before it. Switching starts over.
@@ -171,6 +179,34 @@ try {
 		);
 		check("the sheet shows the defaults", sheetText.includes("Defaults"), sheetText.slice(0, 60));
 		check("the sheet lists the workspaces", sheetText.includes("Workspaces"));
+
+		// A refused action shows the server's own sentence, above the composer, until dismissed.
+		await page.type('[role="dialog"] input[aria-label="New workspace name"]', "ui-check/refused");
+		const added = await page.evaluate(() => {
+			const add = [...document.querySelectorAll('[role="dialog"] button')].find(
+				(button) => button.textContent?.trim() === "Add",
+			);
+			add?.click();
+			return add !== undefined;
+		});
+		check("the create form has an Add button", added);
+		const strip = await page
+			.waitForSelector("[data-slot=error-strip]", { timeout: 10000 })
+			.catch(() => null);
+		const stripText =
+			strip === null ? "" : await strip.evaluate((element) => element.textContent ?? "");
+		check(
+			"a refused action shows the server's words",
+			stripText.includes("cannot contain a slash"),
+			stripText.replace(/\s+/g, " ").slice(0, 90),
+		);
+		if (strip !== null) {
+			await strip.evaluate((element) => element.querySelector("button")?.click());
+			const dismissed = await page.evaluate(
+				() => document.querySelector("[data-slot=error-strip]") === null,
+			);
+			check("the error strip can be dismissed", dismissed);
+		}
 		await page.keyboard.press("Escape");
 		await page.waitForFunction(() => document.querySelector('[role="dialog"]') === null, {
 			timeout: 5000,

@@ -109,6 +109,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		entries,
 		active: streamConversation,
 		workerUp: true,
+		connection: "live",
+		clearFailure: noop,
 		steerable: true,
 		model: {
 			value: "DeepSeek V4.1 Flash",
@@ -233,7 +235,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		rename: noop,
 		hide: noop,
 		fork: noop,
-		send: noop,
+		send: () => Promise.resolve(),
 		abort: noop,
 		setRailWidth: noop,
 		setRailOpen: noop,

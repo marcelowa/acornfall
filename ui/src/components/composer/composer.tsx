@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Button } from "@/components/ui/button";
+import { ErrorStrip } from "@/components/ui/error-strip";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { BusyAction } from "@/app/view-models";
@@ -24,6 +25,9 @@ export interface ComposerProps {
 	controls?: ReactNode | undefined;
 	/** Above the textarea: the slash-command menu, when one is open. */
 	above?: ReactNode | undefined;
+	/** The last refused action, shown above the textarea until dismissed. */
+	error?: string | undefined;
+	onDismissError?: (() => void) | undefined;
 	className?: string | undefined;
 }
 
@@ -48,6 +52,8 @@ export function Composer({
 	placeholder = "Send a message",
 	controls,
 	above,
+	error,
+	onDismissError,
 	className,
 }: ComposerProps) {
 	const canSend = !disabled && value.trim() !== "";
@@ -60,6 +66,9 @@ export function Composer({
 	return (
 		<div data-slot="composer" className={cn("w-full border-t border-border", className)}>
 			<Measure size="wide" padding="md">
+				{error === undefined || onDismissError === undefined ? null : (
+					<ErrorStrip message={error} onDismiss={onDismissError} />
+				)}
 				{above}
 				<Stack gap="sm">
 					<Textarea
