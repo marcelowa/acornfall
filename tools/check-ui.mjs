@@ -145,6 +145,39 @@ try {
 		await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
 	}
 
+	// The settings sheet: hidden until asked for, then the workspace, its defaults, and the
+	// other workspaces. This is the check the old client's suite made first, because a
+	// visible overlay swallows the first interaction and turns one bug into a trail.
+	const settingsTrigger = await page.$("button[aria-label='Settings']");
+	check("the settings trigger is on screen", settingsTrigger !== null);
+	if (settingsTrigger !== null) {
+		check(
+			"the settings sheet starts hidden",
+			await page.evaluate(() => document.querySelector('[role="dialog"]') === null),
+		);
+		await settingsTrigger.click();
+		await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+		const sheetText = await page.evaluate(
+			() => document.querySelector('[role="dialog"]')?.textContent ?? "",
+		);
+		const activePath = await page.evaluate(async () => {
+			const state = await (await fetch("/api/state")).json();
+			return state.workspace.path;
+		});
+		check(
+			"the sheet says where this workspace points",
+			sheetText.includes(activePath),
+			activePath,
+		);
+		check("the sheet shows the defaults", sheetText.includes("Defaults"), sheetText.slice(0, 60));
+		check("the sheet lists the workspaces", sheetText.includes("Workspaces"));
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(() => document.querySelector('[role="dialog"]') === null, {
+			timeout: 5000,
+		});
+		check("the settings sheet closes", true);
+	}
+
 	// 2. The rail is a pane, not the page: a long list scrolls inside it, and the document
 	// itself never grows — a page that scrolls moves every panel, including the ones that
 	// were meant to stay put.

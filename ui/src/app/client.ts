@@ -143,6 +143,62 @@ export async function setAgent(
 	return (await response.json()) as WireState;
 }
 
+export function removeWorkspace(name: string): Promise<void> {
+	return post(`/api/workspaces/${encodeURIComponent(name)}/remove`, {});
+}
+
+export function createWorkspace(name: string): Promise<void> {
+	return post("/api/workspaces", { name });
+}
+
+/** A partial update: an absent field is left alone, so `image` and `network` are independent. */
+export interface WorkspaceChange {
+	title?: string;
+	image?: string;
+	network?: string;
+}
+
+export function updateWorkspace(workspace: string, change: WorkspaceChange): Promise<void> {
+	return post(workspacePath(workspace, "/update"), change);
+}
+
+/** Where a default is being set: this workspace, or every workspace. */
+export type DefaultScope = "workspace" | "install";
+
+function defaultPath(workspace: string, scope: DefaultScope, kind: string): string {
+	return scope === "install"
+		? `/api/defaults/${kind}`
+		: workspacePath(workspace, `/default-${kind}`);
+}
+
+export function setDefaultModel(
+	workspace: string,
+	scope: DefaultScope,
+	value: string,
+): Promise<void> {
+	const slash = value.indexOf("/");
+	return post(defaultPath(workspace, scope, "model"), {
+		provider: slash === -1 ? "" : value.slice(0, slash),
+		modelId: slash === -1 ? "" : value.slice(slash + 1),
+	});
+}
+
+export function setDefaultThinking(
+	workspace: string,
+	scope: DefaultScope,
+	level: string,
+): Promise<void> {
+	return post(defaultPath(workspace, scope, "thinking"), { level });
+}
+
+export function setDefaultAgent(
+	workspace: string,
+	scope: DefaultScope,
+	definition: string,
+): Promise<void> {
+	return post(defaultPath(workspace, scope, "agent"), { definition });
+}
+
 export async function fetchCommands(workspace: string): Promise<SlashCommand[]> {
 	const response = await fetch(workspacePath(workspace, "/commands"));
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);

@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	abortConversation,
+	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
 	fetchState,
 	forkConversation,
 	hideConversation,
 	openStream,
+	removeWorkspace as removeWorkspaceRequest,
 	renameConversation,
 	sendMessage,
 	setAgent,
+	setDefaultAgent,
+	setDefaultModel,
+	setDefaultThinking,
+	updateWorkspace,
 	type AgentChange,
+	type DefaultScope,
 } from "./client";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
@@ -110,6 +117,21 @@ export interface Platform {
 	selectWorkspace: (name: string) => void;
 	/** Where the active workspace's tools actually run. */
 	sandbox?: SandboxSummary | undefined;
+	/** What the defaults resolve to, and the layer each came from. */
+	defaults: {
+		model: string;
+		thinking: string;
+		agent: string;
+		modelOrigin?: string | undefined;
+		thinkingOrigin?: string | undefined;
+		agentOrigin?: string | undefined;
+	};
+	/** Set a default, in this workspace or everywhere. */
+	setDefault: (kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => void;
+	/** The active workspace's image and network. */
+	setWorkspace: (change: { image: string; network: string }) => void;
+	createWorkspace: (name: string) => void;
+	removeWorkspace: (name: string) => void;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	workerUp: boolean;
@@ -485,6 +507,55 @@ export function usePlatform(): Platform {
 		setRoute({ workspace: name, conversation: "" });
 	}, []);
 
+	const setWorkspace = useCallback(
+		(change: { image: string; network: string }) => {
+			void updateWorkspace(workspace, change).then(reload).catch(reportError);
+		},
+		[workspace, reload, reportError],
+	);
+
+	const createWorkspace = useCallback(
+		(name: string) => {
+			void createWorkspaceRequest(name).then(reload).catch(reportError);
+		},
+		[reload, reportError],
+	);
+
+	const removeWorkspace = useCallback(
+		(name: string) => {
+			void removeWorkspaceRequest(name).then(reload).catch(reportError);
+		},
+		[reload, reportError],
+	);
+
+	const setDefault = useCallback(
+		(kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => {
+			const request =
+				kind === "model"
+					? setDefaultModel(workspace, scope, value)
+					: kind === "thinking"
+						? setDefaultThinking(workspace, scope, value)
+						: setDefaultAgent(workspace, scope, value);
+			void request.then(reload).catch(reportError);
+		},
+		[workspace, reload, reportError],
+	);
+
+	const defaults = useMemo(
+		() => ({
+			model:
+				state === undefined
+					? ""
+					: `${state.defaultModel.provider}/${state.defaultModel.modelId}`,
+			thinking: state?.defaultThinking ?? "",
+			agent: state?.defaultAgent ?? "",
+			modelOrigin: originLabel(state?.defaultsOrigin.model),
+			thinkingOrigin: originLabel(state?.defaultsOrigin.thinking),
+			agentOrigin: originLabel(state?.defaultsOrigin.agent),
+		}),
+		[state],
+	);
+
 	return {
 		ready,
 		error,
@@ -503,6 +574,11 @@ export function usePlatform(): Platform {
 		workspaces,
 		sandbox,
 		selectWorkspace,
+		defaults,
+		setDefault,
+		setWorkspace,
+		createWorkspace,
+		removeWorkspace,
 		usage: lastUsage(view?.entries ?? []),
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,

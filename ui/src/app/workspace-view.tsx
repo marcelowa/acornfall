@@ -1,8 +1,8 @@
 import { useState } from "react";
+import type { DefaultScope } from "./client";
 import type { BusyAction } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
 import { Composer } from "@/components/composer/composer";
-import { Picker } from "@/components/composer/picker";
 import { SlashMenu } from "@/components/composer/slash-menu";
 import { AgentPanel } from "@/components/inspector/agent-panel";
 import { ContextPanel } from "@/components/inspector/context-panel";
@@ -11,8 +11,11 @@ import { RunPanel } from "@/components/inspector/run-panel";
 import { SandboxPanel } from "@/components/inspector/sandbox-panel";
 import { WorkspaceList } from "@/components/workspace/workspace-list";
 import { Stack } from "@/components/layout/stack";
+import { Picker } from "@/components/composer/picker";
+import { SettingsSheet } from "@/components/settings/settings-sheet";
 import { Transcript } from "@/components/transcript/transcript";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
 import { Shell } from "@/screens/shell";
 import type { Platform } from "./use-platform";
@@ -32,6 +35,7 @@ export interface WorkspaceViewProps {
 export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const [draft, setDraft] = useState("");
 	const [busyAction, setBusyAction] = useState<BusyAction>("steer");
+	const [scope, setScope] = useState<DefaultScope>("workspace");
 
 	// A draft that is one slash word is a command being typed: the menu lists what the server
 	// knows, Enter completes the word, and the expansion itself happens server-side.
@@ -215,6 +219,65 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 								disabled={platform.agent.disabled}
 							/>
 							<ThemeToggle theme={platform.theme} onToggle={platform.toggleTheme} />
+							<SettingsSheet
+								workspace={platform.workspaces.find(
+									(workspace) => workspace.active,
+								)}
+								workspaces={platform.workspaces}
+								onUpdateWorkspace={platform.setWorkspace}
+								onCreateWorkspace={platform.createWorkspace}
+								onRemoveWorkspace={platform.removeWorkspace}
+								defaults={
+									<Stack gap="sm">
+										<ToggleGroup
+											type="single"
+											value={scope}
+											onValueChange={(next) => {
+												if (next === "workspace" || next === "install")
+													setScope(next);
+											}}
+											variant="outline"
+											size="sm"
+											spacing={0}
+											aria-label="Default scope"
+										>
+											<ToggleGroupItem value="workspace">
+												This workspace
+											</ToggleGroupItem>
+											<ToggleGroupItem value="install">
+												Every workspace
+											</ToggleGroupItem>
+										</ToggleGroup>
+										<Picker
+											label="Model"
+											value={platform.defaults.model.split("/").at(-1) ?? ""}
+											origin={platform.defaults.modelOrigin}
+											groups={platform.model.groups}
+											onSelect={(value) =>
+												platform.setDefault("model", scope, value)
+											}
+										/>
+										<Picker
+											label="Thinking"
+											value={platform.defaults.thinking}
+											origin={platform.defaults.thinkingOrigin}
+											groups={platform.thinking.groups}
+											onSelect={(value) =>
+												platform.setDefault("thinking", scope, value)
+											}
+										/>
+										<Picker
+											label="Agent"
+											value={platform.defaults.agent}
+											origin={platform.defaults.agentOrigin}
+											groups={platform.agent.groups}
+											onSelect={(value) =>
+												platform.setDefault("agent", scope, value)
+											}
+										/>
+									</Stack>
+								}
+							/>
 						</>
 					}
 				/>

@@ -194,6 +194,18 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			},
 		],
 		selectWorkspace: noop,
+		defaults: {
+			model: "opencode-go/deepseek",
+			thinking: "max",
+			agent: "scout",
+			modelOrigin: "install default",
+			thinkingOrigin: "install default",
+			agentOrigin: "last resort",
+		},
+		setDefault: noop,
+		setWorkspace: noop,
+		createWorkspace: noop,
+		removeWorkspace: noop,
 		sandbox: {
 			engine: "microsandbox",
 			version: "0.7.7",
