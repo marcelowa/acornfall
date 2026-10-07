@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"slices"
 	"strconv"
 	"syscall"
 )
@@ -22,10 +23,8 @@ func kvmHint() string {
 		return ""
 	}
 	if groups, err := os.Getgroups(); err == nil {
-		for _, group := range groups {
-			if group == int(stat.Gid) {
-				return "; check the permission bits on /dev/kvm"
-			}
+		if slices.Contains(groups, int(stat.Gid)) {
+			return "; check the permission bits on /dev/kvm"
 		}
 	}
 	who := "the user"

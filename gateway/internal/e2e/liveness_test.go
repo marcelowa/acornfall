@@ -408,7 +408,7 @@ func killWorker(t *testing.T, s *system) {
 	if err != nil {
 		t.Fatalf("no worker process found for %s: %v", s.General, err)
 	}
-	for _, field := range strings.Fields(string(out)) {
+	for field := range strings.FieldsSeq(string(out)) {
 		pid := 0
 		for _, digit := range field {
 			if digit < '0' || digit > '9' {

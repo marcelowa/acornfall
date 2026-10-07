@@ -19,6 +19,9 @@ OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 # not a silent pass.
 GOBIN := $(shell go env GOPATH)/bin
 STATICCHECK := $(GOBIN)/staticcheck
+# modernize lives inside gopls, so the path looks wrong and is not: it is the analyzer gopls
+# serves to editors, published as a vet tool. Installing it pulls the toolchain gopls needs.
+MODERNIZE := $(GOBIN)/modernize
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -32,6 +35,7 @@ build: ## build the gateway binary
 
 tools: ## install the linters used by `make lint`
 	go install honnef.co/go/tools/cmd/staticcheck@latest
+	go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest
 	cd worker && bun install
 
 typecheck: ## the compiler's opinion, without running anything
@@ -44,6 +48,8 @@ lint: typecheck ## the static rules; fails on the first one broken
 	cd gateway && go vet ./...
 	@if [ -x "$(STATICCHECK)" ]; then cd gateway && $(STATICCHECK) ./... && echo "staticcheck: clean"; \
 	else echo "staticcheck: not installed (make tools)"; fi
+	@if [ -x "$(MODERNIZE)" ]; then cd gateway && go vet -vettool=$(MODERNIZE) ./... && echo "modernize: clean"; \
+	else echo "modernize: not installed (make tools)"; fi
 	node scripts/check-house-rules.mjs
 	cd worker && bun run format:check
 	cd worker && bun run lint

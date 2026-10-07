@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -262,13 +263,13 @@ func (w *Worker) rememberStderr(line string) {
 func (w *Worker) LastWords() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for index := len(w.stderr) - 1; index >= 0; index-- {
-		if strings.Contains(strings.ToLower(w.stderr[index]), "error:") {
-			return strings.TrimSpace(w.stderr[index])
+	for _, line := range slices.Backward(w.stderr) {
+		if strings.Contains(strings.ToLower(line), "error:") {
+			return strings.TrimSpace(line)
 		}
 	}
-	for index := len(w.stderr) - 1; index >= 0; index-- {
-		if trimmed := strings.TrimSpace(w.stderr[index]); trimmed != "" && !strings.HasPrefix(trimmed, "Bun v") {
+	for _, line := range slices.Backward(w.stderr) {
+		if trimmed := strings.TrimSpace(line); trimmed != "" && !strings.HasPrefix(trimmed, "Bun v") {
 			return trimmed
 		}
 	}

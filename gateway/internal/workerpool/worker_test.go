@@ -49,7 +49,7 @@ func TestLastWordsWithoutAnError(t *testing.T) {
 // The tail is bounded: this is a diagnosis, not a log.
 func TestStderrTailIsBounded(t *testing.T) {
 	worker := New(Config{})
-	for i := 0; i < stderrKept*3; i++ {
+	for range stderrKept * 3 {
 		worker.rememberStderr("line")
 	}
 	worker.mu.Lock()

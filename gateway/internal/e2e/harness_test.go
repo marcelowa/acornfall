@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -318,9 +319,9 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 func (s *system) waitForListening(timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		for _, line := range strings.Split(s.logs.String(), "\n") {
-			if at := strings.Index(line, "listening on http://"); at >= 0 {
-				rest := line[at+len("listening on http://"):]
+		for line := range strings.SplitSeq(s.logs.String(), "\n") {
+			if _, after, ok := strings.Cut(line, "listening on http://"); ok {
+				rest := after
 				if fields := strings.Fields(rest); len(fields) > 0 {
 					return fields[0], nil
 				}
@@ -951,8 +952,7 @@ func (v view) entriesOf(kind string) []entry {
 // what the prompt said when it was built, not of what it says now. Reading the first would
 // make every change look like it had not happened.
 func (v view) systemSections() map[string]string {
-	for index := len(v.Entries) - 1; index >= 0; index-- {
-		e := v.Entries[index]
+	for _, e := range slices.Backward(v.Entries) {
 		if e.Kind != "pi.system" {
 			continue
 		}
@@ -1081,8 +1081,8 @@ func (c *client) streamEvents(workspace, id string, window time.Duration) map[st
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
-		if strings.HasPrefix(scanner.Text(), "event: ") {
-			counts[strings.TrimPrefix(scanner.Text(), "event: ")]++
+		if after, ok := strings.CutPrefix(scanner.Text(), "event: "); ok {
+			counts[after]++
 		}
 	}
 	return counts

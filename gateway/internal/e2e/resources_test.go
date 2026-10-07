@@ -454,7 +454,7 @@ func TestAGlobalSkillsScriptRunsInsideTheWorkspace(t *testing.T) {
 // would use from the instructions.
 func skillDirectory(t *testing.T, result string) string {
 	t.Helper()
-	for _, line := range strings.Split(result, "\n") {
+	for line := range strings.SplitSeq(result, "\n") {
 		if directory, found := strings.CutPrefix(line, "Directory: "); found {
 			return strings.TrimSpace(directory)
 		}

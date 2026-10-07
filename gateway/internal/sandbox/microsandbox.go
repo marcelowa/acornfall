@@ -457,8 +457,8 @@ func loadNames(library string) map[string]string {
 	}
 	version := strings.TrimPrefix(library, "libkrunfw.so.")
 	abi := version
-	if index := strings.IndexByte(version, '.'); index >= 0 {
-		abi = version[:index]
+	if before, _, ok := strings.Cut(version, "."); ok {
+		abi = before
 	}
 	return map[string]string{"libkrunfw.so." + abi: library, "libkrunfw.so": "libkrunfw.so." + abi}
 }
@@ -476,7 +476,7 @@ func fetchChecksum(ctx context.Context, client *http.Client, url, artifact strin
 	if err != nil {
 		return "", err
 	}
-	for _, line := range strings.Split(string(payload), "\n") {
+	for line := range strings.SplitSeq(string(payload), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == artifact {
 			return strings.ToLower(fields[0]), nil
@@ -581,8 +581,8 @@ func safeJoin(dest, name string) (string, error) {
 // firstLine keeps one engine complaint rather than a wall of them: the first is the cause,
 // the rest are usually consequences.
 func firstLine(text string) string {
-	if index := strings.IndexByte(text, '\n'); index >= 0 {
-		return text[:index]
+	if before, _, ok := strings.Cut(text, "\n"); ok {
+		return before
 	}
 	return text
 }

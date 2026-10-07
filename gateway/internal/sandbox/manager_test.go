@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 )
 
@@ -62,12 +63,7 @@ func (f *fakeDriver) Remove(context.Context, string) error {
 }
 
 func (f *fakeDriver) ran(call string) bool {
-	for _, got := range f.calls {
-		if got == call {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(f.calls, call)
 }
 
 func openWith(t *testing.T, driver Driver) *Manager {
