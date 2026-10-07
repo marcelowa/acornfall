@@ -135,16 +135,22 @@ export function toThinkingGroups(levels: string[]): PickerGroup[] {
 	return [{ options: levels.map((level) => ({ value: level, label: level })) }];
 }
 
+/**
+ * Agents grouped by the layer that defined them, with their descriptions: a name alone does
+ * not say what an agent is for, and the layer is how someone knows what overriding it means.
+ */
 export function toAgentGroups(agents: WireAgentSummary[]): PickerGroup[] {
-	return [
-		{
-			options: agents.map((agent) => ({
-				value: agent.name,
-				label: agent.name,
-				detail: agent.description ?? agent.layer,
-			})),
-		},
-	];
+	const byLayer = new Map<string, PickerGroup["options"]>();
+	for (const agent of agents) {
+		const options = byLayer.get(agent.layer) ?? [];
+		options.push({
+			value: agent.name,
+			label: agent.name,
+			description: agent.description ?? agent.source,
+		});
+		byLayer.set(agent.layer, options);
+	}
+	return [...byLayer].map(([layer, options]) => ({ label: layer, options }));
 }
 
 /** The layer a value resolves from, in words: `install` is not something this conversation chose. */

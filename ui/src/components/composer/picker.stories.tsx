@@ -49,3 +49,41 @@ export const NothingConfigured: Story = {
 export const Disabled: Story = {
 	args: { label: "Agent", value: "scout", groups, onSelect: noop, disabled: true },
 };
+
+/** Agents grouped by the layer that defined them, with the description a name cannot carry. */
+export const Agents: Story = {
+	args: {
+		label: "Agent",
+		value: "release-captain",
+		origin: "this conversation",
+		groups: [
+			{
+				label: "workspace",
+				options: [
+					{
+						value: "release-captain",
+						label: "release-captain",
+						description:
+							"Cuts releases: checks the changelog and the version bumps, and refuses to tag a red build.",
+					},
+					{
+						value: "scout",
+						label: "scout",
+						description: "Reads the repository and reports, without editing anything.",
+					},
+				],
+			},
+			{
+				label: "install",
+				options: [
+					{
+						value: "reviewer",
+						label: "reviewer",
+						description: "Reviews diffs for correctness and style.",
+					},
+				],
+			},
+		],
+		onSelect: noop,
+	},
+};

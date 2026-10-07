@@ -83,6 +83,8 @@ export interface PickerOption {
 	value: string;
 	label: string;
 	detail?: string | undefined;
+	/** A sentence under the label, for choices whose name is not the whole story. */
+	description?: string | undefined;
 }
 
 export interface PickerGroup {

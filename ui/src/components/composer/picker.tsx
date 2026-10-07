@@ -53,7 +53,8 @@ export function Picker({
 					size="xs"
 					disabled={disabled}
 					aria-label={label}
-					className={cn("max-w-(--container-xs) justify-start", className)}
+					className={cn("max-w-(--container-sm) justify-start", className)}
+					title={value === undefined || value === "" ? undefined : value}
 				>
 					<span className="text-muted-foreground">{label}:</span>
 					<span className="truncate">
@@ -68,7 +69,7 @@ export function Picker({
 					<ChevronDown className="shrink-0" />
 				</Button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start" className="w-(--container-xs)">
+			<DropdownMenuContent align="start" className="w-(--container-sm)">
 				{groups.map((group, index) => (
 					<div key={group.label ?? String(index)}>
 						{index > 0 ? <DropdownMenuSeparator /> : null}
@@ -79,13 +80,23 @@ export function Picker({
 							<DropdownMenuItem
 								key={option.value}
 								onSelect={() => onSelect(option.value)}
+								className="items-start"
 							>
-								<span className="truncate">{option.label}</span>
-								{option.detail === undefined ? null : (
-									<span className="ml-auto text-muted-foreground">
-										{option.detail}
+								<span className="flex min-w-0 flex-col gap-0.5">
+									<span className="flex items-baseline gap-2">
+										<span className="truncate font-medium">{option.label}</span>
+										{option.detail === undefined ? null : (
+											<span className="shrink-0 font-mono text-2xs text-muted-foreground">
+												{option.detail}
+											</span>
+										)}
 									</span>
-								)}
+									{option.description === undefined ? null : (
+										<span className="whitespace-normal text-2xs text-muted-foreground">
+											{option.description}
+										</span>
+									)}
+								</span>
 							</DropdownMenuItem>
 						))}
 					</div>

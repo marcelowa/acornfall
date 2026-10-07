@@ -3,6 +3,7 @@ import {
 	failureOf,
 	originLabel,
 	textOf,
+	toAgentGroups,
 	toConversation,
 	toModelChoices,
 	toTranscript,
@@ -160,5 +161,17 @@ describe("the wire mapping", () => {
 		expect(originLabel("install")).toBe("install default");
 		expect(originLabel("last-resort")).toBe("last resort");
 		expect(originLabel(undefined)).toBeUndefined();
+	});
+
+	test("agents are grouped by layer, with the description a name cannot carry", () => {
+		const groups = toAgentGroups([
+			{ name: "a", source: "/a.md", layer: "workspace", description: "does a" },
+			{ name: "b", source: "/b.md", layer: "install" },
+			{ name: "c", source: "/c.md", layer: "workspace" },
+		]);
+		expect(groups.map((group) => group.label)).toEqual(["workspace", "install"]);
+		expect(groups[0]?.options.map((option) => option.value)).toEqual(["a", "c"]);
+		expect(groups[0]?.options[0]?.description).toBe("does a");
+		expect(groups[1]?.options[0]?.description).toBe("/b.md");
 	});
 });
