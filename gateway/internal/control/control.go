@@ -153,7 +153,7 @@ type State struct {
 // Defaults are one layer's answer to "what runs when nothing more specific does". The
 // workspace keeps its own, the install keeps its own, and neither is a copy of the other.
 type Defaults struct {
-	Model    protocol.ModelBinding `json:"defaultModel,omitempty"`
+	Model    protocol.ModelBinding `json:"defaultModel,omitzero"`
 	Thinking string                `json:"defaultThinking,omitempty"`
 	Agent    string                `json:"defaultAgent,omitempty"`
 }
@@ -1961,7 +1961,7 @@ func (c *Control) isAvailable(describe protocol.Describe, binding protocol.Model
 
 type persistedSettings struct {
 	Active          string                           `json:"active,omitempty"`
-	DefaultModel    protocol.ModelBinding            `json:"defaultModel,omitempty"`
+	DefaultModel    protocol.ModelBinding            `json:"defaultModel,omitzero"`
 	DefaultThinking string                           `json:"defaultThinking,omitempty"`
 	DefaultAgent    string                           `json:"defaultAgent,omitempty"`
 	Agents          map[string]protocol.ModelBinding `json:"agents,omitempty"`
