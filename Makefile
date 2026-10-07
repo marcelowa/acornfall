@@ -33,8 +33,9 @@ GO_TOOLCHAIN := go$(if $(filter 2,$(words $(subst ., ,$(GO_VERSION)))),$(GO_VERS
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
 
-deps: ## install worker and tool dependencies
+deps: ## install worker, interface, and tool dependencies
 	cd worker && bun install
+	cd ui && bun install
 	cd tools && bun install
 
 build: ## build the gateway binary
@@ -46,6 +47,7 @@ tools: ## install the linters used by `make lint`
 
 typecheck: ## the compiler's opinion, without running anything
 	cd worker && bun run typecheck
+	cd ui && bun run typecheck
 
 lint: typecheck ## the static rules; fails on the first one broken
 	bun scripts/check-client.mjs
@@ -57,6 +59,11 @@ lint: typecheck ## the static rules; fails on the first one broken
 	bun scripts/check-house-rules.mjs
 	cd worker && bun run format:check
 	cd worker && bun run lint
+	# The interface's rules no compiler owns: token-backed classes only, no arbitrary values,
+	# and no class on a screen.
+	cd ui && bun run lint
+	cd ui && bun run check:system
+	cd ui && bun run format:check
 
 # Not part of `make lint`, on purpose: this is the one Go check measured in seconds rather
 # than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a
@@ -87,6 +94,7 @@ SANDBOX_PARALLEL ?= 6
 
 check: typecheck ## fast: the compiler and the unit tests, no processes
 	cd worker && bun test
+	cd ui && bun test
 	# -count=1 because the suite's inputs include worker/src and gateway/web, which Go's test
 	# cache cannot see: a cached pass would be a pass for code that has changed.
 	# The end-to-end suite is excluded: it starts a gateway and a worker per test, and that is
@@ -95,6 +103,11 @@ check: typecheck ## fast: the compiler and the unit tests, no processes
 
 test: lint ## the default tier: units and the feature suite, no hypervisor needed
 	cd worker && bun test
+	# The interface's unit tests are milliseconds and its bundle has to build, or CI's word
+	# about the interface means nothing. Embedding the bundle in the gateway is a later
+	# change; until then building it is the end of the line.
+	cd ui && bun test
+	cd ui && bun run build
 	# ACORNFALL_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
 	# the same command behaves the same on a machine with /dev/kvm and in CI. -short skips the
 	# tests whose assertions need a sandbox; the rest of the feature suite runs in parallel.
