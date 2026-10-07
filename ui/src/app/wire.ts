@@ -105,10 +105,19 @@ export interface WireCommands {
 	}[];
 }
 
+export interface WireLayerTrace {
+	layer: string;
+	path: string;
+	/** The layer's own contribution document, left raw on purpose. */
+	contributes?: unknown;
+}
+
 export interface WireResolvedAgent {
 	name: string;
+	source?: string | undefined;
 	model?: string | undefined;
 	thinking?: string | undefined;
+	layers?: WireLayerTrace[] | undefined;
 }
 
 export interface WireState {
@@ -120,6 +129,7 @@ export interface WireState {
 	workerError?: string | undefined;
 	sandbox: WireSandbox;
 	capabilities: WireCapabilities;
+	harness: string;
 	/** The effective binding: what will actually run, resolved across the layers. */
 	agent: WireBinding;
 	resolved?: WireResolvedAgent | undefined;
@@ -141,6 +151,21 @@ export interface WireContentBlock {
 	arguments?: unknown;
 }
 
+/** A tool the model was given, as a system entry adds it. */
+export interface WireTool {
+	name: string;
+	description?: string | undefined;
+	parameters?: unknown;
+}
+
+/** What a provider reported for one call. */
+export interface WireUsage {
+	input: number;
+	output: number;
+	cacheRead?: number | undefined;
+	cacheWrite?: number | undefined;
+}
+
 export interface WireMessage {
 	content: string | WireContentBlock[];
 	timestamp?: number | undefined;
@@ -151,6 +176,11 @@ export interface WireMessage {
 	toolCallId?: string | undefined;
 	toolName?: string | undefined;
 	isError?: boolean | undefined;
+	/** System entries carry the prompt as patches: `null` removes a section. */
+	sections?: Record<string, string | null> | undefined;
+	toolsAdded?: WireTool[] | undefined;
+	toolsRemoved?: { name: string }[] | undefined;
+	usage?: WireUsage | undefined;
 }
 
 export interface WireEntry {

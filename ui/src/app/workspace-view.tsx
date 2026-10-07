@@ -4,6 +4,10 @@ import { ConversationList } from "@/components/conversation/conversation-list";
 import { Composer } from "@/components/composer/composer";
 import { Picker } from "@/components/composer/picker";
 import { SlashMenu } from "@/components/composer/slash-menu";
+import { AgentPanel } from "@/components/inspector/agent-panel";
+import { ContextPanel } from "@/components/inspector/context-panel";
+import { Inspector } from "@/components/inspector/inspector";
+import { RunPanel } from "@/components/inspector/run-panel";
 import { Transcript } from "@/components/transcript/transcript";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Text } from "@/components/typography/text";
@@ -73,6 +77,59 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		</Text>
 	);
 
+	// The inspector: the answer to "why did it see that", from the fold — one request, what
+	// changed since the one before it, and which layer set what.
+	const latest = platform.context.at(-1);
+	const inspector = (
+		<Inspector
+			sections={[
+				{
+					key: "context",
+					title: "Context",
+					hint:
+						latest === undefined
+							? "nothing sent yet"
+							: `${latest.sections.size} sections · ${latest.tools.size} tools`,
+					body: <ContextPanel requests={platform.context} usage={platform.usage} />,
+				},
+				{
+					key: "agent",
+					title: "Agent",
+					hint: platform.agent.value,
+					body: (
+						<AgentPanel
+							resolved={platform.resolved}
+							model={platform.model.value}
+							thinking={platform.thinking.value}
+							thinkingRequested={platform.thinkingRequested}
+							sandbox={platform.sandbox}
+							harness={platform.harness}
+						/>
+					),
+				},
+				{
+					key: "run",
+					title: "Run",
+					hint: platform.active?.running === true ? "running" : "idle",
+					body: (
+						<RunPanel
+							running={platform.active?.running === true}
+							queued={
+								platform.entries.filter((entry) => entry.kind === "pending").length
+							}
+							model={platform.model.value}
+							thinking={platform.thinking.value}
+						/>
+					),
+				},
+			]}
+			open={platform.inspectorOpen}
+			onOpenChange={platform.setInspectorOpen}
+			maximized={platform.inspectorMaximized}
+			onMaximizedChange={platform.setInspectorMaximized}
+		/>
+	);
+
 	return (
 		<Shell
 			rail={rail}
@@ -83,6 +140,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			onRailCollapsedChange={platform.toggleRail}
 			railWidth={platform.railWidth}
 			onRailWidthChange={platform.setRailWidth}
+			inspector={inspector}
 			transcript={<Transcript entries={platform.entries} onFork={platform.fork} />}
 			composer={
 				<Composer

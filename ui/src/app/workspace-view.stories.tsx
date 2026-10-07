@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { foldContext } from "./context";
 import type { Platform } from "./use-platform";
 import type { ConversationSummary, TranscriptEntry } from "./view-models";
 import { WorkspaceView } from "./workspace-view";
@@ -173,6 +174,21 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 				source: "workspace",
 			},
 		],
+		context: [],
+		resolved: {
+			name: "scout",
+			source: "/acornfall/.agents/agents/scout.md",
+			model: "opencode-go/deepseek",
+			layers: [
+				{ layer: "install", path: "~/.acornfall/agents/default.md" },
+				{ layer: "workspace", path: "/acornfall/.agents/agents/scout.md" },
+			],
+		},
+		harness: "pi-durable",
+		sandbox: "microsandbox",
+		inspectorOpen: [],
+		setInspectorOpen: noop,
+		setInspectorMaximized: noop,
 		railOpen: false,
 		railCollapsed: false,
 		theme: "light",
@@ -240,4 +256,59 @@ export const PhoneRailOpen: Story = {
 /** The rail is a column that can be put away, and the choice survives a reload. */
 export const RailCollapsed: Story = {
 	args: { platform: makePlatform({ railCollapsed: true }) },
+};
+
+/** From 2xl the inspector is a pane of its own: the answer to "why did it see that". */
+export const InspectorOpen: Story = {
+	args: {
+		platform: makePlatform({
+			inspectorOpen: ["context"],
+			context: foldContext([
+				{
+					id: 10,
+					kind: "pi.system",
+					model: [
+						{
+							content: "",
+							sections: {
+								preamble: "You are a careful engineer.",
+								cwd: "<cwd>\n/acornfall\n</cwd>",
+							},
+							toolsAdded: [
+								{
+									name: "read",
+									description: "read a file",
+									parameters: { type: "object" },
+								},
+								{
+									name: "bash",
+									description: "run a command",
+									parameters: { type: "object" },
+								},
+							],
+						},
+					],
+				},
+				{
+					id: 92,
+					kind: "pi.system",
+					model: [
+						{
+							content: "",
+							sections: { instructions: "global + workspace + agent" },
+							toolsAdded: [
+								{
+									name: "edit",
+									description: "edit a file",
+									parameters: { type: "object" },
+								},
+							],
+							toolsRemoved: [{ name: "bash" }],
+						},
+					],
+				},
+			]),
+		}),
+	},
+	parameters: { viewport: { defaultViewport: "wide" } },
 };

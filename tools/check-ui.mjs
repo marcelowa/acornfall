@@ -377,7 +377,51 @@ try {
 		await page.keyboard.press("Backspace");
 	}
 
-	// 6. The phone gets the transcript, not a rail eating it; the drawer is how the rail opens.
+	// 7. The inspector, from 2xl up: closed by default, the open section remembered, and one
+	// section at a time can take the panel. These are the assertions the old client's suite
+	// made against its own inspector; they belong here now.
+	await page.setViewport({ width: 1600, height: 900 });
+	await page.evaluate(() => {
+		localStorage.removeItem("acornfall.ui.inspectorOpen");
+		localStorage.removeItem("acornfall.ui.inspectorMaximized");
+	});
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await page.waitForSelector("[data-slot=inspector]", { timeout: 15000 });
+
+	const sectionCount = await page.evaluate(
+		() => document.querySelectorAll("[data-slot=inspector] [data-section]").length,
+	);
+	check("the inspector has sections", sectionCount >= 3, `${sectionCount} sections`);
+	const openSections = () =>
+		page.evaluate(() =>
+			[...document.querySelectorAll('[data-slot=inspector] [aria-expanded="true"]')].map((element) =>
+				element.closest("[data-section]")?.getAttribute("data-section"),
+			),
+		);
+	check("the inspector starts closed", (await openSections()).length === 0);
+
+	await page.click("[data-slot=inspector] [data-section] button[aria-expanded]");
+	check("a section opens", (await openSections()).length === 1, JSON.stringify(await openSections()));
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await page.waitForSelector("[data-slot=inspector]", { timeout: 15000 });
+	check(
+		"the open section is remembered across a reload",
+		(await openSections()).length === 1,
+		JSON.stringify(await openSections()),
+	);
+
+	await page.click("[data-slot=inspector] [data-section] button[aria-label^='Maximize']");
+	const maximized = await page.evaluate(
+		() => document.querySelectorAll("[data-slot=inspector] [data-section]").length,
+	);
+	check("maximizing leaves one section on screen", maximized === 1, `${maximized} sections`);
+	await page.click("[data-slot=inspector] [data-section] button[aria-label='Restore the section']");
+	const restored = await page.evaluate(
+		() => document.querySelectorAll("[data-slot=inspector] [data-section]").length,
+	);
+	check("restoring brings the others back", restored > 1, `${restored} sections`);
+
+	// 8. The phone gets the transcript, not a rail eating it; the drawer is how the rail opens.
 	await page.setViewport({ width: 390, height: 844 });
 	await page.reload({ waitUntil: "domcontentloaded" });
 	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });

@@ -11,6 +11,7 @@ import {
 	setAgent,
 	type AgentChange,
 } from "./client";
+import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
 	originLabel,
 	toAgentGroups,
@@ -27,10 +28,12 @@ import type {
 	SlashCommand,
 	TranscriptEntry,
 } from "./view-models";
-import type { WireSender, WireState, WireView } from "./wire";
+import type { WireResolvedAgent, WireSender, WireState, WireUsage, WireView } from "./wire";
 
 const RAIL_WIDTH_KEY = "acornfall.ui.railWidth";
 const RAIL_COLLAPSED_KEY = "acornfall.ui.railCollapsed";
+const INSPECTOR_OPEN_KEY = "acornfall.ui.inspectorOpen";
+const INSPECTOR_MAXIMIZED_KEY = "acornfall.ui.inspectorMaximized";
 const SEEN_KEY = "acornfall.seen";
 const THEME_KEY = "acornfall.ui.theme";
 
@@ -109,6 +112,19 @@ export interface Platform {
 	agent: ChoicePicker;
 	/** The commands the server would expand, for the slash menu. */
 	commands: SlashCommand[];
+	/** What the model saw, request by request — the inspector's fold. */
+	context: ContextRequest[];
+	usage?: WireUsage | undefined;
+	resolved?: WireResolvedAgent | undefined;
+	harness?: string | undefined;
+	sandbox?: string | undefined;
+	/** The level that was asked for when the model could not express it. */
+	thinkingRequested?: string | undefined;
+	/** The inspector's own state, kept the way the rail's is. */
+	inspectorOpen: string[];
+	setInspectorOpen: (open: string[]) => void;
+	inspectorMaximized?: string | undefined;
+	setInspectorMaximized: (key: string | undefined) => void;
 	railWidth?: number | undefined;
 	railOpen: boolean;
 	/** The desktop column: false keeps it open, which is the default. */
@@ -143,6 +159,12 @@ export function usePlatform(): Platform {
 	const [railOpen, setRailOpen] = useState(false);
 	const [railCollapsed, setRailCollapsed] = useState<boolean>(() =>
 		read(RAIL_COLLAPSED_KEY, false),
+	);
+	const [inspectorOpen, setInspectorOpenState] = useState<string[]>(() =>
+		read(INSPECTOR_OPEN_KEY, []),
+	);
+	const [inspectorMaximized, setInspectorMaximizedState] = useState<string | undefined>(
+		() => read<string | null>(INSPECTOR_MAXIMIZED_KEY, null) ?? undefined,
 	);
 	const [system, setSystem] = useState<"light" | "dark">(systemTheme);
 	const [choice, setChoice] = useState<"light" | "dark" | null>(storedTheme);
@@ -265,6 +287,8 @@ export function usePlatform(): Platform {
 				),
 		[state, activeId, seen],
 	);
+
+	const contextFold = useMemo(() => foldContext(view?.entries ?? []), [view]);
 	const deleted = useMemo(
 		() =>
 			(state?.conversations ?? [])
@@ -424,6 +448,17 @@ export function usePlatform(): Platform {
 		});
 	}, []);
 
+	const setInspectorOpen = useCallback((open: string[]) => {
+		setInspectorOpenState(open);
+		window.localStorage.setItem(INSPECTOR_OPEN_KEY, JSON.stringify(open));
+	}, []);
+
+	const setInspectorMaximized = useCallback((key: string | undefined) => {
+		setInspectorMaximizedState(key);
+		if (key === undefined) window.localStorage.removeItem(INSPECTOR_MAXIMIZED_KEY);
+		else window.localStorage.setItem(INSPECTOR_MAXIMIZED_KEY, JSON.stringify(key));
+	}, []);
+
 	return {
 		ready,
 		error,
@@ -438,6 +473,16 @@ export function usePlatform(): Platform {
 		thinking,
 		agent,
 		commands,
+		context: contextFold,
+		usage: lastUsage(view?.entries ?? []),
+		resolved: state?.resolved,
+		thinkingRequested: state?.agent.thinkingRequested,
+		harness: state?.harness,
+		sandbox: state?.sandbox.engine ?? state?.capabilities.sandbox,
+		inspectorOpen,
+		setInspectorOpen,
+		inspectorMaximized,
+		setInspectorMaximized,
 		railWidth,
 		railOpen,
 		railCollapsed,
