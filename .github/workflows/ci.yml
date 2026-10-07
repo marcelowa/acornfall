@@ -2,20 +2,21 @@
 #
 # `make lint` is static analysis and `make test` adds the unit tests, the worker protocol
 # against a real worker process, -race, and the end-to-end suite against a real gateway.
-# Nothing here needs a model or a network.
+# `make test-sandbox` boots real microVMs, and GitHub-hosted Linux runners do expose
+# /dev/kvm — it is just 660 root:kvm, so the job makes it readable first. The dispatch input
+# is for running the microVM suite somewhere else (a self-hosted label, or an ARM image that
+# has KVM).
 name: ci
 
 on:
   push:
   pull_request:
-  # The slow tier needs a hypervisor, which GitHub-hosted runners do not have, so it is run
-  # on demand and names the runner: a self-hosted label with /dev/kvm. The default path must
-  # never depend on it (see the sandbox job below).
   workflow_dispatch:
     inputs:
       runner:
-        description: "A runner with /dev/kvm (a self-hosted label, or a larger runner with nested virtualisation)"
-        required: true
+        description: "Runner for the microVM suite (default: ubuntu-latest, which has /dev/kvm)"
+        required: false
+        default: ubuntu-latest
         type: string
 
 jobs:
@@ -67,10 +68,10 @@ jobs:
         run: echo "the first push to a branch has no range behind it; skipping"
 
   sandbox:
-    # `make test-sandbox` boots real microVMs, so it runs only where somebody dispatched it to
-    # a hypervisor. It fails rather than skips when /dev/kvm is missing, because a slow tier
-    # that silently does nothing is how this bug class survives.
-    if: github.event_name == 'workflow_dispatch'
+    # `make test-sandbox` boots real microVMs. GitHub's Linux runners have /dev/kvm; the udev
+    # rule gives the runner user access to it. It fails rather than skips when /dev/kvm is
+    # missing or unreadable, because a slow tier that silently does nothing is how this bug
+    # class survives.
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +82,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Make /dev/kvm readable
+        if: runner.os == 'Linux'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
       - run: make deps
       - run: make test-sandbox
 
