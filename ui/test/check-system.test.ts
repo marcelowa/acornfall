@@ -45,6 +45,30 @@ describe("the design system scanner", () => {
 		expect(violations[0]?.rule).toBe("primitive read outside tokens.css");
 	});
 
+	test("lets the foundations pages read primitives to show them", () => {
+		const palette = file(
+			"src/foundations/palette.stories.tsx",
+			'<div style={{ backgroundColor: "var(--base-brand-500)" }} />',
+		);
+		expect(scan(palette)).toEqual([]);
+	});
+
+	test("lets a line carry an exception with its reason", () => {
+		const overview = file(
+			"src/foundations/overview.stories.tsx",
+			'// check-system:ignore -- the page shows them\nconst rejected = ["text-[11px]"];',
+		);
+		expect(scan(overview)).toEqual([]);
+	});
+
+	test("does not let an exception without a reason pass", () => {
+		const sloppy = file(
+			"src/components/ui/button.tsx",
+			'// check-system:ignore\nconst bad = "text-[11px]";',
+		);
+		expect(scan(sloppy)).toHaveLength(1);
+	});
+
 	test("fails a class on a screen", () => {
 		const violations = scan(file("src/screens/shell.tsx", '<div className="p-4" />'));
 		expect(violations).toHaveLength(1);

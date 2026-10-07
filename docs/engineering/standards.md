@@ -135,6 +135,8 @@ split would hide exactly that.
 | T13 | Screens are dumb and classless: they compose components and the layout primitives, and the app applies the logic. | A screen that styles or fetches cannot be rendered as a story, and the states nobody stories are the states that break. | `ui/scripts/check-system.ts`, in `make lint` |
 | T14 | A component, and every state it can be in, has a story in Storybook, in light and in dark. | The catalogue is the design surface; "reviewed in Storybook" is only true if the state is there. | Convention, review |
 
+The Foundations pages (`ui/src/foundations/`) are the catalogue's own: they display the primitive ramps with `var(--base-*)`, and `check-system` exempts them from T12's rule for exactly that reason. They are not a place to import from.
+
 ## Enforcement
 
 `make lint` is the static half. It runs only what it finds installed, and says what is missing

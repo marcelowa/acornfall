@@ -4,7 +4,7 @@ import { Heading } from "./heading";
 import { Text } from "./text";
 
 const meta = {
-	title: "Typography",
+	title: "Foundations/Typography",
 	parameters: { layout: "centered" },
 } satisfies Meta;
 

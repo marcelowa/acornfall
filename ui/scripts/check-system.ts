@@ -45,21 +45,28 @@ const paletteColour =
 	/\b(?:bg|text|border|ring|fill|stroke|divide|outline|from|via|to|decoration|placeholder|caret|accent|shadow)-(?:white|black|(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:-\d{2,3})?)(?:\/\d+)?\b/;
 
 /** A primitive read from application code. The direction is one way: primitives feed the
- * semantic layer in tokens.css, and everything else reads the semantic name. */
+ * semantic layer in tokens.css, and everything else reads the semantic name. The foundations
+ * pages are the one exception — they display the ramps, and they are not application code. */
 const baseToken = /--base-/;
 
 export function scanSources(files: SourceFile[]): Violation[] {
 	const violations: Violation[] = [];
 
 	for (const file of files) {
+		const lines = file.text.split("\n");
 		const isScreen =
 			file.path.startsWith("src/screens/") && !/\.(stories|test)\./.test(file.path);
+		const isFoundations = file.path.startsWith("src/foundations/");
 
-		file.text.split("\n").forEach((line, index) => {
+		lines.forEach((line, index) => {
 			const trimmed = line.trim();
 			// Prose in a comment explains the rule and names the values it forbids; scanning it
 			// would make the rule impossible to write down.
 			if (trimmed.startsWith("*") || trimmed.startsWith("//")) return;
+			// A page that has to show a forbidden literal says why: the marker exempts the next
+			// line, and it only works with a reason after " -- ", the way S9 asks.
+			const marker = /check-system:ignore -- \S/;
+			if (marker.test(line) || marker.test(lines[index - 1] ?? "")) return;
 
 			const at = { path: file.path, line: index + 1 };
 			if (arbitraryValue.test(line)) {
@@ -68,7 +75,7 @@ export function scanSources(files: SourceFile[]): Violation[] {
 			if (paletteColour.test(line)) {
 				violations.push({ ...at, rule: "default palette colour", text: trimmed });
 			}
-			if (baseToken.test(line)) {
+			if (!isFoundations && baseToken.test(line)) {
 				violations.push({
 					...at,
 					rule: "primitive read outside tokens.css",
@@ -191,7 +198,9 @@ if (import.meta.main) {
 			(violation) =>
 				`${violation.path}:${violation.line}  ${violation.rule}\n    ${violation.text}`,
 		);
-		console.error(`design system:\n  - ${lines.join("\n  - ")}`);
+		console.error(
+			`design system:\n  - ${lines.join("\n  - ")}\n\nA literal the page must show takes "check-system:ignore -- reason" on the line above it.`,
+		);
 		process.exit(1);
 	}
 	console.log("design system: tokens resolve, defaults do not, screens carry no classes");
