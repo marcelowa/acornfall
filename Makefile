@@ -48,13 +48,13 @@ typecheck: ## the compiler's opinion, without running anything
 	cd worker && bun run typecheck
 
 lint: typecheck ## the static rules; fails on the first one broken
-	node scripts/check-client.mjs
-	node scripts/check-context.mjs
+	bun scripts/check-client.mjs
+	bun scripts/check-context.mjs
 	@out=$$(gofmt -l gateway); if [ -n "$$out" ]; then echo "$$out"; echo "gofmt: not formatted"; exit 1; fi; echo "gofmt: clean"
 	cd gateway && go vet ./...
 	@if [ -x "$(STATICCHECK)" ]; then cd gateway && $(STATICCHECK) ./... && echo "staticcheck: clean"; \
 	else echo "staticcheck: not installed (make tools)"; fi
-	node scripts/check-house-rules.mjs
+	bun scripts/check-house-rules.mjs
 	cd worker && bun run format:check
 	cd worker && bun run lint
 
@@ -66,7 +66,7 @@ modernize: ## the idiom analyzer; a daily workflow runs it, `make lint` does not
 	cd gateway && go vet -vettool=$(MODERNIZE) ./... && echo "modernize: clean"
 
 commits: ## check commit messages (RANGE=origin/main..HEAD by default)
-	node scripts/check-commits.mjs $(RANGE)
+	bun scripts/check-commits.mjs $(RANGE)
 
 # The slow tier's image cache, shared across runs and across both the Go and worker suites so
 # an image is pulled once per machine. Nothing may delete it: a fresh state directory per run

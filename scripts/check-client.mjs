@@ -1,32 +1,25 @@
 // Guards the no-build-step client: every el("id") lookup must exist in the
 // markup. Run with `make check`.
 import { readFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
-const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 const web = join(here, "..", "gateway", "web");
-
-// Syntax first: a stray brace is not a lookup failure and must not reach a browser.
-try {
-	await run(process.execPath, ["--check", join(web, "app.js")]);
-} catch (error) {
-	const detail = String(error.stderr ?? error.message)
-		.split("\n")
-		.filter((line) => line.includes("SyntaxError") || line.includes("app.js:"))
-		.join("\n");
-	console.error(`app.js does not parse:\n${detail}`);
-	process.exit(1);
-}
 
 const [js, html, css] = await Promise.all([
 	readFile(join(web, "app.js"), "utf8"),
 	readFile(join(web, "index.html"), "utf8"),
 	readFile(join(web, "style.css"), "utf8"),
 ]);
+
+// Syntax first: a stray brace is not a lookup failure and must not reach a browser.
+try {
+	new Bun.Transpiler({ loader: "js" }).transformSync(js);
+} catch (error) {
+	console.error(`app.js does not parse:\n${parseDetails(error)}`);
+	process.exit(1);
+}
 
 const referenced = [...js.matchAll(/\bel\("([^"]+)"\)/g)].map((match) => match[1]);
 const declared = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
@@ -48,3 +41,18 @@ if (usesHidden && !hidesByAttribute) {
 }
 
 console.log(`client check ok: ${new Set(referenced).size} element lookups resolve`);
+
+/** Where a parse failed, in the shape a compiler would say it. */
+function parseDetails(error) {
+	const errors = Array.isArray(error?.errors) ? error.errors : [];
+	if (errors.length === 0) return String(error?.message ?? error);
+	return errors
+		.map((item) => {
+			const at =
+				item.position === undefined
+					? ""
+					: `:${item.position.line}:${item.position.column}`;
+			return `  app.js${at} ${item.message}`;
+		})
+		.join("\n");
+}

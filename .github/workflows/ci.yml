@@ -47,9 +47,9 @@ jobs:
         with:
           # The range needs the commits behind it.
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: "26"
+          bun-version: latest
       - name: Decide what to check
         id: range
         run: |
@@ -62,7 +62,7 @@ jobs:
           fi
       - name: Check the messages
         if: steps.range.outputs.value != ''
-        run: node scripts/check-commits.mjs "${{ steps.range.outputs.value }}"
+        run: bun scripts/check-commits.mjs "${{ steps.range.outputs.value }}"
       - name: Nothing to check
         if: steps.range.outputs.value == ''
         run: echo "the first push to a branch has no range behind it; skipping"
