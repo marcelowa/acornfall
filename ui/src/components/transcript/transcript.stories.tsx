@@ -4,10 +4,12 @@ import { Transcript } from "./transcript";
 const meta = {
 	title: "Conversation/Transcript",
 	component: Transcript,
-	parameters: { layout: "centered" },
+	parameters: { layout: "fullscreen" },
 	decorators: [
+		// The transcript is its own scroll region: the frame has to give it a height, or there
+		// is nothing for it to scroll inside.
 		(Story) => (
-			<div className="w-full max-w-2xl bg-background p-6">
+			<div className="flex h-full w-full flex-col bg-background">
 				<Story />
 			</div>
 		),

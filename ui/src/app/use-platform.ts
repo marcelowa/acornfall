@@ -30,6 +30,7 @@ import type {
 import type { WireSender, WireState, WireView } from "./wire";
 
 const RAIL_WIDTH_KEY = "acornfall.ui.railWidth";
+const RAIL_COLLAPSED_KEY = "acornfall.ui.railCollapsed";
 const SEEN_KEY = "acornfall.seen";
 const THEME_KEY = "acornfall.ui.theme";
 
@@ -110,6 +111,9 @@ export interface Platform {
 	commands: SlashCommand[];
 	railWidth?: number | undefined;
 	railOpen: boolean;
+	/** The desktop column: false keeps it open, which is the default. */
+	railCollapsed: boolean;
+	toggleRail: () => void;
 	theme: "light" | "dark";
 	select: (id: string) => void;
 	rename: (id: string, title: string) => void;
@@ -137,6 +141,9 @@ export function usePlatform(): Platform {
 		() => read<number | null>(RAIL_WIDTH_KEY, null) ?? undefined,
 	);
 	const [railOpen, setRailOpen] = useState(false);
+	const [railCollapsed, setRailCollapsed] = useState<boolean>(() =>
+		read(RAIL_COLLAPSED_KEY, false),
+	);
 	const [system, setSystem] = useState<"light" | "dark">(systemTheme);
 	const [choice, setChoice] = useState<"light" | "dark" | null>(storedTheme);
 	const theme = choice ?? system;
@@ -409,6 +416,14 @@ export function usePlatform(): Platform {
 		window.localStorage.setItem(RAIL_WIDTH_KEY, JSON.stringify(width));
 	}, []);
 
+	const toggleRail = useCallback(() => {
+		setRailCollapsed((current) => {
+			const next = !current;
+			window.localStorage.setItem(RAIL_COLLAPSED_KEY, JSON.stringify(next));
+			return next;
+		});
+	}, []);
+
 	return {
 		ready,
 		error,
@@ -425,6 +440,8 @@ export function usePlatform(): Platform {
 		commands,
 		railWidth,
 		railOpen,
+		railCollapsed,
+		toggleRail,
 		theme,
 		select,
 		rename,

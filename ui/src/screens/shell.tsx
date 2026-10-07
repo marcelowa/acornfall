@@ -22,6 +22,9 @@ export interface ShellProps {
 	bar?: ReactNode | undefined;
 	railOpen?: boolean | undefined;
 	onRailOpenChange?: ((open: boolean) => void) | undefined;
+	/** The desktop column: false keeps it open, which is the default. */
+	railCollapsed?: boolean | undefined;
+	onRailCollapsedChange?: ((collapsed: boolean) => void) | undefined;
 	/** Controlled rail width in pixels; the token's 280px when omitted. */
 	railWidth?: number | undefined;
 	onRailWidthChange?: ((width: number) => void) | undefined;
@@ -35,6 +38,8 @@ export function Shell({
 	bar,
 	railOpen,
 	onRailOpenChange,
+	railCollapsed,
+	onRailCollapsedChange,
 	railWidth,
 	onRailWidthChange,
 }: ShellProps) {
@@ -46,15 +51,17 @@ export function Shell({
 				bar={bar}
 				asideOpen={railOpen}
 				onAsideOpenChange={onRailOpenChange}
+				asideCollapsed={railCollapsed}
+				onAsideCollapsedChange={onRailCollapsedChange}
 				asideWidth={railWidth}
 				onAsideWidthChange={onRailWidthChange}
 			>
+				{/* The transcript owns its own scrolling: it knows when it is following the end and
+				 * when the reader has scrolled away from it. */}
 				<Stack gap="none" fill>
-					<Stack gap="none" scroll="vertical" fill>
-						{transcript}
-					</Stack>
-					{composer}
+					{transcript}
 				</Stack>
+				{composer}
 			</Split>
 		</Page>
 	);

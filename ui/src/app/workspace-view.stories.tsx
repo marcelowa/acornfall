@@ -174,6 +174,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			},
 		],
 		railOpen: false,
+		railCollapsed: false,
 		theme: "light",
 		select: noop,
 		rename: noop,
@@ -183,6 +184,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		abort: noop,
 		setRailWidth: noop,
 		setRailOpen: noop,
+		toggleRail: noop,
 		toggleTheme: noop,
 		...overrides,
 	};
@@ -233,4 +235,9 @@ export const Phone: Story = {
 export const PhoneRailOpen: Story = {
 	args: { platform: makePlatform({ railOpen: true }) },
 	parameters: { viewport: { defaultViewport: "phone" } },
+};
+
+/** The rail is a column that can be put away, and the choice survives a reload. */
+export const RailCollapsed: Story = {
+	args: { platform: makePlatform({ railCollapsed: true }) },
 };

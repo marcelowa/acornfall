@@ -139,10 +139,42 @@ try {
 		`${Math.round(railAfter)} → ${Math.round(railReloaded)}`,
 	);
 
+	// The rail is a column that can be put away on a wide screen, and the choice is remembered.
+	const hideRail = await page.$("button[aria-label='Hide the rail']");
+	check("the rail can be put away", hideRail !== null);
+	if (hideRail !== null) {
+		await hideRail.click();
+		const hidden = await railWidth();
+		check("hiding the rail leaves the pane to the transcript", hidden === 0, `${hidden}px`);
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await page.waitForSelector("[data-slot=composer]", { timeout: 15000 });
+		const stillHidden = await railWidth();
+		check("the rail stays away after a reload", stillHidden === 0, `${stillHidden}px`);
+		const showRail = await page.$("button[aria-label='Show the rail']");
+		if (showRail !== null) {
+			await showRail.click();
+			const back = await railWidth();
+			check("the rail comes back", back > 200, `${back}px`);
+		}
+	}
+
 	// 2. The transcript renders, and nothing in it is squashed or clipped.
 	const found = await showConversationWithContent(page);
 	check("a conversation with content is on screen", found, "no conversation in this install has any content");
 	if (found) {
+		// The answer is at the end, so that is where a conversation opens; a short transcript
+		// that does not scroll is trivially at its end.
+		const atEnd = await page.evaluate(() => {
+			const element = document.querySelector("[data-slot=transcript]");
+			if (element === null) return { ok: true, note: "no transcript" };
+			const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
+			return {
+				ok: element.scrollHeight <= element.clientHeight + 8 || distance < 120,
+				note: `${Math.round(distance)}px from the end`,
+			};
+		});
+		check("the transcript opens at its end", atEnd.ok, atEnd.note);
+
 		const squashed = await page.evaluate(
 			(selector) =>
 				[...document.querySelectorAll(selector)]
@@ -324,6 +356,15 @@ try {
 			() => document.querySelector("[role=dialog] [data-slot=conversation-list]") !== null,
 		);
 		check("the toggle opens the rail in a drawer", drawerHasRail);
+		const drawerWidth = await page.evaluate(() => ({
+			drawer: Math.round(document.querySelector("[role=dialog]")?.getBoundingClientRect().width ?? 0),
+			window: window.innerWidth,
+		}));
+		check(
+			"the drawer takes the phone's width",
+			Math.abs(drawerWidth.drawer - drawerWidth.window) <= 1,
+			`${drawerWidth.drawer}px of ${drawerWidth.window}px`,
+		);
 		await page.keyboard.press("Escape");
 		await page.waitForFunction(() => document.querySelector("[role=dialog]") === null, { timeout: 5000 });
 		check("the drawer closes", true);

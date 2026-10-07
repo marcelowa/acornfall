@@ -18,21 +18,39 @@ const MAX_RAIL = 480;
  * The workbench: a rail, the pane beside it, and an optional end pane for the inspector where
  * the screen has room (2xl).
  *
- * The rail is part of the grid from `lg` up and behind a toggle below it. A 280px rail on a
- * 390px phone leaves the transcript unusable — which is the actual bug this shape prevents —
- * and Split owns the aside, so it owns the way to open it, and the handle that resizes it.
- * The width is controlled by the app when it wants the choice to survive a reload; the
- * default is the token.
+ * Below `lg` the rail is a drawer that takes the screen it is on — a 280px rail beside a
+ * 390px phone leaves the transcript unusable, and a drawer that only half-opens is a worse
+ * version of the same mistake. From `lg` it is a column the app can put away; the default is
+ * open, and Split owns the aside, so it owns the way to open, close, and resize it. The width
+ * is the token unless the app hands one in.
  */
 const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
 	variants: {
 		gap: gapScale,
-		withEnd: {
-			true: "lg:grid-cols-[var(--rail-width)_minmax(0,1fr)_auto] 2xl:grid-cols-[var(--rail-width)_minmax(0,1fr)_var(--inspector-width)]",
-			false: "lg:grid-cols-[var(--rail-width)_minmax(0,1fr)]",
-		},
+		withEnd: { true: "", false: "" },
+		collapsed: { true: "", false: "" },
 	},
-	defaultVariants: { gap: "none", withEnd: false },
+	compoundVariants: [
+		{
+			withEnd: false,
+			collapsed: false,
+			className: "lg:grid-cols-[var(--rail-width)_minmax(0,1fr)]",
+		},
+		{ withEnd: false, collapsed: true, className: "lg:grid-cols-[minmax(0,1fr)]" },
+		{
+			withEnd: true,
+			collapsed: false,
+			className:
+				"lg:grid-cols-[var(--rail-width)_minmax(0,1fr)_auto] 2xl:grid-cols-[var(--rail-width)_minmax(0,1fr)_var(--inspector-width)]",
+		},
+		{
+			withEnd: true,
+			collapsed: true,
+			className:
+				"lg:grid-cols-[minmax(0,1fr)_auto] 2xl:grid-cols-[minmax(0,1fr)_var(--inspector-width)]",
+		},
+	],
+	defaultVariants: { gap: "none", withEnd: false, collapsed: false },
 });
 
 export interface SplitProps extends VariantProps<typeof splitVariants> {
@@ -42,8 +60,12 @@ export interface SplitProps extends VariantProps<typeof splitVariants> {
 	/** Sits in the small-screen bar beside the rail toggle. The conversation title, usually. */
 	bar?: ReactNode | undefined;
 	asideLabel?: string | undefined;
+	/** The drawer, below `lg`. */
 	asideOpen?: boolean | undefined;
 	onAsideOpenChange?: ((open: boolean) => void) | undefined;
+	/** The column, from `lg` up. False keeps it open, which is the default. */
+	asideCollapsed?: boolean | undefined;
+	onAsideCollapsedChange?: ((collapsed: boolean) => void) | undefined;
 	/** Controlled rail width in pixels; the token's 280px when omitted. */
 	asideWidth?: number | undefined;
 	onAsideWidthChange?: ((width: number) => void) | undefined;
@@ -58,6 +80,8 @@ export function Split({
 	asideLabel = "Conversations",
 	asideOpen,
 	onAsideOpenChange,
+	asideCollapsed = false,
+	onAsideCollapsedChange: _onAsideCollapsedChange,
 	asideWidth,
 	onAsideWidthChange,
 	gap,
@@ -107,10 +131,18 @@ export function Split({
 
 	return (
 		<div
-			className={cn(splitVariants({ gap, withEnd: end !== undefined }), className)}
+			className={cn(
+				splitVariants({ gap, withEnd: end !== undefined, collapsed: asideCollapsed }),
+				className,
+			)}
 			style={width}
 		>
-			<aside className="relative hidden min-h-0 min-w-0 flex-col lg:flex">
+			<aside
+				className={cn(
+					"relative hidden min-h-0 min-w-0 flex-col lg:flex",
+					asideCollapsed && "lg:hidden",
+				)}
+			>
 				{/* The pane clips; its content owns its scroll. The handle stays outside the clip so
 				 * a drag does not lose the half that sits on the border. */}
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">{aside}</div>
@@ -151,10 +183,11 @@ export function Split({
 								<PanelLeft />
 							</Button>
 						</SheetTrigger>
+						{/* Full width: the drawer is the navigation, and half a screen of it is
+						 * neither the rail nor the transcript. */}
 						<SheetContent
 							side="left"
-							className="p-2"
-							style={{ width: "var(--rail-width)" }}
+							className="w-full p-2 sm:max-w-none"
 							aria-describedby={undefined}
 						>
 							<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
