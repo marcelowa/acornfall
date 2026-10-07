@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Stack } from "@/components/layout/stack";
 import { Text } from "@/components/typography/text";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 const time = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 const dateTime = new Intl.DateTimeFormat(undefined, {

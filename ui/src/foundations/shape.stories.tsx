@@ -3,7 +3,7 @@ import { Stack } from "@/components/layout/stack";
 import { Code } from "@/components/typography/code";
 import { Heading } from "@/components/typography/heading";
 import { Text } from "@/components/typography/text";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 const meta = {
 	title: "Foundations/Shape",

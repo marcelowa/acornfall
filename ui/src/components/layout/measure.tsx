@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 /**
  * A readable measure. Text that runs the full width of a 27-inch screen is harder to read,

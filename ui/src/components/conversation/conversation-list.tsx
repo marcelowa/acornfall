@@ -1,6 +1,6 @@
 import type { ConversationSummary } from "@/app/view-models";
 import { Text } from "@/components/typography/text";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { ConversationRow } from "./conversation-row";
 
 export interface ConversationListProps {

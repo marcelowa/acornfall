@@ -3,7 +3,7 @@ import DOMPurify, { type Config } from "dompurify";
 import hljs from "highlight.js/lib/common";
 import { Marked } from "marked";
 import { stripAnsi } from "@/lib/text";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import "highlight.js/styles/github-dark.css";
 import "./markdown.css";
 

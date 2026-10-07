@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { gapScale } from "./spacing";
 
 const gridVariants = cva("grid", {

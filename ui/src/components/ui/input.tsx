@@ -1,6 +1,6 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 /**
  * The input, with metricside's size axis kept and the invalid state driven by `aria-invalid`

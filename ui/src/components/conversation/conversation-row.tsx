@@ -3,7 +3,7 @@ import type { ConversationSummary } from "@/app/view-models";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { formatCost, formatTokens } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 export interface ConversationRowProps {
 	conversation: ConversationSummary;

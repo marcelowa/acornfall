@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 /**
  * The root surface. It paints the theme's background and text colour and fills its parent, so

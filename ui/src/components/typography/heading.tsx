@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 /**
  * A heading is a level, not a font size: `1` renders an `h1` and the size that belongs to it,

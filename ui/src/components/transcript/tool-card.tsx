@@ -2,7 +2,7 @@ import type { ToolEntry } from "@/app/view-models";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Text } from "@/components/typography/text";
 import { stripAnsi } from "@/lib/text";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { PaneFooter } from "./pane-footer";
 
 export interface ToolCardProps {

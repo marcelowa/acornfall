@@ -1,5 +1,5 @@
 import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 /**
  * Live state, as a dot. The rail's rule from ADR 0009 survives: a dot is for what is
