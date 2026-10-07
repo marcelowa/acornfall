@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { Stack } from "@/components/layout/stack";
 import { Measure } from "@/components/layout/measure";
+import { Stack } from "@/components/layout/stack";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -31,6 +31,9 @@ export interface ComposerProps {
  * The composer. It owns the keyboard contract — Enter sends, Shift+Enter is a newline — and
  * the shape of a turn while one is running: stop, or send and say whether that steers the
  * live turn or queues behind it. What the message means is the server's business.
+ *
+ * The controls and the actions wrap instead of sharing one line: a phone gets them on their
+ * own rows, rather than a row that runs off the screen.
  */
 export function Composer({
 	value,
@@ -72,41 +75,47 @@ export function Composer({
 						placeholder={placeholder}
 						className="max-h-(--composer-max-height)"
 					/>
-					<Stack direction="horizontal" gap="sm" align="center" justify="between">
-						<Stack direction="horizontal" gap="xs" align="center" className="min-w-0">
+					{/* One line on a wide screen, two rows on a phone: the controls get the width they
+					 * need instead of sharing it with four action buttons and truncating to a letter. */}
+					<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+						<div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
 							{controls}
-						</Stack>
-						{running ? (
-							<Stack direction="horizontal" gap="sm" align="center">
-								{steerable ? (
-									<ToggleGroup
-										type="single"
-										value={busyAction}
-										onValueChange={(next) => {
-											if (next === "steer" || next === "followUp")
-												onBusyActionChange(next);
-										}}
-										variant="outline"
-										size="sm"
-										spacing={0}
-									>
-										<ToggleGroupItem value="steer">Steer</ToggleGroupItem>
-										<ToggleGroupItem value="followUp">Queue</ToggleGroupItem>
-									</ToggleGroup>
-								) : null}
-								<Button variant="outline" size="sm" onClick={onAbort}>
-									Stop
-								</Button>
+						</div>
+						<div className="flex shrink-0 items-center justify-end gap-2">
+							{running ? (
+								<>
+									{steerable ? (
+										<ToggleGroup
+											type="single"
+											value={busyAction}
+											onValueChange={(next) => {
+												if (next === "steer" || next === "followUp")
+													onBusyActionChange(next);
+											}}
+											variant="outline"
+											size="sm"
+											spacing={0}
+										>
+											<ToggleGroupItem value="steer">Steer</ToggleGroupItem>
+											<ToggleGroupItem value="followUp">
+												Queue
+											</ToggleGroupItem>
+										</ToggleGroup>
+									) : null}
+									<Button variant="outline" size="sm" onClick={onAbort}>
+										Stop
+									</Button>
+									<Button size="sm" onClick={submit} disabled={!canSend}>
+										{busyAction === "steer" ? "Steer" : "Queue"}
+									</Button>
+								</>
+							) : (
 								<Button size="sm" onClick={submit} disabled={!canSend}>
-									{busyAction === "steer" ? "Steer" : "Queue"}
+									Send
 								</Button>
-							</Stack>
-						) : (
-							<Button size="sm" onClick={submit} disabled={!canSend}>
-								Send
-							</Button>
-						)}
-					</Stack>
+							)}
+						</div>
+					</div>
 				</Stack>
 			</Measure>
 		</div>

@@ -53,7 +53,7 @@ export function Picker({
 					size="xs"
 					disabled={disabled}
 					aria-label={label}
-					className={cn("max-w-(--container-sm) justify-start", className)}
+					className={cn("min-w-0 max-w-full justify-start", className)}
 					title={value === undefined || value === "" ? undefined : value}
 				>
 					<span className="text-muted-foreground">{label}:</span>
@@ -61,7 +61,11 @@ export function Picker({
 						{value === undefined || value === "" ? placeholder : value}
 					</span>
 					{origin === undefined ? null : (
-						<span className="truncate text-muted-foreground">· {origin}</span>
+						// The layer is worth a line in the menu and not worth the trigger's width on a
+						// phone, where the value itself is what has to fit.
+						<span className="hidden truncate text-muted-foreground sm:inline">
+							· {origin}
+						</span>
 					)}
 					{note === undefined ? null : (
 						<span className="truncate text-muted-foreground">· {note}</span>

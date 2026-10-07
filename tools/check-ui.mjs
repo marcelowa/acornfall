@@ -329,6 +329,17 @@ try {
 		check("the drawer closes", true);
 	}
 
+	// The composer's controls have to fit a phone: wrapping is fine, running past the edge is
+	// the bug this check exists for.
+	const controlOverflow = await page.evaluate(() => {
+		const composer = document.querySelector("[data-slot=composer]");
+		if (composer === null) return -1;
+		const box = composer.getBoundingClientRect();
+		return [...composer.querySelectorAll("*")].filter((el) => el.getBoundingClientRect().right > box.right + 1)
+			.length;
+	});
+	check("nothing in the composer runs past the phone's edge", controlOverflow === 0, `${controlOverflow} elements`);
+
 	check("no JavaScript errors", problems.length === 0, problems.join("; "));
 } finally {
 	await browser.close();
