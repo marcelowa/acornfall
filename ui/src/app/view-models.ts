@@ -36,7 +36,7 @@ export interface AgentSender {
 	conversationId: string;
 }
 
-export type TranscriptEntry = UserEntry | AssistantEntry | ToolEntry | NoticeEntry;
+export type TranscriptEntry = UserEntry | AssistantEntry | ToolEntry | NoticeEntry | PendingEntry;
 
 export interface UserEntry {
 	kind: "user";
@@ -76,6 +76,17 @@ export interface NoticeEntry {
 	id: string;
 	text: string;
 	at?: Date | undefined;
+}
+
+/**
+ * Something sent while a turn was running. It is real — the server took it — but it has not
+ * committed yet, so the transcript says so instead of pretending it is not there.
+ */
+export interface PendingEntry {
+	kind: "pending";
+	id: string;
+	text: string;
+	action: "steer" | "followUp";
 }
 
 /** One choice in a picker: the value is what the wire takes, the label is what a person reads. */

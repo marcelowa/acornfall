@@ -167,6 +167,14 @@ export interface WireToolSlot {
 	diagnostics?: { severity?: string | undefined }[] | undefined;
 }
 
+/** A message that has been accepted but not yet committed: it steers the run or waits behind it. */
+export interface WireInboxItem {
+	id: string;
+	/** `write` items are the harness's own drafts, not something a person sent. */
+	mode: "steer" | "followUp" | "write";
+	content?: string | WireContentBlock[] | undefined;
+}
+
 export interface WireLive {
 	generation?: { message?: WireMessage | undefined } | undefined;
 	tools?: WireToolSlot[] | undefined;
@@ -174,7 +182,12 @@ export interface WireLive {
 
 export interface WireView {
 	entries?: WireEntry[] | undefined;
-	docs?: { "pi.live"?: WireLive | undefined } | undefined;
+	docs?:
+		| {
+				"pi.live"?: WireLive | undefined;
+				"pi.inbox"?: { items?: WireInboxItem[] | undefined } | undefined;
+		  }
+		| undefined;
 }
 
 export interface WireSender {

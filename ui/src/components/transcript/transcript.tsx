@@ -5,6 +5,7 @@ import { Stack } from "@/components/layout/stack";
 import { Text } from "@/components/typography/text";
 import { AssistantMessage } from "./assistant-message";
 import { NoticeLine } from "./notice-line";
+import { PendingMessage } from "./pending-message";
 import { ToolCard } from "./tool-card";
 import { UserMessage } from "./user-message";
 
@@ -76,6 +77,8 @@ export function Transcript({ entries, onOpenConversation, onFork }: TranscriptPr
 									return <ToolCard key={entry.id} entry={entry} />;
 								case "notice":
 									return <NoticeLine key={entry.id} entry={entry} />;
+								case "pending":
+									return <PendingMessage key={entry.id} entry={entry} />;
 							}
 						})}
 					</Stack>

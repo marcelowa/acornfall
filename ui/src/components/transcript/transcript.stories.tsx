@@ -124,3 +124,25 @@ export const ToolRunning: Story = {
 		],
 	},
 };
+
+/** Sent while a turn was running: one steers it, one waits behind it. */
+export const Pending: Story = {
+	args: {
+		entries: [
+			{ kind: "user", id: "1", at, text: "Run the tests" },
+			{ kind: "assistant", id: "2", at, markdown: "Running them now." },
+			{
+				kind: "pending",
+				id: "pending-3",
+				text: "also check the lock order",
+				action: "steer",
+			},
+			{
+				kind: "pending",
+				id: "pending-4",
+				text: "then update the changelog",
+				action: "followUp",
+			},
+		],
+	},
+};

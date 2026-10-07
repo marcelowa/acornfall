@@ -284,5 +284,15 @@ export function toTranscript(
 		}
 	}
 
+	// Accepted and not committed: a steered message joins the turn that is running and a
+	// follow-up waits behind it. Showing them beats a message that vanished until it lands;
+	// `write` items are the harness's own drafts, not a person's words.
+	for (const item of view?.docs?.["pi.inbox"]?.items ?? []) {
+		if (item.mode !== "steer" && item.mode !== "followUp") continue;
+		const text = textOf(item.content).trim();
+		if (text === "") continue;
+		transcript.push({ kind: "pending", id: `pending-${item.id}`, text, action: item.mode });
+	}
+
 	return transcript;
 }

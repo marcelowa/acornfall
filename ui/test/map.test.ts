@@ -174,4 +174,29 @@ describe("the wire mapping", () => {
 		expect(groups[0]?.options[0]?.description).toBe("does a");
 		expect(groups[1]?.options[0]?.description).toBe("/b.md");
 	});
+
+	test("accepted messages that have not committed are shown as pending", () => {
+		const view: WireView = {
+			entries: [],
+			docs: {
+				"pi.inbox": {
+					items: [
+						{ id: "a", mode: "steer", content: "wait, check the lock order" },
+						{ id: "b", mode: "followUp", content: "then update the changelog" },
+						// The harness's own drafts are not a person's words.
+						{ id: "c", mode: "write", content: "internal reset" },
+						{ id: "d", mode: "steer", content: "   " },
+					],
+				},
+			},
+		};
+		const entries = toTranscript(view, {});
+		expect(entries).toHaveLength(2);
+		const [steer, followUp] = entries;
+		expect(steer?.kind === "pending" ? steer.action : undefined).toBe("steer");
+		expect(steer?.kind === "pending" ? steer.text : undefined).toBe(
+			"wait, check the lock order",
+		);
+		expect(followUp?.id).toBe("pending-b");
+	});
 });
