@@ -207,7 +207,7 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 // for the old behaviour that quietly gets the new one is a lie in the other direction.
 func TestTheTrustFlagIsGone(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	notSandbox(t)
 	s := start(t)
 	c := s.client()
 
