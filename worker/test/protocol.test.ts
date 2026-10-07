@@ -35,13 +35,28 @@ class Worker {
 	#nextId = 0;
 
 	constructor(directory: string, home: string, script: string) {
-		this.#process = Bun.spawn(["bun", "run", "src/main.ts", "--workspace", directory, "--storage", join(home, "session.sqlite"), "--credentials", join(home, "credentials.json"), "--home", home], {
-			cwd: workerDir,
-			env: { ...process.env, ACORNFALL_DEV_SCRIPT: script },
-			stdin: "pipe",
-			stdout: "pipe",
-			stderr: "inherit",
-		});
+		this.#process = Bun.spawn(
+			[
+				"bun",
+				"run",
+				"src/main.ts",
+				"--workspace",
+				directory,
+				"--storage",
+				join(home, "session.sqlite"),
+				"--credentials",
+				join(home, "credentials.json"),
+				"--home",
+				home,
+			],
+			{
+				cwd: workerDir,
+				env: { ...process.env, ACORNFALL_DEV_SCRIPT: script },
+				stdin: "pipe",
+				stdout: "pipe",
+				stderr: "inherit",
+			},
+		);
 		const stdin = this.#process.stdin;
 		if (stdin === undefined || typeof stdin === "number") {
 			throw new Error("the worker was started without a stdin pipe");
@@ -79,7 +94,10 @@ class Worker {
 
 	/** The response to one command, by id. */
 	async response<T = unknown>(id: string, timeout = 30_000): Promise<T> {
-		const frame = await this.wait((candidate) => candidate.type === "response" && candidate.id === id, timeout);
+		const frame = await this.wait(
+			(candidate) => candidate.type === "response" && candidate.id === id,
+			timeout,
+		);
 		if (frame.type === "response" && !frame.ok) throw new Error(frame.error);
 		return (frame as { data?: unknown }).data as T;
 	}
@@ -92,7 +110,10 @@ class Worker {
 		const existing = this.#frames.findIndex(predicate);
 		if (existing >= 0) return this.#frames.splice(existing, 1)[0]!;
 		return new Promise<Frame>((resolve, reject) => {
-			const timer = setTimeout(() => reject(new Error("timed out waiting for a frame")), timeout);
+			const timer = setTimeout(
+				() => reject(new Error("timed out waiting for a frame")),
+				timeout,
+			);
 			this.#waiters.push({
 				predicate,
 				resolve: (frame) => {
@@ -134,7 +155,11 @@ beforeAll(async () => {
 		JSON.stringify({
 			rules: [
 				{ match: "hello", reply: "PROTOCOL MARKER" },
-				{ match: "run it", tools: [{ name: "bash", args: { command: "echo ran" } }], reply: "did it" },
+				{
+					match: "run it",
+					tools: [{ name: "bash", args: { command: "echo ran" } }],
+					reply: "did it",
+				},
 			],
 		}),
 	);
@@ -157,7 +182,11 @@ describe("the worker protocol", () => {
 
 		expect(described.provider).toBe("pi-durable");
 		expect(described.workdir.endsWith("workspace")).toBe(true);
-		expect(described.providers.some((provider) => provider.id === "faux" && provider.authenticated)).toBe(true);
+		expect(
+			described.providers.some(
+				(provider) => provider.id === "faux" && provider.authenticated,
+			),
+		).toBe(true);
 		expect(described.capabilities.steer).toBe(true);
 	});
 
@@ -165,10 +194,14 @@ describe("the worker protocol", () => {
 		const created = await worker.call<{ conversationId: string }>({ type: "create" });
 		expect(created.conversationId).not.toBe("");
 
-		const listed = await worker.call<{ conversations: { id: string; root: boolean; hidden: boolean }[] }>({
+		const listed = await worker.call<{
+			conversations: { id: string; root: boolean; hidden: boolean }[];
+		}>({
 			type: "conversations",
 		});
-		const conversation = listed.conversations.find((candidate) => candidate.id === created.conversationId);
+		const conversation = listed.conversations.find(
+			(candidate) => candidate.id === created.conversationId,
+		);
 		expect(conversation).toBeDefined();
 		expect(conversation?.root).toBe(false);
 
@@ -180,12 +213,20 @@ describe("the worker protocol", () => {
 		});
 		expect(opened.model).toBeDefined();
 
-		await worker.call({ type: "rename", conversationId: created.conversationId, title: "Renamed" });
+		await worker.call({
+			type: "rename",
+			conversationId: created.conversationId,
+			title: "Renamed",
+		});
 		await worker.call({ type: "hide", conversationId: created.conversationId, hidden: true });
-		const after = await worker.call<{ conversations: { id: string; title: string; hidden: boolean }[] }>({
+		const after = await worker.call<{
+			conversations: { id: string; title: string; hidden: boolean }[];
+		}>({
 			type: "conversations",
 		});
-		const renamed = after.conversations.find((candidate) => candidate.id === created.conversationId);
+		const renamed = after.conversations.find(
+			(candidate) => candidate.id === created.conversationId,
+		);
 		expect(renamed?.title).toBe("Renamed");
 		expect(renamed?.hidden).toBe(true);
 	});
@@ -199,14 +240,19 @@ describe("the worker protocol", () => {
 		});
 		await worker.call({ type: "attach", conversationId: created.conversationId });
 
-		await worker.call({ type: "prompt", conversationId: created.conversationId, text: "run it" });
+		await worker.call({
+			type: "prompt",
+			conversationId: created.conversationId,
+			text: "run it",
+		});
 		const transcript = await worker.transcript(created.conversationId, "did it");
 		expect(transcript).toContain("toolCall");
 		expect(transcript).toContain("ran");
 		expect(transcript).toContain("did it");
 
 		const submission = await worker.wait(
-			(frame) => frame.type === "submission" && frame.conversationId === created.conversationId,
+			(frame) =>
+				frame.type === "submission" && frame.conversationId === created.conversationId,
 		);
 		expect(submission.type).toBe("submission");
 	});
@@ -230,12 +276,18 @@ describe("the worker protocol", () => {
 		expect(expanded.command).toBe("protocol-command");
 
 		// Anything that is not a command comes back untouched.
-		const plain = await worker.call<{ text: string }>({ type: "expand", text: "just a message" });
+		const plain = await worker.call<{ text: string }>({
+			type: "expand",
+			text: "just a message",
+		});
 		expect(plain.text).toBe("just a message");
 	});
 
 	test("a command that does not exist is left as the message it is", async () => {
-		const expanded = await worker.call<{ text: string }>({ type: "expand", text: "/not-a-command at all" });
+		const expanded = await worker.call<{ text: string }>({
+			type: "expand",
+			text: "/not-a-command at all",
+		});
 		expect(expanded.text).toBe("/not-a-command at all");
 	});
 
@@ -254,7 +306,9 @@ describe("the worker protocol", () => {
 		const commands = await worker.call<{ commands: { name: string }[] }>({ type: "commands" });
 		expect(commands.commands.some((command) => command.name === "protocol-command")).toBe(true);
 
-		const agents = await worker.call<{ agents: unknown[]; defaults: unknown[] }>({ type: "agents" });
+		const agents = await worker.call<{ agents: unknown[]; defaults: unknown[] }>({
+			type: "agents",
+		});
 		expect(Array.isArray(agents.agents)).toBe(true);
 	});
 

@@ -25,13 +25,17 @@ describe("a pattern guard", () => {
 	});
 
 	test("only applies to its tool", () => {
-		expect(matches(guard, { name: "write", arguments: { command: "rm -rf /" } }, cwd)).toBe(false);
+		expect(matches(guard, { name: "write", arguments: { command: "rm -rf /" } }, cwd)).toBe(
+			false,
+		);
 	});
 
 	test("a wildcard tool applies to every tool", () => {
 		const anyTool: Guard = { tool: "*", arg: "command", pattern: "sudo", reason: "no" };
 		expect(matches(anyTool, bash("sudo reboot"), cwd)).toBe(true);
-		expect(matches(anyTool, { name: "other", arguments: { command: "sudo now" } }, cwd)).toBe(true);
+		expect(matches(anyTool, { name: "other", arguments: { command: "sudo now" } }, cwd)).toBe(
+			true,
+		);
 	});
 
 	test("an argument that is missing, empty, or not a string cannot match", () => {

@@ -93,7 +93,10 @@ export const Anchor = defineTask<null, { phase: "done" }, null>({
 	initial: () => ({ phase: "done" }),
 	phases: {
 		done: (_anchor, runtime, context) =>
-			runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context),
+			runtime.commit(
+				() => ({ status: "terminal", outcome: { status: "completed", result: null } }),
+				context,
+			),
 	},
 	abort: (_anchor, runtime, context) =>
 		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
@@ -115,7 +118,9 @@ export type ReporterInput = {
 export type ReporterState = { phase: "deliver" } | { phase: "report"; report?: string };
 
 function textOf(message: AssistantMessage | undefined): string {
-	return (message?.content ?? []).flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+	return (message?.content ?? [])
+		.flatMap((block) => (block.type === "text" ? [block.text] : []))
+		.join("");
 }
 
 export function reporterTask(deps: StateDeps) {
@@ -142,7 +147,8 @@ export function reporterTask(deps: StateDeps) {
 				const settled = await submission.wait(context);
 				// `entry` is the admitted input, so provenance is recorded against the exact
 				// entry rather than inferred later from its text.
-				const placed = "entry" in settled && settled.entry !== undefined ? settled.entry : undefined;
+				const placed =
+					"entry" in settled && settled.entry !== undefined ? settled.entry : undefined;
 				if (placed !== undefined) {
 					await runtime.commit(async (tx) => {
 						const messages = await tx.doc(MessagesDoc, conversationId);
@@ -161,7 +167,9 @@ export function reporterTask(deps: StateDeps) {
 					// `exactOptionalPropertyTypes` means an absent report and an undefined
 					// one are different shapes, so build the checkpoint accordingly. The
 					// return type is explicit, or `phase` widens to string.
-					const next = (report?: string): { status: "running"; checkpoint: ReporterState } =>
+					const next = (
+						report?: string,
+					): { status: "running"; checkpoint: ReporterState } =>
 						report === undefined
 							? { status: "running", checkpoint: { phase: "report" } }
 							: { status: "running", checkpoint: { phase: "report", report } };
@@ -197,9 +205,14 @@ export function reporterTask(deps: StateDeps) {
 					// most an extra wake-up: the budget is a guard, not an invariant, and
 					// delivery itself is idempotent through the request id below.
 					const policy = await policyFor(deps, String(runtime.conversationId), context);
-					const state = await deps.harness.snapshot(DelegationDoc, runtime.conversationId, context);
+					const state = await deps.harness.snapshot(
+						DelegationDoc,
+						runtime.conversationId,
+						context,
+					);
 					const spent = (state?.wakes ?? 0) >= policy.delegation.maxWakes;
-					const kind = state?.agents[reporter.input.name]?.peer === true ? "peer" : "subagent";
+					const kind =
+						state?.agents[reporter.input.name]?.peer === true ? "peer" : "subagent";
 					const text = spent
 						? `[${kind} ${reporter.input.name} finished, but this conversation has used its ${policy.delegation.maxWakes} wake-ups. Read conversation ${String(reporter.input.conversationId)} for the answer.]`
 						: report;
@@ -228,7 +241,10 @@ export function reporterTask(deps: StateDeps) {
 					// Wait for it to be placed so the report can be attributed too: an answer
 					// arriving in a parent's transcript looks exactly like the user asking.
 					const settled = await submission.wait(context);
-					const placed = "entry" in settled && settled.entry !== undefined ? settled.entry : undefined;
+					const placed =
+						"entry" in settled && settled.entry !== undefined
+							? settled.entry
+							: undefined;
 					if (placed !== undefined) {
 						await runtime.commit(async (tx) => {
 							const messages = await tx.doc(MessagesDoc, runtime.conversationId);

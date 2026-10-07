@@ -34,10 +34,14 @@ function parseFrontmatter(source: string): Frontmatter {
 		const colon = line.indexOf(":");
 		if (colon === -1) continue;
 		const key = line.slice(0, colon).trim();
-		const value = line.slice(colon + 1).trim().replace(/^["']|["']$/g, "");
+		const value = line
+			.slice(colon + 1)
+			.trim()
+			.replace(/^["']|["']$/g, "");
 		if (key === "name") result.name = value;
 		else if (key === "description") result.description = value;
-		else if (key === "disable-model-invocation") result.disableModelInvocation = value === "true";
+		else if (key === "disable-model-invocation")
+			result.disableModelInvocation = value === "true";
 	}
 	return result;
 }
@@ -84,12 +88,18 @@ export async function loadSkills(roots: readonly string[], files: Files): Promis
 	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function renderSkills(skills: readonly Skill[], allowed: readonly string[] | null): string | undefined {
+export function renderSkills(
+	skills: readonly Skill[],
+	allowed: readonly string[] | null,
+): string | undefined {
 	const usable = skills.filter(
-		(skill) => !skill.disableModelInvocation && (allowed === null || allowed.includes(skill.name)),
+		(skill) =>
+			!skill.disableModelInvocation && (allowed === null || allowed.includes(skill.name)),
 	);
 	if (usable.length === 0) return undefined;
-	const lines = usable.map((skill) => `- ${skill.name}: ${skill.description}\n  dir: ${skill.dir}`);
+	const lines = usable.map(
+		(skill) => `- ${skill.name}: ${skill.description}\n  dir: ${skill.dir}`,
+	);
 	return `Skills provide specialized instructions. Read one with the skill tool before starting work it covers.\n\n${lines.join("\n")}`;
 }
 
@@ -110,7 +120,9 @@ export function skillsExtension(
 	return defineExtension({
 		name: "acornfall-skills",
 		sections: [
-			section("skills", (input) => renderSkills(skills, allowedFor(String(input.conversationId)))),
+			section("skills", (input) =>
+				renderSkills(skills, allowedFor(String(input.conversationId))),
+			),
 		],
 		tools: [
 			defineTool({
@@ -118,8 +130,12 @@ export function skillsExtension(
 				description:
 					"Load the full instructions for a skill by name. Use it before work the skill describes.",
 				parameters: Type.Object({
-					name: Type.String({ description: "Skill name, as listed in the skills section" }),
-					args: Type.Optional(Type.String({ description: "Optional request or arguments for the skill" })),
+					name: Type.String({
+						description: "Skill name, as listed in the skills section",
+					}),
+					args: Type.Optional(
+						Type.String({ description: "Optional request or arguments for the skill" }),
+					),
 				}),
 				execute: async (args, api) => {
 					const available = permitted(String(api.conversationId));
@@ -140,7 +156,12 @@ export function skillsExtension(
 					const source = await files.read(skill.path);
 					if (source === null) {
 						return {
-							content: [{ type: "text" as const, text: `Skill "${args.name}" is no longer there: ${skill.path}` }],
+							content: [
+								{
+									type: "text" as const,
+									text: `Skill "${args.name}" is no longer there: ${skill.path}`,
+								},
+							],
 						};
 					}
 					const body = skillBody(source);

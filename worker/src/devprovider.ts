@@ -62,8 +62,11 @@ function lastUserText(messages: readonly { role: string; content: unknown }[]): 
 		if (typeof message.content === "string") return message.content;
 		if (Array.isArray(message.content)) {
 			return message.content
-				.filter((block): block is { type: "text"; text: string } =>
-					typeof block === "object" && block !== null && (block as { type?: string }).type === "text",
+				.filter(
+					(block): block is { type: "text"; text: string } =>
+						typeof block === "object" &&
+						block !== null &&
+						(block as { type?: string }).type === "text",
 				)
 				.map((block) => block.text)
 				.join(" ");
@@ -86,8 +89,11 @@ function transcriptText(messages: readonly { role: string; content: unknown }[])
 			if (typeof message.content === "string") return message.content;
 			if (!Array.isArray(message.content)) return "";
 			return message.content
-				.filter((block): block is { type: "text"; text: string } =>
-					typeof block === "object" && block !== null && (block as { type?: string }).type === "text",
+				.filter(
+					(block): block is { type: "text"; text: string } =>
+						typeof block === "object" &&
+						block !== null &&
+						(block as { type?: string }).type === "text",
 				)
 				.map((block) => block.text)
 				.join(" ");
@@ -109,17 +115,26 @@ function resolveReferences(value: unknown, transcript: string, tool: string): un
 		// been read more than once.
 		const expression = new RegExp(record.$fromTranscript, "g");
 		let found: string | undefined;
-		for (let match = expression.exec(transcript); match !== null; match = expression.exec(transcript)) {
+		for (
+			let match = expression.exec(transcript);
+			match !== null;
+			match = expression.exec(transcript)
+		) {
 			if (match[1] !== undefined) found = match[1];
 			if (match[0] === "") expression.lastIndex += 1;
 		}
 		if (found === undefined) {
-			throw new Error(`dev script: nothing in the transcript matches ${record.$fromTranscript} for ${tool}`);
+			throw new Error(
+				`dev script: nothing in the transcript matches ${record.$fromTranscript} for ${tool}`,
+			);
 		}
 		return found;
 	}
 	return Object.fromEntries(
-		Object.entries(record).map(([key, item]) => [key, resolveReferences(item, transcript, tool)]),
+		Object.entries(record).map(([key, item]) => [
+			key,
+			resolveReferences(item, transcript, tool),
+		]),
 	);
 }
 
@@ -136,9 +151,12 @@ const defaultRespond: FauxResponseFactory = (context) => {
 	const request = lastUserText(messages);
 
 	if (!answeredSinceLastUser(messages)) {
-		return fauxAssistantMessage([fauxToolCall("bash", { command: "ls -la" }, { id: `dev-${Date.now()}` })], {
-			stopReason: "toolUse",
-		});
+		return fauxAssistantMessage(
+			[fauxToolCall("bash", { command: "ls -la" }, { id: `dev-${Date.now()}` })],
+			{
+				stopReason: "toolUse",
+			},
+		);
 	}
 	const answer: AssistantMessage = fauxAssistantMessage([
 		fauxText(
@@ -157,11 +175,18 @@ function scriptedRespond(script: Script): FauxResponseFactory {
 		const messages = context.messages as readonly { role: string; content: unknown }[];
 		const request = lastUserText(messages);
 		const rule = matchRule(script, request);
-		if (rule !== undefined && !answeredSinceLastUser(messages) && (rule.tools?.length ?? 0) > 0) {
+		if (
+			rule !== undefined &&
+			!answeredSinceLastUser(messages) &&
+			(rule.tools?.length ?? 0) > 0
+		) {
 			const transcript = transcriptText(messages);
 			return fauxAssistantMessage(
 				(rule.tools ?? []).map((tool) =>
-					fauxToolCall(tool.name, resolveReferences(tool.args ?? {}, transcript, tool.name) as JsonObject),
+					fauxToolCall(
+						tool.name,
+						resolveReferences(tool.args ?? {}, transcript, tool.name) as JsonObject,
+					),
 				),
 				{ stopReason: "toolUse" },
 			);

@@ -60,7 +60,12 @@ import { loadSkills, skillsExtension } from "./skills.ts";
 import { routingFiles } from "./files.ts";
 import { refusedSandbox, type SandboxClient, type SandboxEngine } from "./sandbox.ts";
 import { SandboxExecutionEnv } from "./sandbox-env.ts";
-import { expandCommand, loadCommands, parseCommandInvocation, type Command as SlashCommand } from "./commands.ts";
+import {
+	expandCommand,
+	loadCommands,
+	parseCommandInvocation,
+	type Command as SlashCommand,
+} from "./commands.ts";
 
 const CONTEXT = BACKGROUND_CONTEXT;
 const TITLE_SCAN_LIMIT = 20;
@@ -140,7 +145,9 @@ async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 		);
 	}
 	return await engine.openSandbox(options.sandbox, options.workspace).catch((error: unknown) => {
-		return refusedSandbox(`cannot attach to the sandbox ${options.sandbox}: ${error instanceof Error ? error.message : String(error)}`);
+		return refusedSandbox(
+			`cannot attach to the sandbox ${options.sandbox}: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	});
 }
 
@@ -208,14 +215,19 @@ registry.install(
 	}),
 );
 registry.install(
-	skillsExtension(discoveredSkills, (conversationId) => skillFilterByConversation.get(conversationId) ?? null, files),
+	skillsExtension(
+		discoveredSkills,
+		(conversationId) => skillFilterByConversation.get(conversationId) ?? null,
+		files,
+	),
 );
 registry.install(CodingTools);
 
 const settings: HarnessSettings = { toolExecution: "parallel" };
 // One environment per tool call, all of them over the same sandbox: the id is the sandbox's,
 // which is how the harness knows two calls see the same files.
-const env = ({ cwd }: { readonly cwd?: string }) => new SandboxExecutionEnv(sandbox, cwd ?? args.workspace);
+const env = ({ cwd }: { readonly cwd?: string }) =>
+	new SandboxExecutionEnv(sandbox, cwd ?? args.workspace);
 
 const storage = await openNodeSqliteStorage(args.storage);
 const harness = await Harness.open(
@@ -227,7 +239,8 @@ const harness = await Harness.open(
 		env,
 		// A task phase that throws is otherwise swallowed: the run simply never
 		// continues and nothing is logged. This is the only window into that.
-		onReport: (error) => log("extension failure:", error instanceof Error ? error.message : String(error)),
+		onReport: (error) =>
+			log("extension failure:", error instanceof Error ? error.message : String(error)),
 		// Runs in every commit that creates or forks a conversation, so metadata
 		// exists from the first entry and a fork inherits its parent's naming rules.
 		conversationCreated: async (tx, conversation) => {
@@ -246,10 +259,13 @@ registry.install(
 		catalog: () => catalog,
 		// What a definition allows, so a child obeys its own list rather than being offered every
 		// skill the install has.
-		setSkills: (conversationId, skills) => skillFilterByConversation.set(conversationId, skills),
+		setSkills: (conversationId, skills) =>
+			skillFilterByConversation.set(conversationId, skills),
 	}),
 );
-registry.install(guardsExtension({ harness, storage, catalog: () => catalog, workspaceRoot: args.workspace }));
+registry.install(
+	guardsExtension({ harness, storage, catalog: () => catalog, workspaceRoot: args.workspace }),
+);
 
 /** Live handles by conversation id; created on first use. */
 const handles = new Map<string, Conversation>();
@@ -272,7 +288,10 @@ async function conversationFor(id: string): Promise<Conversation> {
 }
 
 /** A given name wins; otherwise the first user message is the name. */
-async function nameOf(id: string, conversation: Conversation): Promise<{ title: string; hidden: boolean }> {
+async function nameOf(
+	id: string,
+	conversation: Conversation,
+): Promise<{ title: string; hidden: boolean }> {
 	const meta = await harness.snapshot(ConversationMetaDoc, conversationIdOf(id), CONTEXT);
 	const given = meta?.title?.trim() ?? "";
 	return {
@@ -291,8 +310,11 @@ async function deriveTitle(conversation: Conversation): Promise<string> {
 				? message.content
 				: Array.isArray(message?.content)
 					? message.content
-							.filter((block): block is { type: "text"; text: string } =>
-								typeof block === "object" && block !== null && (block as { type?: string }).type === "text",
+							.filter(
+								(block): block is { type: "text"; text: string } =>
+									typeof block === "object" &&
+									block !== null &&
+									(block as { type?: string }).type === "text",
 							)
 							.map((block) => block.text)
 							.join(" ")
@@ -346,7 +368,9 @@ async function listConversations(): Promise<ConversationInfo[]> {
 				...(parent === undefined ? {} : { parent }),
 				// The stored configuration is the truth for a conversation control does
 				// not manage, which is every subagent.
-				...(effectiveModel === undefined ? {} : { model: `${effectiveModel.provider}/${effectiveModel.modelId}` }),
+				...(effectiveModel === undefined
+					? {}
+					: { model: `${effectiveModel.provider}/${effectiveModel.modelId}` }),
 				...(effectiveThinking === undefined ? {} : { thinking: String(effectiveThinking) }),
 				...(meta?.createdBy === undefined ? {} : { createdBy: meta.createdBy }),
 				...(meta?.children === undefined || meta.children.length === 0
@@ -379,9 +403,7 @@ async function describe(): Promise<DescribeData> {
 		// It reports that provider as not authenticated, which is what it also does for no key.
 		const check = await models.checkAuth(provider.id).catch(() => undefined);
 		const authenticated = check !== undefined;
-		const list = authenticated
-			? await models.getAvailable(provider.id).catch(() => [])
-			: [];
+		const list = authenticated ? await models.getAvailable(provider.id).catch(() => []) : [];
 		providers.push({
 			id: provider.id,
 			name: provider.name ?? provider.id,
@@ -395,7 +417,9 @@ async function describe(): Promise<DescribeData> {
 			})),
 		});
 	}
-	providers.sort((a, b) => Number(b.authenticated) - Number(a.authenticated) || a.id.localeCompare(b.id));
+	providers.sort(
+		(a, b) => Number(b.authenticated) - Number(a.authenticated) || a.id.localeCompare(b.id),
+	);
 	return {
 		provider: "pi-durable",
 		workdir: args.workspace,
@@ -475,10 +499,16 @@ function toolsByName(): Map<string, ToolRegistration> {
 	return byName;
 }
 
-function resolveTool(byName: Map<string, ToolRegistration>, name: string, agent: string): ToolRegistration {
+function resolveTool(
+	byName: Map<string, ToolRegistration>,
+	name: string,
+	agent: string,
+): ToolRegistration {
 	const tool = byName.get(name);
 	if (tool === undefined) {
-		throw new Error(`agent "${agent}" names unknown tool "${name}"; registered: ${[...byName.keys()].join(", ")}`);
+		throw new Error(
+			`agent "${agent}" names unknown tool "${name}"; registered: ${[...byName.keys()].join(", ")}`,
+		);
 	}
 	return tool;
 }
@@ -487,13 +517,17 @@ function resolveTool(byName: Map<string, ToolRegistration>, name: string, agent:
  * tools: null clears a previous restriction, an array offers exactly those names,
  * and { remove } subtracts. A deny always beats an allow.
  */
-function toolFilter(resolved: ResolvedAgent): readonly ToolRegistration[] | { remove: readonly ToolRegistration[] } | null {
+function toolFilter(
+	resolved: ResolvedAgent,
+): readonly ToolRegistration[] | { remove: readonly ToolRegistration[] } | null {
 	const byName = toolsByName();
 	if (resolved.allowTools !== undefined) {
 		return resolved.allowTools.map((name) => resolveTool(byName, name, resolved.name));
 	}
 	if (resolved.denyTools.length > 0) {
-		return { remove: resolved.denyTools.map((name) => resolveTool(byName, name, resolved.name)) };
+		return {
+			remove: resolved.denyTools.map((name) => resolveTool(byName, name, resolved.name)),
+		};
 	}
 	return null;
 }
@@ -545,7 +579,9 @@ async function applyAgent(
 function reportUnknownKeys(catalog: Catalog): void {
 	for (const agent of catalog.agents) {
 		if (agent.unknownKeys !== undefined && agent.unknownKeys.length > 0) {
-			log(`agent ${agent.name}: unknown frontmatter keys ${agent.unknownKeys.join(", ")} (${agent.source})`);
+			log(
+				`agent ${agent.name}: unknown frontmatter keys ${agent.unknownKeys.join(", ")} (${agent.source})`,
+			);
 		}
 	}
 }
@@ -595,10 +631,20 @@ async function main(): Promise<void> {
 		queue.push(async () => {
 			try {
 				const data = await handle(command);
-				emit({ type: "response", id: command.id, ok: true, ...(data === undefined ? {} : { data }) });
+				emit({
+					type: "response",
+					id: command.id,
+					ok: true,
+					...(data === undefined ? {} : { data }),
+				});
 				if (command.type === "shutdown") await shutdown();
 			} catch (error) {
-				emit({ type: "response", id: command.id, ok: false, error: (error as Error).message });
+				emit({
+					type: "response",
+					id: command.id,
+					ok: false,
+					error: (error as Error).message,
+				});
 			}
 		});
 	});
@@ -624,7 +670,10 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 		case "conversations":
 			return { conversations: await listConversations() };
 		case "create": {
-			const created = await harness.createConversation({ ownership: { kind: "ownerless" } }, CONTEXT);
+			const created = await harness.createConversation(
+				{ ownership: { kind: "ownerless" } },
+				CONTEXT,
+			);
 			handles.set(String(created.id), created);
 			return { conversationId: String(created.id) };
 		}
@@ -636,7 +685,11 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 				thinkingLevel: command.agent.thinkingLevel,
 				instructions: command.agent.instructions,
 			});
-			return { conversationId: command.conversationId, agent: applied.resolved, model: applied.model };
+			return {
+				conversationId: command.conversationId,
+				agent: applied.resolved,
+				model: applied.model,
+			};
 		}
 		case "rename": {
 			const title = command.title.trim();
@@ -660,7 +713,10 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 		}
 		case "attach":
 			await attach(command.conversationId);
-			return { conversationId: command.conversationId, seq: seqs.get(command.conversationId) ?? 0 };
+			return {
+				conversationId: command.conversationId,
+				seq: seqs.get(command.conversationId) ?? 0,
+			};
 		case "detach":
 			subscriptions.get(command.conversationId)?.dispose();
 			subscriptions.delete(command.conversationId);
@@ -700,11 +756,19 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			return undefined;
 		}
 		case "messages": {
-			const state = await harness.snapshot(MessagesDoc, conversationIdOf(command.conversationId), CONTEXT);
+			const state = await harness.snapshot(
+				MessagesDoc,
+				conversationIdOf(command.conversationId),
+				CONTEXT,
+			);
 			return { conversationId: command.conversationId, state: state ?? null };
 		}
 		case "policy": {
-			const view = await policyFor({ harness, storage, catalog: () => catalog }, command.conversationId, CONTEXT);
+			const view = await policyFor(
+				{ harness, storage, catalog: () => catalog },
+				command.conversationId,
+				CONTEXT,
+			);
 			return view;
 		}
 		case "commands":
@@ -712,7 +776,9 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 				commands: commands.map((template) => ({
 					name: template.name,
 					description: template.description,
-					...(template.argumentHint === undefined ? {} : { argumentHint: template.argumentHint }),
+					...(template.argumentHint === undefined
+						? {}
+						: { argumentHint: template.argumentHint }),
 					source: template.source,
 				})),
 			};
@@ -721,14 +787,19 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			// message that merely contains a slash is never rewritten.
 			const invocation = parseCommandInvocation(command.text);
 			if (invocation === undefined) return { text: command.text };
-			const template: SlashCommand | undefined = commands.find((candidate) => candidate.name === invocation.name);
+			const template: SlashCommand | undefined = commands.find(
+				(candidate) => candidate.name === invocation.name,
+			);
 			if (template === undefined) return { text: command.text };
 			return { text: expandCommand(template, invocation.args), command: template.name };
 		}
 		case "agents":
 			return {
 				defaults: catalog.defaults,
-				skills: discoveredSkills.map((skill) => ({ name: skill.name, description: skill.description })),
+				skills: discoveredSkills.map((skill) => ({
+					name: skill.name,
+					description: skill.description,
+				})),
 				agents: catalog.agents.map((agent) => ({
 					name: agent.name,
 					description: agent.description,
@@ -742,7 +813,11 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			reportUnknownKeys(catalog);
 			workspaceRules = await loadWorkspaceRules();
 			commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS), files);
-			return { agents: catalog.agents.length, commands: commands.length, rules: workspaceRules !== undefined };
+			return {
+				agents: catalog.agents.length,
+				commands: commands.length,
+				rules: workspaceRules !== undefined,
+			};
 		case "login":
 			return await login(models, command.authId, command.providerId, command.authType);
 		case "logout":

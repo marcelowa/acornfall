@@ -45,6 +45,7 @@ lint: typecheck ## the static rules; fails on the first one broken
 	@if [ -x "$(STATICCHECK)" ]; then cd gateway && $(STATICCHECK) ./... && echo "staticcheck: clean"; \
 	else echo "staticcheck: not installed (make tools)"; fi
 	node scripts/check-house-rules.mjs
+	cd worker && bun run format:check
 	cd worker && bun run lint
 
 commits: ## check commit messages (RANGE=origin/main..HEAD by default)

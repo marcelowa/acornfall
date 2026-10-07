@@ -61,7 +61,9 @@ export async function loadCommands(roots: readonly string[], files: Files): Prom
 			byName.set(name, {
 				name,
 				description: values.description ?? "",
-				...(values["argument-hint"] === undefined ? {} : { argumentHint: values["argument-hint"] }),
+				...(values["argument-hint"] === undefined
+					? {}
+					: { argumentHint: values["argument-hint"] }),
 				source: path,
 				body,
 			});

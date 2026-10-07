@@ -1,5 +1,12 @@
 import { Sandbox } from "microsandbox";
-import { concatChunks, type DirEntry, type ExecOptions, type ExecResult, type SandboxClient, type WriteSink } from "./sandbox.ts";
+import {
+	concatChunks,
+	type DirEntry,
+	type ExecOptions,
+	type ExecResult,
+	type SandboxClient,
+	type WriteSink,
+} from "./sandbox.ts";
 
 /**
  * The microsandbox engine: libkrun microVMs.
@@ -35,9 +42,12 @@ class MicrosandboxClient implements SandboxClient {
 
 	async exec(command: string, options: ExecOptions): Promise<ExecResult> {
 		const handle = await this.session.execStreamWith("/bin/sh", (builder) => {
-			let configured = builder.arg("-c").arg(options.clearEnv === true ? `env -i ${command}` : command);
+			let configured = builder
+				.arg("-c")
+				.arg(options.clearEnv === true ? `env -i ${command}` : command);
 			if (options.cwd !== undefined) configured = configured.cwd(options.cwd);
-			for (const [key, value] of Object.entries(options.env ?? {})) configured = configured.env(key, value);
+			for (const [key, value] of Object.entries(options.env ?? {}))
+				configured = configured.env(key, value);
 			return configured;
 		});
 		const stdout: Uint8Array[] = [];
@@ -80,7 +90,12 @@ class MicrosandboxClient implements SandboxClient {
 		if (code === undefined) {
 			throw new Error("the sandbox ended the exec stream without an exit event");
 		}
-		return { code, stdout: concatChunks(stdout), stderr: concatChunks(stderr), ...(stopped === undefined ? {} : { stopped }) };
+		return {
+			code,
+			stdout: concatChunks(stdout),
+			stderr: concatChunks(stderr),
+			...(stopped === undefined ? {} : { stopped }),
+		};
 	}
 
 	async read(path: string): Promise<string | null> {
@@ -116,13 +131,19 @@ class MicrosandboxClient implements SandboxClient {
 		}));
 	}
 
-	async stat(path: string): Promise<{ directory: boolean; size: number; mtimeMs: number } | null> {
+	async stat(
+		path: string,
+	): Promise<{ directory: boolean; size: number; mtimeMs: number } | null> {
 		const info = await this.session
 			.fs()
 			.stat(path)
 			.catch(() => null);
 		if (info === null) return null;
-		return { directory: info.kind === "directory", size: info.size, mtimeMs: info.modified?.getTime() ?? 0 };
+		return {
+			directory: info.kind === "directory",
+			size: info.size,
+			mtimeMs: info.modified?.getTime() ?? 0,
+		};
 	}
 
 	async mkdir(path: string): Promise<void> {

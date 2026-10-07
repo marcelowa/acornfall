@@ -13,11 +13,13 @@ import { hostFiles } from "../src/files.ts";
 
 afterAll(cleanupScratch);
 
-
 describe("skills", () => {
 	test("a skill is a directory holding SKILL.md, and needs a description", async () => {
 		const root = await tempDir("acornfall-skills-");
-		await write(join(root, "documented", "SKILL.md"), "---\nname: documented\ndescription: does a thing\n---\nBody");
+		await write(
+			join(root, "documented", "SKILL.md"),
+			"---\nname: documented\ndescription: does a thing\n---\nBody",
+		);
 		await write(join(root, "silent", "SKILL.md"), "---\nname: silent\n---\nBody");
 		await write(join(root, "loose.md"), "not in a directory");
 
@@ -28,16 +30,28 @@ describe("skills", () => {
 
 	test("the directory name is the fallback when frontmatter has none", async () => {
 		const root = await tempDir("acornfall-skills-");
-		await write(join(root, "acorn-notes", "SKILL.md"), "---\ndescription: from the folder\n---\nBody");
+		await write(
+			join(root, "acorn-notes", "SKILL.md"),
+			"---\ndescription: from the folder\n---\nBody",
+		);
 		const skills = await loadSkills([root], hostFiles);
 		expect(skills[0]?.name).toBe("acorn-notes");
 	});
 
 	test("a later root shadows an earlier one, the way agents and commands do", async () => {
 		const root = await tempDir("acornfall-skills-");
-		await write(join(root, "first", "same", "SKILL.md"), "---\nname: same\ndescription: first\n---\nA");
-		await write(join(root, "second", "same", "SKILL.md"), "---\nname: same\ndescription: second\n---\nB");
-		await write(join(root, "second", "only", "SKILL.md"), "---\nname: only\ndescription: second only\n---\nC");
+		await write(
+			join(root, "first", "same", "SKILL.md"),
+			"---\nname: same\ndescription: first\n---\nA",
+		);
+		await write(
+			join(root, "second", "same", "SKILL.md"),
+			"---\nname: same\ndescription: second\n---\nB",
+		);
+		await write(
+			join(root, "second", "only", "SKILL.md"),
+			"---\nname: only\ndescription: second only\n---\nC",
+		);
 
 		const skills = await loadSkills([join(root, "first"), join(root, "second")], hostFiles);
 		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
@@ -49,11 +63,24 @@ describe("skills", () => {
 	test("the .agents folder is read, and ours shadows it", async () => {
 		const root = await tempDir("acornfall-skills-");
 		const workspace = join(root, "workspace");
-		await write(join(workspace, ".agents", "skills", "eco", "SKILL.md"), "---\nname: eco\ndescription: from .agents\n---\nA");
-		await write(join(workspace, ".agents", "skills", "both", "SKILL.md"), "---\nname: both\ndescription: ecosystem\n---\nB");
-		await write(join(workspace, ".acornfall", "skills", "both", "SKILL.md"), "---\nname: both\ndescription: native\n---\nC");
+		await write(
+			join(workspace, ".agents", "skills", "eco", "SKILL.md"),
+			"---\nname: eco\ndescription: from .agents\n---\nA",
+		);
+		await write(
+			join(workspace, ".agents", "skills", "both", "SKILL.md"),
+			"---\nname: both\ndescription: ecosystem\n---\nB",
+		);
+		await write(
+			join(workspace, ".acornfall", "skills", "both", "SKILL.md"),
+			"---\nname: both\ndescription: native\n---\nC",
+		);
 
-		const roots = layerRoots({ home: join(root, "home"), workspace, userHome: join(root, "user") });
+		const roots = layerRoots({
+			home: join(root, "home"),
+			workspace,
+			userHome: join(root, "user"),
+		});
 		const skills = await loadSkills(resourceFolders(roots, ["skills"]), hostFiles);
 		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
 			["both", "native"],
@@ -68,9 +95,27 @@ describe("skills", () => {
 
 	test("only names and descriptions are offered, and only the allowed ones", () => {
 		const skills = [
-			{ name: "a", description: "first", disableModelInvocation: false, dir: "/d", path: "/d/SKILL.md" },
-			{ name: "b", description: "second", disableModelInvocation: false, dir: "/d", path: "/d/SKILL.md" },
-			{ name: "hidden", description: "manual only", disableModelInvocation: true, dir: "/d", path: "/d/SKILL.md" },
+			{
+				name: "a",
+				description: "first",
+				disableModelInvocation: false,
+				dir: "/d",
+				path: "/d/SKILL.md",
+			},
+			{
+				name: "b",
+				description: "second",
+				disableModelInvocation: false,
+				dir: "/d",
+				path: "/d/SKILL.md",
+			},
+			{
+				name: "hidden",
+				description: "manual only",
+				disableModelInvocation: true,
+				dir: "/d",
+				path: "/d/SKILL.md",
+			},
 		];
 		const offered = renderSkills(skills, null);
 		expect(offered).toContain("a");

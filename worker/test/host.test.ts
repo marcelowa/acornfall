@@ -55,15 +55,15 @@ test("the environment is the host's, or exactly what the caller gives", async ()
 	try {
 		const prefix = process.env.PATH ?? "";
 		expect(prefix).not.toBe("");
-		const inherited = await client.exec("printf %s \"$PATH\"", {});
+		const inherited = await client.exec('printf %s "$PATH"', {});
 		expect(new TextDecoder().decode(inherited.stdout)).toBe(prefix);
 
-		const given = await client.exec("printf %s \"$FOO\"", { env: { FOO: "bar" } });
+		const given = await client.exec('printf %s "$FOO"', { env: { FOO: "bar" } });
 		expect(new TextDecoder().decode(given.stdout)).toBe("bar");
 
 		// clearEnv means the guest's own environment, not "add nothing": a command that relies
 		// on the host's PATH or HOME must not see it.
-		const cleared = await client.exec("printf %s \"$HOME\"", { clearEnv: true });
+		const cleared = await client.exec('printf %s "$HOME"', { clearEnv: true });
 		expect(new TextDecoder().decode(cleared.stdout)).toBe("");
 	} finally {
 		await done();

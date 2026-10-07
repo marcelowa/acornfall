@@ -24,7 +24,9 @@ export const THINKING_LEVELS: ReadonlySet<ModelThinkingLevel> = new Set<ModelThi
 export function thinkingLevelFor(value: string | undefined): ModelThinkingLevel | null {
 	if (value === undefined || value.length === 0) return null;
 	if (!THINKING_LEVELS.has(value as ModelThinkingLevel)) {
-		throw new Error(`unknown thinking level "${value}"; expected one of ${[...THINKING_LEVELS].join(", ")}`);
+		throw new Error(
+			`unknown thinking level "${value}"; expected one of ${[...THINKING_LEVELS].join(", ")}`,
+		);
 	}
 	return value as ModelThinkingLevel;
 }

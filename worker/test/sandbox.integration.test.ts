@@ -46,7 +46,9 @@ integration(
 			await client.mkdir("/tmp/acornfall-integration");
 			const marker = "/tmp/acornfall-integration/killed";
 			const controller = new AbortController();
-			const longRunning = client.exec(`sleep 3 && touch ${marker}`, { signal: controller.signal });
+			const longRunning = client.exec(`sleep 3 && touch ${marker}`, {
+				signal: controller.signal,
+			});
 			await new Promise((resolve) => setTimeout(resolve, 300));
 			controller.abort();
 			const aborted = await longRunning;
@@ -69,7 +71,10 @@ integration(
 			expect(await client.read(streamedPath)).toBe("one two\n");
 
 			const entries = await client.list("/tmp/acornfall-integration");
-			expect(entries.map((entry) => entry.name).sort()).toEqual(["hello.txt", "streamed.txt"]);
+			expect(entries.map((entry) => entry.name).sort()).toEqual([
+				"hello.txt",
+				"streamed.txt",
+			]);
 			const helloEntry = entries.find((entry) => entry.name === "hello.txt");
 			expect(helloEntry?.directory).toBe(false);
 			expect(helloEntry?.size).toBe("from the test\n".length);
@@ -79,7 +84,9 @@ integration(
 
 			await client.rename(hello, "/tmp/acornfall-integration/renamed.txt");
 			expect(await client.read(hello)).toBeNull();
-			expect(await client.read("/tmp/acornfall-integration/renamed.txt")).toBe("from the test\n");
+			expect(await client.read("/tmp/acornfall-integration/renamed.txt")).toBe(
+				"from the test\n",
+			);
 			await client.remove("/tmp/acornfall-integration/renamed.txt", {});
 			expect(await client.read("/tmp/acornfall-integration/renamed.txt")).toBeNull();
 		} finally {

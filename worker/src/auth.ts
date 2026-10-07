@@ -18,7 +18,11 @@ const pending = new Map<string, PendingPrompt>();
 const controllers = new Map<string, AbortController>();
 
 /** Answers arrive out of band: a login blocks, so its answers cannot queue behind it. */
-export function resolveAuthAnswer(promptId: string, value: string | undefined, cancelled: boolean): void {
+export function resolveAuthAnswer(
+	promptId: string,
+	value: string | undefined,
+	cancelled: boolean,
+): void {
 	const waiter = pending.get(promptId);
 	if (waiter === undefined) return;
 	pending.delete(promptId);
@@ -79,7 +83,9 @@ export async function login(
 				notify({
 					kind: "auth_url",
 					url: event.url,
-					...(event.instructions === undefined ? {} : { instructions: event.instructions }),
+					...(event.instructions === undefined
+						? {}
+						: { instructions: event.instructions }),
 				});
 				return;
 			}
@@ -88,8 +94,12 @@ export async function login(
 					kind: "device_code",
 					userCode: event.userCode,
 					verificationUri: event.verificationUri,
-					...(event.intervalSeconds === undefined ? {} : { intervalSeconds: event.intervalSeconds }),
-					...(event.expiresInSeconds === undefined ? {} : { expiresInSeconds: event.expiresInSeconds }),
+					...(event.intervalSeconds === undefined
+						? {}
+						: { intervalSeconds: event.intervalSeconds }),
+					...(event.expiresInSeconds === undefined
+						? {}
+						: { expiresInSeconds: event.expiresInSeconds }),
 				});
 				return;
 			}

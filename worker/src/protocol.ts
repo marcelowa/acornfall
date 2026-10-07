@@ -36,9 +36,22 @@ export type Command =
 	| { id: string; type: "policy"; conversationId: string }
 	| { id: string; type: "messages"; conversationId: string }
 	| { id: string; type: "reload" }
-	| { id: string; type: "login"; authId: string; providerId: string; authType: "api_key" | "oauth" }
+	| {
+			id: string;
+			type: "login";
+			authId: string;
+			providerId: string;
+			authType: "api_key" | "oauth";
+	  }
 	| { id: string; type: "logout"; providerId: string }
-	| { id: string; type: "auth_answer"; authId: string; promptId: string; value?: string; cancelled?: boolean }
+	| {
+			id: string;
+			type: "auth_answer";
+			authId: string;
+			promptId: string;
+			value?: string;
+			cancelled?: boolean;
+	  }
 	| { id: string; type: "auth_cancel"; authId: string }
 	| { id: string; type: "usage" }
 	| { id: string; type: "shutdown" };
@@ -109,7 +122,13 @@ export type AuthEvent =
 	  }
 	| { kind: "info"; message: string; links?: readonly { url: string; label?: string }[] }
 	| { kind: "auth_url"; url: string; instructions?: string }
-	| { kind: "device_code"; userCode: string; verificationUri: string; intervalSeconds?: number; expiresInSeconds?: number }
+	| {
+			kind: "device_code";
+			userCode: string;
+			verificationUri: string;
+			intervalSeconds?: number;
+			expiresInSeconds?: number;
+	  }
 	| { kind: "progress"; message: string }
 	| { kind: "done"; providerId: string }
 	| { kind: "error"; message: string };
@@ -123,7 +142,9 @@ export type Frame =
 			seq: number;
 			value: unknown;
 			/** Our own annotation: the view mounts only durable's documents. */
-			acornfall?: { senders: Record<string, { conversationId: string; name?: string; kind: string }> };
+			acornfall?: {
+				senders: Record<string, { conversationId: string; name?: string; kind: string }>;
+			};
 	  }
 	| { type: "submission"; conversationId: string; submissionId: string; status: string }
 	| { type: "auth"; authId: string; event: AuthEvent };

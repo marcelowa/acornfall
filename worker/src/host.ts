@@ -1,7 +1,13 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hostFiles, type DirEntry } from "./files.ts";
-import { concatChunks, type ExecOptions, type ExecResult, type SandboxClient, type WriteSink } from "./sandbox.ts";
+import {
+	concatChunks,
+	type ExecOptions,
+	type ExecResult,
+	type SandboxClient,
+	type WriteSink,
+} from "./sandbox.ts";
 
 /**
  * The host engine: no sandbox. Commands run in the workspace with the user's own permissions
@@ -34,7 +40,8 @@ class HostClient implements SandboxClient {
 	async exec(command: string, options: ExecOptions): Promise<ExecResult> {
 		const proc = Bun.spawn(["/bin/sh", "-c", command], {
 			cwd: options.cwd ?? this.workspace,
-			env: options.clearEnv === true ? { ...options.env } : { ...process.env, ...options.env },
+			env:
+				options.clearEnv === true ? { ...options.env } : { ...process.env, ...options.env },
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",
@@ -62,14 +69,21 @@ class HostClient implements SandboxClient {
 		if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
 			timer = setTimeout(() => stop("timeout"), options.timeoutMs);
 		}
-		const drain = async (stream: ReadableStream<Uint8Array>, chunks: Uint8Array[], kind: "stdout" | "stderr"): Promise<void> => {
+		const drain = async (
+			stream: ReadableStream<Uint8Array>,
+			chunks: Uint8Array[],
+			kind: "stdout" | "stderr",
+		): Promise<void> => {
 			for await (const data of stream) {
 				chunks.push(data);
 				options.onChunk?.({ stream: kind, data });
 			}
 		};
 		try {
-			await Promise.all([drain(proc.stdout, stdout, "stdout"), drain(proc.stderr, stderr, "stderr")]);
+			await Promise.all([
+				drain(proc.stdout, stdout, "stdout"),
+				drain(proc.stderr, stderr, "stderr"),
+			]);
 		} finally {
 			if (timer !== undefined) clearTimeout(timer);
 			options.signal?.removeEventListener("abort", abort);
@@ -95,7 +109,12 @@ class HostClient implements SandboxClient {
 		return await Promise.all(
 			entries.map(async (entry) => {
 				const info = await stat(join(path, entry.name)).catch(() => null);
-				return { name: entry.name, directory: entry.isDirectory(), size: info?.size ?? 0, mtimeMs: info?.mtimeMs ?? 0 };
+				return {
+					name: entry.name,
+					directory: entry.isDirectory(),
+					size: info?.size ?? 0,
+					mtimeMs: info?.mtimeMs ?? 0,
+				};
 			}),
 		);
 	}
@@ -129,7 +148,10 @@ class HostClient implements SandboxClient {
 	}
 
 	async remove(path: string, options: { recursive?: boolean; force?: boolean }): Promise<void> {
-		await rm(path, { recursive: options.recursive === true, force: options.force === true }).catch(() => {});
+		await rm(path, {
+			recursive: options.recursive === true,
+			force: options.force === true,
+		}).catch(() => {});
 	}
 
 	async rename(from: string, to: string): Promise<void> {

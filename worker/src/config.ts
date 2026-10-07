@@ -152,10 +152,30 @@ function parseDelegation(raw: string): Partial<Delegation> {
 	const parts = parseList(raw).map((part) => part.toLowerCase());
 	if (parts.includes("none")) return { spawn: false, peers: false };
 	const policy: Partial<Delegation> = {};
-	if (parts.some((part) => part === "spawn" || part === "both" || part === "all")) policy.spawn = true;
-	if (parts.some((part) => part === "peers" || part === "peer" || part === "both" || part === "all")) policy.peers = true;
-	if (!parts.some((part) => part === "spawn" || part === "both" || part === "all" || part === "none")) policy.spawn = false;
-	if (!parts.some((part) => part === "peers" || part === "peer" || part === "both" || part === "all" || part === "none")) {
+	if (parts.some((part) => part === "spawn" || part === "both" || part === "all"))
+		policy.spawn = true;
+	if (
+		parts.some(
+			(part) => part === "peers" || part === "peer" || part === "both" || part === "all",
+		)
+	)
+		policy.peers = true;
+	if (
+		!parts.some(
+			(part) => part === "spawn" || part === "both" || part === "all" || part === "none",
+		)
+	)
+		policy.spawn = false;
+	if (
+		!parts.some(
+			(part) =>
+				part === "peers" ||
+				part === "peer" ||
+				part === "both" ||
+				part === "all" ||
+				part === "none",
+		)
+	) {
 		policy.peers = false;
 	}
 	return policy;
@@ -163,7 +183,8 @@ function parseDelegation(raw: string): Partial<Delegation> {
 
 /** A guard that cannot be understood is an error, not a rule that quietly does nothing. */
 function parseGuard(entry: unknown, path: string): Guard {
-	if (typeof entry !== "object" || entry === null) throw new Error(`${path}: a guard must be an object`);
+	if (typeof entry !== "object" || entry === null)
+		throw new Error(`${path}: a guard must be an object`);
 	const raw = entry as Record<string, unknown>;
 	const tool = typeof raw.tool === "string" ? raw.tool : "";
 	const arg = typeof raw.arg === "string" ? raw.arg : "";
@@ -171,7 +192,8 @@ function parseGuard(entry: unknown, path: string): Guard {
 	const pattern = typeof raw.pattern === "string" ? raw.pattern : undefined;
 	const outside = raw.outside === true;
 	if (tool === "" || arg === "") throw new Error(`${path}: a guard needs a tool and an arg`);
-	if (reason === "") throw new Error(`${path}: a guard needs a reason, because the model is told it`);
+	if (reason === "")
+		throw new Error(`${path}: a guard needs a reason, because the model is told it`);
 	if (pattern === undefined && !outside) {
 		throw new Error(`${path}: a guard needs a pattern or outside: true`);
 	}
@@ -182,12 +204,19 @@ function parseGuard(entry: unknown, path: string): Guard {
 			throw new Error(`${path}: guard pattern does not compile: ${(error as Error).message}`);
 		}
 	}
-	return { tool, arg, reason, ...(pattern === undefined ? {} : { pattern }), ...(outside ? { outside: true } : {}) };
+	return {
+		tool,
+		arg,
+		reason,
+		...(pattern === undefined ? {} : { pattern }),
+		...(outside ? { outside: true } : {}),
+	};
 }
 
 function parseCount(raw: string, key: string): number {
 	const value = Number.parseInt(raw, 10);
-	if (!Number.isInteger(value) || value < 0) throw new Error(`${key} must be a non-negative integer, got ${raw}`);
+	if (!Number.isInteger(value) || value < 0)
+		throw new Error(`${key} must be a non-negative integer, got ${raw}`);
 	return value;
 }
 
@@ -200,7 +229,11 @@ function parseList(raw: string): string[] {
 }
 
 /** Parses frontmatter into contributions. Unknown keys are reported by the caller. */
-function parseFrontmatter(source: string): { values: Record<string, string>; body: string; unknown: string[] } {
+function parseFrontmatter(source: string): {
+	values: Record<string, string>;
+	body: string;
+	unknown: string[];
+} {
 	const values: Record<string, string> = {};
 	if (!source.startsWith("---")) return { values, body: source.trim(), unknown: [] };
 	const end = source.indexOf("\n---", 3);
@@ -220,14 +253,20 @@ function parseFrontmatter(source: string): { values: Record<string, string>; bod
 }
 
 /** A file may be a config object or a small wrapper around one. */
-async function loadConfig(files: Files, path: string, label: LayerName): Promise<{ contributions: Contributions; path: string } | null> {
+async function loadConfig(
+	files: Files,
+	path: string,
+	label: LayerName,
+): Promise<{ contributions: Contributions; path: string } | null> {
 	const text = await files.read(path);
 	if (text === null) return null;
 	let parsed: Record<string, unknown>;
 	try {
 		parsed = JSON.parse(text) as Record<string, unknown>;
 	} catch (error) {
-		throw new Error(`${label} config at ${path} is not valid JSON: ${(error as Error).message}`);
+		throw new Error(
+			`${label} config at ${path} is not valid JSON: ${(error as Error).message}`,
+		);
 	}
 	const source = (parsed.defaults ?? parsed) as Record<string, unknown>;
 	const contributions: Contributions = {};
@@ -235,7 +274,8 @@ async function loadConfig(files: Files, path: string, label: LayerName): Promise
 	if (typeof source.thinking === "string") contributions.thinking = source.thinking;
 	if (typeof source.instructions === "string") contributions.instructions = source.instructions;
 	const hooks = (source.hooks ?? {}) as Record<string, unknown>;
-	if (Array.isArray(hooks.guards)) contributions.guards = hooks.guards.map((entry) => parseGuard(entry, path));
+	if (Array.isArray(hooks.guards))
+		contributions.guards = hooks.guards.map((entry) => parseGuard(entry, path));
 	if (source.delegation !== undefined && typeof source.delegation === "object") {
 		const raw = source.delegation as Record<string, unknown>;
 		const policy: Partial<Delegation> = {};
@@ -255,7 +295,11 @@ async function loadConfig(files: Files, path: string, label: LayerName): Promise
 	return { contributions, path };
 }
 
-async function loadAgentDir(files: Files, directory: string, layer: "global" | "workspace"): Promise<AgentDefinition[]> {
+async function loadAgentDir(
+	files: Files,
+	directory: string,
+	layer: "global" | "workspace",
+): Promise<AgentDefinition[]> {
 	const agents: AgentDefinition[] = [];
 	for (const entry of await files.list(directory)) {
 		if (entry.directory || !entry.name.endsWith(".md")) continue;
@@ -267,17 +311,26 @@ async function loadAgentDir(files: Files, directory: string, layer: "global" | "
 		const contributions: Contributions = {};
 		if (values.model !== undefined) contributions.model = values.model;
 		if (values.thinking !== undefined) contributions.thinking = values.thinking;
-		const instructions = [values.instructions, body].filter((text) => text !== undefined && text.length > 0);
+		const instructions = [values.instructions, body].filter(
+			(text) => text !== undefined && text.length > 0,
+		);
 		if (instructions.length > 0) contributions.instructions = instructions.join("\n\n");
 		if (values.skills !== undefined) contributions.skills = parseList(values.skills);
-		if (values["allow-tools"] !== undefined) contributions.allowTools = parseList(values["allow-tools"]);
-		if (values["deny-tools"] !== undefined) contributions.denyTools = parseList(values["deny-tools"]);
+		if (values["allow-tools"] !== undefined)
+			contributions.allowTools = parseList(values["allow-tools"]);
+		if (values["deny-tools"] !== undefined)
+			contributions.denyTools = parseList(values["deny-tools"]);
 		const delegation: Partial<Delegation> = {};
-		if (values.delegation !== undefined) Object.assign(delegation, parseDelegation(values.delegation));
-		if (values["max-children"] !== undefined) delegation.maxChildren = parseCount(values["max-children"], "max-children");
-		if (values["max-depth"] !== undefined) delegation.maxDepth = parseCount(values["max-depth"], "max-depth");
-		if (values["max-peers"] !== undefined) delegation.maxPeers = parseCount(values["max-peers"], "max-peers");
-		if (values["max-wakes"] !== undefined) delegation.maxWakes = parseCount(values["max-wakes"], "max-wakes");
+		if (values.delegation !== undefined)
+			Object.assign(delegation, parseDelegation(values.delegation));
+		if (values["max-children"] !== undefined)
+			delegation.maxChildren = parseCount(values["max-children"], "max-children");
+		if (values["max-depth"] !== undefined)
+			delegation.maxDepth = parseCount(values["max-depth"], "max-depth");
+		if (values["max-peers"] !== undefined)
+			delegation.maxPeers = parseCount(values["max-peers"], "max-peers");
+		if (values["max-wakes"] !== undefined)
+			delegation.maxWakes = parseCount(values["max-wakes"], "max-wakes");
 		if (values["max-peers-total"] !== undefined) {
 			delegation.maxPeersTotal = parseCount(values["max-peers-total"], "max-peers-total");
 		}
@@ -355,7 +408,9 @@ export const COMMAND_DIRS = ["prompts", "commands"] as const;
  * still beats the install.
  */
 export function resourceFolders(roots: LayerRoots, names: readonly string[]): string[] {
-	return [...roots.global, ...roots.workspace].flatMap((root) => names.map((name) => join(root, name)));
+	return [...roots.global, ...roots.workspace].flatMap((root) =>
+		names.map((name) => join(root, name)),
+	);
 }
 
 /**
@@ -371,7 +426,10 @@ export async function loadCatalog(roots: LayerRoots, files: Files): Promise<Cata
 	const defaults: LayerTrace[] = [];
 	const discovered: AgentDefinition[] = [];
 
-	for (const [layer, folders] of [["global", roots.global], ["workspace", roots.workspace]] as const) {
+	for (const [layer, folders] of [
+		["global", roots.global],
+		["workspace", roots.workspace],
+	] as const) {
 		for (const root of folders) {
 			const config = await loadConfig(files, join(root, "config.json"), layer);
 			if (config !== null) {
@@ -393,10 +451,15 @@ export async function loadCatalog(roots: LayerRoots, files: Files): Promise<Cata
  * win, skills union, tool denials union, and an allow list replaces.
  */
 export function resolveAgent(catalog: Catalog, name: string | undefined): ResolvedAgent {
-	const definition = name === undefined ? undefined : catalog.agents.find((agent) => agent.name === name);
+	const definition =
+		name === undefined ? undefined : catalog.agents.find((agent) => agent.name === name);
 	const layers: LayerTrace[] = [...catalog.defaults];
 	if (definition !== undefined) {
-		layers.push({ layer: "agent", path: definition.source, contributes: definition.contributions });
+		layers.push({
+			layer: "agent",
+			path: definition.source,
+			contributes: definition.contributions,
+		});
 	}
 
 	let model: string | undefined;
@@ -414,10 +477,13 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 		if (contributes.instructions !== undefined && contributes.instructions.length > 0) {
 			instructions.push(contributes.instructions);
 		}
-		if (contributes.skills !== undefined) skills = [...new Set([...(skills ?? []), ...contributes.skills])];
+		if (contributes.skills !== undefined)
+			skills = [...new Set([...(skills ?? []), ...contributes.skills])];
 		if (contributes.allowTools !== undefined) allowTools = contributes.allowTools;
-		if (contributes.denyTools !== undefined) for (const tool of contributes.denyTools) denyTools.add(tool);
-		if (contributes.delegation !== undefined) delegation = { ...delegation, ...contributes.delegation };
+		if (contributes.denyTools !== undefined)
+			for (const tool of contributes.denyTools) denyTools.add(tool);
+		if (contributes.delegation !== undefined)
+			delegation = { ...delegation, ...contributes.delegation };
 		if (contributes.guards !== undefined) guards.push(...contributes.guards);
 	}
 

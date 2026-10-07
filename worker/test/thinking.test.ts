@@ -8,7 +8,15 @@ import { THINKING_LEVELS, thinkingLevelFor } from "../src/thinking.ts";
 
 describe("the thinking scale", () => {
 	test("names every level, weakest first", () => {
-		expect([...THINKING_LEVELS]).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+		expect([...THINKING_LEVELS]).toEqual([
+			"off",
+			"minimal",
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+			"max",
+		]);
 	});
 
 	test("accepts each of them", () => {

@@ -37,7 +37,7 @@ commits — so a message that does not parse blocks the merge, not the review.
 | `ci` | `.github/workflows/`. |
 | `chore` | Housekeeping that fits nothing above: removing files, sweeping leftovers. |
 | `revert` | Undoing a commit, with its hash in the body. |
-| `style` | Formatting only. Rare here: `gofmt` does this, not people. |
+| `style` | Formatting only. Rare here: `gofmt` and oxfmt do this, not people. |
 
 Scopes in use: `control`, `httpapi`, `workerpool`, `worker`, `web`, `e2e`, `docs`, `ci`, `deps`.
 A policy or a protocol that both layers share is `feat` with no scope.

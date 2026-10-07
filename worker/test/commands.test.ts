@@ -11,10 +11,12 @@ import { hostFiles } from "../src/files.ts";
 
 afterAll(cleanupScratch);
 
-
 describe("invocation", () => {
 	test("reads a name and its arguments", () => {
-		expect(parseCommandInvocation("/summarize the notes")).toEqual({ name: "summarize", args: "the notes" });
+		expect(parseCommandInvocation("/summarize the notes")).toEqual({
+			name: "summarize",
+			args: "the notes",
+		});
 		expect(parseCommandInvocation("/status")).toEqual({ name: "status", args: "" });
 		expect(parseCommandInvocation("  /deploy  now  ")).toEqual({ name: "deploy", args: "now" });
 	});
@@ -29,7 +31,12 @@ describe("invocation", () => {
 });
 
 describe("expansion", () => {
-	const command = { name: "x", description: "", source: "", body: "Summarize $ARGUMENTS in one line." };
+	const command = {
+		name: "x",
+		description: "",
+		source: "",
+		body: "Summarize $ARGUMENTS in one line.",
+	};
 
 	test("puts the arguments where the template says", () => {
 		expect(expandCommand(command, "the notes")).toBe("Summarize the notes in one line.");
@@ -55,7 +62,10 @@ describe("expansion", () => {
 describe("loading", () => {
 	test("reads frontmatter, keeps the body, and sorts by name", async () => {
 		const root = await tempDir("acornfall-commands-");
-		await write(join(root, "b.md"), "---\nname: bravo\ndescription: second\nargument-hint: a thing\n---\nBody B");
+		await write(
+			join(root, "b.md"),
+			"---\nname: bravo\ndescription: second\nargument-hint: a thing\n---\nBody B",
+		);
 		await write(join(root, "a.md"), "---\nname: alpha\ndescription: first\n---\nBody A");
 
 		const commands = await loadCommands([root], hostFiles);
@@ -81,8 +91,14 @@ describe("loading", () => {
 	test("a later root shadows an earlier one, which is how a workspace overrides the install", async () => {
 		const first = await tempDir("acornfall-commands-");
 		const second = await tempDir("acornfall-commands-");
-		await write(join(first, "deploy.md"), "---\nname: deploy\ndescription: install\n---\nInstall deploy");
-		await write(join(second, "deploy.md"), "---\nname: deploy\ndescription: workspace\n---\nWorkspace deploy");
+		await write(
+			join(first, "deploy.md"),
+			"---\nname: deploy\ndescription: install\n---\nInstall deploy",
+		);
+		await write(
+			join(second, "deploy.md"),
+			"---\nname: deploy\ndescription: workspace\n---\nWorkspace deploy",
+		);
 
 		const commands = await loadCommands([first, second], hostFiles);
 		expect(commands).toHaveLength(1);
@@ -93,12 +109,25 @@ describe("loading", () => {
 		const root = await tempDir("acornfall-commands-");
 		const workspace = join(root, "workspace");
 		// The same name in both folder names: ours is read second and wins.
-		await write(join(workspace, ".agents", "prompts", "audit.md"), "---\nname: audit\ndescription: from prompts\n---\nPrompts body");
-		await write(join(workspace, ".agents", "commands", "audit.md"), "---\nname: audit\ndescription: from commands\n---\nCommands body");
+		await write(
+			join(workspace, ".agents", "prompts", "audit.md"),
+			"---\nname: audit\ndescription: from prompts\n---\nPrompts body",
+		);
+		await write(
+			join(workspace, ".agents", "commands", "audit.md"),
+			"---\nname: audit\ndescription: from commands\n---\nCommands body",
+		);
 		// And one that only exists as a prompt, which is the case a shared bundle has.
-		await write(join(workspace, ".agents", "prompts", "only-here.md"), "---\nname: only-here\ndescription: prompts only\n---\nBody");
+		await write(
+			join(workspace, ".agents", "prompts", "only-here.md"),
+			"---\nname: only-here\ndescription: prompts only\n---\nBody",
+		);
 
-		const roots = layerRoots({ home: join(root, "home"), workspace, userHome: join(root, "user") });
+		const roots = layerRoots({
+			home: join(root, "home"),
+			workspace,
+			userHome: join(root, "user"),
+		});
 		const commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS), hostFiles);
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["audit", "from commands"],
@@ -114,10 +143,22 @@ describe("loading", () => {
 		const user = join(root, "user");
 		// The same command in all three places it can live: the user's ecosystem folder, the
 		// workspace's, and ours beside it. Ours is read last and wins.
-		await write(join(user, ".agents", "commands", "deploy.md"), "---\nname: deploy\ndescription: user\n---\nUser");
-		await write(join(workspace, ".agents", "commands", "deploy.md"), "---\nname: deploy\ndescription: ecosystem\n---\nEco");
-		await write(join(workspace, ".acornfall", "commands", "deploy.md"), "---\nname: deploy\ndescription: native\n---\nNative");
-		await write(join(workspace, ".agents", "commands", "shared.md"), "---\nname: shared\ndescription: only in .agents\n---\nShared");
+		await write(
+			join(user, ".agents", "commands", "deploy.md"),
+			"---\nname: deploy\ndescription: user\n---\nUser",
+		);
+		await write(
+			join(workspace, ".agents", "commands", "deploy.md"),
+			"---\nname: deploy\ndescription: ecosystem\n---\nEco",
+		);
+		await write(
+			join(workspace, ".acornfall", "commands", "deploy.md"),
+			"---\nname: deploy\ndescription: native\n---\nNative",
+		);
+		await write(
+			join(workspace, ".agents", "commands", "shared.md"),
+			"---\nname: shared\ndescription: only in .agents\n---\nShared",
+		);
 
 		const roots = layerRoots({ home, workspace, userHome: user });
 		const commands = await loadCommands(resourceFolders(roots, ["commands"]), hostFiles);

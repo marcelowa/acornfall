@@ -2,7 +2,14 @@ import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { hostFiles, routingFiles, type Files } from "../src/files.ts";
 import { SandboxExecutionEnv } from "../src/sandbox-env.ts";
-import { refusedSandbox, type DirEntry, type ExecOptions, type ExecResult, type SandboxClient, type WriteSink } from "../src/sandbox.ts";
+import {
+	refusedSandbox,
+	type DirEntry,
+	type ExecOptions,
+	type ExecResult,
+	type SandboxClient,
+	type WriteSink,
+} from "../src/sandbox.ts";
 
 const CONTEXT = BACKGROUND_CONTEXT;
 
@@ -25,7 +32,8 @@ class FakeSandbox implements SandboxClient {
 
 	async exec(command: string, options: ExecOptions): Promise<ExecResult> {
 		this.execs.push({ command, options });
-		for (const piece of this.stream) options.onChunk?.({ stream: "stdout", data: new TextEncoder().encode(piece) });
+		for (const piece of this.stream)
+			options.onChunk?.({ stream: "stdout", data: new TextEncoder().encode(piece) });
 		const result = this.respond(command);
 		return {
 			code: result.code,
@@ -73,7 +81,9 @@ class FakeSandbox implements SandboxClient {
 		return [...entries.values()];
 	}
 
-	async stat(path: string): Promise<{ directory: boolean; size: number; mtimeMs: number } | null> {
+	async stat(
+		path: string,
+	): Promise<{ directory: boolean; size: number; mtimeMs: number } | null> {
 		if (this.directories.has(path)) return { directory: true, size: 0, mtimeMs: 1 };
 		const bytes = this.files.get(path);
 		if (bytes !== undefined) return { directory: false, size: bytes.byteLength, mtimeMs: 1 };
@@ -103,7 +113,10 @@ class FakeSandbox implements SandboxClient {
 	}
 
 	private put(path: string, content: string | Uint8Array): void {
-		this.files.set(path, typeof content === "string" ? new TextEncoder().encode(content) : content);
+		this.files.set(
+			path,
+			typeof content === "string" ? new TextEncoder().encode(content) : content,
+		);
 	}
 }
 
@@ -148,7 +161,9 @@ test("the host filesystem answers for everything outside the workspace", async (
 	expect(await files.read(`${directory}/outside.txt`)).toBe("on the host");
 	expect(await files.read(`${directory}/missing.txt`)).toBeNull();
 	expect(await files.stat(directory).then((info) => info?.directory)).toBe(true);
-	expect(await files.list(directory).then((entries) => entries.map((entry) => entry.name))).toEqual(["outside.txt"]);
+	expect(
+		await files.list(directory).then((entries) => entries.map((entry) => entry.name)),
+	).toEqual(["outside.txt"]);
 });
 
 // -- the refusal ---------------------------------------------------------------------
@@ -173,7 +188,11 @@ test("a command streams its output as it arrives and reports the exit code", asy
 	const { sandbox, env } = environment();
 	sandbox.stream = ["first\n", "second\n"];
 	const chunks: string[] = [];
-	const result = await env.exec("sh -c 'echo'", { onOutput: (text) => chunks.push(text) }, CONTEXT);
+	const result = await env.exec(
+		"sh -c 'echo'",
+		{ onOutput: (text) => chunks.push(text) },
+		CONTEXT,
+	);
 	expect(result.ok).toBe(true);
 	expect(result.ok && result.value.exitCode).toBe(0);
 	expect(chunks.join("")).toBe("first\nsecond\n");
@@ -205,7 +224,12 @@ test("aborting a command reports it as aborted and stops it", async () => {
 	sandbox.exec = async (command: string, options: ExecOptions): Promise<ExecResult> => {
 		sandbox.execs.push({ command, options });
 		controller.abort();
-		return { code: 143, stdout: new Uint8Array(), stderr: new Uint8Array(), stopped: "aborted" };
+		return {
+			code: 143,
+			stdout: new Uint8Array(),
+			stderr: new Uint8Array(),
+			stopped: "aborted",
+		};
 	};
 	const result = await env.exec("sleep 100", {}, { ...CONTEXT, abortSignal: controller.signal });
 	expect(result.ok).toBe(false);
@@ -219,12 +243,26 @@ test("a command that runs too long reports a timeout and carries its spilt outpu
 		sandbox.execs.push({ command, options });
 		if (command.startsWith("mktemp") || command.startsWith("truncate")) {
 			const answer = sandbox.respond(command);
-			return { code: answer.code, stdout: new TextEncoder().encode(answer.stdout ?? ""), stderr: new Uint8Array() };
+			return {
+				code: answer.code,
+				stdout: new TextEncoder().encode(answer.stdout ?? ""),
+				stderr: new Uint8Array(),
+			};
 		}
-		for (const piece of sandbox.stream) options.onChunk?.({ stream: "stdout", data: new TextEncoder().encode(piece) });
-		return { code: 143, stdout: new Uint8Array(), stderr: new Uint8Array(), stopped: "timeout" };
+		for (const piece of sandbox.stream)
+			options.onChunk?.({ stream: "stdout", data: new TextEncoder().encode(piece) });
+		return {
+			code: 143,
+			stdout: new Uint8Array(),
+			stderr: new Uint8Array(),
+			stopped: "timeout",
+		};
 	};
-	const result = await env.exec("sleep 100", { timeout: 5, spill: { afterBytes: 16, afterLines: 1000 } }, CONTEXT);
+	const result = await env.exec(
+		"sleep 100",
+		{ timeout: 5, spill: { afterBytes: 16, afterLines: 1000 } },
+		CONTEXT,
+	);
 	expect(result.ok).toBe(false);
 	if (result.ok) return;
 	expect(result.error.code).toBe("timeout");
@@ -242,7 +280,11 @@ test("output that crosses the spill thresholds is written to a file, and small o
 
 	const small = environment();
 	small.sandbox.stream = ["one line\n"];
-	const notSpilled = await small.env.exec("small", { spill: { afterBytes: 1024, afterLines: 100 } }, CONTEXT);
+	const notSpilled = await small.env.exec(
+		"small",
+		{ spill: { afterBytes: 1024, afterLines: 100 } },
+		CONTEXT,
+	);
 	expect(notSpilled.ok && notSpilled.value.spillPath).toBeUndefined();
 	expect(small.sandbox.execs.every((call) => !call.command.startsWith("mktemp"))).toBe(true);
 });
@@ -277,11 +319,16 @@ test("the environment's id is the sandbox, so two calls see the same files", () 
 
 test("paths resolve against the working directory the way a shell would", async () => {
 	const { env } = environment();
-	expect((await env.absolutePath("sub/file.txt", CONTEXT)).ok && (await env.absolutePath("sub/file.txt", CONTEXT))).toMatchObject({
+	expect(
+		(await env.absolutePath("sub/file.txt", CONTEXT)).ok &&
+			(await env.absolutePath("sub/file.txt", CONTEXT)),
+	).toMatchObject({
 		value: "/work/sub/file.txt",
 	});
 	expect(await env.absolutePath("../other", CONTEXT).then((r) => r.ok && r.value)).toBe("/other");
-	expect(await env.absolutePath("/absolute", CONTEXT).then((r) => r.ok && r.value)).toBe("/absolute");
+	expect(await env.absolutePath("/absolute", CONTEXT).then((r) => r.ok && r.value)).toBe(
+		"/absolute",
+	);
 	// Joining is string work and does not make a path absolute, as it does not anywhere else.
 	expect(await env.joinPath(["a", "b", "c"], CONTEXT).then((r) => r.ok && r.value)).toBe("a/b/c");
 });
@@ -292,7 +339,9 @@ test("a missing file is not_found and a present one is its contents", async () =
 	expect(missing.ok).toBe(false);
 	expect(!missing.ok && missing.error.code).toBe("not_found");
 	await sandbox.write("/work/here.txt", "hello");
-	expect(await env.readTextFile("/work/here.txt", CONTEXT).then((r) => r.ok && r.value)).toBe("hello");
+	expect(await env.readTextFile("/work/here.txt", CONTEXT).then((r) => r.ok && r.value)).toBe(
+		"hello",
+	);
 	expect(await env.exists("/work/here.txt", CONTEXT).then((r) => r.ok && r.value)).toBe(true);
 	expect(await env.exists("/work/nope.txt", CONTEXT).then((r) => r.ok && r.value)).toBe(false);
 });
@@ -370,8 +419,14 @@ test("line readers hand back one line at a time and stop at the end", async () =
 		lines.push(line.ok ? line.value?.text : undefined);
 	}
 	expect(lines).toEqual(["one", "two", "three", undefined]);
-	expect(await env.readTextLines("/work/lines.txt", undefined, CONTEXT).then((r) => r.ok && r.value)).toEqual(["one", "two", "three"]);
-	expect(await env.readTextLines("/work/lines.txt", { maxLines: 2 }, CONTEXT).then((r) => r.ok && r.value)).toEqual(["one", "two"]);
+	expect(
+		await env.readTextLines("/work/lines.txt", undefined, CONTEXT).then((r) => r.ok && r.value),
+	).toEqual(["one", "two", "three"]);
+	expect(
+		await env
+			.readTextLines("/work/lines.txt", { maxLines: 2 }, CONTEXT)
+			.then((r) => r.ok && r.value),
+	).toEqual(["one", "two"]);
 });
 
 test("the host filesystem is not reachable through the environment's own helpers", async () => {

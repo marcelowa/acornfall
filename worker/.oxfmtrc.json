@@ -1,0 +1,12 @@
+// Formatting is not a thing people do here. `gofmt` settled that for Go in 2009 and
+// `.oxfmtrc.json` is the same answer for the worker: the width matches the Go sources, and
+// nothing below is a preference worth arguing about in review.
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"useTabs": true,
+	"tabWidth": 4,
+	"singleQuote": false,
+	"printWidth": 100,
+	"sortPackageJson": false,
+	"ignorePatterns": ["bun.lock"]
+}

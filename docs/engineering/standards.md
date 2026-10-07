@@ -139,6 +139,7 @@ rather than pretending to have checked:
 | no `init()` in the gateway | a grep, because the rule is absolute |
 | TypeScript types | `bun run typecheck` |
 | TypeScript rules | `bun run lint` (oxlint, type-aware through tsgolint) |
+| TypeScript formatting | `bun run format:check` (oxfmt). `bun run format` writes twice on purpose: oxfmt 0.72 does not reach its fixed point in one pass when a signature carries a long inline object return type ([oxc#26240](https://github.com/oxc-project/oxc/issues/26240)). |
 | lint exceptions have reasons | a grep |
 | commit message shape | `scripts/check-commits.mjs`, over a pull request's commits in CI |
 

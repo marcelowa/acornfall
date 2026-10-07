@@ -77,12 +77,20 @@ export async function definitionOf(
 	conversationId: string,
 	context: Context,
 ): Promise<string | undefined> {
-	const meta = await deps.harness.snapshot(ConversationMetaDoc, conversationIdOf(conversationId), context);
+	const meta = await deps.harness.snapshot(
+		ConversationMetaDoc,
+		conversationIdOf(conversationId),
+		context,
+	);
 	return meta?.definition === undefined || meta.definition === "" ? undefined : meta.definition;
 }
 
 /** How many ownership edges separate a conversation from a top-level one. */
-export async function depthOf(deps: StateDeps, conversationId: string, context: Context): Promise<number> {
+export async function depthOf(
+	deps: StateDeps,
+	conversationId: string,
+	context: Context,
+): Promise<number> {
 	let depth = 0;
 	let record = await deps.storage.conversation(conversationIdOf(conversationId), context);
 	while (record?.owner !== undefined) {
@@ -113,12 +121,18 @@ export async function mayAddress(
 		deps.storage.conversation(conversationIdOf(targetId), context),
 	]);
 	if (record === undefined) return { allowed: false, why: `no conversation ${targetId}` };
-	if (policy.delegation.address === "any") return { allowed: true, why: "policy allows any conversation" };
-	if (Object.values(state?.agents ?? {}).some((agent) => String(agent.conversationId) === targetId)) {
+	if (policy.delegation.address === "any")
+		return { allowed: true, why: "policy allows any conversation" };
+	if (
+		Object.values(state?.agents ?? {}).some(
+			(agent) => String(agent.conversationId) === targetId,
+		)
+	) {
 		return { allowed: true, why: "this conversation created it" };
 	}
 	// A child, or the conversation this one is working for.
-	if (String(record.owner?.conversationId ?? "") === fromId) return { allowed: true, why: "it is a child" };
+	if (String(record.owner?.conversationId ?? "") === fromId)
+		return { allowed: true, why: "it is a child" };
 	const own = await deps.storage.conversation(conversationIdOf(fromId), context);
 	if (own?.owner !== undefined && String(own.owner.conversationId) === targetId) {
 		return { allowed: true, why: "it is the conversation that started this one" };
@@ -140,10 +154,16 @@ async function recordChild(
 	deps: StateDeps,
 	tx: Tx,
 	context: Context,
-	options: { parentId: string; childId: ConversationId; definition: string | undefined; owned: boolean },
+	options: {
+		parentId: string;
+		childId: ConversationId;
+		definition: string | undefined;
+		owned: boolean;
+	},
 ): Promise<ConversationMeta> {
 	const meta = await tx.doc(ConversationMetaDoc, options.childId);
-	meta.definition = options.definition ?? (await definitionOf(deps, options.parentId, context)) ?? "";
+	meta.definition =
+		options.definition ?? (await definitionOf(deps, options.parentId, context)) ?? "";
 	if (!options.owned) {
 		meta.createdBy = options.parentId;
 		return meta;
@@ -163,16 +183,27 @@ export async function agentCreatedCount(deps: StateDeps, context: Context): Prom
 		const page = await deps.storage.scanConversations({}, 200, cursor, context);
 		const metas = await Promise.all(
 			page.items.map((record) =>
-				deps.harness.snapshot(ConversationMetaDoc, record.id, context).catch((error: unknown) => {
-					// Count it rather than skip it: this feeds a ceiling on how many conversations
-					// agents may create, and a ceiling that opens when a read fails is not one. The
-					// log is what makes the over-count visible instead of silent.
-					log(`agentCreatedCount: cannot read ${String(record.id)}; counting it:`, error);
-					return { title: "", hidden: false, createdBy: "unreadable" } satisfies ConversationMeta;
-				}),
+				deps.harness
+					.snapshot(ConversationMetaDoc, record.id, context)
+					.catch((error: unknown) => {
+						// Count it rather than skip it: this feeds a ceiling on how many conversations
+						// agents may create, and a ceiling that opens when a read fails is not one. The
+						// log is what makes the over-count visible instead of silent.
+						log(
+							`agentCreatedCount: cannot read ${String(record.id)}; counting it:`,
+							error,
+						);
+						return {
+							title: "",
+							hidden: false,
+							createdBy: "unreadable",
+						} satisfies ConversationMeta;
+					}),
 			),
 		);
-		created += metas.filter((meta) => meta?.createdBy !== undefined && meta.createdBy !== "").length;
+		created += metas.filter(
+			(meta) => meta?.createdBy !== undefined && meta.createdBy !== "",
+		).length;
 		if (page.next === undefined) break;
 		cursor = page.next;
 	}
@@ -196,7 +227,11 @@ export interface PolicyView {
  * is what keeps a hierarchy from growing: a conversation at depth `maxDepth` may not
  * create children, while creating peers is a separate permission.
  */
-export async function policyFor(deps: StateDeps, conversationId: string, context: Context): Promise<PolicyView> {
+export async function policyFor(
+	deps: StateDeps,
+	conversationId: string,
+	context: Context,
+): Promise<PolicyView> {
 	const [definition, depth, meta, peersTotal] = await Promise.all([
 		definitionOf(deps, conversationId, context),
 		depthOf(deps, conversationId, context),
@@ -210,7 +245,8 @@ export async function policyFor(deps: StateDeps, conversationId: string, context
 	let blockedBy: string | undefined;
 	if (!policy.spawn) blockedBy = `agent "${resolved.name}" does not allow delegation`;
 	else if (depth >= policy.maxDepth) blockedBy = `depth ${depth} of max-depth ${policy.maxDepth}`;
-	else if (children >= policy.maxChildren) blockedBy = `${children} children of max-children ${policy.maxChildren}`;
+	else if (children >= policy.maxChildren)
+		blockedBy = `${children} children of max-children ${policy.maxChildren}`;
 
 	return {
 		delegation: policy,
@@ -252,7 +288,13 @@ function entryText(entry: { kind?: string; model?: readonly unknown[] }): string
 
 function splitModel(value: string): { provider: string; modelId: string } {
 	const [provider, modelId, ...rest] = value.split("/");
-	if (provider === undefined || modelId === undefined || rest.length > 0 || provider === "" || modelId === "") {
+	if (
+		provider === undefined ||
+		modelId === undefined ||
+		rest.length > 0 ||
+		provider === "" ||
+		modelId === ""
+	) {
 		throw new Error(`model must be provider/modelId, got ${value}`);
 	}
 	return { provider, modelId };
@@ -286,7 +328,9 @@ export function delegationExtension(deps: DelegationDeps) {
 			]),
 			name: Type.Optional(Type.String({ description: "The subagent's name" })),
 			conversation: Type.Optional(
-				Type.String({ description: "Conversation id, instead of a name, for send, read, and stop" }),
+				Type.String({
+					description: "Conversation id, instead of a name, for send, read, and stop",
+				}),
 			),
 			peer: Type.Optional(
 				Type.Boolean({
@@ -300,13 +344,23 @@ export function delegationExtension(deps: DelegationDeps) {
 						"Deliver the message, but do not bring its answer back. The conversation still answers in its own transcript; you are just not woken with it. Default: false",
 				}),
 			),
-			message: Type.Optional(Type.String({ description: "What to tell it, for spawn and send" })),
-			followUp: Type.Optional(
-				Type.Boolean({ description: "Queue after its current answer instead of steering it now" }),
+			message: Type.Optional(
+				Type.String({ description: "What to tell it, for spawn and send" }),
 			),
-			agent: Type.Optional(Type.String({ description: "Agent definition to run it as, for spawn" })),
-			model: Type.Optional(Type.String({ description: "provider/modelId override, for spawn" })),
-			thinking: Type.Optional(Type.String({ description: "Thinking level override, for spawn" })),
+			followUp: Type.Optional(
+				Type.Boolean({
+					description: "Queue after its current answer instead of steering it now",
+				}),
+			),
+			agent: Type.Optional(
+				Type.String({ description: "Agent definition to run it as, for spawn" }),
+			),
+			model: Type.Optional(
+				Type.String({ description: "provider/modelId override, for spawn" }),
+			),
+			thinking: Type.Optional(
+				Type.String({ description: "Thinking level override, for spawn" }),
+			),
 		}),
 		// Repeating `stop` could stop newer work, so an interrupted call is not rerun.
 		replay: "unsafe",
@@ -328,7 +382,8 @@ export function delegationExtension(deps: DelegationDeps) {
 			// that are not true of it.
 			const target: ConversationId | undefined =
 				args.conversation === undefined
-					? (args.name === undefined ? undefined : state.agents[args.name])?.conversationId
+					? (args.name === undefined ? undefined : state.agents[args.name])
+							?.conversationId
 					: conversationIdOf(args.conversation);
 			// The name this conversation knows the target by, when it knows it at all. A target
 			// addressed by id is a conversation this one made — the id came from a listing — and
@@ -337,10 +392,13 @@ export function delegationExtension(deps: DelegationDeps) {
 			const knownAs =
 				args.conversation === undefined
 					? undefined
-					: Object.entries(state.agents).find(([, entry]) => String(entry.conversationId) === args.conversation)?.[0];
+					: Object.entries(state.agents).find(
+							([, entry]) => String(entry.conversationId) === args.conversation,
+						)?.[0];
 			if (args.conversation !== undefined) {
 				const reach = await mayAddress(deps, parentId, args.conversation, context);
-				if (!reach.allowed) return reply(`Cannot address ${args.conversation}: ${reach.why}.`);
+				if (!reach.allowed)
+					return reply(`Cannot address ${args.conversation}: ${reach.why}.`);
 			}
 
 			if (args.action === "list") {
@@ -381,7 +439,8 @@ export function delegationExtension(deps: DelegationDeps) {
 				for (const entry of [...page.items].reverse()) {
 					const text = entryText(entry);
 					if (text.trim() === "") continue;
-					const trimmed = text.length > budget ? `${text.slice(0, Math.max(budget, 0))}…` : text;
+					const trimmed =
+						text.length > budget ? `${text.slice(0, Math.max(budget, 0))}…` : text;
 					budget -= trimmed.length;
 					lines.push(`${String(entry.kind).replace("pi.", "")}: ${trimmed}`);
 					if (budget <= 0) break;
@@ -392,7 +451,9 @@ export function delegationExtension(deps: DelegationDeps) {
 			if (args.message === undefined) return reply(`${args.action} needs a message.`);
 			const policy = await policyFor(deps, parentId, context);
 			if (args.action === "spawn" && !policy.canSpawn) {
-				return reply(`Cannot start a subagent here: ${policy.blockedBy}. Do the work yourself and say why.`);
+				return reply(
+					`Cannot start a subagent here: ${policy.blockedBy}. Do the work yourself and say why.`,
+				);
 			}
 
 			// The level is the model's own argument, so an unusable one is answered the way the
@@ -419,13 +480,18 @@ export function delegationExtension(deps: DelegationDeps) {
 				}
 				// Both tasks belong to this conversation and are background, so your Esc
 				// and this conversation's idle waits leave them alone.
-				const background = { ownership: { kind: "conversation" }, background: true } as const;
+				const background = {
+					ownership: { kind: "conversation" },
+					background: true,
+				} as const;
 
 				let conversationId: ConversationId;
 				if (args.action === "spawn") {
 					const isPeer = args.peer === true;
 					if (isPeer) {
-						const peers = Object.values(current.agents).filter((agent) => agent.peer).length;
+						const peers = Object.values(current.agents).filter(
+							(agent) => agent.peer,
+						).length;
 						if (peers >= policy.delegation.maxPeers) {
 							return {
 								text: `${name} was not started: this conversation already made ${peers} peers of max-peers ${policy.delegation.maxPeers}.`,
@@ -437,7 +503,9 @@ export function delegationExtension(deps: DelegationDeps) {
 							};
 						}
 						if (!policy.delegation.peers) {
-							return { text: "Cannot create a peer here: this agent does not allow peers." };
+							return {
+								text: "Cannot create a peer here: this agent does not allow peers.",
+							};
 						}
 					}
 					// A subagent is owned by an anchor task, so its creator waits for it and
@@ -446,7 +514,10 @@ export function delegationExtension(deps: DelegationDeps) {
 					const child = isPeer
 						? await tx.createConversation({ ownership: { kind: "ownerless" } })
 						: await tx.createConversation({
-								ownership: { kind: "task", taskId: await tx.createTask(Anchor, null, background) },
+								ownership: {
+									kind: "task",
+									taskId: await tx.createTask(Anchor, null, background),
+								},
 							});
 					conversationId = child.id;
 
@@ -454,9 +525,15 @@ export function delegationExtension(deps: DelegationDeps) {
 						...(args.model === undefined ? {} : { model: splitModel(args.model) }),
 						...(overrideLevel === null ? {} : { thinkingLevel: overrideLevel }),
 					};
-					const resolved = args.agent === undefined ? undefined : resolveAgent(deps.catalog(), args.agent);
-					const resolvedLevel = resolved === undefined ? null : thinkingLevelFor(resolved.thinking);
-					const inherited = isPeer ? await tx.doc(AgentDoc, api.conversationId) : undefined;
+					const resolved =
+						args.agent === undefined
+							? undefined
+							: resolveAgent(deps.catalog(), args.agent);
+					const resolvedLevel =
+						resolved === undefined ? null : thinkingLevelFor(resolved.thinking);
+					const inherited = isPeer
+						? await tx.doc(AgentDoc, api.conversationId)
+						: undefined;
 					// Least specific first, because the last one wins: what this conversation runs,
 					// then what the named definition says, then what the caller asked for. That is
 					// the order the open path documents — an explicit model beats a definition —
@@ -467,10 +544,13 @@ export function delegationExtension(deps: DelegationDeps) {
 						// task-owned one does, so a peer copies the model and thinking explicitly.
 						...(inherited?.model === undefined ? {} : { model: inherited.model }),
 						// A child that recorded no level of its own keeps whatever the copy left it.
-						...(inherited?.thinkingLevel === undefined || inherited.thinkingLevel === null
+						...(inherited?.thinkingLevel === undefined ||
+						inherited.thinkingLevel === null
 							? {}
 							: { thinkingLevel: inherited.thinkingLevel }),
-						...(resolved?.model === undefined ? {} : { model: splitModel(resolved.model) }),
+						...(resolved?.model === undefined
+							? {}
+							: { model: splitModel(resolved.model) }),
 						// The definition's level applies here too; it was read and then dropped, so a
 						// definition that named one was ignored for every spawned child.
 						...(resolvedLevel === null ? {} : { thinkingLevel: resolvedLevel }),
@@ -522,12 +602,11 @@ export function delegationExtension(deps: DelegationDeps) {
 					},
 					background,
 				);
-				const suffix =
-					wantsReply
-						? " Its answer will come back to you."
-						: known
-							? ""
-							: " It answers in its own transcript; nothing wakes this conversation for it.";
+				const suffix = wantsReply
+					? " Its answer will come back to you."
+					: known
+						? ""
+						: " It answers in its own transcript; nothing wakes this conversation for it.";
 				return {
 					text: `${args.action === "send" ? "Sent to" : "Started"} ${name}.${suffix}`,
 					conversationId: String(conversationId),
@@ -547,7 +626,9 @@ export function delegationExtension(deps: DelegationDeps) {
 			"delegate edits to files you are editing yourself.",
 		].join(" "),
 		parameters: Type.Object({
-			task: Type.String({ description: "A complete, self-contained instruction for the subagent" }),
+			task: Type.String({
+				description: "A complete, self-contained instruction for the subagent",
+			}),
 			agent: Type.Optional(Type.String({ description: "Agent definition name to run as" })),
 		}),
 		// A rerun after a crash finds the child it already made, because the ownership
@@ -582,13 +663,18 @@ export function delegationExtension(deps: DelegationDeps) {
 			}
 
 			const childId = await api.commit(async (tx) => {
-				const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
+				const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1))
+					.items[0];
 				if (existing !== undefined) return existing.id;
 
-				const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
+				const created = await tx.createConversation({
+					ownership: { kind: "task", taskId: api.taskId },
+				});
 				if (definition !== undefined) {
 					await configure(tx, created.id, {
-						...(definition.model === undefined ? {} : { model: splitModel(definition.model) }),
+						...(definition.model === undefined
+							? {}
+							: { model: splitModel(definition.model) }),
 						...(level === null ? {} : { thinkingLevel: level }),
 						instructions: definition.instructions,
 					});
@@ -605,10 +691,18 @@ export function delegationExtension(deps: DelegationDeps) {
 
 			const handle = await api.conversation(childId as ConversationId, context);
 			if (handle === undefined) {
-				return { content: [{ type: "text" as const, text: "The subagent conversation vanished." }] };
+				return {
+					content: [
+						{ type: "text" as const, text: "The subagent conversation vanished." },
+					],
+				};
 			}
 			const submission = await handle.submit(
-				{ type: "input", content: args.task, requestId: `acornfall:delegate:${api.taskId}` },
+				{
+					type: "input",
+					content: args.task,
+					requestId: `acornfall:delegate:${api.taskId}`,
+				},
 				context,
 			);
 			const settled = await submission.wait(context);

@@ -35,6 +35,7 @@ export const ConversationMetaDoc = defineDoc<ConversationMeta>({
 
 export function conversationIdOf(id: string): ConversationId {
 	const numeric = Number(id);
-	if (!Number.isInteger(numeric) || numeric <= 0) throw new Error(`invalid conversation id ${id}`);
+	if (!Number.isInteger(numeric) || numeric <= 0)
+		throw new Error(`invalid conversation id ${id}`);
 	return numeric as ConversationId;
 }

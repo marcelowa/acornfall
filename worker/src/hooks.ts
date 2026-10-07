@@ -26,7 +26,11 @@ export interface GuardDeps extends StateDeps {
 const compiled = new Map<string, RegExp>();
 
 /** Exported for its tests: these two are the whole rule, and a rule is worth pinning. */
-export function matches(guard: Guard, call: { name: string; arguments: Record<string, unknown> }, cwd: string): boolean {
+export function matches(
+	guard: Guard,
+	call: { name: string; arguments: Record<string, unknown> },
+	cwd: string,
+): boolean {
 	if (guard.tool !== "*" && guard.tool !== call.name) return false;
 	const value = call.arguments[guard.arg];
 	if (typeof value !== "string" || value === "") return false;
@@ -69,7 +73,10 @@ export function guardsExtension(deps: GuardDeps) {
 			hook(ToolTask, {
 				beforeTool: async (call, api, context: Context) => {
 					const conversationId = String(api.conversationId);
-					const resolved = resolveAgent(deps.catalog(), await definitionOf(deps, conversationId, context));
+					const resolved = resolveAgent(
+						deps.catalog(),
+						await definitionOf(deps, conversationId, context),
+					);
 					if (resolved.guards.length === 0) return undefined;
 
 					// The conversation's own directory, so a guard follows a conversation that

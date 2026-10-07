@@ -27,7 +27,10 @@ export class FileCredentialStore implements CredentialStore {
 		this.#path = path;
 	}
 
-	async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
+	async read(
+		providerId: string,
+		options?: AuthOperationOptions,
+	): Promise<Credential | undefined> {
 		options?.signal?.throwIfAborted();
 		const all = await this.#readAll(true);
 		const credential = all[providerId];
@@ -112,7 +115,11 @@ export class FileCredentialStore implements CredentialStore {
 		let handle: Awaited<ReturnType<typeof open>> | undefined;
 		for (;;) {
 			try {
-				handle = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+				handle = await open(
+					lockPath,
+					constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+					0o600,
+				);
 				break;
 			} catch (error) {
 				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;

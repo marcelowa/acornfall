@@ -37,7 +37,12 @@ export const hostFiles: Files = {
 	},
 	async list(path) {
 		const entries = await readdir(path, { withFileTypes: true }).catch(() => []);
-		return entries.map((entry) => ({ name: entry.name, directory: entry.isDirectory(), size: 0, mtimeMs: 0 }));
+		return entries.map((entry) => ({
+			name: entry.name,
+			directory: entry.isDirectory(),
+			size: 0,
+			mtimeMs: 0,
+		}));
 	},
 	async stat(path) {
 		const info = await stat(path).catch(() => null);
