@@ -14,6 +14,7 @@ import { Stack } from "@/components/layout/stack";
 import { Picker } from "@/components/composer/picker";
 import { SettingsSheet } from "@/components/settings/settings-sheet";
 import { Transcript } from "@/components/transcript/transcript";
+import { StatusPill } from "@/components/ui/status-pill";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
@@ -198,6 +199,15 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					}
 					controls={
 						<>
+							{/* Ambient state first: a dropped stream or a dead harness is the thing to know
+							 * before choosing a model. Nothing renders while everything is well. */}
+							{platform.workerUp ? (
+								platform.connection === "reconnecting" ? (
+									<StatusPill state="reconnecting" />
+								) : null
+							) : (
+								<StatusPill state="harness-down" detail={platform.workerError} />
+							)}
 							<Picker
 								label="Model"
 								value={platform.model.value}

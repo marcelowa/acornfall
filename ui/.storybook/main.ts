@@ -15,7 +15,14 @@ const allowedHosts = ["desktop", ".ts.net"];
  */
 const config: StorybookConfig = {
 	stories: ["../src/**/*.stories.@(ts|tsx)"],
-	addons: ["@storybook/addon-docs", "@storybook/addon-a11y", "@storybook/addon-themes"],
+	addons: [
+		"@storybook/addon-docs",
+		"@storybook/addon-a11y",
+		"@storybook/addon-themes",
+		// The viewport toolbar and its decorator are core in Storybook 10, but not registered
+		// by default; a story pins one with `globals: { viewport: { value: … } }`.
+		"storybook/viewport",
+	],
 	framework: { name: "@storybook/react-vite", options: {} },
 	core: { disableTelemetry: true, allowedHosts },
 	async viteFinal(viteConfig) {

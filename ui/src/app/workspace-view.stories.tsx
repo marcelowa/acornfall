@@ -245,7 +245,10 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 	};
 }
 
-export const Default: Story = { args: { platform: makePlatform() } };
+export const Default: Story = {
+	args: { platform: makePlatform() },
+	globals: { viewport: { value: "laptop" } },
+};
 
 export const EmptyConversation: Story = {
 	args: { platform: makePlatform({ entries: [], active: rootConversation }) },
@@ -281,23 +284,64 @@ export const NoProviders: Story = {
 	},
 };
 
-/** Below `lg` the rail is behind the toggle, and the composer's controls wrap. */
+/**
+ * Below `lg` the rail is behind the toggle and the composer's controls wrap; the transcript
+ * gets the whole screen. This is the layout, not a smaller desktop.
+ */
 export const Phone: Story = {
 	args: { platform: makePlatform() },
-	parameters: { viewport: { defaultViewport: "phone" } },
+	globals: { viewport: { value: "phone" } },
 };
 
+/** The same phone, with the rail open as a full-width drawer. */
 export const PhoneRailOpen: Story = {
 	args: { platform: makePlatform({ railOpen: true }) },
-	parameters: { viewport: { defaultViewport: "phone" } },
+	globals: { viewport: { value: "phone" } },
 };
 
 /** The rail is a column that can be put away, and the choice survives a reload. */
 export const RailCollapsed: Story = {
 	args: { platform: makePlatform({ railCollapsed: true }) },
+	globals: { viewport: { value: "laptop" } },
 };
 
-/** From 2xl the inspector is a pane of its own: the answer to "why did it see that". */
+/** The stream dropped: the app keeps working from the last state it saw. */
+export const Reconnecting: Story = {
+	args: { platform: makePlatform({ connection: "reconnecting" }) },
+	globals: { viewport: { value: "laptop" } },
+};
+
+/**
+ * The harness is gone. The pill carries the reason and the composer is disabled, because
+ * sending would fail and saying so is kinder than letting it try.
+ */
+export const HarnessDown: Story = {
+	args: {
+		platform: makePlatform({
+			workerUp: false,
+			workerError: "the harness process ended: signal: killed",
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/**
+ * An action the server refused: the strip above the composer holds its own words — here, a
+ * workspace name that is a path — until it is dismissed.
+ */
+export const RefusedAction: Story = {
+	args: {
+		platform: makePlatform({
+			failure: 'a workspace name cannot contain a slash or a space: "ui-check/refused"',
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/**
+ * From 2xl the inspector is a pane of its own — the answer to "why did it see that" — with
+ * the Context section open: request lineage, the delta, and every section with its size.
+ */
 export const InspectorOpen: Story = {
 	args: {
 		platform: makePlatform({
@@ -349,5 +393,5 @@ export const InspectorOpen: Story = {
 			]),
 		}),
 	},
-	parameters: { viewport: { defaultViewport: "wide" } },
+	globals: { viewport: { value: "wide" } },
 };

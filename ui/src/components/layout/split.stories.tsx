@@ -50,18 +50,18 @@ const inspector = (
 
 export const Desktop: Story = {
 	args: { aside, children: main },
-	parameters: { viewport: { defaultViewport: "laptop" } },
+	globals: { viewport: { value: "laptop" } },
 };
 
 export const WithInspector: Story = {
 	args: { aside, end: inspector, children: main },
-	parameters: { viewport: { defaultViewport: "wide" } },
+	globals: { viewport: { value: "wide" } },
 };
 
 /** Phone: the rail is behind the toggle in the bar, and the middle pane is the whole screen. */
 export const Phone: Story = {
 	args: { aside, bar: <Text size="sm">Conversation</Text>, children: main },
-	parameters: { viewport: { defaultViewport: "phone" } },
+	globals: { viewport: { value: "phone" } },
 };
 
 function ResizableFrame() {
