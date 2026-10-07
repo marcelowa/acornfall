@@ -3,14 +3,17 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 /**
- * A readable measure. Text that runs the full width of a 27-inch screen is not more
- * information, it is harder to read. The transcript and the composer align to the same one,
- * and the width is a token rather than a class a screen invents.
+ * A readable measure. Text that runs the full width of a 27-inch screen is harder to read,
+ * but this interface is mostly code, tool output, and diffs — content that a prose column
+ * wastes space on. Three widths, then: `prose` for a text-only context, `wide` for the
+ * transcript and the composer, `page` for a surface that owns its whole screen. The pane
+ * constrains whichever one is asked for, so a phone just gets the full width.
  */
 const measureVariants = cva("mx-auto flex w-full shrink-0 flex-col", {
 	variants: {
 		size: {
 			prose: "max-w-3xl",
+			wide: "max-w-5xl",
 			page: "max-w-page",
 		},
 		padding: {

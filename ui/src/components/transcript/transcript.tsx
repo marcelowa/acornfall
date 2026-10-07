@@ -16,14 +16,14 @@ export interface TranscriptProps {
 export function Transcript({ entries, onOpenConversation, onFork }: TranscriptProps) {
 	if (entries.length === 0) {
 		return (
-			<Measure size="prose" padding="lg">
+			<Measure size="wide" padding="lg">
 				<Text tone="muted">No messages yet.</Text>
 			</Measure>
 		);
 	}
 
 	return (
-		<Measure size="prose" padding="lg">
+		<Measure size="wide" padding="lg">
 			<Stack gap="xl">
 				{entries.map((entry) => {
 					switch (entry.kind) {

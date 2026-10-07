@@ -89,7 +89,7 @@ const barTitle = (
 
 const composer = (
 	<div className="w-full border-t border-border">
-		<Measure size="prose" padding="md">
+		<Measure size="wide" padding="md">
 			<Stack direction="horizontal" gap="sm" align="center">
 				<Button size="sm">Send</Button>
 				<ThemeToggle theme="light" onToggle={() => undefined} />

@@ -21,6 +21,15 @@ export const Prose: Story = {
 	),
 };
 
+export const Wide: Story = {
+	args: { size: "wide", padding: "sm", children: content },
+	render: (args) => (
+		<div className="h-full w-full bg-muted p-4">
+			<Measure {...args} />
+		</div>
+	),
+};
+
 export const Page: Story = {
 	args: { size: "page", padding: "sm", children: content },
 	render: (args) => (

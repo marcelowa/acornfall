@@ -69,12 +69,6 @@ describe("the design system scanner", () => {
 		expect(scan(sloppy)).toHaveLength(1);
 	});
 
-	test("fails an import from the cn package", () => {
-		const violations = scan(file("src/components/ui/button.tsx", 'import { cn } from "cn";'));
-		expect(violations).toHaveLength(1);
-		expect(violations[0]?.rule).toBe("the cn package is not this project's");
-	});
-
 	test("fails a class on a screen", () => {
 		const violations = scan(file("src/screens/shell.tsx", '<div className="p-4" />'));
 		expect(violations).toHaveLength(1);

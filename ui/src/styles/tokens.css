@@ -185,6 +185,8 @@
 	--base-container-xl: 576px;
 	--base-container-2xl: 672px;
 	--base-container-3xl: 768px;
+	--base-container-4xl: 896px;
+	--base-container-5xl: 1024px;
 	--base-container-page: 1280px;
 
 	/* ────────────────────────────────────────────────────────────────────────────────────────

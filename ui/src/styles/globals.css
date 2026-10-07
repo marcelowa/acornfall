@@ -157,6 +157,8 @@
 	--container-xl: var(--base-container-xl);
 	--container-2xl: var(--base-container-2xl);
 	--container-3xl: var(--base-container-3xl);
+	--container-4xl: var(--base-container-4xl);
+	--container-5xl: var(--base-container-5xl);
 	--container-page: var(--base-container-page);
 
 	/* ── Motion and breakpoints */
