@@ -12,7 +12,7 @@ URL ?= http://$(ADDR)
 INSECURE ?= 1
 OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 
-.PHONY: help deps build typecheck lint tools commits check test test-sandbox sandbox-preflight ui vendor run dev fmt clean
+.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui vendor run dev fmt clean
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -35,7 +35,6 @@ build: ## build the gateway binary
 
 tools: ## install the linters used by `make lint`
 	go install honnef.co/go/tools/cmd/staticcheck@latest
-	go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest
 	cd worker && bun install
 
 typecheck: ## the compiler's opinion, without running anything
@@ -48,11 +47,16 @@ lint: typecheck ## the static rules; fails on the first one broken
 	cd gateway && go vet ./...
 	@if [ -x "$(STATICCHECK)" ]; then cd gateway && $(STATICCHECK) ./... && echo "staticcheck: clean"; \
 	else echo "staticcheck: not installed (make tools)"; fi
-	@if [ -x "$(MODERNIZE)" ]; then cd gateway && go vet -vettool=$(MODERNIZE) ./... && echo "modernize: clean"; \
-	else echo "modernize: not installed (make tools)"; fi
 	node scripts/check-house-rules.mjs
 	cd worker && bun run format:check
 	cd worker && bun run lint
+
+# Not part of `make lint`, on purpose: this is the one Go check measured in seconds rather
+# than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a
+# loop, not a wrong answer. It is a prompt, not a gate, and a daily workflow prompts with it.
+modernize: ## the idiom analyzer; a daily workflow runs it, `make lint` does not
+	go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest
+	cd gateway && go vet -vettool=$(MODERNIZE) ./... && echo "modernize: clean"
 
 commits: ## check commit messages (RANGE=origin/main..HEAD by default)
 	node scripts/check-commits.mjs $(RANGE)

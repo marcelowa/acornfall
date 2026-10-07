@@ -1,0 +1,27 @@
+# The idiom analyzer, once a day instead of on every change.
+#
+# `modernize` is the one Go check measured in seconds rather than milliseconds, and what it
+# finds is drift rather than a bug: a loop written before `slices.Contains` existed, a split
+# that allocates when `SplitSeq` would not. That is a prompt, not a gate — it should not fail
+# a merge — but it should not go unheard for a year either, so a scheduled job runs it and
+# the failure is the prompt.
+#
+# GitHub's cron is UTC and has no daylight saving. 03:00 UTC is 06:00 in Israel while DST is
+# in effect and 05:00 once it ends; the hour is not worth a second workflow to move it.
+name: modernize
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  modernize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: gateway/go.sum
+      - run: make modernize

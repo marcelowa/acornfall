@@ -193,7 +193,8 @@ ADR 0012 lists what the sandbox deliberately does not cover yet.
 
 ```bash
 make check         # fast: the compiler and the unit tests, no processes (~6s)
-make lint          # the static rules: gofmt, vet, staticcheck, modernize, tsc, oxlint, oxfmt
+make lint          # the static rules: gofmt, vet, staticcheck, tsc, oxlint, oxfmt
+make modernize     # the Go idiom analyzer; a daily workflow prompts with it, the gate does not
 make test          # the default gate: units + the feature suite, no hypervisor (~30s)
 make test-sandbox  # the microVM engine boundary: live driver + SDK + 4 e2e tests (~35s; needs /dev/kvm)
 make ui            # drives the real client in headless chromium (needs a running gateway)
