@@ -335,15 +335,26 @@ func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 
 	killWorker(t, s)
 
-	// It comes back on its own, without anything being restarted by hand.
+	// It comes back on its own, without anything being restarted by hand. Wait for the killed
+	// worker to be reported down first: reading only for "up" raced the kill, passed on the
+	// worker that was still up, and failed on the next read — which is how CI caught it.
 	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		if c.state("general").WorkerUp {
-			break
+	down, back := false, false
+	for time.Now().Before(deadline) && !back {
+		got := c.state("general")
+		if !got.WorkerUp {
+			down = true
+		} else if down {
+			back = true
 		}
-		time.Sleep(200 * time.Millisecond)
+		if !back {
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
-	if !c.state("general").WorkerUp {
+	if !down {
+		t.Fatalf("the kill was never reported: the worker still reads as up")
+	}
+	if !back {
 		t.Fatalf("the harness should be restarted, got %q", c.state("general").WorkerError)
 	}
 
