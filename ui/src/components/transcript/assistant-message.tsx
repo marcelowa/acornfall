@@ -28,6 +28,16 @@ export function AssistantMessage({ entry, defaultRaw = false }: AssistantMessage
 		);
 	}
 
+	// While the text is still arriving it has no controls: it is incomplete, and the pane gets
+	// them the moment it is committed.
+	if (entry.live === true) {
+		return (
+			<div className="w-full">
+				<Markdown>{entry.markdown}</Markdown>
+			</div>
+		);
+	}
+
 	return (
 		<div className="w-full">
 			{raw ? (

@@ -56,6 +56,8 @@ export interface AssistantEntry {
 	at?: Date | undefined;
 	/** A provider failure: the entry has no content and this is the only explanation there is. */
 	failure?: string | undefined;
+	/** Still being written: render the text, but no controls until it settles. */
+	live?: boolean | undefined;
 }
 
 export interface ToolEntry {

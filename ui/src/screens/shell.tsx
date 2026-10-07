@@ -22,6 +22,9 @@ export interface ShellProps {
 	bar?: ReactNode | undefined;
 	railOpen?: boolean | undefined;
 	onRailOpenChange?: ((open: boolean) => void) | undefined;
+	/** Controlled rail width in pixels; the token's 280px when omitted. */
+	railWidth?: number | undefined;
+	onRailWidthChange?: ((width: number) => void) | undefined;
 }
 
 export function Shell({
@@ -32,6 +35,8 @@ export function Shell({
 	bar,
 	railOpen,
 	onRailOpenChange,
+	railWidth,
+	onRailWidthChange,
 }: ShellProps) {
 	return (
 		<Page>
@@ -41,6 +46,8 @@ export function Shell({
 				bar={bar}
 				asideOpen={railOpen}
 				onAsideOpenChange={onRailOpenChange}
+				asideWidth={railWidth}
+				onAsideWidthChange={onRailWidthChange}
 			>
 				<Stack gap="none" fill>
 					<Stack gap="none" scroll="vertical" fill>

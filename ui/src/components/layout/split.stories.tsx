@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useState } from "react";
 import { Page } from "./page";
 import { Split } from "./split";
 import { Stack } from "./stack";
@@ -61,4 +62,26 @@ export const WithInspector: Story = {
 export const Phone: Story = {
 	args: { aside, bar: <Text size="sm">Conversation</Text>, children: main },
 	parameters: { viewport: { defaultViewport: "phone" } },
+};
+
+function ResizableFrame() {
+	const [width, setWidth] = useState<number | undefined>(undefined);
+	return (
+		<Page>
+			<Split
+				aside={aside}
+				asideWidth={width}
+				onAsideWidthChange={setWidth}
+				bar={<Text size="sm">Drag the edge of the rail</Text>}
+			>
+				{main}
+			</Split>
+		</Page>
+	);
+}
+
+/** The handle between the panes: drag it, or focus it and use the arrow keys. */
+export const Resizable: Story = {
+	args: { aside, children: main },
+	render: () => <ResizableFrame />,
 };
