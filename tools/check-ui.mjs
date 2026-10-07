@@ -88,6 +88,63 @@ try {
 	await page.waitForSelector("[data-slot=splitter]", { timeout: 10000 });
 	check("the rail renders", true);
 
+	// The rail names its workspace first: a conversation belongs to exactly one, so the
+	// workspace is the choice that comes before it. Switching starts over.
+	const activeWorkspace = await page.evaluate(
+		() =>
+			document
+				.querySelector("[data-slot=workspace-row][data-active='true']")
+				?.getAttribute("data-name") ?? "",
+	);
+	check("the rail names the workspace in view", activeWorkspace !== "", activeWorkspace);
+	const otherWorkspace = await page.evaluate((active) => {
+		const rows = [...document.querySelectorAll("[data-slot=workspace-row]")];
+		return rows.find((row) => row.getAttribute("data-name") !== active)?.getAttribute("data-name") ?? "";
+	}, activeWorkspace);
+	if (otherWorkspace !== "" && activeWorkspace !== "") {
+		await page.click(`[data-slot=workspace-row][data-name="${otherWorkspace}"]`);
+		await page.waitForFunction(
+			(name) => window.location.pathname === `/w/${name}`,
+			{ timeout: 10000 },
+			otherWorkspace,
+		);
+		// The route changes first; the workspace's own state arrives with its fetch.
+		const marked = await page
+			.waitForFunction(
+				(name) =>
+					document
+						.querySelector("[data-slot=workspace-row][data-active='true']")
+						?.getAttribute("data-name") === name,
+				{ timeout: 15000 },
+				otherWorkspace,
+			)
+			.then(() => true)
+			.catch(() => false);
+		const nowActive = await page.evaluate(
+			() =>
+				document
+					.querySelector("[data-slot=workspace-row][data-active='true']")
+					?.getAttribute("data-name") ?? "",
+		);
+		check(
+			"switching a workspace moves the route and the mark",
+			marked && nowActive === otherWorkspace,
+			`${activeWorkspace} → ${nowActive}`,
+		);
+		// Back where it started, so the rest of the suite runs against the same workspace.
+		await page.click(`[data-slot=workspace-row][data-name="${activeWorkspace}"]`);
+		await page.waitForFunction(
+			(name) =>
+				window.location.pathname === `/w/${name}` &&
+				document
+					.querySelector("[data-slot=workspace-row][data-active='true']")
+					?.getAttribute("data-name") === name,
+			{ timeout: 15000 },
+			activeWorkspace,
+		);
+		await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
+	}
+
 	// 2. The rail is a pane, not the page: a long list scrolls inside it, and the document
 	// itself never grows — a page that scrolls moves every panel, including the ones that
 	// were meant to stay put.
@@ -408,6 +465,16 @@ try {
 		"the open section is remembered across a reload",
 		(await openSections()).length === 1,
 		JSON.stringify(await openSections()),
+	);
+
+	await page.click("[data-slot=inspector] [data-section=sandbox] button[aria-expanded]");
+	const sandboxText = await page.evaluate(
+		() => document.querySelector("[data-slot=inspector] [data-section=sandbox]")?.textContent ?? "",
+	);
+	check(
+		"the inspector says where the tools run",
+		/engine/.test(sandboxText) && /tools/.test(sandboxText),
+		sandboxText.replace(/\s+/g, " ").slice(0, 90),
 	);
 
 	await page.click("[data-slot=inspector] [data-section] button[aria-label^='Maximize']");

@@ -18,15 +18,19 @@ import {
 	toConversation,
 	toModelChoices,
 	toModelGroups,
+	toSandbox,
 	toThinkingGroups,
 	toTranscript,
+	toWorkspaces,
 } from "./map";
 import type {
 	BusyAction,
 	ConversationSummary,
 	PickerGroup,
+	SandboxSummary,
 	SlashCommand,
 	TranscriptEntry,
+	WorkspaceSummary,
 } from "./view-models";
 import type { WireResolvedAgent, WireSender, WireState, WireUsage, WireView } from "./wire";
 
@@ -101,6 +105,11 @@ export interface Platform {
 	error?: string | undefined;
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
+	/** The workspaces, with the one in view marked. */
+	workspaces: WorkspaceSummary[];
+	selectWorkspace: (name: string) => void;
+	/** Where the active workspace's tools actually run. */
+	sandbox?: SandboxSummary | undefined;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	workerUp: boolean;
@@ -117,7 +126,6 @@ export interface Platform {
 	usage?: WireUsage | undefined;
 	resolved?: WireResolvedAgent | undefined;
 	harness?: string | undefined;
-	sandbox?: string | undefined;
 	/** The level that was asked for when the model could not express it. */
 	thinkingRequested?: string | undefined;
 	/** The inspector's own state, kept the way the rail's is. */
@@ -289,6 +297,15 @@ export function usePlatform(): Platform {
 	);
 
 	const contextFold = useMemo(() => foldContext(view?.entries ?? []), [view]);
+
+	const workspaces = useMemo(
+		() => toWorkspaces(state?.workspaces ?? [], state?.workspace.name ?? ""),
+		[state],
+	);
+	const sandbox = useMemo(
+		() => (state === undefined ? undefined : toSandbox(state.sandbox)),
+		[state],
+	);
 	const deleted = useMemo(
 		() =>
 			(state?.conversations ?? [])
@@ -459,6 +476,15 @@ export function usePlatform(): Platform {
 		else window.localStorage.setItem(INSPECTOR_MAXIMIZED_KEY, JSON.stringify(key));
 	}, []);
 
+	/** A conversation belongs to a workspace for life, so switching means starting over: the
+	 * transcript is cleared and the next one arrives with the workspace. */
+	const selectWorkspace = useCallback((name: string) => {
+		window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
+		setRailOpen(false);
+		setView(undefined);
+		setRoute({ workspace: name, conversation: "" });
+	}, []);
+
 	return {
 		ready,
 		error,
@@ -474,11 +500,13 @@ export function usePlatform(): Platform {
 		agent,
 		commands,
 		context: contextFold,
+		workspaces,
+		sandbox,
+		selectWorkspace,
 		usage: lastUsage(view?.entries ?? []),
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
 		harness: state?.harness,
-		sandbox: state?.sandbox.engine ?? state?.capabilities.sandbox,
 		inspectorOpen,
 		setInspectorOpen,
 		inspectorMaximized,

@@ -6,7 +6,9 @@ import {
 	toAgentGroups,
 	toConversation,
 	toModelChoices,
+	toSandbox,
 	toTranscript,
+	toWorkspaces,
 } from "../src/app/map";
 import type { WireConversation, WireView } from "../src/app/wire";
 
@@ -198,5 +200,41 @@ describe("the wire mapping", () => {
 			"wait, check the lock order",
 		);
 		expect(followUp?.id).toBe("pending-b");
+	});
+
+	test("workspaces are listed with the one in view marked", () => {
+		const workspaces = toWorkspaces(
+			[
+				{
+					name: "general",
+					title: "acornfall",
+					path: "/acornfall",
+					general: true,
+					running: true,
+				},
+				{
+					name: "demo",
+					title: "Demo",
+					path: "/tmp/ws-demo",
+					general: false,
+					running: false,
+					network: "off",
+				},
+			],
+			"demo",
+		);
+		expect(workspaces.map((workspace) => workspace.active)).toEqual([false, true]);
+		expect(workspaces[1]?.network).toBe("off");
+	});
+
+	test("a sandbox that is not isolated says so", () => {
+		const sandbox = toSandbox({
+			engine: "host",
+			status: "Running",
+			tools: true,
+			isolated: false,
+		});
+		expect(sandbox.isolated).toBe(false);
+		expect(sandbox.engine).toBe("host");
 	});
 });

@@ -7,6 +7,31 @@
  * in Storybook with a literal.
  */
 
+/** One selectable workspace: where it points, what runs it, and whether it is the one in view. */
+export interface WorkspaceSummary {
+	name: string;
+	title: string;
+	path: string;
+	general: boolean;
+	/** The worker process for this workspace is up. */
+	running: boolean;
+	active: boolean;
+	image?: string | undefined;
+	network?: string | undefined;
+}
+
+/** What the agent's tools can reach, as the interface has to be able to say. */
+export interface SandboxSummary {
+	engine: string;
+	version: string;
+	status: string;
+	/** False means the tools refuse rather than running on the host. */
+	tools: boolean;
+	/** False is the host engine: no isolation, and the interface has to say so. */
+	isolated: boolean;
+	problem?: string | undefined;
+}
+
 /** One conversation as the rail needs it. */
 export interface ConversationSummary {
 	id: string;

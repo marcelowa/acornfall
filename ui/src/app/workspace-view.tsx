@@ -8,6 +8,9 @@ import { AgentPanel } from "@/components/inspector/agent-panel";
 import { ContextPanel } from "@/components/inspector/context-panel";
 import { Inspector } from "@/components/inspector/inspector";
 import { RunPanel } from "@/components/inspector/run-panel";
+import { SandboxPanel } from "@/components/inspector/sandbox-panel";
+import { WorkspaceList } from "@/components/workspace/workspace-list";
+import { Stack } from "@/components/layout/stack";
 import { Transcript } from "@/components/transcript/transcript";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Text } from "@/components/typography/text";
@@ -53,21 +56,28 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 
 	const rail = (
 		<div className="h-full border-r border-border bg-card p-2">
-			<ConversationList
-				conversations={platform.conversations}
-				deleted={platform.deleted}
-				activeId={platform.active?.id}
-				onSelect={platform.select}
-				onRename={(id) => {
-					const current = platform.conversations.find(
-						(conversation) => conversation.id === id,
-					);
-					const title = window.prompt("Rename conversation", current?.title ?? "");
-					if (title !== null && title.trim() !== "") platform.rename(id, title.trim());
-				}}
-				onHide={(id) => platform.hide(id, true)}
-				onRestore={(id) => platform.hide(id, false)}
-			/>
+			<Stack gap="sm" fill>
+				<WorkspaceList
+					workspaces={platform.workspaces}
+					onSelect={platform.selectWorkspace}
+				/>
+				<ConversationList
+					conversations={platform.conversations}
+					deleted={platform.deleted}
+					activeId={platform.active?.id}
+					onSelect={platform.select}
+					onRename={(id) => {
+						const current = platform.conversations.find(
+							(conversation) => conversation.id === id,
+						);
+						const title = window.prompt("Rename conversation", current?.title ?? "");
+						if (title !== null && title.trim() !== "")
+							platform.rename(id, title.trim());
+					}}
+					onHide={(id) => platform.hide(id, true)}
+					onRestore={(id) => platform.hide(id, false)}
+				/>
+			</Stack>
 		</div>
 	);
 
@@ -102,8 +112,24 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							model={platform.model.value}
 							thinking={platform.thinking.value}
 							thinkingRequested={platform.thinkingRequested}
-							sandbox={platform.sandbox}
+							sandbox={platform.sandbox?.engine}
 							harness={platform.harness}
+						/>
+					),
+				},
+				{
+					key: "sandbox",
+					title: "Sandbox",
+					hint:
+						platform.sandbox === undefined
+							? "unknown"
+							: `${platform.sandbox.engine} · ${platform.sandbox.status}`,
+					body: (
+						<SandboxPanel
+							sandbox={platform.sandbox}
+							workspacePath={
+								platform.workspaces.find((workspace) => workspace.active)?.path
+							}
 						/>
 					),
 				},

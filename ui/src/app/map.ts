@@ -1,4 +1,11 @@
-import type { ConversationSummary, ModelChoice, PickerGroup, TranscriptEntry } from "./view-models";
+import type {
+	ConversationSummary,
+	ModelChoice,
+	PickerGroup,
+	SandboxSummary,
+	TranscriptEntry,
+	WorkspaceSummary,
+} from "./view-models";
 import type {
 	WireAgentSummary,
 	WireContentBlock,
@@ -6,9 +13,11 @@ import type {
 	WireEntry,
 	WireMessage,
 	WireProvider,
+	WireSandbox,
 	WireSender,
 	WireToolSlot,
 	WireView,
+	WireWorkspace,
 } from "./wire";
 
 /** Everything a message says, whichever shape its content is in. */
@@ -94,6 +103,31 @@ function toolEntry(
 		isError: (slot.diagnostics ?? []).some((diagnostic) => diagnostic.severity === "error"),
 		args: calls.get(slot.callId)?.args,
 		output: slot.output ?? "",
+	};
+}
+
+/** The workspaces as the rail lists them, with the one in view marked. */
+export function toWorkspaces(workspaces: WireWorkspace[], activeName: string): WorkspaceSummary[] {
+	return workspaces.map((workspace) => ({
+		name: workspace.name,
+		title: workspace.title,
+		path: workspace.path,
+		general: workspace.general,
+		running: workspace.running,
+		active: workspace.name === activeName,
+		image: workspace.image,
+		network: workspace.network,
+	}));
+}
+
+export function toSandbox(sandbox: WireSandbox): SandboxSummary {
+	return {
+		engine: sandbox.engine ?? "none",
+		version: sandbox.version ?? "",
+		status: sandbox.status ?? "unknown",
+		tools: sandbox.tools,
+		isolated: sandbox.isolated,
+		problem: sandbox.problem,
 	};
 }
 
