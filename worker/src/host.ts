@@ -37,8 +37,11 @@ class HostClient implements SandboxClient {
 		this.name = `host:${workspace}`;
 	}
 
-	async exec(command: string, options: ExecOptions): Promise<ExecResult> {
-		const proc = Bun.spawn(["/bin/sh", "-c", command], {
+	async exec(command: string | readonly string[], options: ExecOptions): Promise<ExecResult> {
+		// A string is a shell script; an array is the program and its arguments, unparsed.
+		const argv = typeof command === "string" ? ["/bin/sh", "-c", command] : [...command];
+		if (argv.length === 0) throw new Error("empty argv: no program to run");
+		const proc = Bun.spawn(argv, {
 			cwd: options.cwd ?? this.workspace,
 			env:
 				options.clearEnv === true ? { ...options.env } : { ...process.env, ...options.env },
