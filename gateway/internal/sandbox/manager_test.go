@@ -21,6 +21,7 @@ type fakeDriver struct {
 
 func (f *fakeDriver) Name() string       { return "fake" }
 func (f *fakeDriver) Version() string    { return "1.2.3" }
+func (f *fakeDriver) Isolated() bool     { return true }
 func (f *fakeDriver) InstallDir() string { return "/home/me/.acornfall/tools/fake/1.2.3" }
 func (f *fakeDriver) StateDir() string   { return "/home/me/.acornfall/sandboxes" }
 func (f *fakeDriver) Env() []string      { return []string{"FAKE_HOME=" + f.StateDir()} }

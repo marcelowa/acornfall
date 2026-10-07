@@ -69,6 +69,9 @@ func (m *Microsandbox) WithRunner(runner Runner) *Microsandbox {
 func (m *Microsandbox) Name() string    { return "microsandbox" }
 func (m *Microsandbox) Version() string { return Version }
 
+// Isolated is the engine's reason to exist: a microVM separates the command from the host.
+func (m *Microsandbox) Isolated() bool { return true }
+
 func (m *Microsandbox) InstallDir() string {
 	return filepath.Join(m.home, "tools", "microsandbox", Version)
 }

@@ -36,6 +36,9 @@ type Driver interface {
 	// must agree, so this is what control passes along when it starts a workspace.
 	Name() string
 	Version() string
+	// Isolated reports whether what runs here is separated from the host. The host engine is
+	// the one that is not, and every surface that describes the sandbox has to say so.
+	Isolated() bool
 	// InstallDir is where the engine itself lives; StateDir is where its sandboxes, images,
 	// and snapshots live. Both are inside the installation folder so that removing
 	// acornfall removes all of it.
@@ -174,7 +177,9 @@ type Report struct {
 	Installed bool   `json:"installed"`
 	Path      string `json:"path"`
 	StateDir  string `json:"stateDir"`
-	Problem   string `json:"problem,omitempty"`
+	// Isolated says whether this engine separates commands from the host; false for host.
+	Isolated bool   `json:"isolated"`
+	Problem  string `json:"problem,omitempty"`
 }
 
 func (m *Manager) Report() Report {
@@ -186,6 +191,7 @@ func (m *Manager) Report() Report {
 		Installed: m.driver.Installed(),
 		Path:      m.driver.InstallDir(),
 		StateDir:  m.driver.StateDir(),
+		Isolated:  m.driver.Isolated(),
 	}
 	if m.problem != nil {
 		report.Problem = m.problem.Error()
