@@ -26,7 +26,7 @@ integration(
 			.idleTimeout(60)
 			.create();
 		try {
-			const client = await openSandbox(name);
+			const client = await openSandbox(name, "/");
 
 			// A chunk has to arrive while the command is still running; one blob at exit would
 			// pass a concatenation check while being exactly the bug the streaming path exists

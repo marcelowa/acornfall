@@ -58,7 +58,7 @@ import {
 } from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
 import { routingFiles } from "./files.ts";
-import { refusedSandbox, type SandboxClient } from "./sandbox.ts";
+import { refusedSandbox, type SandboxClient, type SandboxEngine } from "./sandbox.ts";
 import { SandboxExecutionEnv } from "./sandbox-env.ts";
 import { expandCommand, loadCommands, parseCommandInvocation, type Command as SlashCommand } from "./commands.ts";
 
@@ -133,15 +133,27 @@ async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 	if (options.sandbox === "") {
 		return refusedSandbox("this workspace has no sandbox: tool execution is disabled");
 	}
-	const engine = await import("./microsandbox.ts");
-	if (options.sandboxEngine !== engine.engineName()) {
+	const engine = await sandboxEngine(options.sandboxEngine);
+	if (engine === undefined) {
 		return refusedSandbox(
 			`this workspace's sandbox belongs to engine ${options.sandboxEngine}, which this build does not support`,
 		);
 	}
-	return await engine.openSandbox(options.sandbox).catch((error: unknown) => {
+	return await engine.openSandbox(options.sandbox, options.workspace).catch((error: unknown) => {
 		return refusedSandbox(`cannot attach to the sandbox ${options.sandbox}: ${error instanceof Error ? error.message : String(error)}`);
 	});
+}
+
+/** The engine modules this build implements, by the name control sends. */
+async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
+	switch (name) {
+		case "microsandbox":
+			return await import("./microsandbox.ts");
+		case "host":
+			return await import("./host.ts");
+		default:
+			return undefined;
+	}
 }
 
 // Every resource folder this install reads: the user's, then the workspace's, each with the

@@ -9,10 +9,10 @@ import type { Files } from "./files.ts";
  * the machine holds nothing else of ours. See docs/adr/0012-sandbox.md.
  *
  * This file is the contract, and it names no engine. An engine is one module implementing
- * `SandboxClient` plus a way to open one — `microsandbox.ts` today, which is also where the
- * SDK is imported. Control picks the engine and passes its name to the worker, so both sides
- * of one install use the same one; a second engine is a second file here and a second
- * `Driver` in gateway/internal/sandbox.
+ * `SandboxClient` plus a way to open one — `microsandbox.ts` and `host.ts` today, which are
+ * also where the engine-specific code lives. Control picks the engine and passes its name to
+ * the worker, so both sides of one install use the same one; a second engine is a second file
+ * here and a second `Driver` in gateway/internal/sandbox.
  */
 export interface SandboxClient extends Files {
 	/** The engine's name for this sandbox, which is derived from the workspace. */
@@ -26,6 +26,16 @@ export interface SandboxClient extends Files {
 	mkdir(path: string): Promise<void>;
 	remove(path: string, options: { recursive?: boolean; force?: boolean }): Promise<void>;
 	rename(from: string, to: string): Promise<void>;
+}
+
+/**
+ * An engine's module: its name, and how to open a workspace with it. The worker matches the
+ * name control sends against this interface, so the two sides of one install cannot disagree
+ * about which engine is in use.
+ */
+export interface SandboxEngine {
+	engineName(): string;
+	openSandbox(name: string, workspace: string): Promise<SandboxClient>;
 }
 
 export interface ExecChunk {

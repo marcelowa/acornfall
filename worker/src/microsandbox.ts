@@ -16,7 +16,7 @@ export function engineName(): string {
 	return "microsandbox";
 }
 
-export async function openSandbox(name: string): Promise<SandboxClient> {
+export async function openSandbox(name: string, _workspace: string): Promise<SandboxClient> {
 	const handle = await Sandbox.get(name);
 	return new MicrosandboxClient(name, await handle.connect());
 }
