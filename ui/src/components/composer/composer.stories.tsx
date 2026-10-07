@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState, type ReactNode } from "react";
 import type { BusyAction } from "@/app/view-models";
 import { Composer } from "./composer";
-import { Picker } from "./picker";
+import { ChoiceControl } from "./choice-control";
 import { SlashMenu } from "./slash-menu";
 
 const meta = {
@@ -36,22 +36,26 @@ const models = [
 ];
 
 const controls = (
-	<>
-		<Picker
-			label="Model"
-			value="Opus 5"
-			origin="workspace default"
-			groups={models}
-			onSelect={noop}
-		/>
-		<Picker
-			label="Thinking"
-			value="medium"
-			origin="this conversation"
-			groups={[{ options: [{ value: "medium", label: "medium" }] }]}
-			onSelect={noop}
-		/>
-	</>
+	<ChoiceControl
+		agent={{
+			value: "general",
+			origin: "last resort",
+			groups: [{ options: [{ value: "general", label: "general" }] }],
+			onSelect: noop,
+		}}
+		model={{
+			value: "Opus 5",
+			origin: "workspace default",
+			groups: models,
+			onSelect: noop,
+		}}
+		thinking={{
+			value: "medium",
+			origin: "this conversation",
+			groups: [{ options: [{ value: "medium", label: "medium" }] }],
+			onSelect: noop,
+		}}
+	/>
 );
 
 export const Idle: Story = {

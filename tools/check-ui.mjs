@@ -632,24 +632,104 @@ try {
 	await press(page, "button[aria-label='Back to the conversation']");
 	await page.waitForSelector("[data-slot=composer]", { timeout: 5000 });
 
-	// 5. The composer says what it will run and where each value came from, and a slash
-	// offers the commands the server would expand.
-	const pickers = await page.evaluate(() =>
-		["Model", "Thinking", "Agent"].map((label) => {
-			const button = document.querySelector(`[data-slot=composer] button[aria-label="${label}"]`);
-			return button?.textContent?.trim().replace(/\s+/g, " ") ?? "";
-		}),
+	// 5. The composer says what it will run in one line, and the layers are one click away. A
+	// slash offers the commands the server would expand.
+	//
+	// Selecting a conversation from the rail is what tells the harness about it, so this picks
+	// one first: a summary that reads "not set" for the conversation in view is the bug this
+	// part of the check exists for.
+	const selected = await inPage(page, async () => {
+		const rows = await (await fetch("/api/workspaces/general/conversations")).json();
+		const row = (rows ?? []).find(
+			(candidate) => !candidate.hidden && candidate.parent === undefined,
+		);
+		if (row === undefined) return "";
+		const button = document.querySelector(
+			`[data-slot=conversation-select][data-conversation="${row.id}"]`,
+		);
+		button?.click();
+		return button === null ? "" : row.id;
+	});
+	check("a conversation can be selected from the rail", (selected ?? "") !== "");
+	const settled = await page
+		.waitForFunction(
+			async () => {
+				const state = await (await fetch("/api/state")).json();
+				const name = state.resolved?.name ?? "";
+				const text =
+					document.querySelector("[data-slot=composer] [data-slot=choice-control]")
+						?.textContent ?? "";
+				return name !== "" && text.includes(name);
+			},
+			{ timeout: 15000 },
+		)
+		.then(() => true)
+		.catch(() => false);
+	check("the conversation in view resolves its agent", settled, String(selected));
+
+	const summary = await page.evaluate(
+		() =>
+			document
+				.querySelector("[data-slot=composer] [data-slot=choice-control]")
+				?.textContent?.trim()
+				.replace(/\s+/g, " ") ?? "",
+	);
+	const wire = await page.evaluate(async () => {
+		const body = await (await fetch("/api/state")).json();
+		return {
+			model: body.agent?.modelId ?? "",
+			thinking: body.agent?.thinkingLevel ?? "",
+			agent: body.resolved?.name ?? "",
+		};
+	});
+	// The model shows its display name and the other two show their values, so the check is
+	// that there are three parts and that the two it can name exactly are in the right places.
+	const parts = summary.split("·").map((part) => part.trim());
+	check(
+		"the composer says what runs this conversation in one line",
+		parts.length === 3 && parts.every((part) => part !== "") && wire.model !== "",
+		`"${summary}"`,
 	);
 	check(
-		"the composer carries a model, thinking, and agent choice",
-		pickers.every((text) => text.includes(":")),
-		JSON.stringify(pickers),
+		"the line reads agent, model, thinking",
+		parts[0] === wire.agent && parts[2] === wire.thinking,
+		`"${summary}" for ${wire.agent} … ${wire.thinking}`,
 	);
-	check(
-		"a resolved choice says which layer it came from",
-		pickers.some((text) => text.includes("·")),
-		JSON.stringify(pickers),
-	);
+
+	const opened = await press(page, "[data-slot=composer] [data-slot=choice-control]");
+	const dialog = await page
+		.waitForSelector("[data-slot=dialog-content]", { timeout: 5000 })
+		.catch(() => null);
+	check("the control opens the three choices", opened && dialog !== null);
+	if (dialog !== null) {
+		const inside = await page.evaluate(() =>
+			["Model", "Thinking", "Agent"].map(
+				(label) =>
+					document
+						.querySelector(
+							`[data-slot=dialog-content] button[aria-label="${label}"]`,
+						)
+						?.textContent?.trim()
+						.replace(/\s+/g, " ") ?? "",
+			),
+		);
+		check(
+			"each choice says which layer its value came from",
+			inside.every((text) => text.includes(":")),
+			JSON.stringify(inside),
+		);
+		check(
+			"at least one layer is named in the dialog",
+			inside.some((text) => text.includes("·")),
+			JSON.stringify(inside),
+		);
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(
+			() => document.querySelector("[data-slot=dialog-content]") === null,
+			{ timeout: 5000 },
+		);
+		check("the dialog closes", true);
+	}
 
 	const commandCount = await page.evaluate(async () => {
 		const body = await (await fetch("/api/workspaces/general/commands")).json();

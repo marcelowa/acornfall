@@ -128,6 +128,16 @@ export interface PickerGroup {
 	options: PickerOption[];
 }
 
+/** One picker's whole state: the value, where it came from, and what choosing does. */
+export interface ChoicePicker {
+	value: string;
+	origin?: string | undefined;
+	note?: string | undefined;
+	groups: PickerGroup[];
+	disabled?: boolean | undefined;
+	onSelect: (value: string) => void;
+}
+
 /** A slash command the server would expand; the interface only offers the list. */
 export interface SlashCommand {
 	name: string;

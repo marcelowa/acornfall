@@ -13,6 +13,7 @@ import { SandboxPanel } from "@/components/inspector/sandbox-panel";
 import { Stack } from "@/components/layout/stack";
 import { Measure } from "@/components/layout/measure";
 import { ErrorStrip } from "@/components/ui/error-strip";
+import { ChoiceControl } from "@/components/composer/choice-control";
 import { Picker } from "@/components/composer/picker";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { WorkspacesScreen } from "@/components/workspace/workspaces-screen";
@@ -318,31 +319,10 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 										detail={platform.workerError}
 									/>
 								)}
-								<Picker
-									label="Model"
-									value={platform.model.value}
-									origin={platform.model.origin}
-									groups={platform.model.groups}
-									onSelect={platform.model.onSelect}
-									disabled={platform.model.disabled}
-								/>
-								<Picker
-									label="Thinking"
-									value={platform.thinking.value}
-									origin={platform.thinking.origin}
-									note={platform.thinking.note}
-									groups={platform.thinking.groups}
-									onSelect={platform.thinking.onSelect}
-									disabled={platform.thinking.disabled}
-								/>
-								<Picker
-									label="Agent"
-									value={platform.agent.value}
-									placeholder="built in"
-									origin={platform.agent.origin}
-									groups={platform.agent.groups}
-									onSelect={platform.agent.onSelect}
-									disabled={platform.agent.disabled}
+								<ChoiceControl
+									agent={platform.agent}
+									model={platform.model}
+									thinking={platform.thinking}
 								/>
 							</>
 						}

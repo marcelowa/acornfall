@@ -33,6 +33,7 @@ import {
 } from "./map";
 import type {
 	BusyAction,
+	ChoicePicker,
 	ConversationSummary,
 	PickerGroup,
 	SandboxSummary,
@@ -119,16 +120,6 @@ function read<T>(key: string, fallback: T): T {
 	} catch {
 		return fallback;
 	}
-}
-
-/** One picker's whole state: the value, where it came from, and what choosing does. */
-export interface ChoicePicker {
-	value: string;
-	origin?: string | undefined;
-	note?: string | undefined;
-	groups: PickerGroup[];
-	disabled?: boolean | undefined;
-	onSelect: (value: string) => void;
 }
 
 export interface Platform {
@@ -476,7 +467,9 @@ export function usePlatform(): Platform {
 				? undefined
 				: !state.inherited.agent
 					? "this conversation"
-					: originLabel(state.defaultsOrigin.agent),
+					: // Nothing configured it, so the worker's own agent is what is running: saying
+						// "built in" is truer than leaving the layer blank.
+						(originLabel(state.defaultsOrigin.agent) ?? "built in"),
 		groups: withDefault(toAgentGroups(state?.agents ?? [])),
 		disabled: activeId === "",
 		onSelect: (value) => choose({ definition: value }),

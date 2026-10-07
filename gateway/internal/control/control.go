@@ -819,6 +819,12 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 	if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 		return err
 	}
+	// The conversation in view is the one whose model, level, and agent someone is about to
+	// read off the screen, so the worker is told about it here rather than at the first
+	// message. `ensureConversation` is a no-op for one that is already configured.
+	if err := c.ensureConversation(ctx, conversationID); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	c.active = conversationID
 	c.mu.Unlock()
