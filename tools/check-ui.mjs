@@ -243,18 +243,33 @@ try {
 		}
 	}
 
-	// 4. The theme is a click that survives a reload.
+	// 4. The theme: the system decides until someone says otherwise, and a choice is remembered.
+	const isDark = () => page.evaluate(() => document.documentElement.classList.contains("dark"));
+
+	await page.evaluate(() => localStorage.removeItem("acornfall.ui.theme"));
+	await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
+	check("with no choice made, a dark system gets the dark theme", await isDark(), "came up light");
+
+	await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
+	check("a light system gets the light theme", !(await isDark()), "came up dark");
+
 	const themeButton = await page.$("button[aria-label^='Switch to the']");
 	check("the theme toggle is on screen", themeButton !== null);
 	if (themeButton !== null) {
 		await themeButton.click();
-		const dark = await page.evaluate(() => document.documentElement.classList.contains("dark"));
-		check("the toggle switches the theme", dark, "html has no dark class after the click");
+		check("the toggle overrides the system", await isDark(), "the click did not darken the page");
+		// The system still says light; the explicit choice still wins.
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
-		const stillDark = await page.evaluate(() => document.documentElement.classList.contains("dark"));
-		check("the theme survives a reload", stillDark, "the reload came back light");
-		await page.click("button[aria-label^='Switch to the']");
+		check(
+			"an explicit choice survives a reload even against the system",
+			await isDark(),
+			"the reload forgot the choice",
+		);
 	}
 
 	// 5. The composer says what it will run and where each value came from, and a slash

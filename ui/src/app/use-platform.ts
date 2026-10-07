@@ -38,6 +38,24 @@ interface Route {
 	conversation: string;
 }
 
+/**
+ * The theme someone chose, or null while the system is still the one deciding. The stored
+ * value is JSON, as every other preference here is.
+ */
+function storedTheme(): "light" | "dark" | null {
+	try {
+		const raw = window.localStorage.getItem(THEME_KEY);
+		const value: unknown = raw === null ? null : JSON.parse(raw);
+		return value === "light" || value === "dark" ? value : null;
+	} catch {
+		return null;
+	}
+}
+
+function systemTheme(): "light" | "dark" {
+	return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 /** The URL scheme the gateway already routes: /c/<workspace>/<conversation> and /w/<workspace>. */
 function fromUrl(): Route {
 	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(window.location.pathname);
@@ -119,9 +137,9 @@ export function usePlatform(): Platform {
 		() => read<number | null>(RAIL_WIDTH_KEY, null) ?? undefined,
 	);
 	const [railOpen, setRailOpen] = useState(false);
-	const [theme, setTheme] = useState<"light" | "dark">(() =>
-		read<"light" | "dark">(THEME_KEY, "light"),
-	);
+	const [system, setSystem] = useState<"light" | "dark">(systemTheme);
+	const [choice, setChoice] = useState<"light" | "dark" | null>(storedTheme);
+	const theme = choice ?? system;
 	const [error, setError] = useState<string | undefined>(undefined);
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
 	const [ready, setReady] = useState(false);
@@ -198,10 +216,20 @@ export function usePlatform(): Platform {
 		window.localStorage.setItem(SEEN_KEY, JSON.stringify(next));
 	}, [state, activeId, seen]);
 
+	// The system decides until someone says otherwise, and still moves the theme while no
+	// choice has been made.
+	useEffect(() => {
+		const query = window.matchMedia("(prefers-color-scheme: dark)");
+		const follow = (): void => setSystem(query.matches ? "dark" : "light");
+		query.addEventListener("change", follow);
+		return () => query.removeEventListener("change", follow);
+	}, []);
+
 	useEffect(() => {
 		document.documentElement.classList.toggle("dark", theme === "dark");
-		window.localStorage.setItem(THEME_KEY, JSON.stringify(theme));
-	}, [theme]);
+		if (choice === null) window.localStorage.removeItem(THEME_KEY);
+		else window.localStorage.setItem(THEME_KEY, JSON.stringify(choice));
+	}, [theme, choice]);
 
 	// The commands the server would expand. They are fetched per workspace, once: the list
 	// changes when the workspace's resources change, not when a conversation does.
@@ -406,6 +434,6 @@ export function usePlatform(): Platform {
 		abort,
 		setRailWidth,
 		setRailOpen,
-		toggleTheme: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
+		toggleTheme: () => setChoice(theme === "dark" ? "light" : "dark"),
 	};
 }
