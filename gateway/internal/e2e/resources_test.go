@@ -341,17 +341,26 @@ func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {
 	if got.WorkerUp {
 		t.Fatal("a harness that cannot load its config must not report itself up")
 	}
-	if !strings.Contains(got.WorkerError, "reason") {
-		t.Errorf("the state should carry what the harness said, got %q", got.WorkerError)
-	}
-	if !strings.Contains(got.WorkerError, "config.json") {
-		t.Errorf("the state should name the file at fault, got %q", got.WorkerError)
+	// The reason settles a moment after the first refusal: the describe that loses the dead
+	// process's stdout is superseded by the exit notification, whose message carries the
+	// harness's own last words. Reading once raced that window — one run in six saw
+	// "describe worker: worker stdout closed" instead of the file at fault.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		got = c.state("general")
+		if strings.Contains(got.WorkerError, "reason") && strings.Contains(got.WorkerError, "config.json") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the state should carry the harness's own reason, naming config.json, got %q", got.WorkerError)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Fixing the file is enough: the supervisor keeps trying, and nothing needs a restart.
 	s.writeWorkspace(t, ".acornfall/config.json",
 		`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf","reason":"now it has one"}]}}}`)
-	deadline := time.Now().Add(90 * time.Second)
+	deadline = time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		if c.state("general").WorkerUp {
 			break
