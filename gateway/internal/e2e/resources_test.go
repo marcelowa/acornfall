@@ -23,6 +23,13 @@ func TestWorkspaceRulesReachThePrompt(t *testing.T) {
 	c := s.client()
 	root := c.waitForConversation("general")
 
+	// A resource test runs on the host engine — the fast option, no hypervisor — and the state
+	// has to say so instead of implying a sandbox. The microVM boundary is covered by
+	// `make test-sandbox`.
+	if engine := c.state("general").Sandbox; engine.Engine != "host" || engine.Isolated || !engine.Tools {
+		t.Fatalf("this test should run on the host engine and say it is not isolated, got %+v", engine)
+	}
+
 	c.prompt("general", root, "get to work")
 	got := c.waitForText("general", root, "working")
 	rules := got.systemSections()["workspace-rules"]

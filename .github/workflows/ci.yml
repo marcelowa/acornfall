@@ -83,5 +83,4 @@ jobs:
           bun-version: latest
       - run: make deps
       - run: make test-sandbox
-      - run: make test-workspace
 

@@ -220,16 +220,25 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		"--workspace", s.General,
 		"--model", "faux/faux-1",
 		"--worker-dir", workerDir,
-		"--sandbox-state", s.SandboxState,
 		"--addr", "127.0.0.1:0",
 		"--insecure",
+	}
+	// A resource test runs on the host engine: it needs the workspace's files, not a microVM,
+	// and this is the engine that needs no hypervisor and no state directory. Everything else
+	// runs with the sandbox tier forced off, which is a refusal path and not a host fallback.
+	hostEngine := false
+	if value, ok := hostEngineTests.Load(t.Name()); ok && value == true {
+		hostEngine = true
+		args = append(args, "--sandbox-engine", "host")
+	} else {
+		args = append(args, "--sandbox-state", s.SandboxState)
 	}
 	cmd := exec.Command(gatewayBin, args...)
 	// A curated environment: the test must not inherit a real install's home, token, or
 	// provider credentials, or it would be testing someone else's configuration. The
 	// switches that decide how this install behaves are forwarded explicitly.
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + s.Home, "ACORNFALL_HOME=" + s.Home}
-	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" {
+	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
 		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
 	}
 	if len(s.cfg.script) > 0 {
@@ -345,46 +354,44 @@ func engineBinary(home string) string {
 	return matches[0]
 }
 
+// hostEngineTests records the tests that asked for a workspace but not a real sandbox. start
+// reads it and runs their gateway with --sandbox-engine host, which needs no hypervisor and
+// no state directory; a test declares it in workspaceResources, before start.
+var hostEngineTests sync.Map
+
 // notSandbox marks a test that needs no real workspace. Both sandbox tiers skip it: this one
 // already ran in the fast tier, where the tools take the refusal path. Without a marker a
 // test that never asked for a sandbox still boots one there, because starting a workspace's
 // worker provisions its sandbox.
 func notSandbox(t *testing.T) {
 	t.Helper()
-	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" || os.Getenv("ACORNFALL_WORKSPACE_ONLY") != "" {
+	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" {
 		t.Skip("this test needs no sandbox; the fast tier ran it against the refusal path")
 	}
 }
 
 // maybeSandbox marks a test that exercises the sandbox itself: a command runs through it, a
-// file operation goes through it, or the mounts are asserted. `make test-sandbox` runs these,
-// and `make test-workspace` skips them because that tier is about resources, not the engine.
+// file operation goes through it, or the mounts are asserted. `make test-sandbox` runs these
+// on the microVM engine; the fast tier skips them under -short.
 func maybeSandbox(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("this test needs a sandbox; make test-sandbox runs it")
-	}
-	if os.Getenv("ACORNFALL_WORKSPACE_ONLY") != "" {
-		t.Skip("the workspace tier runs the resource tests; this one exercises the sandbox")
 	}
 	skipWithoutHypervisor(t)
 }
 
 // workspaceResources marks a test whose subject is the resource overlay — rules, definitions,
 // commands, skills — and whose files live in the workspace. The worker reads those only
-// through the sandbox (ADR 0012: it has no host path to the workspace), so the test needs a
-// hypervisor, but it does not exercise the sandbox's execution surface. `make test-workspace`
-// runs these; `make test-sandbox` skips them, because booting a microVM per resource test
-// there buys no extra sandbox coverage.
+// through an engine (ADR 0012: it has no host path to the workspace), so the test cannot run
+// with the tools refusing; it runs on the host engine, which needs no hypervisor and works on
+// every machine, including CI. The microVM path is covered by the boundary tests.
 func workspaceResources(t *testing.T) {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("this test needs a workspace's files; make test-workspace runs it")
-	}
 	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" {
 		t.Skip("the sandbox tier runs the boundary tests; this one is a resource test")
 	}
-	skipWithoutHypervisor(t)
+	hostEngineTests.Store(t.Name(), true)
 }
 
 // skipWithoutHypervisor is the machine check both sandbox tiers share: the engine refuses to
@@ -629,11 +636,12 @@ type state struct {
 	} `json:"skills"`
 	Capabilities map[string]any `json:"capabilities"`
 	Sandbox      struct {
-		Engine  string `json:"engine"`
-		Version string `json:"version"`
-		Status  string `json:"status"`
-		Tools   bool   `json:"tools"`
-		Problem string `json:"problem"`
+		Engine   string `json:"engine"`
+		Version  string `json:"version"`
+		Status   string `json:"status"`
+		Tools    bool   `json:"tools"`
+		Isolated bool   `json:"isolated"`
+		Problem  string `json:"problem"`
 	} `json:"sandbox"`
 	Defaults []layerTrace   `json:"defaults"`
 	Resolved map[string]any `json:"resolved"`

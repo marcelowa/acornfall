@@ -12,7 +12,7 @@ URL ?= http://$(ADDR)
 INSECURE ?= 1
 OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 
-.PHONY: help deps build typecheck lint tools commits check test test-sandbox test-workspace sandbox-preflight ui vendor run dev fmt clean
+.PHONY: help deps build typecheck lint tools commits check test test-sandbox sandbox-preflight ui vendor run dev fmt clean
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -82,18 +82,11 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a
 	# suite of skips. -race stays here: the sandbox's start, attach, and mount path is only
-	# taken in this tier, and the four tests plus the live driver are 33s instrumented.
+	# taken in this tier, and the four tests plus the live driver are ~35s instrumented.
 	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_INTEGRATION=1 MSB_HOME=$(SANDBOX_STATE) bun test test/sandbox.integration.test.ts
 	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -parallel $(SANDBOX_PARALLEL) ./...
 
-test-workspace: sandbox-preflight ## the resource features whose files live in a workspace
-	# The worker reads a workspace's AGENTS.md, agents, skills, and commands only through the
-	# sandbox (ADR 0012), so these need a hypervisor even though they test resources, not the
-	# engine. No -race: the resolution code underneath runs under it in the fast tier, and
-	# instrumenting thirteen microVM boots costs 58s against 19s.
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_WORKSPACE_ONLY=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -count=1 -parallel $(SANDBOX_PARALLEL) ./...
-
-sandbox-preflight: ## fail, not skip, when there is no hypervisor (the sandbox tiers share it)
+sandbox-preflight: ## fail, not skip, when there is no hypervisor for the microVM engine
 	@if [ "$$(uname -s)" = "Linux" ] && [ ! -r /dev/kvm ]; then \
 		echo "the sandbox tiers need a hypervisor and /dev/kvm is not readable; see docs/adr/0012-sandbox.md"; exit 1; \
 	fi
