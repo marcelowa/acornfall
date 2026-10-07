@@ -36,19 +36,29 @@ honest.**
 - **`make test` is the fast tier.** `-short -race`, the worker units, the Go units, and the
   end-to-end suite with `ACORNFALL_NO_SANDBOX=1` and `-parallel 6`. It needs no hypervisor and
   behaves the same on every machine, including CI. Measured 33s against 506s.
-- **`make test-sandbox` is the slow tier.** The tests that need a real workspace, plus the
-  worker's SDK suite and the live engine test, without `-short`, with
-  `ACORNFALL_LIVE_SANDBOX=1` and `ACORNFALL_SANDBOX_INTEGRATION=1`, one sandbox per core
-  (`SANDBOX_PARALLEL`, 6 here: 125s at 2, 85s at 4, 72s at 6, 76s at 8), sharing the image
-  cache under `/tmp/acornfall-e2e-sandboxes`. A test that needs no workspace declares it with
-  `notSandbox` and skips: starting a worker provisions its sandbox whether the test uses it or
-  not, and the rest of the feature suite already ran in the fast tier — running all of it
-  again was 294s against 126s for the tests that need one. It **fails** where there is
+- **`make test-sandbox` is the engine boundary.** The live driver test, the worker's SDK
+  suite, and the four end-to-end tests that exercise the sandbox itself — a tool call, a global
+  mount, a guard, a heal — without `-short`, with `ACORNFALL_LIVE_SANDBOX=1` and
+  `ACORNFALL_SANDBOX_INTEGRATION=1`, one sandbox per core (`SANDBOX_PARALLEL`, 6 here: 125s at
+  2, 85s at 4, 72s at 6, 76s at 8), sharing the image cache under
+  `/tmp/acornfall-e2e-sandboxes`. `-race` stays on: the sandbox's start, attach, and mount path
+  is only taken here, and the instrumented tier is ~35s. It **fails** where there is
   no hypervisor rather than skipping: a slow tier that silently does nothing is how the bug
   class it exists for survives.
-- **`testing.Short()` is the boundary**, and `maybeSandbox` is the one function that decides
-  it. A test that needs the workspace's own files calls it and skips under `-short`; the rest
-  of the end-to-end suite runs in both tiers.
+- **`make test-workspace` is the resource tier.** The thirteen end-to-end tests whose subject
+  is the overlay, commands, skills, and delegation defaults, and whose files live in the
+  workspace. The worker reads those only through the sandbox
+  ([ADR 0012](0012-sandbox.md)), so the tier needs a hypervisor too, but it does not exercise
+  the sandbox's execution surface — which is why it is not in `make test-sandbox`. It runs
+  without `-race`: the resolution code underneath is race-tested in the fast tier, and
+  instrumenting thirteen microVM boots costs 58s against 19s. A test that needs neither tier
+  declares it with `notSandbox` and skips: starting a worker provisions its sandbox whether
+  the test uses it or not, and the rest of the feature suite already ran in the fast tier —
+  running all of it again was 294s against 126s for the tests that need one.
+- **`testing.Short()` is the boundary**, and the three markers are the one place the tiers are
+  decided: `maybeSandbox` (the engine), `workspaceResources` (the resource features), and
+  `notSandbox` (the fast tier). A test calls one of them, and each tier skips the others; the
+  fast tier is the one that runs under `-short`.
 - **"No sandbox" in the fast tier is the refusal path the product ships.** `ACORNFALL_NO_SANDBOX`
   makes the gateway build no sandbox tier at all — the same state as a machine without a
   hypervisor — so the tools refuse and the worker starts anyway. It is never a host-backed
@@ -109,12 +119,14 @@ spends the rest on `make lint` (tsc 5.6s + eslint 7.2s, run one after the other)
 in this ADR is what stays: a slow piece gets its own suite and its own target.
 
 One of the sandbox tests, `TestTheTrustFlagIsGone`, turned out to touch no sandbox at all — it
-asserts the API refuses a `trusted` field — and moved to the fast tier. Of the remaining 17,
-**four exercise the sandbox's execution and file surface**: a tool call runs and its output is
+asserts the API refuses a `trusted` field — and moved to the fast tier. The remaining 17 then
+turned out to be two different things, and one tier made the engine pay for the resources:
+**four exercise the sandbox's execution and file surface** (a tool call runs and its output is
 recorded, a global skill's script runs inside the read-only mount, a guard refuses a call, and
-a broken workspace file is reported and heals. The other thirteen are feature tests whose
-files live in the workspace: the sandbox is their environment, not their subject. They are
-also the only end-to-end run of the overlay, commands, skills, and delegation defaults, so
-they stay. At `-parallel 6` the four measure 24s and the thirteen 57s of the 72s; the engine
-implementation is covered more directly by the live driver test and the worker's SDK test,
-which are seconds.
+a broken workspace file is reported and heals), and **thirteen are feature tests whose files
+live in the workspace** — the overlay, commands, skills, and delegation defaults — where the
+sandbox is the environment, not the subject, but is still the only door to those files. So
+`make test-sandbox` is the first four plus the live driver and the SDK suite (~35s, `-race`),
+and `make test-workspace` is the thirteen (~19s, no `-race`), with `notSandbox` keeping the
+fast tier's tests out of both. The engine implementation is covered most directly by the live
+driver test and the worker's SDK test, which are seconds.

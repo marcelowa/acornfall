@@ -11,7 +11,7 @@ import (
 // answer.
 func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(scriptRule{Match: "anything", Reply: "answered"}),
 		withSetup(func(t *testing.T, s *system) {

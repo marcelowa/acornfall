@@ -97,7 +97,7 @@ split would hide exactly that.
 
 | # | Rule | Why | Check |
 |---|---|---|---|
-| G11 | A unit test lives in the package it tests and needs no process. A test that needs processes, ports, or a harness lives in `internal/e2e`, and one that needs a sandbox says so with `maybeSandbox` and skips under `-short`. | The fast loop has to stay fast, or nobody runs it. | `make check`, `make test` vs `make test-sandbox` |
+| G11 | A unit test lives in the package it tests and needs no process. A test that needs processes, ports, or a harness lives in `internal/e2e`, and one that needs a sandbox declares which tier with `maybeSandbox`, `workspaceResources`, or `notSandbox` and skips under `-short`. | The fast loop has to stay fast, or nobody runs it. | `make check`, `make test` vs `make test-sandbox`/`make test-workspace` |
 | G12 | Wait for a condition with a deadline, never for a fixed duration. | `time.Sleep(2 * time.Second)` is either slow or flaky, and often both. | Convention, review |
 | G13 | `-race` is part of the suite, not a special occasion — including for the gateway the end-to-end tests spawn, which is a separate process and would otherwise be uninstrumented. | The bugs this project has had were concurrency bugs. | `make test` |
 | G15 | A table when the test is the same check over different inputs, so the cases read as a list of situations rather than as prose. | `resolveThinking` and the defaults chain are only legible as a table; a name per case says what each one is for. | Convention, review |
@@ -144,8 +144,10 @@ rather than pretending to have checked:
 
 `make check` is the fast loop (types and unit tests, ~6s). `make test` adds the end-to-end suite
 against a real gateway with the sandbox tier forced off, under `-race` (~25s, no hypervisor
-needed). `make test-sandbox` is the slow tier: real microVMs, the engine's checks, and the
-worker's SDK suite, on a machine that has a hypervisor. `make tools` installs the linters.
+needed). `make test-sandbox` is the engine boundary — the live driver, the worker's SDK suite,
+and the e2e tests that exercise the sandbox — and `make test-workspace` is the resource
+features whose files live in a workspace; both need a hypervisor. `make tools` installs the
+linters.
 
 None of this is enforced by a machine unless it runs on every change: `.github/workflows/ci.yml`
 runs `make lint` and `make test` on push.

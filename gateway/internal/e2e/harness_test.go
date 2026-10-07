@@ -345,31 +345,53 @@ func engineBinary(home string) string {
 	return matches[0]
 }
 
-// notSandbox marks a test that needs no real workspace. The sandbox tier exists for the tests
-// that do, and this one already ran in the fast tier, where the tools take the refusal path.
-// Without this a test that never asked for a sandbox still boots one there, because starting
-// a workspace's worker provisions its sandbox — and the tier was spending most of its five
-// minutes re-running the fast suite that way: 294s for all 41 tests, 123s for the 18 that
-// need a real workspace.
+// notSandbox marks a test that needs no real workspace. Both sandbox tiers skip it: this one
+// already ran in the fast tier, where the tools take the refusal path. Without a marker a
+// test that never asked for a sandbox still boots one there, because starting a workspace's
+// worker provisions its sandbox.
 func notSandbox(t *testing.T) {
 	t.Helper()
-	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" {
-		t.Skip("the sandbox tier runs the tests that need a real workspace; this one ran in the fast tier")
+	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" || os.Getenv("ACORNFALL_WORKSPACE_ONLY") != "" {
+		t.Skip("this test needs no sandbox; the fast tier ran it against the refusal path")
 	}
 }
 
-// maybeSandbox is used at the top of a test, before a system exists. It is the only place the
-// decision is made, because a test that needs the workspace's own files needs a sandbox: the
-// gateway refuses to run tools where there is none, which is the behaviour ADR 0012 asks for,
-// so the test skips rather than pretending.
-//
-// -short is the sandbox tier's boundary: `make test` runs the feature suite with sandboxes
-// forced off, and the sandbox tests skip; `make test-sandbox` runs them for real.
+// maybeSandbox marks a test that exercises the sandbox itself: a command runs through it, a
+// file operation goes through it, or the mounts are asserted. `make test-sandbox` runs these,
+// and `make test-workspace` skips them because that tier is about resources, not the engine.
 func maybeSandbox(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("this test needs a sandbox; make test-sandbox runs it")
 	}
+	if os.Getenv("ACORNFALL_WORKSPACE_ONLY") != "" {
+		t.Skip("the workspace tier runs the resource tests; this one exercises the sandbox")
+	}
+	skipWithoutHypervisor(t)
+}
+
+// workspaceResources marks a test whose subject is the resource overlay — rules, definitions,
+// commands, skills — and whose files live in the workspace. The worker reads those only
+// through the sandbox (ADR 0012: it has no host path to the workspace), so the test needs a
+// hypervisor, but it does not exercise the sandbox's execution surface. `make test-workspace`
+// runs these; `make test-sandbox` skips them, because booting a microVM per resource test
+// there buys no extra sandbox coverage.
+func workspaceResources(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("this test needs a workspace's files; make test-workspace runs it")
+	}
+	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" {
+		t.Skip("the sandbox tier runs the boundary tests; this one is a resource test")
+	}
+	skipWithoutHypervisor(t)
+}
+
+// skipWithoutHypervisor is the machine check both sandbox tiers share: the engine refuses to
+// run tools where there is none, which is the behaviour ADR 0012 asks for, so the test skips
+// rather than pretending.
+func skipWithoutHypervisor(t *testing.T) {
+	t.Helper()
 	if reason := sandboxUnavailable(); reason != "" {
 		t.Skipf("this machine cannot run a sandbox: %s", reason)
 	}

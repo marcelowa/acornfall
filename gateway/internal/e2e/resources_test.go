@@ -13,7 +13,7 @@ import (
 // model can tell the project's instructions from the platform's.
 func TestWorkspaceRulesReachThePrompt(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(scriptRule{Match: "get to work", Reply: "working"}),
 		withSetup(func(t *testing.T, s *system) {
@@ -38,7 +38,7 @@ func TestWorkspaceRulesReachThePrompt(t *testing.T) {
 // how a project overrides a shared agent without renaming it.
 func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(scriptRule{Match: "who are you", Reply: "an agent"}),
 		withSetup(func(t *testing.T, s *system) {
@@ -98,7 +98,7 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 // workspace, tool denials union, and the explain view names every layer that contributed.
 func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(scriptRule{Match: "fold", Reply: "folded"}),
 		withSetup(func(t *testing.T, s *system) {
@@ -137,7 +137,7 @@ func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 // share, and the local one is what overrides it.
 func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(scriptRule{Match: "what are the rules", Reply: "answered"}),
 		withSetup(func(t *testing.T, s *system) {
@@ -212,7 +212,7 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 // Reload re-reads the files, so writing an agent does not mean restarting anything.
 func TestReloadPicksUpANewDefinition(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t)
 	c := s.client()
 	root := c.waitForConversation("general")
@@ -274,7 +274,7 @@ func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 // every skill the install has, whatever its definition said.
 func TestASpawnedChildIsOfferedItsDefinitionsSkills(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(
 			scriptRule{

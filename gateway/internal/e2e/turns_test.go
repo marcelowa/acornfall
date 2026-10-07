@@ -11,7 +11,7 @@ import (
 // command and its effect can be told apart later.
 func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(scriptRule{Match: "EXPANDED:", Reply: "on it"}),
 		withSetup(func(t *testing.T, s *system) {
@@ -41,7 +41,7 @@ func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
 // worse than an extra line.
 func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(scriptRule{Match: "PING", Reply: "pong"}),
 		withSetup(func(t *testing.T, s *system) {
@@ -79,7 +79,7 @@ func TestAnUnknownCommandIsSentAsWritten(t *testing.T) {
 // came from, because "why is this command different here" is a question with an answer.
 func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t, withSetup(func(t *testing.T, s *system) {
 		s.writeHome(t, "commands/deploy.md", "---\nname: deploy\ndescription: the install's way\n---\nInstall deploy.")
 		s.writeHome(t, "commands/shared.md", "---\nname: shared\ndescription: from the install\n---\nShared install body.")

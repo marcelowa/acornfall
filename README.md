@@ -190,7 +190,8 @@ ADR 0012 lists what the sandbox deliberately does not cover yet.
 make check         # fast: the compiler and the unit tests, no processes (~6s)
 make lint          # the static rules: gofmt, vet, staticcheck, tsc, eslint
 make test          # the default gate: units + the feature suite, no hypervisor (~25s)
-make test-sandbox  # the slow tier: real microVMs; needs /dev/kvm or Apple Silicon (~5min)
+make test-sandbox  # the sandbox engine boundary: live driver + SDK + 4 e2e tests (~35s)
+make test-workspace # the resource features whose files live in a workspace (~20s)
 make ui            # drives the real client in headless chromium (needs a running gateway)
 make build         # gateway build
 make dev           # dev provider + gateway, workspace = current directory

@@ -127,7 +127,7 @@ func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
 // level was read and then dropped, so naming one made no difference to a spawned child at all.
 func TestASpawnedChildsLevelFollowsTheDocumentedOrder(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(
 			scriptRule{
@@ -235,7 +235,7 @@ func TestASendByConversationIdReportsItsAnswer(t *testing.T) {
 // argument. Both go through the check the open path uses, and a refusal is not a spawn.
 func TestAnUnknownThinkingLevelIsRefusedNotPassedOn(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(
 			scriptRule{
@@ -283,7 +283,7 @@ func TestAnUnknownThinkingLevelIsRefusedNotPassedOn(t *testing.T) {
 // refusal can be explained rather than only suffered.
 func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
 	t.Parallel()
-	maybeSandbox(t)
+	workspaceResources(t)
 	s := start(t,
 		withScript(scriptRule{
 			Match: "delegate this",
