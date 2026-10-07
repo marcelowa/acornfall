@@ -112,7 +112,7 @@ the serialization, were paying for time nobody needed. Three tests streamed scri
 run state through the refreshed listing made that artificial slowness unnecessary, and the
 keepalive test was watching a 3-second ticker for five seconds. The end-to-end package is
 **5.5-8s** now (twelve consecutive `-parallel 6` runs green), ~12s under `-race`; `make test`
-spends the rest on `make lint` (tsc 5.6s + eslint 7.2s, run one after the other). The decision
+spends the rest on `make lint` (tsc + the linter, run one after the other). The decision
 in this ADR is what stays: a slow piece gets its own suite and its own target.
 
 One of the sandbox tests, `TestTheTrustFlagIsGone`, turned out to touch no sandbox at all — it

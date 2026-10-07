@@ -22,7 +22,7 @@ const rules = [
 		hint: 'write it after " -- " on the same line, so the next reader knows what was traded',
 		trees: ["worker/src", "worker/test"],
 		files: /\.ts$/,
-		matches: /eslint-disable/,
+		matches: /(eslint|oxlint)-disable/,
 		exempt: / -- /,
 	},
 ];

@@ -109,7 +109,7 @@ split would hide exactly that.
 
 | # | Rule | Why | Check |
 |---|---|---|---|
-| T1 | `any` is banned; use `unknown` and check. | An `any` is a decision to stop knowing. | `@typescript-eslint/no-explicit-any` |
+| T1 | `any` is banned; use `unknown` and check. | An `any` is a decision to stop knowing. | `typescript/no-explicit-any` |
 | T2 | `as` is allowed only where a check immediately precedes it, or at a documented trust boundary. | The cast is the boundary; write down which side of it you are on. | `make lint` |
 | T11 | The runtime's own tools and APIs first — `Bun.file`, `bun test`, `bun --watch`, `Bun.spawn`. A dependency needs a reason, which is why there is no validator library here: the payloads we parse are our own protocol (checked by shape) and files the user writes (checked field by field, with tests). | Every dependency is someone else's release schedule, and a validator earns its place against an untrusted, changing payload, not a pipe we control. | Convention, review |
 | T3 | A union that grows must break every `switch` over it: `Exclude` the parts handled elsewhere, and make the default `never`. | A new protocol command silently became "unsupported" instead of a compile error. | `switch-exhaustiveness-check` |
@@ -138,7 +138,7 @@ rather than pretending to have checked:
 | Go beyond vet | `staticcheck ./...` (2025.1+ for Go 1.24) |
 | no `init()` in the gateway | a grep, because the rule is absolute |
 | TypeScript types | `bun run typecheck` |
-| TypeScript rules | `bun run lint` (eslint + typescript-eslint, type-aware) |
+| TypeScript rules | `bun run lint` (oxlint, type-aware through tsgolint) |
 | lint exceptions have reasons | a grep |
 | commit message shape | `scripts/check-commits.mjs`, over a pull request's commits in CI |
 
