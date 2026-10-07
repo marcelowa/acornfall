@@ -1,0 +1,152 @@
+/* Prose styles for rendered markdown. Values are the emitted tokens: the semantic colours
+ * from tokens.css, the scales from the plain @theme block in globals.css. The code surface
+ * is a component token because it stays dark in both themes, matching the vendored syntax
+ * theme; the token colours inside the block come from highlight.js. */
+.markdown {
+	color: var(--foreground);
+	font-size: var(--text-base);
+	line-height: var(--leading-normal);
+	overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+	margin-top: 0;
+}
+
+.markdown > :last-child {
+	margin-bottom: 0;
+}
+
+.markdown p {
+	margin: 0 0 var(--spacing-2);
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+	margin: var(--spacing-3) 0 var(--spacing-2);
+	font-weight: var(--font-weight-semibold);
+	letter-spacing: var(--tracking-tight);
+	line-height: var(--leading-tight);
+}
+
+.markdown h1 {
+	font-size: var(--text-xl);
+}
+
+.markdown h2 {
+	font-size: var(--text-lg);
+}
+
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+	font-size: var(--text-base);
+}
+
+.markdown ul,
+.markdown ol {
+	margin: 0 0 var(--spacing-2);
+	padding-left: var(--spacing-6);
+}
+
+.markdown ul {
+	list-style: disc;
+}
+
+.markdown ol {
+	list-style: decimal;
+}
+
+.markdown li {
+	margin: var(--spacing-1) 0;
+}
+
+.markdown li::marker {
+	color: var(--muted-foreground);
+}
+
+.markdown a {
+	color: var(--primary);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.markdown blockquote {
+	margin: 0 0 var(--spacing-2);
+	padding-left: var(--spacing-3);
+	border-left: 2px solid var(--border);
+	color: var(--muted-foreground);
+}
+
+.markdown hr {
+	margin: var(--spacing-4) 0;
+	border: 0;
+	border-top: 1px solid var(--border);
+}
+
+.markdown code {
+	padding: 1px 5px;
+	border-radius: var(--radius-sm);
+	background: var(--muted);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+}
+
+.markdown .code-block {
+	position: relative;
+	margin: 0 0 var(--spacing-2);
+}
+
+.markdown .code-block pre {
+	margin: 0;
+	padding: var(--spacing-3);
+	border-radius: var(--radius-md);
+	background: var(--code-background);
+	overflow: auto;
+	max-height: 420px;
+}
+
+.markdown .code-block code {
+	padding: 0;
+	border-radius: 0;
+	background: none;
+	color: var(--code-foreground);
+	font-size: var(--text-xs);
+	white-space: pre;
+}
+
+.markdown .code-lang {
+	position: absolute;
+	top: var(--spacing-1);
+	right: var(--spacing-2);
+	color: var(--muted-foreground);
+	font-family: var(--font-mono);
+	font-size: var(--text-2xs);
+	text-transform: lowercase;
+	pointer-events: none;
+}
+
+.markdown table {
+	display: block;
+	max-width: 100%;
+	margin: 0 0 var(--spacing-2);
+	border-collapse: collapse;
+	overflow-x: auto;
+}
+
+.markdown th,
+.markdown td {
+	padding: var(--spacing-1) var(--spacing-2);
+	border: 1px solid var(--border);
+	text-align: left;
+}
+
+.markdown th {
+	background: var(--muted);
+	font-weight: var(--font-weight-semibold);
+}

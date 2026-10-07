@@ -242,6 +242,12 @@
 	 * its own name here, so even the exception is a token. The dialog's mobile width is the
 	 * viewport minus the page gutter; there is no Tailwind namespace for it. */
 	--dialog-max-width: calc(100% - var(--base-space-8));
+
+	/* The code surface stays dark in both themes, the way the old client had it and the way the
+	 * vendored syntax theme is drawn. The wrapper and the text are tokens; the token colours
+	 * inside come from highlight.js. */
+	--code-background: var(--base-neutral-900);
+	--code-foreground: var(--base-neutral-100);
 }
 
 .dark {

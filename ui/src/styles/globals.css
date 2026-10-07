@@ -4,8 +4,14 @@
  * Every namespace starts with `initial`: Tailwind's defaults are removed, and only the tokens
  * from `tokens.css` are registered. A class that is not backed by a token — `p-13`,
  * `bg-blue-500`, `text-lg`, `rounded-2xl` — produces no CSS at all. That is the mechanism
- * behind "tokens are the only source of design truth"; `ui/scripts/check-system.mjs` catches
+ * behind "tokens are the only source of design truth"; `ui/scripts/check-system.ts` catches
  * the one thing the theme cannot: arbitrary values like `p-[13px]`.
+ *
+ * Two blocks, on purpose. `@theme inline` inlines the value into every utility, which is what
+ * a colour needs: `bg-primary` must resolve `--primary` on the element itself, or the `.dark`
+ * swap would not reach it. The scales do not swap, and a stylesheet that is not Tailwind —
+ * the markdown prose, a future component sheet — needs to read them by name, so they live in
+ * a plain `@theme` and are emitted as real variables.
  * ═══════════════════════════════════════════════════════════════════════════════════════════ */
 
 @import "tailwindcss";
@@ -37,6 +43,7 @@
 	--color-destructive: var(--destructive);
 	--color-destructive-foreground: var(--destructive-foreground);
 	--color-destructive-subtle: var(--destructive-subtle);
+	--color-destructive-subtle-foreground: var(--destructive-subtle-foreground);
 	--color-success: var(--success);
 	--color-success-foreground: var(--success-foreground);
 	--color-success-subtle: var(--success-subtle);
@@ -49,12 +56,13 @@
 	--color-info-foreground: var(--info-foreground);
 	--color-info-subtle: var(--info-subtle);
 	--color-info-subtle-foreground: var(--info-subtle-foreground);
-	--color-destructive-subtle-foreground: var(--destructive-subtle-foreground);
 	--color-overlay: var(--overlay);
 	--color-border: var(--border);
 	--color-input: var(--input);
 	--color-ring: var(--ring);
+}
 
+@theme {
 	/* ── Families and weights */
 	--font-*: initial;
 	--font-sans: var(--base-font-sans);
