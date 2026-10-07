@@ -60,13 +60,15 @@ type Options struct {
 
 // SandboxState says what the agent's tools can reach here. When Tools is false the tools
 // refuse rather than running on the host, and Problem says why, because a silent fallback
-// would be worse than a refusal.
+// would be worse than a refusal. Isolated says whether the engine separates a command from
+// the host: false is the host engine, and the interface has to be able to say so.
 type SandboxState struct {
-	Engine  string `json:"engine,omitempty"`
-	Version string `json:"version,omitempty"`
-	Status  string `json:"status,omitempty"`
-	Tools   bool   `json:"tools"`
-	Problem string `json:"problem,omitempty"`
+	Engine   string `json:"engine,omitempty"`
+	Version  string `json:"version,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Tools    bool   `json:"tools"`
+	Isolated bool   `json:"isolated"`
+	Problem  string `json:"problem,omitempty"`
 }
 
 // WorkspaceState is a workspace as the interface needs it: what it is called, where it
@@ -677,7 +679,7 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 		return SandboxState{Problem: "no sandbox is configured: tool execution is disabled"}
 	}
 	report := manager.Report()
-	state := SandboxState{Engine: report.Engine, Version: report.Version}
+	state := SandboxState{Engine: report.Engine, Version: report.Version, Isolated: report.Isolated}
 	if problem := manager.Problem(); problem != nil {
 		state.Problem = problem.Error()
 		return state

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -52,6 +53,7 @@ func serve(argv []string) error {
 	dataDir := flags.String("data-dir", "", "alias for --home")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
+	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor) or host (no isolation)")
 	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: "bun run src/main.ts")`)
 	workerDir := flags.String("worker-dir", "", "worker directory")
@@ -109,8 +111,16 @@ func serve(argv []string) error {
 	}
 
 	// The sandbox tier. One engine per install, and the worker is told which one, because it
-	// attaches with that engine's SDK and the two must agree.
-	engine, err := sandboxTier(ctx, dir, *sandboxState)
+	// attaches with that engine's client and the two must agree. Nothing here chooses for a
+	// machine: naming the host engine is what makes a run unconfined.
+	engineName := *sandboxEngine
+	if engineName == "" {
+		engineName = os.Getenv("ACORNFALL_SANDBOX_ENGINE")
+	}
+	if engineName == "host" && *sandboxState != "" {
+		return errors.New("--sandbox-state belongs to the microsandbox engine; the host engine keeps no state")
+	}
+	engine, err := sandboxTier(ctx, dir, *sandboxState, engineName)
 	if err != nil {
 		return err
 	}
@@ -169,14 +179,14 @@ func serve(argv []string) error {
 // ACORNFALL_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
 // nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
 // behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
-func sandboxTier(ctx context.Context, home, state string) (*sandbox.Manager, error) {
+func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.Manager, error) {
 	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
 		log.Printf("sandbox: disabled by ACORNFALL_NO_SANDBOX; commands and file tools will refuse")
 		return nil, nil
 	}
-	driver := sandbox.NewMicrosandbox(home)
-	if state != "" {
-		driver = driver.WithStateDir(state)
+	driver, err := sandbox.Engine(home, state, engineName)
+	if err != nil {
+		return nil, err
 	}
 	engine, err := sandbox.Open(ctx, sandbox.Options{
 		Home:   home,
@@ -192,6 +202,9 @@ func sandboxTier(ctx context.Context, home, state string) (*sandbox.Manager, err
 		log.Printf("sandbox: commands and file tools will refuse until this is fixed; tools never run on the host")
 	}
 	log.Printf("sandbox: engine %s %s, state %s", report.Engine, report.Version, report.StateDir)
+	if !report.Isolated {
+		log.Printf("sandbox: the host engine is not isolated: commands and file tools run with this user's own reach")
+	}
 	return engine, nil
 }
 
