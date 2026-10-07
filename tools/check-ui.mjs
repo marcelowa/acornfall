@@ -401,7 +401,28 @@ try {
 			Math.abs(drawerWidth.drawer - drawerWidth.window) <= 1,
 			`${drawerWidth.drawer}px of ${drawerWidth.window}px`,
 		);
-		await page.keyboard.press("Escape");
+		// The drawer closes with the rail's own icon, not an X in a different corner.
+		const drawerClose = await page
+			.waitForSelector('[role="dialog"] button[aria-label="Hide the rail"]', {
+				timeout: 5000,
+				visible: true,
+			})
+			.catch(() => null);
+		check("the drawer carries the rail's own close", drawerClose !== null);
+		if (drawerClose !== null) {
+			// The drawer slides in from the left; clicking before it lands aims at a point that
+			// is still off the screen.
+			await page.waitForFunction(
+				() =>
+					(document
+						.querySelector('[role="dialog"] button[aria-label="Hide the rail"]')
+						?.getBoundingClientRect().x ?? -1) >= 0,
+				{ timeout: 5000 },
+			);
+			await drawerClose.click();
+		} else {
+			await page.keyboard.press("Escape");
+		}
 		await page.waitForFunction(() => document.querySelector("[role=dialog]") === null, { timeout: 5000 });
 		check("the drawer closes", true);
 	}

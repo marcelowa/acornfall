@@ -7,7 +7,7 @@ import {
 import { PanelLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "cn";
 import { gapScale } from "./spacing";
 
@@ -212,14 +212,30 @@ export function Split({
 							</Button>
 						</SheetTrigger>
 						{/* Full width: the drawer is the navigation, and half a screen of it is
-						 * neither the rail nor the transcript. */}
+						 * neither the rail nor the transcript. Its close is the rail's own icon in the
+						 * rail's own corner, so the gesture is the same on both screens. */}
 						<SheetContent
 							side="left"
+							showCloseButton={false}
 							className="w-full p-2 sm:max-w-none"
 							aria-describedby={undefined}
 						>
 							<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
-							{aside}
+							<div className="relative flex min-h-0 flex-1 flex-col">
+								<div className="absolute top-1 right-1 z-10">
+									<SheetClose asChild>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-sm"
+											aria-label="Hide the rail"
+										>
+											<PanelLeftClose />
+										</Button>
+									</SheetClose>
+								</div>
+								{aside}
+							</div>
 						</SheetContent>
 					</Sheet>
 					{bar === undefined ? null : (
