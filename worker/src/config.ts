@@ -15,6 +15,12 @@ import { join } from "node:path";
 
 export type LayerName = "global" | "workspace" | "agent";
 
+/** Where a definition came from. `built-in` is the general agent, which has no file. */
+export type AgentLayer = "global" | "workspace" | "built-in";
+
+/** The agent every conversation has. A `general.md` in any layer replaces it. */
+export const GENERAL_AGENT = "general";
+
 /**
  * What a conversation may do with other conversations. Ownership decides lifetime;
  * this decides permission, and the two are separate on purpose.
@@ -97,9 +103,10 @@ export interface Contributions {
 export interface AgentDefinition {
 	name: string;
 	description: string;
-	/** File the definition came from; a workspace file shadows a global one. */
+	/** File the definition came from; a workspace file shadows a global one. Empty for the
+	 * built-in general agent, which is not a file. */
 	source: string;
-	layer: "global" | "workspace";
+	layer: AgentLayer;
 	contributions: Contributions;
 	/** Frontmatter keys this build does not know; reported, never silently ignored. */
 	unknownKeys?: readonly string[];
@@ -298,7 +305,7 @@ async function loadConfig(
 async function loadAgentDir(
 	files: Files,
 	directory: string,
-	layer: "global" | "workspace",
+	layer: AgentLayer,
 ): Promise<AgentDefinition[]> {
 	const agents: AgentDefinition[] = [];
 	for (const entry of await files.list(directory)) {
@@ -443,6 +450,20 @@ export async function loadCatalog(roots: LayerRoots, files: Files): Promise<Cata
 	// beats the ecosystem one beside it.
 	const byName = new Map<string, AgentDefinition>();
 	for (const agent of discovered) byName.set(agent.name, agent);
+
+	// The agent a conversation runs when nothing named one, as a definition rather than a
+	// special case: it can be listed, chosen, and pinned by name like any other, and an
+	// install that wants its own general writes `general.md` and shadows this.
+	if (!byName.has(GENERAL_AGENT)) {
+		byName.set(GENERAL_AGENT, {
+			name: GENERAL_AGENT,
+			description: "General assistant",
+			source: "",
+			layer: "built-in",
+			contributions: {},
+		});
+	}
+
 	return { defaults, agents: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
@@ -454,7 +475,8 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 	const definition =
 		name === undefined ? undefined : catalog.agents.find((agent) => agent.name === name);
 	const layers: LayerTrace[] = [...catalog.defaults];
-	if (definition !== undefined) {
+	// A built-in has no file, so there is no layer to trace it to.
+	if (definition !== undefined && definition.source !== "") {
 		layers.push({
 			layer: "agent",
 			path: definition.source,

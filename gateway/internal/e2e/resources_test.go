@@ -69,8 +69,12 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 			source      string
 		}{agent.Description, agent.Layer, agent.Source}
 	}
-	if len(got.Agents) != 2 {
-		t.Fatalf("expected two definitions, got %+v", got.Agents)
+	// The general agent is in the catalog too: the worker ships it, so every install has one.
+	if len(got.Agents) != 3 {
+		t.Fatalf("expected the built-in agent and the two definitions, got %+v", got.Agents)
+	}
+	if byName["general"].layer != "built-in" {
+		t.Errorf("the general agent should come from the worker, got %+v", byName["general"])
 	}
 	if byName["researcher"].description != "the workspace one" || byName["researcher"].layer != "workspace" {
 		t.Errorf("a workspace definition should shadow the global one of the same name, got %+v", byName["researcher"])
@@ -164,10 +168,19 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 	c := s.client()
 
 	listed := c.state("general")
-	if len(listed.Agents) != 1 {
+	// `eco` from both folders, plus the general agent the worker ships.
+	if len(listed.Agents) != 2 {
 		t.Fatalf("expected the one definition, in both folders, got %+v", listed.Agents)
 	}
-	agent := listed.Agents[0]
+	var agent struct {
+		Description string `json:"description"`
+		Source      string `json:"source"`
+	}
+	for _, candidate := range listed.Agents {
+		if candidate.Name == "eco" {
+			agent.Description, agent.Source = candidate.Description, candidate.Source
+		}
+	}
 	if !strings.Contains(agent.Description, "from .acornfall") || !strings.Contains(agent.Source, ".acornfall") {
 		t.Errorf("our folder should shadow the ecosystem one, got %+v", agent)
 	}

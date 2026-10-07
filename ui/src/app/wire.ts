@@ -136,11 +136,21 @@ export interface WireState {
 	defaultModel: WireBinding;
 	defaultThinking: string;
 	defaultAgent: string;
+	/** Each scope's own layer, unresolved: what the settings screen shows per tab. */
+	workspaceDefaults: WireScopeDefaults;
+	installDefaults: WireScopeDefaults;
 	defaultsOrigin: WireDefaultsOrigin;
 	inherited: WireInherited;
 	agents: WireAgentSummary[];
 	providers: WireProvider[];
 	seq: number;
+}
+
+/** One layer's own defaults. Empty means the layer says nothing, not that it agrees. */
+export interface WireScopeDefaults {
+	model?: WireBinding | undefined;
+	thinking?: string | undefined;
+	agent?: string | undefined;
 }
 
 export interface WireContentBlock {

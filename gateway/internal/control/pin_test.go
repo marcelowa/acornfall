@@ -55,8 +55,8 @@ func TestMigrationPinsOnlyWhatNeverChose(t *testing.T) {
 	}
 }
 
-// A definition that no longer exists is not pinned by name: it would fail every open, and the
-// interface has to show a stale default rather than a broken conversation.
+// A definition that no longer exists is not pinned by name: it would fail every open. The
+// conversation falls through to the general agent, which is what it will actually run.
 func TestAStaleDefaultAgentIsNotPinned(t *testing.T) {
 	deepseek := binding("opencode-go", "deepseek-v4.1-flash")
 	control := layered(t, Defaults{Model: deepseek, Thinking: "high", Agent: "gone"}, Defaults{}, deepseek)
@@ -64,8 +64,8 @@ func TestAStaleDefaultAgentIsNotPinned(t *testing.T) {
 
 	control.pinMissing(control.conversations)
 
-	if got := control.bindings["9"]; got.Definition != "" {
-		t.Fatalf("a definition that does not exist must not be pinned: %+v", got)
+	if got := control.bindings["9"]; got.Definition != GeneralAgent {
+		t.Fatalf("a stale default agent must not be pinned; the general one should be: %+v", got)
 	}
 }
 
@@ -90,5 +90,73 @@ func TestNothingResolvedIsNotPinned(t *testing.T) {
 
 	if control.pinOne("4") {
 		t.Fatalf("pinned %+v with no provider anywhere", control.bindings["4"])
+	}
+}
+
+// Nothing configured an agent, so the conversation runs the general one — and it says so,
+// because a name is what the interface shows.
+func TestTheGeneralAgentIsPinnedWhenNothingElseIs(t *testing.T) {
+	deepseek := binding("opencode-go", "deepseek-v4.1-flash")
+	control := layered(t, Defaults{Model: deepseek, Thinking: "high"}, Defaults{}, deepseek)
+	control.conversations = []protocol.ConversationInfo{{ID: "4"}}
+
+	if !control.pinOne("4") {
+		t.Fatal("a conversation with a provider to resolve should be pinned")
+	}
+	if got := control.bindings["4"]; got.Definition != GeneralAgent {
+		t.Fatalf("pinned %+v, want the general agent named", got)
+	}
+}
+
+// A configured default agent still wins: the general one is what is left when nothing chose.
+func TestAConfiguredAgentBeatsTheGeneralOne(t *testing.T) {
+	deepseek := binding("opencode-go", "deepseek-v4.1-flash")
+	control := layered(t, Defaults{Model: deepseek, Agent: "researcher"}, Defaults{}, deepseek)
+	control.conversations = []protocol.ConversationInfo{{ID: "4"}}
+
+	control.pinOne("4")
+
+	if got := control.bindings["4"]; got.Definition != "researcher" {
+		t.Fatalf("pinned %+v, want this workspace's agent", got)
+	}
+}
+
+// The conversations that were pinned before the general agent existed have a model and no
+// definition. They get the name once, and a conversation that clears its definition later is
+// asking to follow the default, so it must not be given the name back.
+func TestTheGeneralAgentIsNamedOnceForConversationsThatPredateIt(t *testing.T) {
+	deepseek := binding("opencode-go", "deepseek-v4.1-flash")
+	control := layered(t, Defaults{Model: deepseek}, Defaults{}, deepseek)
+	control.bindings["5"] = protocol.ModelBinding{
+		Provider:      "opencode-go",
+		ModelID:       "deepseek-v4.1-flash",
+		ThinkingLevel: "high",
+	}
+	control.bindings["6"] = protocol.ModelBinding{
+		Provider:   "opencode-go",
+		ModelID:    "minimax-m3",
+		Definition: "researcher",
+	}
+	control.conversations = []protocol.ConversationInfo{{ID: "5"}, {ID: "6"}}
+
+	control.pinMissing(control.conversations)
+
+	if got := control.bindings["5"]; got.Definition != GeneralAgent {
+		t.Fatalf("a conversation that never named an agent should have been given one: %+v", got)
+	}
+	if got := control.bindings["6"]; got.Definition != "researcher" {
+		t.Fatalf("a conversation that chose an agent must not move: %+v", got)
+	}
+	if !control.generalPinned {
+		t.Fatal("the naming should be recorded, so it happens once")
+	}
+
+	// Cleared afterwards, which is a request to follow the default rather than to be named.
+	cleared := control.bindings["5"]
+	cleared.Definition = ""
+	control.bindings["5"] = cleared
+	control.pinMissing(control.conversations)
+	if got := control.bindings["5"]; got.Definition != "" {
+		t.Fatalf("clearing the definition should stick: %+v", got)
 	}
 }

@@ -29,7 +29,11 @@ func layered(t *testing.T, workspace, install Defaults, lastResort protocol.Mode
 			{ID: "deepseek-v4.1-flash", ThinkingLevels: []string{"low", "high"}},
 		},
 	}}}
-	control.catalog = protocol.AgentsData{Agents: []protocol.AgentSummary{{Name: "researcher"}}}
+	// The worker ships `general` built in, so a catalog without it is not a catalog the
+	// gateway will ever see.
+	control.catalog = protocol.AgentsData{
+		Agents: []protocol.AgentSummary{{Name: "general"}, {Name: "researcher"}},
+	}
 	control.defaultModel, control.defaultThinking, control.defaultAgent = workspace.Model, workspace.Thinking, workspace.Agent
 	control.install = install
 	control.lastResort = lastResort

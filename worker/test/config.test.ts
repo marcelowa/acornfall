@@ -43,6 +43,7 @@ describe("the catalog", () => {
 
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents.map((agent) => [agent.name, agent.layer])).toEqual([
+			["general", "built-in"],
 			["global", "global"],
 			["local", "workspace"],
 		]);
@@ -60,8 +61,8 @@ describe("the catalog", () => {
 		);
 
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
-		expect(catalog.agents).toHaveLength(1);
-		expect(catalog.agents[0]?.description).toBe("local");
+		expect(catalog.agents.map((agent) => agent.name)).toEqual(["general", "same"]);
+		expect(catalog.agents.find((agent) => agent.name === "same")?.description).toBe("local");
 	});
 
 	// A workspace used to carry a trust flag that decided whether any of this was read. It is
@@ -80,9 +81,30 @@ describe("the catalog", () => {
 		await write(join(home, "config.json"), `{"defaults":{"instructions":"GLOBAL"}}`);
 
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
-		expect(catalog.agents).toHaveLength(1);
+		expect(catalog.agents.map((agent) => agent.name)).toEqual(["general", "local"]);
 		expect(catalog.defaults.map((layer) => layer.layer)).toEqual(["global", "workspace"]);
 		expect(resolveAgent(catalog, undefined).instructions).toBe("GLOBAL\n\nWORKSPACE");
+	});
+
+	test("the general agent is always in the catalog, and a general.md replaces it", async () => {
+		const { home, workspace, user } = await scratch();
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
+		expect(catalog.agents.map((agent) => [agent.name, agent.layer])).toEqual([
+			["general", "built-in"],
+		]);
+		// It resolves like any other agent, and it has no file layer to explain.
+		expect(resolveAgent(catalog, "general").name).toBe("general");
+		expect(resolveAgent(catalog, "general").layers).toEqual([]);
+
+		await write(
+			join(home, "agents", "general.md"),
+			"---\nname: general\ndescription: mine\n---\nBe brief.",
+		);
+		const shadowed = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
+		expect(shadowed.agents.map((agent) => [agent.name, agent.layer])).toEqual([
+			["general", "global"],
+		]);
+		expect(resolveAgent(shadowed, "general").description).toBe("mine");
 	});
 
 	test("unknown frontmatter keys are reported, never silently dropped", async () => {
@@ -92,7 +114,9 @@ describe("the catalog", () => {
 			"---\nname: odd\ndescription: x\ncolour: blue\n---\nBody",
 		);
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
-		expect(catalog.agents[0]?.unknownKeys).toEqual(["colour"]);
+		expect(catalog.agents.find((agent) => agent.name === "odd")?.unknownKeys).toEqual([
+			"colour",
+		]);
 	});
 });
 
@@ -240,10 +264,13 @@ describe("guards", () => {
 
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(catalog.agents.map((agent) => [agent.name, agent.layer])).toEqual([
+			["general", "built-in"],
 			["shared", "workspace"],
 		]);
 		// The explain view names the file that won, so `.agents` is visibly where it came from.
-		expect(catalog.agents[0]?.source).toContain("/.agents/");
+		expect(catalog.agents.find((agent) => agent.name === "shared")?.source).toContain(
+			"/.agents/",
+		);
 		expect(resolveAgent(catalog, undefined).instructions).toBe("ECOSYSTEM");
 	});
 
@@ -281,8 +308,8 @@ describe("guards", () => {
 		);
 
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
-		expect(catalog.agents).toHaveLength(1);
-		expect(catalog.agents[0]?.description).toBe("native");
+		expect(catalog.agents).toHaveLength(2);
+		expect(catalog.agents.find((agent) => agent.name === "same")?.description).toBe("native");
 		// Instructions concatenate in the order the folders are read, so ours is last and wins
 		// for anything that takes the last value.
 		expect(resolveAgent(catalog, undefined).instructions).toBe(
@@ -308,7 +335,7 @@ describe("guards", () => {
 		await write(join(user, ".agents", "config.json"), `{"defaults":{"instructions":"USER"}}`);
 
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
-		expect(catalog.agents).toHaveLength(1);
+		expect(catalog.agents.map((agent) => agent.name)).toEqual(["eco", "general"]);
 		expect(catalog.defaults.map((layer) => layer.layer)).toEqual(["global", "workspace"]);
 		expect(resolveAgent(catalog, undefined).instructions).toBe("USER\n\nECOSYSTEM");
 	});

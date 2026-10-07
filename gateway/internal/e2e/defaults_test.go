@@ -45,22 +45,32 @@ func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 			cleared.DefaultThinking, cleared.DefaultsOrigin["thinking"])
 	}
 
-	// The agent default is the same mechanism, and the effective binding is what a whole
-	// conversation with nothing of its own will run.
+	// The agent default is the same mechanism, and it shapes the conversations that come
+	// after it: a conversation pins what it was created with (ADR 0017), and the one that
+	// predates this default keeps the general agent it was pinned to.
 	c.post("/api/workspaces/general/default-agent", map[string]any{"definition": "reviewer"}, nil)
 	withAgent := c.state("general")
 	if withAgent.DefaultAgent != "reviewer" || withAgent.DefaultsOrigin["agent"] != "workspace" {
 		t.Errorf("the workspace default agent should be reported, got %q from %q",
 			withAgent.DefaultAgent, withAgent.DefaultsOrigin["agent"])
 	}
-	if withAgent.Agent.Definition != "reviewer" {
-		t.Errorf("a conversation that chose nothing should run it, got %+v", withAgent.Agent)
+	if withAgent.Agent.Definition != "general" {
+		t.Errorf("a conversation created before the default keeps what it pinned, got %+v", withAgent.Agent)
+	}
+
+	created := c.create("general")
+	if got := c.state("general"); got.Conversation.ID != created.ID || got.Agent.Definition != "reviewer" {
+		t.Errorf("a conversation created after the default should run it, got %+v", got.Agent)
 	}
 
 	c.post("/api/workspaces/general/default-agent", map[string]any{"definition": ""}, nil)
-	if back := c.state("general"); back.DefaultAgent != "" || back.Agent.Definition != "" {
-		t.Errorf("clearing the agent default should leave the layered defaults, got %q / %q",
-			back.DefaultAgent, back.Agent.Definition)
+	back := c.state("general")
+	if back.DefaultAgent != "" || back.DefaultsOrigin["agent"] != "" {
+		t.Errorf("clearing the agent default should leave no origin, got %q / %q",
+			back.DefaultAgent, back.DefaultsOrigin["agent"])
+	}
+	if back.Agent.Definition != "reviewer" {
+		t.Errorf("the conversation that pinned reviewer keeps it, got %+v", back.Agent)
 	}
 }
 

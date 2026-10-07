@@ -130,6 +130,10 @@ type State struct {
 	DefaultThinking string                `json:"defaultThinking"`
 	DefaultAgent    string                `json:"defaultAgent"`
 	DefaultsOrigin  DefaultOrigins        `json:"defaultsOrigin"`
+	// Each scope's own layer, unresolved. The resolved defaults above are what will run; these
+	// are what the settings screen shows and writes, one tab per scope.
+	WorkspaceDefaults ScopeDefaults `json:"workspaceDefaults"`
+	InstallDefaults   ScopeDefaults `json:"installDefaults"`
 	// Inherited says, per field, that this conversation never chose it.
 	Inherited Inherited `json:"inherited"`
 	// Subagent is true when the active conversation was created by another one. Its
@@ -157,6 +161,14 @@ type Defaults struct {
 	Model    protocol.ModelBinding `json:"defaultModel,omitzero"`
 	Thinking string                `json:"defaultThinking,omitempty"`
 	Agent    string                `json:"defaultAgent,omitempty"`
+}
+
+// ScopeDefaults is one layer's own defaults, before any resolution. Empty means this layer
+// says nothing, which is different from it saying what the layer below says.
+type ScopeDefaults struct {
+	Model    protocol.ModelBinding `json:"model,omitzero"`
+	Thinking string                `json:"thinking,omitempty"`
+	Agent    string                `json:"agent,omitempty"`
 }
 
 // DefaultOrigins names the layer each resolved default came from: which one is in force,
@@ -196,6 +208,8 @@ type Control struct {
 	defaultModel    protocol.ModelBinding
 	defaultThinking string
 	defaultAgent    string
+	/** Whether the conversations that predate naming an agent have been given the general one. */
+	generalPinned bool
 	// install is the install-wide layer, from <home>/settings.json. Read-only for a
 	// workspace: it is changed through the workspace layer, which writes the file once for
 	// every workspace to see.
@@ -769,9 +783,19 @@ func (c *Control) StateFor(conversationID string) State {
 		DefaultThinking: fallback.Thinking,
 		DefaultAgent:    fallback.Agent,
 		DefaultsOrigin:  origins,
-		WorkerUp:        c.workerUp,
-		WorkerError:     c.workerError,
-		Sandbox:         c.sandbox,
+		WorkspaceDefaults: ScopeDefaults{
+			Model:    c.defaultModel,
+			Thinking: c.defaultThinking,
+			Agent:    c.defaultAgent,
+		},
+		InstallDefaults: ScopeDefaults{
+			Model:    c.install.Model,
+			Thinking: c.install.Thinking,
+			Agent:    c.install.Agent,
+		},
+		WorkerUp:    c.workerUp,
+		WorkerError: c.workerError,
+		Sandbox:     c.sandbox,
 		Inherited: Inherited{
 			Model:    c.bindings[active].Provider == "",
 			Thinking: c.bindings[active].ThinkingLevel == "",
@@ -969,7 +993,13 @@ func (c *Control) Create(ctx context.Context) error {
 // Nothing resolved means nothing to pin: a workspace with no provider keeps inheriting until
 // there is something to inherit. A subagent is configured by whatever created it, so pinning
 // it here would overwrite that with the defaults.
+// GeneralAgent is the agent a conversation runs when nothing named one. The worker ships it as
+// a built-in definition, so it can be pinned by name like any other — and an install that
+// wants its own general writes `general.md`, which shadows it.
+const GeneralAgent = "general"
+
 func (c *Control) pinBinding(conversationID string) (protocol.ModelBinding, bool) {
+
 	if c.isSubagent(conversationID) {
 		return protocol.ModelBinding{}, false
 	}
@@ -983,10 +1013,15 @@ func (c *Control) pinBinding(conversationID string) (protocol.ModelBinding, bool
 		ModelID:       effective.ModelID,
 		ThinkingLevel: effective.ThinkingLevel,
 	}
-	// A definition that no longer exists is not pinned: it would fail every open, and the
-	// interface has to show a stale default rather than a broken conversation.
-	if inputs.defaultAgent != "" && c.hasAgentDefinition(inputs.defaultAgent) {
-		binding.Definition = inputs.defaultAgent
+	// The agent is pinned by name too: the configured default, or the general one every
+	// install has. A definition that does not exist is not pinned — it would fail every open,
+	// and the interface has to show a stale default rather than a broken conversation.
+	agent := inputs.defaultAgent
+	if agent == "" {
+		agent = GeneralAgent
+	}
+	if c.hasAgentDefinition(agent) {
+		binding.Definition = agent
 	}
 	return binding, true
 }
@@ -1004,11 +1039,45 @@ func (c *Control) pinOne(conversationID string) bool {
 	return true
 }
 
-// pinMissing pins the conversations that never chose, which is the one-time migration for
-// conversations that predate pinning. Conversations with a binding are left alone — that is
-// a choice — and so are subagents.
+// pinMissing is the migration for conversations that predate pinning, and it has two parts.
+//
+// The conversations that never chose are pinned from what resolves at that moment.
+// Conversations with a binding are left alone — that is a choice — and so are subagents.
+//
+// Then, once, the conversations whose binding never named an agent are given the general one.
+// Pinning the name is what lets the interface show which agent runs; a conversation that
+// clears its definition afterwards is asking to follow the default, and that has to keep
+// working, which is why this part happens once rather than on every listing.
 func (c *Control) pinMissing(conversations []protocol.ConversationInfo) {
-	pinned := false
+	changed := false
+
+	c.mu.RLock()
+	named := c.generalPinned
+	c.mu.RUnlock()
+	if !named && c.hasAgentDefinition(GeneralAgent) {
+		for _, conversation := range conversations {
+			if conversation.Parent != "" {
+				continue
+			}
+			c.mu.RLock()
+			existing := c.bindings[conversation.ID]
+			c.mu.RUnlock()
+			chose := existing.Provider != "" || existing.ModelID != "" || existing.Definition != ""
+			if !chose || existing.Definition != "" {
+				continue
+			}
+			existing.Definition = GeneralAgent
+			c.mu.Lock()
+			c.bindings[conversation.ID] = existing
+			c.mu.Unlock()
+			changed = true
+		}
+		c.mu.Lock()
+		c.generalPinned = true
+		c.mu.Unlock()
+		changed = true
+	}
+
 	for _, conversation := range conversations {
 		c.mu.RLock()
 		existing := c.bindings[conversation.ID]
@@ -1023,9 +1092,9 @@ func (c *Control) pinMissing(conversations []protocol.ConversationInfo) {
 		c.mu.Lock()
 		c.bindings[conversation.ID] = binding
 		c.mu.Unlock()
-		pinned = true
+		changed = true
 	}
-	if pinned {
+	if changed {
 		c.persist()
 	}
 }
@@ -2057,6 +2126,7 @@ func (c *Control) isAvailable(describe protocol.Describe, binding protocol.Model
 
 type persistedSettings struct {
 	Active          string                           `json:"active,omitempty"`
+	GeneralPinned   bool                             `json:"generalPinned,omitempty"`
 	DefaultModel    protocol.ModelBinding            `json:"defaultModel,omitzero"`
 	DefaultThinking string                           `json:"defaultThinking,omitempty"`
 	DefaultAgent    string                           `json:"defaultAgent,omitempty"`
@@ -2092,6 +2162,7 @@ func (c *Control) loadSettings() string {
 	c.mu.Lock()
 	c.defaultThinking = settings.DefaultThinking
 	c.defaultAgent = settings.DefaultAgent
+	c.generalPinned = settings.GeneralPinned
 	c.mu.Unlock()
 	if settings.Agents != nil {
 		c.mu.Lock()
@@ -2116,6 +2187,7 @@ func (c *Control) persist() {
 	// would outrank every layer below for good.
 	settings := persistedSettings{
 		Active:          c.active,
+		GeneralPinned:   c.generalPinned,
 		DefaultModel:    c.defaultModel,
 		DefaultThinking: c.defaultThinking,
 		DefaultAgent:    c.defaultAgent,
