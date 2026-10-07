@@ -45,6 +45,7 @@ gateway/internal/httpapi/  the transport edge: routes, auth, streaming
 gateway/internal/protocol/ the wire types, mirrored by the worker
 gateway/internal/workerpool/ one harness process: spawn, supervise, JSONL
 gateway/web/               the client, embedded; no build step
+ui/                        the interface: React, tokens, Storybook; built, not yet embedded
 worker/src/                the harness adapter, one file per concept
 worker/test/               unit tests, and the protocol contract
 docs/adr/                  decisions, numbered, with the alternatives
@@ -126,6 +127,14 @@ split would hide exactly that.
 | T9 | A store never hands out its own object; a task commits before it shows. | Mutation through a getter is the hardest bug to find. | `worker/test/skills.test.ts` |
 | T10 | Serialise where order is the contract (`CommandQueue`), and say so where you do it. | Answers that overtake their questions is a race with a plausible-looking log. | `worker/test/protocol.test.ts` |
 
+### The interface
+
+| # | Rule | Why | Check |
+|---|---|---|---|
+| T12 | A design value comes from a token. Tailwind's default scales are unregistered — `p-13`, `bg-blue-500`, and `text-lg` produce no CSS — and arbitrary values (`p-[13px]`) fail. | A class that is not a token does not fail loudly, it ships unstyled: metricside's button used `text-[11px]` and `text-white` while its token file sat beside it. | `cd ui && bun run check:system`, in `make lint` |
+| T13 | Screens are dumb and classless: they compose components and the layout primitives, and the app applies the logic. | A screen that styles or fetches cannot be rendered as a story, and the states nobody stories are the states that break. | `ui/scripts/check-system.ts`, in `make lint` |
+| T14 | A component, and every state it can be in, has a story in Storybook, in light and in dark. | The catalogue is the design surface; "reviewed in Storybook" is only true if the state is there. | Convention, review |
+
 ## Enforcement
 
 `make lint` is the static half. It runs only what it finds installed, and says what is missing
@@ -141,6 +150,9 @@ rather than pretending to have checked:
 | TypeScript types | `bun run typecheck` |
 | TypeScript rules | `bun run lint` (oxlint, type-aware through tsgolint) |
 | TypeScript formatting | `bun run format:check` (oxfmt). `bun run format` writes twice on purpose: oxfmt 0.72 does not reach its fixed point in one pass when a signature carries a long inline object return type ([oxc#26240](https://github.com/oxc-project/oxc/issues/26240)). |
+| Interface types, rules, and formatting | `cd ui && bun run typecheck`, `bun run lint`, `bun run format:check` |
+| Interface design system | `cd ui && bun run check:system` — the source scan and the Tailwind probe behind T12 and T13 |
+| Interface bundle | `cd ui && bun run build`, in `make test` |
 | lint exceptions have reasons | a grep |
 | commit message shape | `scripts/check-commits.mjs`, over a pull request's commits in CI |
 
@@ -167,6 +179,7 @@ with a deadline:
 | A workspace that had never saved settings never read the install defaults. | S2 (the test that caught it) |
 | `auth_answer` was handled before the command queue on purpose (queueing it would deadlock), so the switch looked incomplete. | T3 — the fix was to say it in the type, not to reorder the code. |
 | The end-to-end cleanup removed every sandbox labelled `acornfall` — every test's, not the finishing test's — so a parallel sandbox run failed in a different set of tests each time. | G16 |
+| metricside's components invented `text-[11px]`, `px-2.5`, and `text-white` while its token file sat beside them, and nothing objected. | T12 |
 
 ## Convention (not enforced)
 

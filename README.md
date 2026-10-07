@@ -18,6 +18,7 @@ another worker, not changing the control plane.
 | `gateway/` | Go: transport edge, control plane, worker supervision, embedded client. |
 | `worker/` | bun: the Harness, its registry (tools, skills), and credentials. |
 | `gateway/web/` | Client. No build step: plain ES modules, served from the binary. |
+| `ui/` | The rebuilt interface: React, design tokens, Storybook. Built, not yet embedded. |
 | `tools/` | Browser-driven checks. |
 
 ## Requirements
