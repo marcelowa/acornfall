@@ -249,6 +249,8 @@
 	 * for itself. The rail is the panel #11 rebuilds; the inspector is #13's, given room only
 	 * where the screen has it (2xl). */
 	--rail-width: 280px;
+	/* A collapsed rail is the toggle and nothing else. */
+	--rail-collapsed-width: 40px;
 	--inspector-width: 360px;
 
 	/* Component tokens. A component that cannot say what it needs in the two layers above adds

@@ -4,7 +4,7 @@ import {
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
-import { PanelLeft } from "lucide-react";
+import { PanelLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -36,7 +36,11 @@ const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
 			collapsed: false,
 			className: "lg:grid-cols-[var(--rail-width)_minmax(0,1fr)]",
 		},
-		{ withEnd: false, collapsed: true, className: "lg:grid-cols-[minmax(0,1fr)]" },
+		{
+			withEnd: false,
+			collapsed: true,
+			className: "lg:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)]",
+		},
 		{
 			withEnd: true,
 			collapsed: false,
@@ -47,7 +51,7 @@ const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
 			withEnd: true,
 			collapsed: true,
 			className:
-				"lg:grid-cols-[minmax(0,1fr)_auto] 2xl:grid-cols-[minmax(0,1fr)_var(--inspector-width)]",
+				"lg:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)_auto] 2xl:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)_var(--inspector-width)]",
 		},
 	],
 	defaultVariants: { gap: "none", withEnd: false, collapsed: false },
@@ -65,8 +69,9 @@ export interface SplitProps extends VariantProps<typeof splitVariants> {
 	onAsideOpenChange?: ((open: boolean) => void) | undefined;
 	/** The column, from `lg` up. False keeps it open, which is the default. */
 	asideCollapsed?: boolean | undefined;
-	onAsideCollapsedChange?: ((collapsed: boolean) => void) | undefined;
-	/** Controlled rail width in pixels; the token's 280px when omitted. */
+	onAsideCollapsedChange?:
+		| ((collapsed: boolean) => void)
+		| undefined /** Controlled rail width in pixels; the token's 280px when omitted. */;
 	asideWidth?: number | undefined;
 	onAsideWidthChange?: ((width: number) => void) | undefined;
 	className?: string | undefined;
@@ -81,7 +86,7 @@ export function Split({
 	asideOpen,
 	onAsideOpenChange,
 	asideCollapsed = false,
-	onAsideCollapsedChange: _onAsideCollapsedChange,
+	onAsideCollapsedChange,
 	asideWidth,
 	onAsideWidthChange,
 	gap,
@@ -106,6 +111,19 @@ export function Split({
 	const resizeTo = (next: number): void => {
 		onAsideWidthChange?.(Math.min(MAX_RAIL, Math.max(MIN_RAIL, next)));
 	};
+
+	const toggle =
+		onAsideCollapsedChange === undefined ? null : (
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon-sm"
+				aria-label={asideCollapsed ? "Show the rail" : "Hide the rail"}
+				onClick={() => onAsideCollapsedChange(!asideCollapsed)}
+			>
+				{asideCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+			</Button>
+		);
 
 	const startDrag = (event: ReactPointerEvent<HTMLDivElement>): void => {
 		if (onAsideWidthChange === undefined) return;
@@ -137,37 +155,47 @@ export function Split({
 			)}
 			style={width}
 		>
-			<aside
-				className={cn(
-					"relative hidden min-h-0 min-w-0 flex-col lg:flex",
-					asideCollapsed && "lg:hidden",
-				)}
-			>
-				{/* The pane clips; its content owns its scroll. The handle stays outside the clip so
-				 * a drag does not lose the half that sits on the border. */}
-				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">{aside}</div>
-				{onAsideWidthChange === undefined ? null : (
-					<div
-						role="separator"
-						data-slot="splitter"
-						aria-orientation="vertical"
-						aria-label="Resize the rail"
-						aria-valuenow={asideWidth ?? 280}
-						aria-valuemin={MIN_RAIL}
-						aria-valuemax={MAX_RAIL}
-						tabIndex={0}
-						onPointerDown={startDrag}
-						onKeyDown={(event) => {
-							if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-							event.preventDefault();
-							resizeTo((asideWidth ?? 280) + (event.key === "ArrowLeft" ? -16 : 16));
-						}}
-						className={cn(
-							"absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none bg-transparent",
-							"hover:bg-ring/40 focus-visible:bg-ring/40 focus-visible:outline-none",
-							dragging && "bg-ring/40",
+			<aside className="relative hidden min-h-0 min-w-0 flex-col lg:flex">
+				{asideCollapsed ? (
+					// Collapsed, the rail is the toggle and nothing else: a strip that keeps the
+					// way back where the rail was, instead of a button floating over the transcript.
+					<div className="flex min-h-0 flex-1 flex-col items-center overflow-hidden border-r border-border bg-card py-1">
+						{toggle}
+					</div>
+				) : (
+					<>
+						{/* The pane clips; its content owns its scroll. The handle stays outside the clip
+						 * so a drag does not lose the half that sits on the border. */}
+						<div className="flex min-h-0 flex-1 flex-col overflow-hidden">{aside}</div>
+						<div className="absolute top-1 right-1 z-10">{toggle}</div>
+						{onAsideWidthChange === undefined ? null : (
+							<div
+								role="separator"
+								data-slot="splitter"
+								aria-orientation="vertical"
+								aria-label="Resize the rail"
+								aria-valuenow={asideWidth ?? 280}
+								aria-valuemin={MIN_RAIL}
+								aria-valuemax={MAX_RAIL}
+								tabIndex={0}
+								onPointerDown={startDrag}
+								onKeyDown={(event) => {
+									if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+										return;
+									event.preventDefault();
+									resizeTo(
+										(asideWidth ?? 280) +
+											(event.key === "ArrowLeft" ? -16 : 16),
+									);
+								}}
+								className={cn(
+									"absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none bg-transparent",
+									"hover:bg-ring/40 focus-visible:bg-ring/40 focus-visible:outline-none",
+									dragging && "bg-ring/40",
+								)}
+							/>
 						)}
-					/>
+					</>
 				)}
 			</aside>
 			<div className="flex min-h-0 min-w-0 flex-col overflow-hidden">

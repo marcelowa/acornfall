@@ -144,18 +144,54 @@ try {
 	check("the rail can be put away", hideRail !== null);
 	if (hideRail !== null) {
 		await hideRail.click();
-		const hidden = await railWidth();
-		check("hiding the rail leaves the pane to the transcript", hidden === 0, `${hidden}px`);
+		const collapsedWidth = await railWidth();
+		check(
+			"hiding the rail leaves a strip with the way back",
+			collapsedWidth > 0 && collapsedWidth <= 48,
+			`${collapsedWidth}px`,
+		);
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await page.waitForSelector("[data-slot=composer]", { timeout: 15000 });
-		const stillHidden = await railWidth();
-		check("the rail stays away after a reload", stillHidden === 0, `${stillHidden}px`);
+		const stillCollapsed = await railWidth();
+		check(
+			"the rail stays collapsed after a reload",
+			stillCollapsed > 0 && stillCollapsed <= 48,
+			`${stillCollapsed}px`,
+		);
 		const showRail = await page.$("button[aria-label='Show the rail']");
 		if (showRail !== null) {
 			await showRail.click();
 			const back = await railWidth();
 			check("the rail comes back", back > 200, `${back}px`);
 		}
+	}
+
+	// A row's actions are a menu, because a hover does not exist on a touch screen. The `…`
+	// button and a right-click ask the same question.
+	const rowActions = await page.$("[data-slot=conversation-row] button[aria-label^='Actions']");
+	check("a row offers its actions from a menu", rowActions !== null);
+	if (rowActions !== null) {
+		await page.hover("[data-slot=conversation-row]");
+		await rowActions.click();
+		await page.waitForSelector('[role="menu"]', { timeout: 5000 });
+		const labels = await page.evaluate(() =>
+			[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((item) =>
+				item.textContent?.trim(),
+			),
+		);
+		check(
+			"the row menu offers rename and delete",
+			labels.includes("Rename") && labels.includes("Delete"),
+			JSON.stringify(labels),
+		);
+		await page.keyboard.press("Escape");
+		await page.click("[data-slot=conversation-row]", { button: "right" });
+		const opened = await page
+			.waitForSelector('[role="menu"]', { timeout: 5000 })
+			.then(() => true)
+			.catch(() => false);
+		check("a right-click opens the same menu", opened);
+		await page.keyboard.press("Escape");
 	}
 
 	// 2. The transcript renders, and nothing in it is squashed or clipped.

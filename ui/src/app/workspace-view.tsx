@@ -1,12 +1,10 @@
 import { useState } from "react";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { BusyAction } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
 import { Composer } from "@/components/composer/composer";
 import { Picker } from "@/components/composer/picker";
 import { SlashMenu } from "@/components/composer/slash-menu";
 import { Transcript } from "@/components/transcript/transcript";
-import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Text } from "@/components/typography/text";
 import { Shell } from "@/screens/shell";
@@ -132,19 +130,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 								onSelect={platform.agent.onSelect}
 								disabled={platform.agent.disabled}
 							/>
-							{/* The rail is the bar's toggle below lg; this one is the column's, from lg up. */}
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								className="hidden lg:inline-flex"
-								aria-label={
-									platform.railCollapsed ? "Show the rail" : "Hide the rail"
-								}
-								onClick={platform.toggleRail}
-							>
-								{platform.railCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
-							</Button>
 							<ThemeToggle theme={platform.theme} onToggle={platform.toggleTheme} />
 						</>
 					}
