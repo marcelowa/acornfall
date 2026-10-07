@@ -1,0 +1,258 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+ * Design tokens. Three layers, one direction:
+ *
+ *   1. primitives — `--base-*`. The raw values. Nothing outside this file reads one.
+ *   2. semantic   — `--background`, `--primary`, … The theme. `globals.css` maps these into
+ *                   Tailwind names, `.dark` swaps them, and components use the semantic name.
+ *   3. component  — a component that cannot be expressed with the two layers above adds its
+ *                   own token here, so even the exception is a token.
+ *
+ * The failure this file prevents: a component inventing a colour, size, or spacing.
+ * `globals.css` registers none of Tailwind's default scales, so `p-13`, `bg-blue-500`, and
+ * `text-lg` resolve to nothing; `ui/scripts/check-system.mjs` fails on the arbitrary values
+ * the theme cannot stop.
+ * ═══════════════════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+	/* ────────────────────────────────────────────────────────────────────────────────────────
+	 * Colour ramps. Primitives are theme-independent: a ramp means the same thing in light and
+	 * in dark, and only the semantic layer below decides which step the theme is using. This is
+	 * the correction to metricside, where the "neutral" primitives themselves changed with the
+	 * theme and the layers stopped meaning anything.
+	 * ──────────────────────────────────────────────────────────────────────────────────────── */
+
+	/* Neutral */
+	--base-neutral-0: oklch(1 0 0);
+	--base-neutral-50: oklch(0.985 0.001 286);
+	--base-neutral-100: oklch(0.967 0.002 286);
+	--base-neutral-200: oklch(0.92 0.004 286);
+	--base-neutral-300: oklch(0.871 0.005 286);
+	--base-neutral-400: oklch(0.705 0.012 286);
+	--base-neutral-500: oklch(0.552 0.014 286);
+	--base-neutral-600: oklch(0.442 0.015 286);
+	--base-neutral-700: oklch(0.37 0.012 286);
+	--base-neutral-800: oklch(0.274 0.007 286);
+	--base-neutral-900: oklch(0.21 0.006 286);
+	--base-neutral-950: oklch(0.141 0.005 286);
+
+	/* Brand: a muted blue, the metricside primary cooled down and rebuilt on the same grid */
+	--base-brand-50: oklch(0.97 0.01 255);
+	--base-brand-100: oklch(0.94 0.025 255);
+	--base-brand-200: oklch(0.89 0.05 255);
+	--base-brand-300: oklch(0.81 0.08 255);
+	--base-brand-400: oklch(0.7 0.11 255);
+	--base-brand-500: oklch(0.62 0.13 255);
+	--base-brand-600: oklch(0.55 0.14 258);
+	--base-brand-700: oklch(0.48 0.13 260);
+	--base-brand-800: oklch(0.42 0.11 262);
+	--base-brand-900: oklch(0.37 0.09 262);
+	--base-brand-950: oklch(0.28 0.06 262);
+
+	/* Success */
+	--base-success-50: oklch(0.97 0.02 165);
+	--base-success-100: oklch(0.94 0.04 165);
+	--base-success-300: oklch(0.84 0.1 165);
+	--base-success-400: oklch(0.75 0.14 165);
+	--base-success-500: oklch(0.66 0.15 163);
+	--base-success-600: oklch(0.56 0.14 162);
+	--base-success-700: oklch(0.47 0.12 162);
+	--base-success-800: oklch(0.4 0.1 162);
+	--base-success-900: oklch(0.35 0.08 162);
+	--base-success-950: oklch(0.26 0.06 162);
+
+	/* Warning: the one status whose fill takes dark text; amber is too light for white */
+	--base-warning-50: oklch(0.98 0.02 85);
+	--base-warning-100: oklch(0.96 0.05 85);
+	--base-warning-300: oklch(0.88 0.1 80);
+	--base-warning-400: oklch(0.81 0.14 75);
+	--base-warning-500: oklch(0.73 0.16 70);
+	--base-warning-600: oklch(0.62 0.15 65);
+	--base-warning-700: oklch(0.52 0.13 60);
+	--base-warning-800: oklch(0.44 0.11 58);
+	--base-warning-900: oklch(0.38 0.09 58);
+	--base-warning-950: oklch(0.28 0.07 58);
+
+	/* Danger */
+	--base-danger-50: oklch(0.97 0.015 20);
+	--base-danger-100: oklch(0.94 0.04 20);
+	--base-danger-300: oklch(0.82 0.1 22);
+	--base-danger-400: oklch(0.71 0.16 22);
+	--base-danger-500: oklch(0.61 0.2 22);
+	--base-danger-600: oklch(0.52 0.19 22);
+	--base-danger-700: oklch(0.44 0.16 22);
+	--base-danger-800: oklch(0.38 0.13 22);
+	--base-danger-900: oklch(0.33 0.1 22);
+	--base-danger-950: oklch(0.24 0.08 22);
+
+	/* Info */
+	--base-info-50: oklch(0.97 0.02 215);
+	--base-info-100: oklch(0.94 0.04 215);
+	--base-info-300: oklch(0.83 0.09 215);
+	--base-info-400: oklch(0.74 0.11 215);
+	--base-info-500: oklch(0.65 0.11 215);
+	--base-info-600: oklch(0.55 0.1 215);
+	--base-info-700: oklch(0.47 0.09 215);
+	--base-info-800: oklch(0.4 0.07 215);
+	--base-info-900: oklch(0.35 0.06 215);
+	--base-info-950: oklch(0.26 0.04 215);
+
+	/* ────────────────────────────────────────────────────────────────────────────────────────
+	 * Typography
+	 * ──────────────────────────────────────────────────────────────────────────────────────── */
+	--base-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--base-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+	--base-font-size-2xs: 11px;
+	--base-font-size-xs: 12px;
+	--base-font-size-sm: 13px;
+	--base-font-size-base: 14px;
+	--base-font-size-lg: 16px;
+	--base-font-size-xl: 20px;
+	--base-font-size-2xl: 24px;
+	--base-font-size-3xl: 30px;
+
+	--base-line-height-2xs: 1.45;
+	--base-line-height-xs: 1.5;
+	--base-line-height-sm: 1.5;
+	--base-line-height-base: 1.5;
+	--base-line-height-lg: 1.4;
+	--base-line-height-xl: 1.3;
+	--base-line-height-2xl: 1.25;
+	--base-line-height-3xl: 1.2;
+
+	--base-font-weight-normal: 400;
+	--base-font-weight-medium: 500;
+	--base-font-weight-semibold: 600;
+	--base-font-weight-bold: 700;
+
+	/* ────────────────────────────────────────────────────────────────────────────────────────
+	 * Spacing: the 4px grid, and every step named. The halves exist because a 2px inset is real
+	 * in dense UI; nothing else is on offer. Tailwind's dynamic spacer is off (see globals.css),
+	 * so this list is the whole vocabulary — `p-13` is not a smaller step, it is not a step.
+	 * ──────────────────────────────────────────────────────────────────────────────────────── */
+	--base-space-0: 0px;
+	--base-space-0_5: 2px;
+	--base-space-1: 4px;
+	--base-space-1_5: 6px;
+	--base-space-2: 8px;
+	--base-space-2_5: 10px;
+	--base-space-3: 12px;
+	--base-space-3_5: 14px;
+	--base-space-4: 16px;
+	--base-space-5: 20px;
+	--base-space-6: 24px;
+	--base-space-7: 28px;
+	--base-space-8: 32px;
+	--base-space-9: 36px;
+	--base-space-10: 40px;
+	--base-space-11: 44px;
+	--base-space-12: 48px;
+	--base-space-14: 56px;
+	--base-space-16: 64px;
+	--base-space-20: 80px;
+	--base-space-24: 96px;
+
+	/* Radius */
+	--base-radius-sm: 4px;
+	--base-radius-md: 8px;
+	--base-radius-lg: 12px;
+	--base-radius-xl: 16px;
+	--base-radius-2xl: 20px;
+
+	/* Shadow: one family, five weights; the dark theme keeps them because raised is raised */
+	--base-shadow-2xs: 0 1px 1px rgb(0 0 0 / 0.04);
+	--base-shadow-xs: 0 1px 2px rgb(0 0 0 / 0.05);
+	--base-shadow-sm: 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+	--base-shadow-md: 0 4px 8px rgb(0 0 0 / 0.06), 0 2px 4px rgb(0 0 0 / 0.04);
+	--base-shadow-lg: 0 8px 24px rgb(0 0 0 / 0.08), 0 4px 8px rgb(0 0 0 / 0.04);
+	--base-shadow-xl: 0 16px 48px rgb(0 0 0 / 0.1), 0 8px 16px rgb(0 0 0 / 0.05);
+
+	/* Motion */
+	--base-duration-fast: 100ms;
+	--base-duration-normal: 200ms;
+	--base-duration-slow: 300ms;
+	--base-ease-in: cubic-bezier(0.4, 0, 1, 1);
+	--base-ease-out: cubic-bezier(0, 0, 0.2, 1);
+	--base-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+	/* Layout widths */
+	--base-container-xs: 320px;
+	--base-container-sm: 384px;
+	--base-container-md: 448px;
+	--base-container-lg: 512px;
+	--base-container-xl: 576px;
+	--base-container-2xl: 672px;
+	--base-container-3xl: 768px;
+	--base-container-page: 1280px;
+
+	/* ────────────────────────────────────────────────────────────────────────────────────────
+	 * Semantic layer — light. The names are shadcn's, so a component from the canon drops in
+	 * without a translation table; the values are this system's.
+	 * ──────────────────────────────────────────────────────────────────────────────────────── */
+	--background: var(--base-neutral-50);
+	--foreground: var(--base-neutral-900);
+	--card: var(--base-neutral-0);
+	--card-foreground: var(--base-neutral-900);
+	--popover: var(--base-neutral-0);
+	--popover-foreground: var(--base-neutral-900);
+	--primary: var(--base-brand-600);
+	--primary-foreground: var(--base-neutral-0);
+	--secondary: var(--base-neutral-100);
+	--secondary-foreground: var(--base-neutral-900);
+	--muted: var(--base-neutral-100);
+	--muted-foreground: var(--base-neutral-500);
+	--accent: var(--base-neutral-100);
+	--accent-foreground: var(--base-neutral-900);
+	--destructive: var(--base-danger-600);
+	--destructive-foreground: var(--base-neutral-0);
+	--border: var(--base-neutral-200);
+	--input: var(--base-neutral-200);
+	--ring: var(--base-brand-500);
+
+	--success: var(--base-success-600);
+	--success-foreground: var(--base-neutral-0);
+	--warning: var(--base-warning-500);
+	--warning-foreground: var(--base-neutral-950);
+	--info: var(--base-info-600);
+	--info-foreground: var(--base-neutral-0);
+
+	/* A status tint is always 12% of its own strong colour, so it follows the theme by
+	 * construction and there is no second value to keep in sync. */
+	--success-subtle: color-mix(in oklab, var(--success) 12%, transparent);
+	--warning-subtle: color-mix(in oklab, var(--warning) 12%, transparent);
+	--info-subtle: color-mix(in oklab, var(--info) 12%, transparent);
+	--destructive-subtle: color-mix(in oklab, var(--destructive) 12%, transparent);
+
+	/* Layout semantics: not a colour, but still a decision every screen would otherwise make
+	 * for itself. The rail is the panel #11 rebuilds. */
+	--rail-width: 280px;
+}
+
+.dark {
+	--background: var(--base-neutral-950);
+	--foreground: var(--base-neutral-100);
+	--card: var(--base-neutral-900);
+	--card-foreground: var(--base-neutral-100);
+	--popover: var(--base-neutral-900);
+	--popover-foreground: var(--base-neutral-100);
+	--primary: var(--base-brand-500);
+	--primary-foreground: var(--base-neutral-950);
+	--secondary: var(--base-neutral-800);
+	--secondary-foreground: var(--base-neutral-100);
+	--muted: var(--base-neutral-800);
+	--muted-foreground: var(--base-neutral-400);
+	--accent: var(--base-neutral-800);
+	--accent-foreground: var(--base-neutral-100);
+	--destructive: var(--base-danger-500);
+	--destructive-foreground: var(--base-neutral-950);
+	--border: var(--base-neutral-800);
+	--input: var(--base-neutral-800);
+	--ring: var(--base-brand-400);
+
+	--success: var(--base-success-400);
+	--success-foreground: var(--base-neutral-950);
+	--warning: var(--base-warning-400);
+	--warning-foreground: var(--base-neutral-950);
+	--info: var(--base-info-400);
+	--info-foreground: var(--base-neutral-950);
+}

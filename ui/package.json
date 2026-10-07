@@ -1,0 +1,49 @@
+{
+	"name": "@acornfall/ui",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"typecheck": "tsc --noEmit",
+		"lint": "oxlint src test scripts .storybook",
+		"format": "oxfmt --write src test scripts .storybook",
+		"format:check": "oxfmt --check src test scripts .storybook",
+		"check:system": "bun scripts/check-system.ts",
+		"test": "bun test",
+		"storybook": "storybook dev -p 6006",
+		"build:storybook": "storybook build"
+	},
+	"dependencies": {
+		"class-variance-authority": "^0.7.1",
+		"clsx": "^2.1.1",
+		"cn": "^0.4.0",
+		"lucide-react": "^1.52.0",
+		"radix-ui": "^1.7.0",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
+		"tailwind-merge": "^3.7.0"
+	},
+	"devDependencies": {
+		"@storybook/addon-a11y": "^10.6.1",
+		"@storybook/addon-docs": "^10.6.1",
+		"@storybook/addon-themes": "^10.6.1",
+		"@storybook/react-vite": "^10.6.1",
+		"@tailwindcss/cli": "^4.3.3",
+		"@tailwindcss/vite": "^4.3.3",
+		"@types/bun": "^1.4.2",
+		"@types/node": "^26.6.4",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
+		"@vitejs/plugin-react": "^6.1.2",
+		"oxfmt": "^0.72.0",
+		"oxlint": "^1.87.0",
+		"oxlint-tsgolint": "^7.0.2003",
+		"shadcn": "^4.21.3",
+		"storybook": "^10.6.1",
+		"tailwindcss": "^4.3.3",
+		"typescript": "^7.0.2",
+		"vite": "^8.3.3"
+	}
+}

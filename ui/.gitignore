@@ -1,0 +1,6 @@
+# Only sources are repository content: the bundle goes to the binary, the catalogue to a
+# browser. Neither is committed.
+dist/
+storybook-static/
+.check-probe.css
+.check-probe.out.css

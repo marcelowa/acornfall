@@ -1,0 +1,178 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+ * Tailwind, wired to the tokens. This file is the only place the two meet.
+ *
+ * Every namespace starts with `initial`: Tailwind's defaults are removed, and only the tokens
+ * from `tokens.css` are registered. A class that is not backed by a token — `p-13`,
+ * `bg-blue-500`, `text-lg`, `rounded-2xl` — produces no CSS at all. That is the mechanism
+ * behind "tokens are the only source of design truth"; `ui/scripts/check-system.mjs` catches
+ * the one thing the theme cannot: arbitrary values like `p-[13px]`.
+ * ═══════════════════════════════════════════════════════════════════════════════════════════ */
+
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* Class-driven dark mode: the theme is a `.dark` on an ancestor, not the OS preference, so
+ * Storybook's toolbar and the app's toggle switch the same thing. */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+	/* ── Colour: semantic only. There is no `bg-brand-600`; brand-600 is an implementation
+	 * detail of `--primary`, and a component that wants it wants a semantic name instead. */
+	--color-*: initial;
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-destructive-subtle: var(--destructive-subtle);
+	--color-success: var(--success);
+	--color-success-foreground: var(--success-foreground);
+	--color-success-subtle: var(--success-subtle);
+	--color-warning: var(--warning);
+	--color-warning-foreground: var(--warning-foreground);
+	--color-warning-subtle: var(--warning-subtle);
+	--color-info: var(--info);
+	--color-info-foreground: var(--info-foreground);
+	--color-info-subtle: var(--info-subtle);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+
+	/* ── Families and weights */
+	--font-*: initial;
+	--font-sans: var(--base-font-sans);
+	--font-mono: var(--base-font-mono);
+
+	--font-weight-*: initial;
+	--font-weight-normal: var(--base-font-weight-normal);
+	--font-weight-medium: var(--base-font-weight-medium);
+	--font-weight-semibold: var(--base-font-weight-semibold);
+	--font-weight-bold: var(--base-font-weight-bold);
+
+	/* ── Type scale */
+	--text-*: initial;
+	--text-2xs: var(--base-font-size-2xs);
+	--text-2xs--line-height: var(--base-line-height-2xs);
+	--text-xs: var(--base-font-size-xs);
+	--text-xs--line-height: var(--base-line-height-xs);
+	--text-sm: var(--base-font-size-sm);
+	--text-sm--line-height: var(--base-line-height-sm);
+	--text-base: var(--base-font-size-base);
+	--text-base--line-height: var(--base-line-height-base);
+	--text-lg: var(--base-font-size-lg);
+	--text-lg--line-height: var(--base-line-height-lg);
+	--text-xl: var(--base-font-size-xl);
+	--text-xl--line-height: var(--base-line-height-xl);
+	--text-2xl: var(--base-font-size-2xl);
+	--text-2xl--line-height: var(--base-line-height-2xl);
+	--text-3xl: var(--base-font-size-3xl);
+	--text-3xl--line-height: var(--base-line-height-3xl);
+
+	--leading-*: initial;
+	--leading-none: 1;
+	--leading-tight: 1.25;
+	--leading-normal: 1.5;
+	--leading-relaxed: 1.625;
+
+	--tracking-*: initial;
+	--tracking-tight: -0.01em;
+	--tracking-normal: 0em;
+	--tracking-wide: 0.02em;
+	--tracking-wider: 0.04em;
+	--tracking-widest: 0.08em;
+
+	/* ── Spacing: the named grid, and no dynamic fallback. The bare `--spacing` that would let
+	 * Tailwind compute `p-<any integer>` is deliberately absent. */
+	--spacing-*: initial;
+	--spacing-0: var(--base-space-0);
+	--spacing-0\.5: var(--base-space-0_5);
+	--spacing-1: var(--base-space-1);
+	--spacing-1\.5: var(--base-space-1_5);
+	--spacing-2: var(--base-space-2);
+	--spacing-2\.5: var(--base-space-2_5);
+	--spacing-3: var(--base-space-3);
+	--spacing-3\.5: var(--base-space-3_5);
+	--spacing-4: var(--base-space-4);
+	--spacing-5: var(--base-space-5);
+	--spacing-6: var(--base-space-6);
+	--spacing-7: var(--base-space-7);
+	--spacing-8: var(--base-space-8);
+	--spacing-9: var(--base-space-9);
+	--spacing-10: var(--base-space-10);
+	--spacing-11: var(--base-space-11);
+	--spacing-12: var(--base-space-12);
+	--spacing-14: var(--base-space-14);
+	--spacing-16: var(--base-space-16);
+	--spacing-20: var(--base-space-20);
+	--spacing-24: var(--base-space-24);
+
+	/* ── Radius, shadow, containers */
+	--radius-*: initial;
+	--radius-sm: var(--base-radius-sm);
+	--radius-md: var(--base-radius-md);
+	--radius-lg: var(--base-radius-lg);
+	--radius-xl: var(--base-radius-xl);
+	--radius-2xl: var(--base-radius-2xl);
+
+	--shadow-*: initial;
+	--shadow-2xs: var(--base-shadow-2xs);
+	--shadow-xs: var(--base-shadow-xs);
+	--shadow-sm: var(--base-shadow-sm);
+	--shadow-md: var(--base-shadow-md);
+	--shadow-lg: var(--base-shadow-lg);
+	--shadow-xl: var(--base-shadow-xl);
+
+	--container-*: initial;
+	--container-xs: var(--base-container-xs);
+	--container-sm: var(--base-container-sm);
+	--container-md: var(--base-container-md);
+	--container-lg: var(--base-container-lg);
+	--container-xl: var(--base-container-xl);
+	--container-2xl: var(--base-container-2xl);
+	--container-3xl: var(--base-container-3xl);
+	--container-page: var(--base-container-page);
+
+	/* ── Motion and breakpoints */
+	--ease-*: initial;
+	--ease-in: var(--base-ease-in);
+	--ease-out: var(--base-ease-out);
+	--ease-in-out: var(--base-ease-in-out);
+	--ease-default: var(--base-ease-in-out);
+	--default-transition-duration: var(--base-duration-normal);
+	--default-transition-timing-function: var(--base-ease-in-out);
+
+	--breakpoint-*: initial;
+	--breakpoint-sm: 40rem;
+	--breakpoint-md: 48rem;
+	--breakpoint-lg: 64rem;
+	--breakpoint-xl: 80rem;
+	--breakpoint-2xl: 96rem;
+}
+
+@layer base {
+	* {
+		@apply border-border;
+	}
+
+	html,
+	body,
+	#storybook-root,
+	#root {
+		height: 100%;
+	}
+
+	body {
+		@apply bg-background font-sans text-base text-foreground antialiased;
+	}
+}

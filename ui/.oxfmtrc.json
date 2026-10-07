@@ -1,0 +1,11 @@
+// Formatting is not a thing people do here. The settings match the worker: same width, same
+// answer, so a diff across the two trees reads the same way.
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"useTabs": true,
+	"tabWidth": 4,
+	"singleQuote": false,
+	"printWidth": 100,
+	"sortPackageJson": false,
+	"ignorePatterns": ["bun.lock"]
+}

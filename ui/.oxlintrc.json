@@ -1,0 +1,38 @@
+// The rules this tree holds itself to, by name — the worker's config plus what a React tree
+// needs on top, and type-aware for the same reason: a promise nobody awaits and a switch that
+// stopped being exhaustive need types to catch. The interface is where a floating promise
+// hides in an effect, so the rule earns its cost here more than anywhere.
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"plugins": [],
+	"categories": { "correctness": "off" },
+	"options": { "typeAware": true },
+	"overrides": [
+		{
+			"files": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "scripts/**/*.ts", ".storybook/**/*.ts"],
+			"plugins": ["typescript", "react", "jsx-a11y", "import"],
+			"rules": {
+				"typescript/no-floating-promises": "error",
+				"typescript/no-misused-promises": "error",
+				"typescript/await-thenable": "error",
+				"typescript/switch-exhaustiveness-check": "error",
+				"typescript/no-explicit-any": "error",
+				"typescript/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+				"typescript/consistent-type-imports": ["error", { "prefer": "type-imports" }],
+				"typescript/no-non-null-assertion": "off",
+				"eqeqeq": ["error", "smart"],
+				"prefer-const": "error",
+				"no-var": "error",
+				"react/jsx-key": "error",
+				"react/jsx-no-duplicate-props": "error",
+				"react/jsx-no-useless-fragment": "error",
+				"react/self-closing-comp": "error",
+				"react/rules-of-hooks": "error",
+				"react/exhaustive-deps": "error",
+				"jsx-a11y/alt-text": "error",
+				"jsx-a11y/anchor-is-valid": "error",
+				"import/no-duplicates": "error"
+			}
+		}
+	]
+}
