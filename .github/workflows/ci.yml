@@ -23,10 +23,10 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: "1.24"
+          go-version: "1.27"
           cache-dependency-path: gateway/go.sum
       - uses: oven-sh/setup-bun@v2
         with:
@@ -43,13 +43,13 @@ jobs:
     # rather than trusted — over the commits a pull request or a push adds, not all of history.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The range needs the commits behind it.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
       - name: Decide what to check
         id: range
         run: |
@@ -74,10 +74,10 @@ jobs:
     # class survives.
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: "1.24"
+          go-version: "1.27"
           cache-dependency-path: gateway/go.sum
       - uses: oven-sh/setup-bun@v2
         with:
