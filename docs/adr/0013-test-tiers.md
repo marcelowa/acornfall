@@ -33,9 +33,10 @@ moved between runs.
 **A slow piece gets its own suite and its own target; the default gate stays fast and
 honest.**
 
-- **`make test` is the fast tier.** `-short -race`, the worker units, the Go units, and the
-  end-to-end suite with `ACORNFALL_NO_SANDBOX=1` and `-parallel 6`. It needs no hypervisor and
-  behaves the same on every machine, including CI. Measured 33s against 506s.
+- **`make test` is the fast tier.** `-short -race`, the worker units, the Go units, the
+  tests that need no engine at all against the refusal path, and the thirteen resource tests
+  on the host engine ([ADR 0015](0015-host-engine.md)) with `-parallel 6`. It needs no
+  hypervisor and behaves the same on every machine, including CI. Measured ~30s.
 - **`make test-sandbox` is the engine boundary.** The live driver test, the worker's SDK
   suite, and the four end-to-end tests that exercise the sandbox itself — a tool call, a global
   mount, a guard, a heal — without `-short`, with `ACORNFALL_LIVE_SANDBOX=1` and
@@ -45,20 +46,11 @@ honest.**
   is only taken here, and the instrumented tier is ~35s. It **fails** where there is
   no hypervisor rather than skipping: a slow tier that silently does nothing is how the bug
   class it exists for survives.
-- **`make test-workspace` is the resource tier.** The thirteen end-to-end tests whose subject
-  is the overlay, commands, skills, and delegation defaults, and whose files live in the
-  workspace. The worker reads those only through the sandbox
-  ([ADR 0012](0012-sandbox.md)), so the tier needs a hypervisor too, but it does not exercise
-  the sandbox's execution surface — which is why it is not in `make test-sandbox`. It runs
-  without `-race`: the resolution code underneath is race-tested in the fast tier, and
-  instrumenting thirteen microVM boots costs 58s against 19s. A test that needs neither tier
-  declares it with `notSandbox` and skips: starting a worker provisions its sandbox whether
-  the test uses it or not, and the rest of the feature suite already ran in the fast tier —
-  running all of it again was 294s against 126s for the tests that need one.
-- **`testing.Short()` is the boundary**, and the three markers are the one place the tiers are
-  decided: `maybeSandbox` (the engine), `workspaceResources` (the resource features), and
-  `notSandbox` (the fast tier). A test calls one of them, and each tier skips the others; the
-  fast tier is the one that runs under `-short`.
+- **A test declares its engine.** `maybeSandbox` (the microVM boundary, `make test-sandbox`),
+  `workspaceResources` (the host engine, `make test`), and `notSandbox` (the refusal path,
+  `make test`). A test calls one of them, and the sandbox tier skips the other two; the two
+  fast-tier kinds are told apart by the harness, which starts a resource test's gateway with
+  `--sandbox-engine host`.
 - **"No sandbox" in the fast tier is the refusal path the product ships.** `ACORNFALL_NO_SANDBOX`
   makes the gateway build no sandbox tier at all — the same state as a machine without a
   hypervisor — so the tools refuse and the worker starts anyway. It is never a host-backed
@@ -125,8 +117,9 @@ turned out to be two different things, and one tier made the engine pay for the 
 recorded, a global skill's script runs inside the read-only mount, a guard refuses a call, and
 a broken workspace file is reported and heals), and **thirteen are feature tests whose files
 live in the workspace** — the overlay, commands, skills, and delegation defaults — where the
-sandbox is the environment, not the subject, but is still the only door to those files. So
-`make test-sandbox` is the first four plus the live driver and the SDK suite (~35s, `-race`),
-and `make test-workspace` is the thirteen (~19s, no `-race`), with `notSandbox` keeping the
-fast tier's tests out of both. The engine implementation is covered most directly by the live
-driver test and the worker's SDK test, which are seconds.
+sandbox is the environment, not the subject. Those thirteen were briefly a `make test-workspace`
+tier of their own, still paying a hypervisor for file reads; the host engine
+([ADR 0015](0015-host-engine.md)) removed the reason for the tier, and they now run in
+`make test` on every machine, CI included. `make test-sandbox` is the four boundary tests plus
+the live driver and the SDK suite, and the engine implementation is covered most directly by
+those, which are seconds.

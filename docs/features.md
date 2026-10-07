@@ -10,18 +10,16 @@ Each feature is covered at the lowest level that can decide it:
 |---|---|---|
 | Unit (Go) | `go test ./...` | Resolution, registries, lock order, arities. Milliseconds, no processes. |
 | Unit (worker) | `bun test` (from `worker/`) | The overlay, guards, commands, skills, credentials, the worker protocol. Under a second. |
-| Feature (end to end) | `go test ./internal/e2e/...` | A real gateway, a real worker, and a scripted provider over HTTP: everything a client can see. |
-| Sandbox engine (boundary) | `make test-sandbox` | The live driver, the worker SDK (exec streaming, kill, file operations), and the four end-to-end tests that exercise execution and the mounts. Needs a hypervisor (~35s). |
-| Workspace resources | `make test-workspace` | The end-to-end tests whose subject is the resource overlay and whose files live in the workspace; the sandbox is the only door to those files, so this needs a hypervisor too (~20s). |
+| Feature (end to end) | `go test ./internal/e2e/...` | A real gateway, a real worker, and a scripted provider over HTTP: everything a client can see. Resource tests run on the host engine; tests that need no engine run against the refusal path. |
+| Sandbox engine boundary | `make test-sandbox` | The live driver, the worker SDK (exec streaming, kill, file operations), and the four end-to-end tests that exercise execution and the mounts. Needs a hypervisor (~35s). |
 | Interface | `make ui` | The browser client. Kept, but the client is being rebuilt, so nothing here depends on it. |
 
 `make test` is the default gate: `-short -race`, the worker units, the Go units, and the
-feature suite with `ACORNFALL_NO_SANDBOX=1`, so the tools take the refusal path and the same
-command behaves the same on every machine, including CI ([ADR 0013](adr/0013-test-tiers.md)).
-It needs `bun` and `make deps`; without them the end-to-end suite skips with a reason rather
-than failing. `make test-sandbox` and `make test-workspace` are the hypervisor tiers — the
-engine boundary and the workspace resource features — and they fail rather than skip where
-there is no hypervisor.
+feature suite — resource tests on the host engine, tests that need no engine against the
+refusal path — so the same command behaves the same on every machine, including CI
+([ADR 0013](adr/0013-test-tiers.md)). It needs `bun` and `make deps`; without them the
+end-to-end suite skips with a reason rather than failing. `make test-sandbox` is the hypervisor
+tier — the microVM engine boundary — and fails rather than skips where there is no hypervisor.
 
 ## The scripted provider
 
@@ -87,6 +85,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | W4 | Removing forgets a workspace and stops its worker; it never deletes the folder or the history, and general cannot be removed. | `TestRemovingAWorkspaceKeepsItsFolderAndHistory` |
 | W5 | A broken resource file is reported by that workspace, not fatal to the gateway, and fixing the file is enough. | `TestABrokenWorkspaceFileIsReportedAndHeals` |
 | W6 | Idle workers are evicted; a watched or busy one is not. | `TestEvictionStopsOnlyIdleUnwatchedWorkspaces` |
+| W7 | The tools can run on the host engine, chosen explicitly, and the state says it is not isolated. It is never selected by a missing hypervisor, and an unknown engine is refused with the list. | `TestWorkspaceRulesReachThePrompt`, `TestTheHostEngineNeedsNothing`, `TestIsolationSaysWhichEngineSeparatesFromTheHost`, `TestEngineRefusesANameItDoesNotImplement`, `worker/test/host.test.ts` |
 
 ## Resources: rules, agents, skills
 
@@ -187,12 +186,11 @@ and the fix is in the history rather than a workaround:
   Everything that can be tested without one is: the environment, the path routing, and the
   refusal run against a fake sandbox, and the policy and the lifecycle against a fake engine.
   The end-to-end tests that use a real workspace — its `AGENTS.md`, `.agents/`, skills,
-  commands, guards — skip under `-short` and run in the hypervisor tiers: `make test-sandbox`
-  for the four that exercise the engine boundary, `make test-workspace` for the resource
-  features. Both fail rather than skip where there is no hypervisor, and the worker's file
-  operations and streaming execution are exercised against the real SDK there too; the tests
-  that need neither skip in those tiers, because they already ran in the fast one
-  ([ADR 0013](adr/0013-test-tiers.md)).
+  commands, guards — run in `make test`: the resource features on the host engine, which needs
+  no hypervisor, and the four that exercise the microVM boundary on `make test-sandbox`, which
+  fails rather than skips where there is no hypervisor. The worker's file operations and
+  streaming execution are exercised against the real SDK there too
+  ([ADR 0013](adr/0013-test-tiers.md), [ADR 0015](adr/0015-host-engine.md)).
 - **Memory and self-improvement.** Designed, not built (see `docs/adr/`).
 - **The interface.** `make ui` still covers the client, but the client is being rebuilt, so no
   feature above depends on it.

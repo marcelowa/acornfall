@@ -39,7 +39,9 @@ make build                     # go build -> ./bin/acornfall
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
 `--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
 `--token <secret>`, `--worker-dir <dir>`, `--workspaces-dir <dir>` (default
-`~/acornfall/workspaces`).
+`~/acornfall/workspaces`), `--sandbox-engine <microsandbox|host>` (default: microsandbox;
+`host` runs the tools on this machine with no isolation — see
+[ADR 0015](docs/adr/0015-host-engine.md)).
 
 Each of those has an environment variable, for a service manager or a container that should
 not carry flags: `ACORNFALL_HOME` or `ACORNFALL_DATA` for the install folder,
@@ -124,7 +126,10 @@ make dev
   provider key. A skill's script therefore runs where its instructions say it lives, while the
   install's credentials, token, and state are not paths inside the guest. When the engine
   or the hypervisor is missing the tools refuse rather than run on the host; `acornfall doctor`
-  says which it is. See `docs/adr/0012-sandbox.md` and `docs/adr/0014-global-resources-in-the-sandbox.md`.
+  says which it is. `--sandbox-engine host` is the explicit alternative for a machine without a
+  hypervisor or a fast development loop: the tools run on the host, unconfined, and the state
+  and doctor say so. See `docs/adr/0012-sandbox.md`, `docs/adr/0015-host-engine.md`, and
+  `docs/adr/0014-global-resources-in-the-sandbox.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
   `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
   name, `prompts/` — expanded server-side so the transcript records what the model saw.
@@ -189,9 +194,8 @@ ADR 0012 lists what the sandbox deliberately does not cover yet.
 ```bash
 make check         # fast: the compiler and the unit tests, no processes (~6s)
 make lint          # the static rules: gofmt, vet, staticcheck, tsc, eslint
-make test          # the default gate: units + the feature suite, no hypervisor (~25s)
-make test-sandbox  # the sandbox engine boundary: live driver + SDK + 4 e2e tests (~35s)
-make test-workspace # the resource features whose files live in a workspace (~20s)
+make test          # the default gate: units + the feature suite, no hypervisor (~30s)
+make test-sandbox  # the microVM engine boundary: live driver + SDK + 4 e2e tests (~35s; needs /dev/kvm)
 make ui            # drives the real client in headless chromium (needs a running gateway)
 make build         # gateway build
 make dev           # dev provider + gateway, workspace = current directory

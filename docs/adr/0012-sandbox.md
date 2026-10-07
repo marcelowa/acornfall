@@ -101,7 +101,9 @@ naming what is missing — and the state frame says so (`sandbox.tools: false`,
 `sandbox.problem`), which the interface shows. The worker starts anyway, because a workspace
 whose tools refuse is still a workspace: its conversations, its history, and its settings are
 all readable. Running unconfined must be a decision somebody made, never a state the system
-drifted into. Whether there is a config knob that *grants* the fallback is still open.
+drifted into. The decision is a separate engine, `--sandbox-engine host`: it is chosen by name,
+never by a missing hypervisor, and every surface reports that it is not isolated
+([ADR 0015](0015-host-engine.md)).
 
 `acornfall doctor` reports the tier without changing anything: engine, version, install path,
 state path, and the reason it cannot work if it cannot.
