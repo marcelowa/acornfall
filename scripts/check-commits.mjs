@@ -4,7 +4,7 @@
 // why of a change survives. `.agents/skills/conventional-commits/SKILL.md` is the standard; this is
 // the check, run over a pull request's commits in CI and by hand before pushing.
 //
-// Usage: node scripts/check-commits.mjs [range]
+// Usage: bun scripts/check-commits.mjs [range]
 //   (default: origin/main..HEAD when there is an origin, else the last commit)
 import { execFileSync } from "node:child_process";
 

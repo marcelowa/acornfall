@@ -63,8 +63,8 @@ A policy or a protocol that both layers share is `feat` with no scope.
 ## Checking, and fixing
 
 ```bash
-node scripts/check-commits.mjs                 # origin/main..HEAD, or the last commit
-node scripts/check-commits.mjs HEAD~5..HEAD    # an explicit range
+bun scripts/check-commits.mjs                 # origin/main..HEAD, or the last commit
+bun scripts/check-commits.mjs HEAD~5..HEAD    # an explicit range
 git log origin/main..HEAD --format='%h %s'     # what a push would send
 ```
 
