@@ -187,7 +187,7 @@ describe("folding the layers", () => {
 		await write(join(home, "config.json"), `{"defaults":{"instructions":"GLOBAL"}}`);
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, "never-heard-of-it");
-		expect(resolved.name).toBe("default");
+		expect(resolved.name).toBe("general");
 		expect(resolved.instructions).toBe("GLOBAL");
 		expect(resolved.layers.map((layer) => layer.layer)).toEqual(["global"]);
 	});

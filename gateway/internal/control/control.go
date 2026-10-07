@@ -950,7 +950,89 @@ func (c *Control) Create(ctx context.Context) error {
 	if err := c.ensureConversation(ctx, response.ConversationID); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
+	// Then it stops inheriting: what resolved when it was created is what it runs, and a
+	// default changed tomorrow must not move it (ADR 0017).
+	c.pinOne(response.ConversationID)
 	return nil
+}
+
+// pinBinding is what a conversation would be pinned to: the effective model and the level
+// that model can actually express, plus the default agent when one is named and known. It
+// reads and decides; nothing here changes anything.
+//
+// Nothing resolved means nothing to pin: a workspace with no provider keeps inheriting until
+// there is something to inherit. A subagent is configured by whatever created it, so pinning
+// it here would overwrite that with the defaults.
+func (c *Control) pinBinding(conversationID string) (protocol.ModelBinding, bool) {
+	if c.isSubagent(conversationID) {
+		return protocol.ModelBinding{}, false
+	}
+	inputs := c.inputsFor(conversationID)
+	effective := inputs.effective()
+	if effective.Provider == "" || effective.ModelID == "" {
+		return protocol.ModelBinding{}, false
+	}
+	binding := protocol.ModelBinding{
+		Provider:      effective.Provider,
+		ModelID:       effective.ModelID,
+		ThinkingLevel: effective.ThinkingLevel,
+	}
+	// A definition that no longer exists is not pinned: it would fail every open, and the
+	// interface has to show a stale default rather than a broken conversation.
+	if inputs.defaultAgent != "" && c.hasAgentDefinition(inputs.defaultAgent) {
+		binding.Definition = inputs.defaultAgent
+	}
+	return binding, true
+}
+
+// pinOne pins a single conversation, for the one that was just created.
+func (c *Control) pinOne(conversationID string) bool {
+	binding, ok := c.pinBinding(conversationID)
+	if !ok {
+		return false
+	}
+	c.mu.Lock()
+	c.bindings[conversationID] = binding
+	c.mu.Unlock()
+	c.persist()
+	return true
+}
+
+// pinMissing pins the conversations that never chose, which is the one-time migration for
+// conversations that predate pinning. Conversations with a binding are left alone — that is
+// a choice — and so are subagents.
+func (c *Control) pinMissing(conversations []protocol.ConversationInfo) {
+	pinned := false
+	for _, conversation := range conversations {
+		c.mu.RLock()
+		existing := c.bindings[conversation.ID]
+		c.mu.RUnlock()
+		if existing.Provider != "" || existing.ModelID != "" || existing.Definition != "" {
+			continue
+		}
+		binding, ok := c.pinBinding(conversation.ID)
+		if !ok {
+			continue
+		}
+		c.mu.Lock()
+		c.bindings[conversation.ID] = binding
+		c.mu.Unlock()
+		pinned = true
+	}
+	if pinned {
+		c.persist()
+	}
+}
+
+func (c *Control) hasAgentDefinition(name string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, agent := range c.catalog.Agents {
+		if agent.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // AgentChange is a partial update. A nil field means "leave it alone" and an
@@ -1484,6 +1566,9 @@ func (c *Control) ensureLastResort() error {
 func (c *Control) ensureConversation(ctx context.Context, conversationID string) error {
 	c.mu.RLock()
 	explicit := c.bindings[conversationID]
+	// A binding is not the same as an applied binding: pinning writes one without talking to
+	// the worker, and a conversation whose binding was never opened has no model to run with.
+	applied := c.resolved[conversationID] != nil
 	for _, info := range c.conversations {
 		if info.ID == conversationID && info.Parent != "" {
 			// A subagent is configured by whatever created it. Re-applying a binding
@@ -1493,7 +1578,7 @@ func (c *Control) ensureConversation(ctx context.Context, conversationID string)
 		}
 	}
 	c.mu.RUnlock()
-	if explicit.Provider != "" && c.isAvailable(c.Describe(), explicit) {
+	if applied && explicit.Provider != "" && c.isAvailable(c.Describe(), explicit) {
 		return nil
 	}
 	return c.reapply(ctx, conversationID)
@@ -1691,6 +1776,11 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 	if strings.TrimSpace(text) == "" {
 		return errors.New("empty message")
 	}
+	// A conversation about to run must be configured first: pinning writes a binding without
+	// opening it, and a worker that was never told has no model to run the turn with.
+	if err := c.ensureConversation(ctx, conversationID); err != nil {
+		return err
+	}
 	// A message that opens with a slash may be a command. The worker expands it, because
 	// that is where the templates live; unknown names come back unchanged, so a message
 	// that happens to start with a slash is never rewritten.
@@ -1873,6 +1963,10 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 	c.mu.Lock()
 	c.conversations = data.Conversations
 	c.mu.Unlock()
+
+	// Conversations that never chose are pinned to what resolves now. Idempotent, and it runs
+	// on every listing because a listing is the only place that sees every conversation.
+	c.pinMissing(data.Conversations)
 
 	// Policy for every conversation a client is watching, so an inspector is correct in
 	// whichever tab it happens to be open.

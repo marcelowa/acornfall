@@ -492,8 +492,8 @@ export function resolveAgent(catalog: Catalog, name: string | undefined): Resolv
 	const effectiveAllow = allowTools?.filter((tool) => !denyTools.has(tool));
 
 	return {
-		name: definition?.name ?? "default",
-		description: definition?.description ?? "Default assistant",
+		name: definition?.name ?? "general",
+		description: definition?.description ?? "General assistant",
 		source: definition?.source ?? "",
 		delegation: { ...DEFAULT_DELEGATION, ...delegation },
 		guards,
