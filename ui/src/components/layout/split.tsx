@@ -15,8 +15,7 @@ const MIN_RAIL = 200;
 const MAX_RAIL = 480;
 
 /**
- * The workbench: a rail, the pane beside it, and an optional end pane for the inspector where
- * the screen has room (2xl).
+ * The workbench: a rail and the pane beside it.
  *
  * Below `lg` the rail is a drawer that takes the screen it is on — a 280px rail beside a
  * 390px phone leaves the transcript unusable, and a drawer that only half-opens is a worse
@@ -27,40 +26,23 @@ const MAX_RAIL = 480;
 const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
 	variants: {
 		gap: gapScale,
-		withEnd: { true: "", false: "" },
 		collapsed: { true: "", false: "" },
 	},
 	compoundVariants: [
 		{
-			withEnd: false,
 			collapsed: false,
 			className: "lg:grid-cols-[var(--rail-width)_minmax(0,1fr)]",
 		},
 		{
-			withEnd: false,
 			collapsed: true,
 			className: "lg:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)]",
 		},
-		{
-			withEnd: true,
-			collapsed: false,
-			className:
-				"lg:grid-cols-[var(--rail-width)_minmax(0,1fr)_auto] 2xl:grid-cols-[var(--rail-width)_minmax(0,1fr)_var(--inspector-width)]",
-		},
-		{
-			withEnd: true,
-			collapsed: true,
-			className:
-				"lg:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)_auto] 2xl:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)_var(--inspector-width)]",
-		},
 	],
-	defaultVariants: { gap: "none", withEnd: false, collapsed: false },
+	defaultVariants: { gap: "none", collapsed: false },
 });
 
 export interface SplitProps extends VariantProps<typeof splitVariants> {
 	aside: ReactNode;
-	/** The inspector, when the screen is wide enough for one. */
-	end?: ReactNode | undefined;
 	/** Sits in the small-screen bar beside the rail toggle. The conversation title, usually. */
 	bar?: ReactNode | undefined;
 	asideLabel?: string | undefined;
@@ -80,7 +62,6 @@ export interface SplitProps extends VariantProps<typeof splitVariants> {
 
 export function Split({
 	aside,
-	end,
 	bar,
 	asideLabel = "Conversations",
 	asideOpen,
@@ -149,10 +130,7 @@ export function Split({
 
 	return (
 		<div
-			className={cn(
-				splitVariants({ gap, withEnd: end !== undefined, collapsed: asideCollapsed }),
-				className,
-			)}
+			className={cn(splitVariants({ gap, collapsed: asideCollapsed }), className)}
 			style={width}
 		>
 			<aside className="relative hidden min-h-0 min-w-0 flex-col lg:flex">
@@ -244,11 +222,6 @@ export function Split({
 				</div>
 				{children}
 			</div>
-			{end === undefined ? null : (
-				<aside className="hidden min-h-0 min-w-0 flex-col overflow-hidden 2xl:flex">
-					{end}
-				</aside>
-			)}
 		</div>
 	);
 }

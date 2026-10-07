@@ -45,8 +45,6 @@ import type { WireResolvedAgent, WireSender, WireState, WireUsage, WireView } fr
 
 const RAIL_WIDTH_KEY = "acornfall.ui.railWidth";
 const RAIL_COLLAPSED_KEY = "acornfall.ui.railCollapsed";
-const INSPECTOR_OPEN_KEY = "acornfall.ui.inspectorOpen";
-const INSPECTOR_MAXIMIZED_KEY = "acornfall.ui.inspectorMaximized";
 const SEEN_KEY = "acornfall.seen";
 const THEME_KEY = "acornfall.ui.theme";
 
@@ -179,11 +177,6 @@ export interface Platform {
 	harness?: string | undefined;
 	/** The level that was asked for when the model could not express it. */
 	thinkingRequested?: string | undefined;
-	/** The inspector's own state, kept the way the rail's is. */
-	inspectorOpen: string[];
-	setInspectorOpen: (open: string[]) => void;
-	inspectorMaximized?: string | undefined;
-	setInspectorMaximized: (key: string | undefined) => void;
 	railWidth?: number | undefined;
 	railOpen: boolean;
 	/** The desktop column: false keeps it open, which is the default. */
@@ -221,12 +214,6 @@ export function usePlatform(): Platform {
 	const [railOpen, setRailOpen] = useState(false);
 	const [railCollapsed, setRailCollapsed] = useState<boolean>(() =>
 		read(RAIL_COLLAPSED_KEY, false),
-	);
-	const [inspectorOpen, setInspectorOpenState] = useState<string[]>(() =>
-		read(INSPECTOR_OPEN_KEY, []),
-	);
-	const [inspectorMaximized, setInspectorMaximizedState] = useState<string | undefined>(
-		() => read<string | null>(INSPECTOR_MAXIMIZED_KEY, null) ?? undefined,
 	);
 	const [system, setSystem] = useState<"light" | "dark">(systemTheme);
 	const [choice, setChoice] = useState<"light" | "dark" | "system">(storedTheme);
@@ -578,17 +565,6 @@ export function usePlatform(): Platform {
 		});
 	}, []);
 
-	const setInspectorOpen = useCallback((open: string[]) => {
-		setInspectorOpenState(open);
-		window.localStorage.setItem(INSPECTOR_OPEN_KEY, JSON.stringify(open));
-	}, []);
-
-	const setInspectorMaximized = useCallback((key: string | undefined) => {
-		setInspectorMaximizedState(key);
-		if (key === undefined) window.localStorage.removeItem(INSPECTOR_MAXIMIZED_KEY);
-		else window.localStorage.setItem(INSPECTOR_MAXIMIZED_KEY, JSON.stringify(key));
-	}, []);
-
 	/** A conversation belongs to a workspace for life, so switching means starting over: the
 	 * transcript is cleared and the next one arrives with the workspace. */
 	const selectWorkspace = useCallback((name: string) => {
@@ -728,10 +704,6 @@ export function usePlatform(): Platform {
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
 		harness: state?.harness,
-		inspectorOpen,
-		setInspectorOpen,
-		inspectorMaximized,
-		setInspectorMaximized,
 		railWidth,
 		railOpen,
 		railCollapsed,

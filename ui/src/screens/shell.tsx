@@ -4,10 +4,10 @@ import { Split } from "@/components/layout/split";
 import { Stack } from "@/components/layout/stack";
 
 /**
- * The shape of every screen and nothing else: a rail, a transcript, a composer, and — where
- * the screen is wide enough — the inspector. It has no state, no data, and no classes. Each
- * slot owns its own alignment: the transcript centres itself on a readable measure, and the
- * composer is expected to do the same, which is why nothing here wraps them.
+ * The shape of every screen and nothing else: a rail, a transcript, and a composer. It has no
+ * state, no data, and no classes. Each slot owns its own alignment: the transcript centres
+ * itself on a readable measure, and the composer is expected to do the same, which is why
+ * nothing here wraps them.
  *
  * The rail is a drawer below `lg`, and the app can control it when selecting a conversation
  * should close it.
@@ -18,8 +18,6 @@ export interface ShellProps {
 	/** Below the transcript. A screen that is not a conversation has no composer, so this is
 	 * the one slot that can be absent. */
 	composer?: ReactNode | undefined;
-	/** The context inspector: a pane of its own from 2xl up, where there is room for it. */
-	inspector?: ReactNode | undefined;
 	/** The small-screen bar's content, beside the rail toggle. The conversation title, usually. */
 	bar?: ReactNode | undefined;
 	/** Above everything in the main pane: the last refused action, usually. It sits here rather
@@ -39,7 +37,6 @@ export function Shell({
 	rail,
 	transcript,
 	composer,
-	inspector,
 	bar,
 	notice,
 	railOpen,
@@ -53,7 +50,6 @@ export function Shell({
 		<Page>
 			<Split
 				aside={rail}
-				end={inspector}
 				bar={bar}
 				asideOpen={railOpen}
 				onAsideOpenChange={onRailOpenChange}

@@ -39,23 +39,9 @@ const main = (
 	</Stack>
 );
 
-const inspector = (
-	<Stack gap="sm" padding="lg" fill className="border-l border-border bg-card">
-		<Text weight="semibold">The inspector</Text>
-		<Text size="sm" tone="muted">
-			From 2xl up, when Split is given one.
-		</Text>
-	</Stack>
-);
-
 export const Desktop: Story = {
 	args: { aside, children: main },
 	globals: { viewport: { value: "laptop" } },
-};
-
-export const WithInspector: Story = {
-	args: { aside, end: inspector, children: main },
-	globals: { viewport: { value: "wide" } },
 };
 
 /** Phone: the rail is behind the toggle in the bar, and the middle pane is the whole screen. */

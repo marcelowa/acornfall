@@ -195,10 +195,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					),
 				},
 			]}
-			open={platform.inspectorOpen}
-			onOpenChange={platform.setInspectorOpen}
-			maximized={platform.inspectorMaximized}
-			onMaximizedChange={platform.setInspectorMaximized}
 		/>
 	);
 
@@ -267,68 +263,77 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		) : undefined;
 
 	return (
-		<Shell
-			rail={rail}
-			bar={barTitle}
-			railOpen={platform.railOpen}
-			onRailOpenChange={platform.setRailOpen}
-			railCollapsed={platform.railCollapsed}
-			onRailCollapsedChange={platform.toggleRail}
-			railWidth={platform.railWidth}
-			onRailWidthChange={platform.setRailWidth}
-			inspector={inspector}
-			notice={
-				platform.failure === undefined ? undefined : (
-					<Measure size="wide" padding="md">
-						<ErrorStrip message={platform.failure} onDismiss={platform.clearFailure} />
-					</Measure>
-				)
-			}
-			transcript={screen ?? <Transcript entries={platform.entries} onFork={platform.fork} />}
-			composer={
-				screen === undefined ? (
-					<Composer
-						value={draft}
-						onChange={setDraft}
-						onSend={submit}
-						onAbort={platform.abort}
-						running={platform.active?.running === true}
-						steerable={platform.steerable}
-						busyAction={busyAction}
-						onBusyActionChange={setBusyAction}
-						disabled={platform.active === undefined || !platform.workerUp}
-						placeholder={
-							platform.active === undefined ? "Pick a conversation" : "Send a message"
-						}
-						above={
-							slashWord === null ? undefined : (
-								<SlashMenu commands={slashMatches} onSelect={setDraft} />
-							)
-						}
-						controls={
-							<>
-								{/* Ambient state first: a dropped stream or a dead harness is the thing to know
-								 * before choosing a model. Nothing renders while everything is well. */}
-								{platform.workerUp ? (
-									platform.connection === "reconnecting" ? (
-										<StatusPill state="reconnecting" />
-									) : null
-								) : (
-									<StatusPill
-										state="harness-down"
-										detail={platform.workerError}
+		<>
+			<Shell
+				rail={rail}
+				bar={barTitle}
+				railOpen={platform.railOpen}
+				onRailOpenChange={platform.setRailOpen}
+				railCollapsed={platform.railCollapsed}
+				onRailCollapsedChange={platform.toggleRail}
+				railWidth={platform.railWidth}
+				onRailWidthChange={platform.setRailWidth}
+				notice={
+					platform.failure === undefined ? undefined : (
+						<Measure size="wide" padding="md">
+							<ErrorStrip
+								message={platform.failure}
+								onDismiss={platform.clearFailure}
+							/>
+						</Measure>
+					)
+				}
+				transcript={
+					screen ?? <Transcript entries={platform.entries} onFork={platform.fork} />
+				}
+				composer={
+					screen === undefined ? (
+						<Composer
+							value={draft}
+							onChange={setDraft}
+							onSend={submit}
+							onAbort={platform.abort}
+							running={platform.active?.running === true}
+							steerable={platform.steerable}
+							busyAction={busyAction}
+							onBusyActionChange={setBusyAction}
+							disabled={platform.active === undefined || !platform.workerUp}
+							placeholder={
+								platform.active === undefined
+									? "Pick a conversation"
+									: "Send a message"
+							}
+							above={
+								slashWord === null ? undefined : (
+									<SlashMenu commands={slashMatches} onSelect={setDraft} />
+								)
+							}
+							controls={
+								<>
+									{/* Ambient state first: a dropped stream or a dead harness is the thing to know
+									 * before choosing a model. Nothing renders while everything is well. */}
+									{platform.workerUp ? (
+										platform.connection === "reconnecting" ? (
+											<StatusPill state="reconnecting" />
+										) : null
+									) : (
+										<StatusPill
+											state="harness-down"
+											detail={platform.workerError}
+										/>
+									)}
+									<ChoiceControl
+										agent={platform.agent}
+										model={platform.model}
+										thinking={platform.thinking}
 									/>
-								)}
-								<ChoiceControl
-									agent={platform.agent}
-									model={platform.model}
-									thinking={platform.thinking}
-								/>
-							</>
-						}
-					/>
-				) : undefined
-			}
-		/>
+								</>
+							}
+						/>
+					) : undefined
+				}
+			/>
+			{inspector}
+		</>
 	);
 }

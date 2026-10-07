@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { foldContext } from "./context";
 import type { Platform } from "./use-platform";
 import type { ConversationSummary, TranscriptEntry } from "./view-models";
 import { WorkspaceView } from "./workspace-view";
@@ -229,9 +228,6 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			],
 		},
 		harness: "pi-durable",
-		inspectorOpen: [],
-		setInspectorOpen: noop,
-		setInspectorMaximized: noop,
 		railOpen: false,
 		railCollapsed: false,
 		theme: "light",
@@ -353,62 +349,4 @@ export const WorkspacesScreen: Story = {
 export const SettingsScreen: Story = {
 	args: { platform: makePlatform({ screen: "settings", themeChoice: "dark", theme: "dark" }) },
 	globals: { viewport: { value: "laptop" } },
-};
-
-/**
- * From 2xl the inspector is a pane of its own — the answer to "why did it see that" — with
- * the Context section open: request lineage, the delta, and every section with its size.
- */
-export const InspectorOpen: Story = {
-	args: {
-		platform: makePlatform({
-			inspectorOpen: ["context"],
-			context: foldContext([
-				{
-					id: 10,
-					kind: "pi.system",
-					model: [
-						{
-							content: "",
-							sections: {
-								preamble: "You are a careful engineer.",
-								cwd: "<cwd>\n/acornfall\n</cwd>",
-							},
-							toolsAdded: [
-								{
-									name: "read",
-									description: "read a file",
-									parameters: { type: "object" },
-								},
-								{
-									name: "bash",
-									description: "run a command",
-									parameters: { type: "object" },
-								},
-							],
-						},
-					],
-				},
-				{
-					id: 92,
-					kind: "pi.system",
-					model: [
-						{
-							content: "",
-							sections: { instructions: "global + workspace + agent" },
-							toolsAdded: [
-								{
-									name: "edit",
-									description: "edit a file",
-									parameters: { type: "object" },
-								},
-							],
-							toolsRemoved: [{ name: "bash" }],
-						},
-					],
-				},
-			]),
-		}),
-	},
-	globals: { viewport: { value: "wide" } },
 };

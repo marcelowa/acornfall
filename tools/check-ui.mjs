@@ -749,59 +749,101 @@ try {
 		await page.keyboard.press("Backspace");
 	}
 
-	// 7. The inspector, from 2xl up: closed by default, the open section remembered, and one
-	// section at a time can take the panel. These are the assertions the old client's suite
-	// made against its own inspector; they belong here now.
-	await page.setViewport({ width: 1600, height: 900 });
-	await page.evaluate(() => {
-		localStorage.removeItem("acornfall.ui.inspectorOpen");
-		localStorage.removeItem("acornfall.ui.inspectorMaximized");
-	});
-	await page.reload({ waitUntil: "domcontentloaded" });
-	await page.waitForSelector("[data-slot=inspector]", { timeout: 15000 });
-
-	const sectionCount = await page.evaluate(
-		() => document.querySelectorAll("[data-slot=inspector] [data-section]").length,
-	);
-	check("the inspector has sections", sectionCount >= 3, `${sectionCount} sections`);
-	const openSections = () =>
-		page.evaluate(() =>
-			[...document.querySelectorAll('[data-slot=inspector] [aria-expanded="true"]')].map((element) =>
-				element.closest("[data-section]")?.getAttribute("data-section"),
-			),
+	// 7. The inspector: an overlay behind a floating toggle in the top-right corner, closed by
+	// default, and not remembered — opening it is a question asked now, not a preference.
+	await page.setViewport({ width: 1400, height: 900 });
+	const inspectorToggle = await page.$("[data-slot=inspector-toggle]");
+	check("the inspector has a toggle in the corner", inspectorToggle !== null);
+	if (inspectorToggle !== null) {
+		const corner = await inspectorToggle.evaluate((element) => {
+			const box = element.getBoundingClientRect();
+			return {
+				fromTop: box.top,
+				fromRight: window.innerWidth - box.right,
+				bottom: box.bottom,
+			};
+		});
+		check(
+			"the toggle floats in the top-right corner",
+			corner.fromTop < 40 && corner.fromRight < 40,
+			`${Math.round(corner.fromTop)}px from the top, ${Math.round(corner.fromRight)}px from the right`,
 		);
-	check("the inspector starts closed", (await openSections()).length === 0);
+		check(
+			"the inspector starts closed",
+			await page.evaluate(() => document.querySelector("[data-slot=inspector]") === null),
+		);
 
-	await page.click("[data-slot=inspector] [data-section] button[aria-expanded]");
-	check("a section opens", (await openSections()).length === 1, JSON.stringify(await openSections()));
-	await page.reload({ waitUntil: "domcontentloaded" });
-	await page.waitForSelector("[data-slot=inspector]", { timeout: 15000 });
-	check(
-		"the open section is remembered across a reload",
-		(await openSections()).length === 1,
-		JSON.stringify(await openSections()),
-	);
+		await press(page, "[data-slot=inspector-toggle]");
+		const overlay = await page
+			.waitForSelector("[data-slot=inspector]", { timeout: 5000 })
+			.catch(() => null);
+		check("the toggle opens the inspector", overlay !== null);
+		if (overlay !== null) {
+			const coverage = await overlay.evaluate((element) => {
+				const box = element.getBoundingClientRect();
+				return {
+					width: box.width / window.innerWidth,
+					height: box.height / window.innerHeight,
+				};
+			});
+			check(
+				"the inspector covers the screen it was asked about",
+				coverage.width > 0.9 && coverage.height > 0.9,
+				`${Math.round(coverage.width * 100)}% wide, ${Math.round(coverage.height * 100)}% tall`,
+			);
+			const sectionCount = await page.evaluate(
+				() => document.querySelectorAll("[data-slot=inspector] [data-section]").length,
+			);
+			check("the inspector has sections", sectionCount >= 3, `${sectionCount} sections`);
+			const openSections = () =>
+				page.evaluate(() =>
+					[
+						...document.querySelectorAll(
+							'[data-slot=inspector] [data-section] button[aria-expanded]',
+						),
+					].filter((element) => element.getAttribute("aria-expanded") === "true").length,
+				);
+			check(
+				"every section is readable when the overlay opens",
+				(await openSections()) === sectionCount,
+				`${await openSections()} of ${sectionCount} open`,
+			);
+			const sandboxText = await page.evaluate(
+				() =>
+					document.querySelector("[data-slot=inspector] [data-section=sandbox]")
+						?.textContent ?? "",
+				);
+			check(
+				"the inspector says where the tools run",
+				/engine/.test(sandboxText) && /tools/.test(sandboxText),
+				sandboxText.replace(/\s+/g, " ").slice(0, 90),
+			);
 
-	await page.click("[data-slot=inspector] [data-section=sandbox] button[aria-expanded]");
-	const sandboxText = await page.evaluate(
-		() => document.querySelector("[data-slot=inspector] [data-section=sandbox]")?.textContent ?? "",
-	);
-	check(
-		"the inspector says where the tools run",
-		/engine/.test(sandboxText) && /tools/.test(sandboxText),
-		sandboxText.replace(/\s+/g, " ").slice(0, 90),
-	);
+			await press(page, "[data-slot=inspector] [data-section] button[aria-expanded]");
+			check(
+				"a section can be put away while you read another",
+				(await openSections()) === sectionCount - 1,
+				`${await openSections()} of ${sectionCount} open`,
+			);
 
-	await page.click("[data-slot=inspector] [data-section] button[aria-label^='Maximize']");
-	const maximized = await page.evaluate(
-		() => document.querySelectorAll("[data-slot=inspector] [data-section]").length,
-	);
-	check("maximizing leaves one section on screen", maximized === 1, `${maximized} sections`);
-	await page.click("[data-slot=inspector] [data-section] button[aria-label='Restore the section']");
-	const restored = await page.evaluate(
-		() => document.querySelectorAll("[data-slot=inspector] [data-section]").length,
-	);
-	check("restoring brings the others back", restored > 1, `${restored} sections`);
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(
+				() => document.querySelector("[data-slot=inspector]") === null,
+				{ timeout: 5000 },
+			);
+			check("the inspector closes", true);
+
+			// Not remembered: the reload is the point of the check, so it comes after a visit.
+			await press(page, "[data-slot=inspector-toggle]");
+			await page.waitForSelector("[data-slot=inspector]", { timeout: 5000 });
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.waitForSelector("[data-slot=inspector-toggle]", { timeout: 15000 });
+			check(
+				"the inspector is not remembered across a reload",
+				await page.evaluate(() => document.querySelector("[data-slot=inspector]") === null),
+			);
+		}
+	}
 
 	// 8. The phone gets the transcript, not a rail eating it; the drawer is how the rail opens.
 	await page.setViewport({ width: 390, height: 844 });

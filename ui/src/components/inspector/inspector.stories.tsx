@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useState } from "react";
 import { Text } from "@/components/typography/text";
 import { Inspector, type InspectorSection } from "./inspector";
 
@@ -22,7 +21,7 @@ const sections: InspectorSection[] = [
 	{
 		key: "agent",
 		title: "Agent",
-		hint: "scout",
+		hint: "general",
 		body: <Text size="sm">Which layer contributed what.</Text>,
 	},
 	{
@@ -31,54 +30,34 @@ const sections: InspectorSection[] = [
 		hint: "idle",
 		body: <Text size="sm">Attempt, tools, queue.</Text>,
 	},
+	{
+		key: "sandbox",
+		title: "Sandbox",
+		hint: "microsandbox 0.7.7 · running",
+		body: <Text size="sm">Where the tools actually run.</Text>,
+	},
 ];
 
-function Frame({
-	open: initialOpen,
-	maximized: initialMaximized,
-}: {
-	open: string[];
-	maximized?: string;
-}) {
-	const [open, setOpen] = useState(initialOpen);
-	const [maximized, setMaximized] = useState<string | undefined>(initialMaximized);
-	return (
-		<div className="h-full w-96 border-l border-border bg-card">
-			<Inspector
-				sections={sections}
-				open={open}
-				onOpenChange={setOpen}
-				maximized={maximized}
-				onMaximizedChange={setMaximized}
-			/>
-		</div>
-	);
-}
-
-/** Closed by default: the point is to open the one that explains the surprise. */
+/** The overlay closed: what the interface shows is the toggle in the top-right corner. */
 export const Closed: Story = {
-	args: { sections, open: [], onOpenChange: () => undefined, onMaximizedChange: () => undefined },
-	render: () => <Frame open={[]} />,
+	args: { sections },
 };
 
+/**
+ * Open: the whole screen, every section readable at once. The catalogue needs a story of the
+ * open state, so this one starts open — the app never passes this.
+ */
 export const Open: Story = {
-	args: {
-		sections,
-		open: ["context"],
-		onOpenChange: () => undefined,
-		onMaximizedChange: () => undefined,
-	},
-	render: () => <Frame open={["context"]} />,
+	args: { sections, defaultOpen: true },
 };
 
-/** One section takes the panel; the rest collapse to headers. */
-export const Maximized: Story = {
-	args: {
-		sections,
-		open: ["context"],
-		maximized: "context",
-		onOpenChange: () => undefined,
-		onMaximizedChange: () => undefined,
+/** The catalogue's other state: a reader who put one section away while reading another. */
+export const SectionPutAway: Story = {
+	args: { sections, defaultOpen: true },
+	play: async ({ canvasElement }) => {
+		const button = canvasElement.querySelector<HTMLButtonElement>(
+			'[data-section="agent"] button[aria-expanded]',
+		);
+		button?.click();
 	},
-	render: () => <Frame open={["context"]} maximized="context" />,
 };
