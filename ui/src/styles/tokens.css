@@ -151,8 +151,10 @@
 	--base-space-16: 64px;
 	--base-space-20: 80px;
 	--base-space-24: 96px;
+	--base-space-32: 128px;
 
 	/* Radius */
+	--base-radius-xs: 2px;
 	--base-radius-sm: 4px;
 	--base-radius-md: 8px;
 	--base-radius-lg: 12px;
@@ -217,15 +219,29 @@
 	--info-foreground: var(--base-neutral-0);
 
 	/* A status tint is always 12% of its own strong colour, so it follows the theme by
-	 * construction and there is no second value to keep in sync. */
+	 * construction and there is no second value to keep in sync. The foreground is a step away
+	 * from the strong colour on purpose: 12px text on a 12% tint needs the contrast. */
 	--success-subtle: color-mix(in oklab, var(--success) 12%, transparent);
 	--warning-subtle: color-mix(in oklab, var(--warning) 12%, transparent);
 	--info-subtle: color-mix(in oklab, var(--info) 12%, transparent);
 	--destructive-subtle: color-mix(in oklab, var(--destructive) 12%, transparent);
+	--success-subtle-foreground: var(--base-success-700);
+	--warning-subtle-foreground: var(--base-warning-800);
+	--info-subtle-foreground: var(--base-info-700);
+	--destructive-subtle-foreground: var(--base-danger-700);
+
+	/* The scrim behind a modal. Theme-dependent: the same ink over a dark surface reads
+	 * weaker than over a light one. */
+	--overlay: color-mix(in oklab, var(--base-neutral-950) 50%, transparent);
 
 	/* Layout semantics: not a colour, but still a decision every screen would otherwise make
 	 * for itself. The rail is the panel #11 rebuilds. */
 	--rail-width: 280px;
+
+	/* Component tokens. A component that cannot say what it needs in the two layers above adds
+	 * its own name here, so even the exception is a token. The dialog's mobile width is the
+	 * viewport minus the page gutter; there is no Tailwind namespace for it. */
+	--dialog-max-width: calc(100% - var(--base-space-8));
 }
 
 .dark {
@@ -255,4 +271,9 @@
 	--warning-foreground: var(--base-neutral-950);
 	--info: var(--base-info-400);
 	--info-foreground: var(--base-neutral-950);
+	--success-subtle-foreground: var(--base-success-300);
+	--warning-subtle-foreground: var(--base-warning-300);
+	--info-subtle-foreground: var(--base-info-300);
+	--destructive-subtle-foreground: var(--base-danger-300);
+	--overlay: color-mix(in oklab, var(--base-neutral-950) 65%, transparent);
 }

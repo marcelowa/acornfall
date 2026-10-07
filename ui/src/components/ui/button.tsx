@@ -4,8 +4,9 @@ import { Slot } from "radix-ui";
 import { cn } from "@/lib/utils";
 
 /**
- * The shadcn button, adapted where the canon left this system: `text-white` is the semantic
- * destructive foreground, and the 3px focus ring is the 2px one — a bracket is not a token.
+ * The shadcn button, adapted where the canon left this system: white is not a token, so the
+ * destructive variant takes the semantic foreground, and the 3px focus ring is the 2px one —
+ * a bracket is not a token either.
  */
 const buttonVariants = cva(
 	"inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",

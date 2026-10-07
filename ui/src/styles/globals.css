@@ -9,6 +9,7 @@
  * ═══════════════════════════════════════════════════════════════════════════════════════════ */
 
 @import "tailwindcss";
+@import "tw-animate-css";
 @import "./tokens.css";
 
 /* Class-driven dark mode: the theme is a `.dark` on an ancestor, not the OS preference, so
@@ -39,12 +40,17 @@
 	--color-success: var(--success);
 	--color-success-foreground: var(--success-foreground);
 	--color-success-subtle: var(--success-subtle);
+	--color-success-subtle-foreground: var(--success-subtle-foreground);
 	--color-warning: var(--warning);
 	--color-warning-foreground: var(--warning-foreground);
 	--color-warning-subtle: var(--warning-subtle);
+	--color-warning-subtle-foreground: var(--warning-subtle-foreground);
 	--color-info: var(--info);
 	--color-info-foreground: var(--info-foreground);
 	--color-info-subtle: var(--info-subtle);
+	--color-info-subtle-foreground: var(--info-subtle-foreground);
+	--color-destructive-subtle-foreground: var(--destructive-subtle-foreground);
+	--color-overlay: var(--overlay);
 	--color-border: var(--border);
 	--color-input: var(--input);
 	--color-ring: var(--ring);
@@ -116,9 +122,11 @@
 	--spacing-16: var(--base-space-16);
 	--spacing-20: var(--base-space-20);
 	--spacing-24: var(--base-space-24);
+	--spacing-32: var(--base-space-32);
 
 	/* ── Radius, shadow, containers */
 	--radius-*: initial;
+	--radius-xs: var(--base-radius-xs);
 	--radius-sm: var(--base-radius-sm);
 	--radius-md: var(--base-radius-md);
 	--radius-lg: var(--base-radius-lg);
