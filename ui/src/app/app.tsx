@@ -2,7 +2,8 @@ import { useState } from "react";
 import type { BusyAction } from "@/app/view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
 import { Composer } from "@/components/composer/composer";
-import { Stack } from "@/components/layout/stack";
+import { Picker } from "@/components/composer/picker";
+import { SlashMenu } from "@/components/composer/slash-menu";
 import { Transcript } from "@/components/transcript/transcript";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Text } from "@/components/typography/text";
@@ -11,17 +12,31 @@ import { usePlatform } from "./use-platform";
 
 /**
  * The app: the platform hook's view models and callbacks applied to the dumb screen. The
- * composer's controls are the theme toggle for now; the model, thinking, and agent pickers
- * land beside it next.
+ * composer carries the three pickers — model, thinking, agent — each saying which layer its
+ * value came from, and offers the commands the server would expand.
  */
 export function App() {
 	const platform = usePlatform();
 	const [draft, setDraft] = useState("");
 	const [busyAction, setBusyAction] = useState<BusyAction>("steer");
 
+	// A draft that is one slash word is a command being typed: the menu lists what the server
+	// knows, Enter completes the word, and the expansion itself happens server-side.
+	const slashWord = /^\/(\S*)$/.exec(draft);
+	const slashMatches =
+		slashWord === null
+			? []
+			: platform.commands.filter((command) => command.name.startsWith(slashWord[1] ?? ""));
+
 	const submit = (): void => {
 		const text = draft.trim();
-		if (text === "" || platform.active === undefined) return;
+		if (text === "") return;
+		const first = slashMatches[0];
+		if (first !== undefined) {
+			setDraft(`/${first.name} `);
+			return;
+		}
+		if (platform.active === undefined) return;
 		platform.send(text, busyAction);
 		setDraft("");
 	};
@@ -75,10 +90,40 @@ export function App() {
 					placeholder={
 						platform.active === undefined ? "Pick a conversation" : "Send a message"
 					}
+					above={
+						slashWord === null ? undefined : (
+							<SlashMenu commands={slashMatches} onSelect={setDraft} />
+						)
+					}
 					controls={
-						<Stack direction="horizontal" gap="2xs" align="center">
+						<>
+							<Picker
+								label="Model"
+								value={platform.model.value}
+								origin={platform.model.origin}
+								groups={platform.model.groups}
+								onSelect={platform.model.onSelect}
+								disabled={platform.model.disabled}
+							/>
+							<Picker
+								label="Thinking"
+								value={platform.thinking.value}
+								origin={platform.thinking.origin}
+								note={platform.thinking.note}
+								groups={platform.thinking.groups}
+								onSelect={platform.thinking.onSelect}
+								disabled={platform.thinking.disabled}
+							/>
+							<Picker
+								label="Agent"
+								value={platform.agent.value}
+								origin={platform.agent.origin}
+								groups={platform.agent.groups}
+								onSelect={platform.agent.onSelect}
+								disabled={platform.agent.disabled}
+							/>
 							<ThemeToggle theme={platform.theme} onToggle={platform.toggleTheme} />
-						</Stack>
+						</>
 					}
 				/>
 			}

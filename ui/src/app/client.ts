@@ -1,4 +1,5 @@
-import type { WireFrame, WireSender, WireState, WireView } from "./wire";
+import type { SlashCommand } from "./view-models";
+import type { WireCommands, WireFrame, WireSender, WireState, WireView } from "./wire";
 
 /**
  * The gateway client. One fetch for state, one EventSource for everything after it, and the
@@ -114,4 +115,37 @@ export function abortConversation(workspace: string, conversation: string): Prom
 		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/abort`),
 		{},
 	);
+}
+
+/** What this conversation chose. An absent field is left alone; an empty string clears it. */
+export interface AgentChange {
+	provider?: string;
+	modelId?: string;
+	thinkingLevel?: string;
+	definition?: string;
+}
+
+/** Applied changes answer with the new state, so a picker does not need a second round trip. */
+export async function setAgent(
+	workspace: string,
+	conversation: string,
+	change: AgentChange,
+): Promise<WireState> {
+	const response = await fetch(
+		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/agent`),
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(change),
+		},
+	);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as WireState;
+}
+
+export async function fetchCommands(workspace: string): Promise<SlashCommand[]> {
+	const response = await fetch(workspacePath(workspace, "/commands"));
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	const body = (await response.json()) as WireCommands;
+	return body.commands;
 }

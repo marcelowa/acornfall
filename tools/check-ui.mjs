@@ -257,7 +257,44 @@ try {
 		await page.click("button[aria-label^='Switch to the']");
 	}
 
-	// 5. The phone gets the transcript, not a rail eating it; the drawer is how the rail opens.
+	// 5. The composer says what it will run and where each value came from, and a slash
+	// offers the commands the server would expand.
+	const pickers = await page.evaluate(() =>
+		["Model", "Thinking", "Agent"].map((label) => {
+			const button = document.querySelector(`[data-slot=composer] button[aria-label="${label}"]`);
+			return button?.textContent?.trim().replace(/\s+/g, " ") ?? "";
+		}),
+	);
+	check(
+		"the composer carries a model, thinking, and agent choice",
+		pickers.every((text) => text.includes(":")),
+		JSON.stringify(pickers),
+	);
+	check(
+		"a resolved choice says which layer it came from",
+		pickers.some((text) => text.includes("·")),
+		JSON.stringify(pickers),
+	);
+
+	const commandCount = await page.evaluate(async () => {
+		const body = await (await fetch("/api/workspaces/general/commands")).json();
+		return (body.commands ?? []).length;
+	});
+	if (commandCount > 0) {
+		await page.click("[data-slot=composer] textarea");
+		await page.type("[data-slot=composer] textarea", "/");
+		const offered = await page
+			.waitForSelector("[data-slot=slash-menu]", { timeout: 5000 })
+			.then(() => true)
+			.catch(() => false);
+		check("a slash offers the commands the server would expand", offered);
+		await page.keyboard.down("Control");
+		await page.keyboard.press("KeyA");
+		await page.keyboard.up("Control");
+		await page.keyboard.press("Backspace");
+	}
+
+	// 6. The phone gets the transcript, not a rail eating it; the drawer is how the rail opens.
 	await page.setViewport({ width: 390, height: 844 });
 	await page.reload({ waitUntil: "domcontentloaded" });
 	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });

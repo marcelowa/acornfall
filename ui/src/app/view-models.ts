@@ -90,6 +90,14 @@ export interface PickerGroup {
 	options: PickerOption[];
 }
 
+/** A slash command the server would expand; the interface only offers the list. */
+export interface SlashCommand {
+	name: string;
+	description?: string | undefined;
+	argumentHint?: string | undefined;
+	source: string;
+}
+
 /** How a turn is sent while one is already running. */
 export type BusyAction = "steer" | "followUp";
 

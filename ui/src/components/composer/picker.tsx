@@ -18,6 +18,8 @@ export interface PickerProps {
 	placeholder?: string | undefined;
 	/** Where this value comes from: "this conversation", "workspace default", "install". */
 	origin?: string | undefined;
+	/** Something the value cannot say by itself: a level that was asked for and not offered. */
+	note?: string | undefined;
 	groups: PickerGroup[];
 	onSelect: (value: string) => void;
 	disabled?: boolean | undefined;
@@ -34,6 +36,7 @@ export function Picker({
 	value,
 	placeholder = "default",
 	origin,
+	note,
 	groups,
 	onSelect,
 	disabled = false,
@@ -53,9 +56,14 @@ export function Picker({
 					className={cn("max-w-(--container-xs) justify-start", className)}
 				>
 					<span className="text-muted-foreground">{label}:</span>
-					<span className="truncate">{value ?? placeholder}</span>
+					<span className="truncate">
+						{value === undefined || value === "" ? placeholder : value}
+					</span>
 					{origin === undefined ? null : (
 						<span className="truncate text-muted-foreground">· {origin}</span>
+					)}
+					{note === undefined ? null : (
+						<span className="truncate text-muted-foreground">· {note}</span>
 					)}
 					<ChevronDown className="shrink-0" />
 				</Button>

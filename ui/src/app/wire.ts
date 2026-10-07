@@ -105,6 +105,12 @@ export interface WireCommands {
 	}[];
 }
 
+export interface WireResolvedAgent {
+	name: string;
+	model?: string | undefined;
+	thinking?: string | undefined;
+}
+
 export interface WireState {
 	workspace: WireWorkspace;
 	workspaces: WireWorkspace[];
@@ -114,7 +120,9 @@ export interface WireState {
 	workerError?: string | undefined;
 	sandbox: WireSandbox;
 	capabilities: WireCapabilities;
+	/** The effective binding: what will actually run, resolved across the layers. */
 	agent: WireBinding;
+	resolved?: WireResolvedAgent | undefined;
 	defaultModel: WireBinding;
 	defaultThinking: string;
 	defaultAgent: string;

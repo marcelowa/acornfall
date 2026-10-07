@@ -1,15 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	abortConversation,
+	fetchCommands,
 	fetchState,
 	forkConversation,
 	hideConversation,
 	openStream,
 	renameConversation,
 	sendMessage,
+	setAgent,
+	type AgentChange,
 } from "./client";
-import { toConversation, toTranscript } from "./map";
-import type { BusyAction, ConversationSummary, TranscriptEntry } from "./view-models";
+import {
+	originLabel,
+	toAgentGroups,
+	toConversation,
+	toModelChoices,
+	toModelGroups,
+	toThinkingGroups,
+	toTranscript,
+} from "./map";
+import type {
+	BusyAction,
+	ConversationSummary,
+	PickerGroup,
+	SlashCommand,
+	TranscriptEntry,
+} from "./view-models";
 import type { WireSender, WireState, WireView } from "./wire";
 
 const RAIL_WIDTH_KEY = "acornfall.ui.railWidth";
@@ -47,6 +64,16 @@ function read<T>(key: string, fallback: T): T {
 	}
 }
 
+/** One picker's whole state: the value, where it came from, and what choosing does. */
+export interface ChoicePicker {
+	value: string;
+	origin?: string | undefined;
+	note?: string | undefined;
+	groups: PickerGroup[];
+	disabled?: boolean | undefined;
+	onSelect: (value: string) => void;
+}
+
 export interface Platform {
 	ready: boolean;
 	error?: string | undefined;
@@ -57,6 +84,12 @@ export interface Platform {
 	workerUp: boolean;
 	/** The worker can take a steering input mid-turn; without it the choice is stop or queue. */
 	steerable: boolean;
+	/** Model, thinking, and agent as the conversation resolves them, with their layer. */
+	model: ChoicePicker;
+	thinking: ChoicePicker;
+	agent: ChoicePicker;
+	/** The commands the server would expand, for the slash menu. */
+	commands: SlashCommand[];
 	railWidth?: number | undefined;
 	railOpen: boolean;
 	theme: "light" | "dark";
@@ -90,7 +123,12 @@ export function usePlatform(): Platform {
 		read<"light" | "dark">(THEME_KEY, "light"),
 	);
 	const [error, setError] = useState<string | undefined>(undefined);
+	const [commands, setCommands] = useState<SlashCommand[]>([]);
 	const [ready, setReady] = useState(false);
+
+	const reportError = useCallback((cause: unknown): void => {
+		setError(cause instanceof Error ? cause.message : String(cause));
+	}, []);
 
 	const workspace = route.workspace === "" ? "general" : route.workspace;
 	const activeId =
@@ -165,9 +203,23 @@ export function usePlatform(): Platform {
 		window.localStorage.setItem(THEME_KEY, JSON.stringify(theme));
 	}, [theme]);
 
-	const reportError = useCallback((cause: unknown): void => {
-		setError(cause instanceof Error ? cause.message : String(cause));
-	}, []);
+	// The commands the server would expand. They are fetched per workspace, once: the list
+	// changes when the workspace's resources change, not when a conversation does.
+	useEffect(() => {
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const list = await fetchCommands(workspace);
+				if (!cancelled) setCommands(list);
+			} catch (cause) {
+				if (!cancelled) reportError(cause);
+			}
+		};
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [workspace, reportError]);
 
 	const conversations = useMemo(
 		() =>
@@ -192,6 +244,95 @@ export function usePlatform(): Platform {
 		() => (state?.conversations ?? []).find((conversation) => conversation.id === activeId),
 		[state, activeId],
 	);
+
+	// How a turn lands while one is running: the worker has to offer steering at all, and then
+	// the choice is the person's, not a heuristic.
+	const choose = useCallback(
+		(change: AgentChange) => {
+			void setAgent(workspace, activeId, change).then(setState).catch(reportError);
+		},
+		[workspace, activeId, reportError],
+	);
+
+	// The composer's three choices. `state.agent` is the effective binding, so a picker shows
+	// what will actually run; `inherited` says whether this conversation chose it, and
+	// `defaultsOrigin` names the layer when it did not.
+	const modelChoices = useMemo(() => toModelChoices(state?.providers ?? []), [state]);
+	const effectiveModel =
+		state === undefined ? "" : `${state.agent.provider}/${state.agent.modelId}`;
+	const thinkingLevels =
+		modelChoices.find((choice) => choice.value === effectiveModel)?.thinkingLevels ?? [];
+	const thinkingValue = state?.agent.thinkingLevel ?? "";
+	const agentValue =
+		state?.resolved?.name ??
+		(state?.agent.definition !== undefined && state.agent.definition !== ""
+			? state.agent.definition
+			: (state?.defaultAgent ?? ""));
+
+	/** Every picker can go back to inheriting: a choice has to be undoable. */
+	const withDefault = (groups: PickerGroup[]): PickerGroup[] => [
+		...groups,
+		{ options: [{ value: "", label: "Use the default" }] },
+	];
+
+	const model: ChoicePicker = {
+		value:
+			modelChoices.find((choice) => choice.value === effectiveModel)?.label ??
+			state?.agent.modelId ??
+			"",
+		origin:
+			state === undefined
+				? undefined
+				: !state.inherited.model
+					? "this conversation"
+					: (state.resolved?.model ?? "") !== ""
+						? "the agent definition"
+						: originLabel(state.defaultsOrigin.model),
+		groups: withDefault(toModelGroups(state?.providers ?? [])),
+		disabled: activeId === "" || modelChoices.length === 0,
+		onSelect: (value) => {
+			if (value === "") {
+				choose({ provider: "", modelId: "" });
+				return;
+			}
+			const slash = value.indexOf("/");
+			choose({ provider: value.slice(0, slash), modelId: value.slice(slash + 1) });
+		},
+	};
+
+	const thinking: ChoicePicker = {
+		value: thinkingValue,
+		origin:
+			state === undefined
+				? undefined
+				: !state.inherited.thinking
+					? "this conversation"
+					: (state.resolved?.thinking ?? "") !== ""
+						? "the agent definition"
+						: originLabel(state.defaultsOrigin.thinking),
+		note:
+			state !== undefined &&
+			(state.agent.thinkingRequested ?? "") !== "" &&
+			state.agent.thinkingRequested !== thinkingValue
+				? `${state.agent.thinkingRequested ?? ""} was asked`
+				: undefined,
+		groups: withDefault(toThinkingGroups(thinkingLevels)),
+		disabled: activeId === "" || (thinkingLevels.length === 0 && thinkingValue === ""),
+		onSelect: (value) => choose({ thinkingLevel: value }),
+	};
+
+	const agent: ChoicePicker = {
+		value: agentValue,
+		origin:
+			state === undefined
+				? undefined
+				: !state.inherited.agent
+					? "this conversation"
+					: originLabel(state.defaultsOrigin.agent),
+		groups: withDefault(toAgentGroups(state?.agents ?? [])),
+		disabled: activeId === "",
+		onSelect: (value) => choose({ definition: value }),
+	};
 
 	const select = useCallback(
 		(id: string) => {
@@ -250,6 +391,10 @@ export function usePlatform(): Platform {
 			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
 		workerUp: state?.workerUp ?? false,
 		steerable: state?.capabilities.steer ?? false,
+		model,
+		thinking,
+		agent,
+		commands,
 		railWidth,
 		railOpen,
 		theme,

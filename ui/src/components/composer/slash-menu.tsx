@@ -1,11 +1,5 @@
+import type { SlashCommand } from "@/app/view-models";
 import { cn } from "cn";
-
-export interface SlashCommand {
-	name: string;
-	description?: string | undefined;
-	argumentHint?: string | undefined;
-	source: string;
-}
 
 export interface SlashMenuProps {
 	commands: SlashCommand[];
