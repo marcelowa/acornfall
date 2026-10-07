@@ -22,7 +22,7 @@ another worker, not changing the control plane.
 
 ## Requirements
 
-- Go 1.24+
+- Go 1.27+
 - bun 1.4+
 - an API key for a supported provider (or the dev provider below)
 
