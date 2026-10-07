@@ -181,6 +181,11 @@
 @layer base {
 	* {
 		@apply border-border;
+
+		/* A thin, trackless scrollbar over the platform's chrome: the default one reads as a
+		 * frame someone forgot to style, and it does not follow the theme on its own. */
+		scrollbar-width: thin;
+		scrollbar-color: var(--scrollbar) transparent;
 	}
 
 	html,

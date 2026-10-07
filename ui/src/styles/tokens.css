@@ -14,6 +14,11 @@
  * ═══════════════════════════════════════════════════════════════════════════════════════════ */
 
 :root {
+	/* Native chrome — scrollbars, form controls, the caret — follows the theme only when the
+	 * browser is told which theme this is. Without it, a dark interface gets bright grey
+	 * scrollbars, which is the tell that nobody decided how they should look. */
+	color-scheme: light;
+
 	/* ────────────────────────────────────────────────────────────────────────────────────────
 	 * Colour ramps. Primitives are theme-independent: a ramp means the same thing in light and
 	 * in dark, and only the semantic layer below decides which step the theme is using. This is
@@ -236,6 +241,10 @@
 	 * weaker than over a light one. */
 	--overlay: color-mix(in oklab, var(--base-neutral-950) 50%, transparent);
 
+	/* The scrollbar is part of the interface: a translucent thumb derived from the muted
+	 * foreground, so it follows the theme by construction, over no track at all. */
+	--scrollbar: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+
 	/* Layout semantics: not a colour, but still a decision every screen would otherwise make
 	 * for itself. The rail is the panel #11 rebuilds; the inspector is #13's, given room only
 	 * where the screen has it (2xl). */
@@ -255,6 +264,8 @@
 }
 
 .dark {
+	color-scheme: dark;
+
 	--background: var(--base-neutral-950);
 	--foreground: var(--base-neutral-100);
 	--card: var(--base-neutral-900);
