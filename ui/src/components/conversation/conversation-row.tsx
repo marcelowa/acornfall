@@ -55,6 +55,8 @@ export function ConversationRow({
 
 	return (
 		<div
+			data-slot="conversation-row"
+			data-id={conversation.id}
 			data-active={active}
 			className={cn(
 				"group flex items-center gap-1 rounded-md px-2 py-1.5",
@@ -64,6 +66,8 @@ export function ConversationRow({
 		>
 			<button
 				type="button"
+				data-slot="conversation-select"
+				data-conversation={conversation.id}
 				onClick={() => onSelect?.(conversation.id)}
 				aria-current={active ? "true" : undefined}
 				className="flex min-w-0 flex-1 items-center gap-2 text-left"

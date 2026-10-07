@@ -115,6 +115,7 @@ export function Split({
 				{onAsideWidthChange === undefined ? null : (
 					<div
 						role="separator"
+						data-slot="splitter"
 						aria-orientation="vertical"
 						aria-label="Resize the rail"
 						aria-valuenow={asideWidth ?? 280}

@@ -19,7 +19,11 @@ export function AssistantMessage({ entry, defaultRaw = false }: AssistantMessage
 	// the reader gets, so it is the pane.
 	if (entry.failure !== undefined) {
 		return (
-			<div className="rounded-lg border border-destructive/40 bg-destructive-subtle px-4 py-3">
+			<div
+				data-slot="assistant"
+				data-error="true"
+				className="rounded-lg border border-destructive/40 bg-destructive-subtle px-4 py-3"
+			>
 				<Text as="div" size="sm" className="text-destructive-subtle-foreground">
 					{entry.failure}
 				</Text>
@@ -32,14 +36,14 @@ export function AssistantMessage({ entry, defaultRaw = false }: AssistantMessage
 	// them the moment it is committed.
 	if (entry.live === true) {
 		return (
-			<div className="w-full">
+			<div data-slot="assistant" data-live="true" className="w-full">
 				<Markdown>{entry.markdown}</Markdown>
 			</div>
 		);
 	}
 
 	return (
-		<div className="w-full">
+		<div data-slot="assistant" className="w-full">
 			{raw ? (
 				<Text as="div" className="whitespace-pre-wrap">
 					{entry.markdown}

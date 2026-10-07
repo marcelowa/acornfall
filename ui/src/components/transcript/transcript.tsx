@@ -16,35 +16,39 @@ export interface TranscriptProps {
 export function Transcript({ entries, onOpenConversation, onFork }: TranscriptProps) {
 	if (entries.length === 0) {
 		return (
-			<Measure size="wide" padding="lg">
-				<Text tone="muted">No messages yet.</Text>
-			</Measure>
+			<div data-slot="transcript">
+				<Measure size="wide" padding="lg">
+					<Text tone="muted">No messages yet.</Text>
+				</Measure>
+			</div>
 		);
 	}
 
 	return (
-		<Measure size="wide" padding="lg">
-			<Stack gap="xl">
-				{entries.map((entry) => {
-					switch (entry.kind) {
-						case "user":
-							return (
-								<UserMessage
-									key={entry.id}
-									entry={entry}
-									onOpenConversation={onOpenConversation}
-									onFork={onFork}
-								/>
-							);
-						case "assistant":
-							return <AssistantMessage key={entry.id} entry={entry} />;
-						case "tool":
-							return <ToolCard key={entry.id} entry={entry} />;
-						case "notice":
-							return <NoticeLine key={entry.id} entry={entry} />;
-					}
-				})}
-			</Stack>
-		</Measure>
+		<div data-slot="transcript">
+			<Measure size="wide" padding="lg">
+				<Stack gap="xl">
+					{entries.map((entry) => {
+						switch (entry.kind) {
+							case "user":
+								return (
+									<UserMessage
+										key={entry.id}
+										entry={entry}
+										onOpenConversation={onOpenConversation}
+										onFork={onFork}
+									/>
+								);
+							case "assistant":
+								return <AssistantMessage key={entry.id} entry={entry} />;
+							case "tool":
+								return <ToolCard key={entry.id} entry={entry} />;
+							case "notice":
+								return <NoticeLine key={entry.id} entry={entry} />;
+						}
+					})}
+				</Stack>
+			</Measure>
+		</div>
 	);
 }

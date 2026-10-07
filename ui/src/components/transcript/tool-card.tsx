@@ -23,7 +23,11 @@ export function ToolCard({ entry }: ToolCardProps) {
 	const status = entry.isError ? "error" : entry.status;
 
 	return (
-		<div className="rounded-lg border border-border bg-card">
+		<div
+			data-slot="tool"
+			data-status={status}
+			className="rounded-lg border border-border bg-card"
+		>
 			<div className="flex items-center gap-2 border-b border-border px-3 py-2">
 				<Text as="span" size="sm" weight="semibold" className="font-mono">
 					{entry.name}

@@ -17,8 +17,8 @@ another worker, not changing the control plane.
 | `docs/adr/` | Decisions. Read `0001-concepts.md` first. |
 | `gateway/` | Go: transport edge, control plane, worker supervision, embedded client. |
 | `worker/` | bun: the Harness, its registry (tools, skills), and credentials. |
-| `gateway/web/` | Client. No build step: plain ES modules, served from the binary. |
-| `ui/` | The rebuilt interface: React, design tokens, Storybook. Built, not yet embedded. |
+| `gateway/web/` | The embedded interface: the built bundle the gateway serves. |
+| `ui/` | The interface itself: React, tokens, Storybook. Built by `make ui-build`. |
 | `tools/` | Browser-driven checks. |
 
 ## Requirements
@@ -219,19 +219,21 @@ are [ADR 0013](docs/adr/0013-test-tiers.md). A feature driven by a tool call —
 blocking one, a subagent being spawned — is driven by `ACORNFALL_DEV_SCRIPT`, a JSON file of
 rules matched against the last user message; see `docs/features.md`.
 
-The Markdown renderer in `gateway/web/markdown.js` **escapes the source once, up front**, and every
-later step operates on escaped text. Model output and tool output are untrusted — a tool
-result can contain anything a file or a command produced — so raw HTML must never
-survive, link targets are scheme-checked rather than passed through, and images are
+The Markdown renderer in `ui/src/components/transcript/render-markdown.ts` **escapes the source
+once, up front**, and every later step operates on escaped text. Model output and tool output
+are untrusted — a tool result can contain anything a file or a command produced — so raw HTML
+must never survive, link targets are scheme-checked rather than passed through, and images are
 refused outright: a remote image in a reply is fetched by your browser, which is a way to
-signal information outward. The checks for all of that live in `tools/check-ui.mjs`
-(`make ui`), in a real DOM, because the sanitiser needs one.
+signal information outward. The checks for all of that live in
+`ui/test/render-markdown.test.ts` under jsdom, because the sanitiser needs a DOM — and needs
+one whose parser it can trust.
 
 `make ui` exists because two bugs shipped that curl could not see: an element looked up
 but never declared, and a modal whose visibility an author rule silently overrode. It
-checks that the panels resize and remember their width, that inspector sections start
-closed and persist, that maximize collapses the others, and that the settings sheet
-starts hidden — then reloads and confirms the preferences came back.
+drives the served interface in a real browser: the splitter resizes the rail and the width
+comes back after a reload, transcript items are neither squashed nor clipped, pane
+controls are per pane, the theme toggle persists, and the phone gets a drawer instead of a
+rail eating the transcript. The inspector and settings-sheet checks arrive with #13.
 
 The worker protocol is defined once per language — `worker/src/protocol.ts` and
 `gateway/internal/protocol/protocol.go` — and documented in `docs/adr/0002-layers-and-protocol.md`.

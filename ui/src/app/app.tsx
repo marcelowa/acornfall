@@ -53,7 +53,7 @@ export function App() {
 	);
 
 	const composer = (
-		<div className="w-full border-t border-border">
+		<div data-slot="composer" className="w-full border-t border-border">
 			<Measure size="wide" padding="md">
 				<Stack direction="horizontal" gap="sm" align="end">
 					<Textarea

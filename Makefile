@@ -12,7 +12,7 @@ URL ?= http://$(ADDR)
 INSECURE ?= 1
 OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 
-.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui vendor run dev fmt clean
+.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui ui-build run dev fmt clean
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -38,8 +38,12 @@ deps: ## install worker, interface, and tool dependencies
 	cd ui && bun install
 	cd tools && bun install
 
-build: ## build the gateway binary
+build: ui-build ## build the gateway binary, with the interface embedded
 	cd gateway && go build -o ../$(BIN) ./cmd/acornfall
+
+ui-build: ## build the interface into the embed directory the gateway serves
+	cd ui && bun run build
+	@touch gateway/web/dist/.gitkeep
 
 tools: ## install the linters used by `make lint`
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install honnef.co/go/tools/cmd/staticcheck@latest
@@ -49,9 +53,7 @@ typecheck: ## the compiler's opinion, without running anything
 	cd worker && bun run typecheck
 	cd ui && bun run typecheck
 
-lint: typecheck ## the static rules; fails on the first one broken
-	bun scripts/check-client.mjs
-	bun scripts/check-context.mjs
+lint: ui-build typecheck ## the static rules; fails on the first one broken
 	@out=$$(gofmt -l gateway); if [ -n "$$out" ]; then echo "$$out"; echo "gofmt: not formatted"; exit 1; fi; echo "gofmt: clean"
 	cd gateway && go vet ./...
 	@if [ -x "$(STATICCHECK)" ]; then cd gateway && $(STATICCHECK) ./... && echo "staticcheck: clean"; \
@@ -92,11 +94,11 @@ TEST_PARALLEL ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 # "serial-ish" for a reason any more — the per-test cleanup made parallel VMs safe.
 SANDBOX_PARALLEL ?= 6
 
-check: typecheck ## fast: the compiler and the unit tests, no processes
+check: ui-build typecheck ## fast: the compiler, the bundle, and the unit tests, no processes
 	cd worker && bun test
 	cd ui && bun test
-	# -count=1 because the suite's inputs include worker/src and gateway/web, which Go's test
-	# cache cannot see: a cached pass would be a pass for code that has changed.
+	# -count=1 because the suite's inputs include worker/src and the built interface, which
+	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	# The end-to-end suite is excluded: it starts a gateway and a worker per test, and that is
 	# its own tier (`make test`). A gate that takes a minute is a gate nobody runs.
 	cd gateway && go test -short -count=1 $$(go list ./... | grep -v /internal/e2e)
@@ -104,15 +106,14 @@ check: typecheck ## fast: the compiler and the unit tests, no processes
 test: lint ## the default tier: units and the feature suite, no hypervisor needed
 	cd worker && bun test
 	# The interface's unit tests are milliseconds and its bundle has to build, or CI's word
-	# about the interface means nothing. Embedding the bundle in the gateway is a later
-	# change; until then building it is the end of the line.
+	# about the interface means nothing.
 	cd ui && bun test
-	cd ui && bun run build
+	$(MAKE) ui-build
 	# ACORNFALL_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
 	# the same command behaves the same on a machine with /dev/kvm and in CI. -short skips the
 	# tests whose assertions need a sandbox; the rest of the feature suite runs in parallel.
-	# -count=1 because the suite's inputs include worker/src and gateway/web, which Go's test
-	# cache cannot see: a cached pass would be a pass for code that has changed.
+	# -count=1 because the suite's inputs include worker/src and the built interface, which
+	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel $(TEST_PARALLEL) ./...
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
@@ -136,14 +137,12 @@ run: build ## run against the current directory
 dev: build ## run with the scripted dev provider (no api key needed)
 	cd worker && ACORNFALL_DEV_PROVIDER=1 ../$(BIN) --addr $(ADDR) $(OPTS) --workspace $(CURDIR) --data-dir $(DATA) --model faux/faux-1 --worker-dir $(CURDIR)/worker
 
-ui: ## check the client in a real browser (needs a running gateway)
+ui: ## check the interface in a real browser (needs a running gateway)
 	cd tools && bun run check-ui.mjs $(URL)
-
-vendor: ## regenerate the vendored browser bundles (marked, DOMPurify, highlight.js)
-	cd tools && bun run vendor.mjs
 
 fmt: ## format Go sources
 	cd gateway && gofmt -w .
 
 clean:
 	rm -rf bin
+	find gateway/web/dist -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true

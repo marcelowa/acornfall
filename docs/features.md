@@ -12,7 +12,7 @@ Each feature is covered at the lowest level that can decide it:
 | Unit (worker) | `bun test` (from `worker/`) | The overlay, guards, commands, skills, credentials, the worker protocol. Under a second. |
 | Feature (end to end) | `go test ./internal/e2e/...` | A real gateway, a real worker, and a scripted provider over HTTP: everything a client can see. Resource tests run on the host engine; tests that need no engine run against the refusal path. |
 | Sandbox engine boundary | `make test-sandbox` | The live driver, the worker SDK (exec streaming, kill, file operations), and the four end-to-end tests that exercise execution and the mounts. Needs a hypervisor (~35s). |
-| Interface | `make ui` | The browser client. Kept, but the client is being rebuilt, so nothing here depends on it. |
+| Interface | `make ui` | The served interface, driven in a real browser: the rail, the transcript, the splitter, per-pane controls, the theme, and the phone drawer. |
 
 `make test` is the default gate: `-short -race`, the worker units, the Go units, and the
 feature suite — resource tests on the host engine, tests that need no engine against the
@@ -192,5 +192,7 @@ and the fix is in the history rather than a workaround:
   streaming execution are exercised against the real SDK there too
   ([ADR 0013](adr/0013-test-tiers.md), [ADR 0015](adr/0015-host-engine.md)).
 - **Memory and self-improvement.** Designed, not built (see `docs/adr/`).
-- **The interface.** `make ui` still covers the client, but the client is being rebuilt, so no
-  feature above depends on it.
+- **The interface.** `make ui` drives the interface the gateway serves: the rail and the
+  transcript, the resizable splitter that remembers its width, per-pane format toggles and
+  copy, the theme toggle, and the phone drawer. The inspector and the settings sheet are
+  still being rebuilt (#13), which is why their assertions are not in the suite yet.

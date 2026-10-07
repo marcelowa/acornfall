@@ -23,7 +23,7 @@ export function UserMessage({ entry, onOpenConversation, onFork }: UserMessagePr
 		// The prefix the sender wrote is for the model; showing it to a person is noise.
 		const body = entry.text.replace(/^\[from (conversation \d+|subagent [^\]]+)\]\s*/, "");
 		return (
-			<div className="rounded-lg border border-border bg-card px-4 py-3">
+			<div data-slot="user" className="rounded-lg border border-border bg-card px-4 py-3">
 				<Text as="div" size="2xs" tone="muted" className="pb-1">
 					{who} {sender.kind === "report" ? "reported" : "asked"}
 				</Text>
@@ -45,7 +45,10 @@ export function UserMessage({ entry, onOpenConversation, onFork }: UserMessagePr
 
 	const forkAt = entry.forkAt;
 	return (
-		<div className="flex w-fit max-w-full flex-col self-end rounded-lg bg-secondary px-4 py-3">
+		<div
+			data-slot="user"
+			className="flex w-fit max-w-full flex-col self-end rounded-lg bg-secondary px-4 py-3"
+		>
 			<Text as="div" className="whitespace-pre-wrap">
 				{entry.text}
 			</Text>

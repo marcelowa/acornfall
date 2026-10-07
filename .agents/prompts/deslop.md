@@ -60,7 +60,7 @@ Routine, behavior-preserving cleanup does not require approval, such as inlining
 - Do not replace clear code with a new abstraction solely to reduce line count.
 - Do not weaken tests to permit simplification. Update tests only when an approved behavior change or a cleaner equivalent structure requires it.
 - A simplification that removes a capability is a feature change: it goes through the approval gate, and `docs/features.md` changes with it.
-- Validate with `make lint` and `make test`. `make check` is the fast half and is not enough on its own; `make test` adds the worker protocol and the end-to-end features under `-race`. When `gateway/web/` changed, `make ui` needs a running gateway.
+- Validate with `make lint` and `make test`. `make check` is the fast half and is not enough on its own; `make test` adds the worker protocol and the end-to-end features under `-race`. When `ui/` changed, `make ui` needs a running gateway.
 
 ## Completion
 

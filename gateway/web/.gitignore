@@ -1,0 +1,4 @@
+# The interface is built here by `make ui-build`; only the placeholder that keeps
+# `go:embed all:dist` satisfiable is repository content.
+dist/*
+!dist/.gitkeep
