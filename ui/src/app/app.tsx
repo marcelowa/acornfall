@@ -1,28 +1,28 @@
 import { useState } from "react";
+import type { BusyAction } from "@/app/view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
-import { Measure } from "@/components/layout/measure";
+import { Composer } from "@/components/composer/composer";
 import { Stack } from "@/components/layout/stack";
 import { Transcript } from "@/components/transcript/transcript";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Text } from "@/components/typography/text";
 import { Shell } from "@/screens/shell";
 import { usePlatform } from "./use-platform";
 
 /**
- * The app: the platform hook's view models and callbacks applied to the dumb screen. This is
- * the only component that renders the Shell, and the composer here is deliberately minimal —
- * #12 rebuilds it with attachments, steering, and the pickers.
+ * The app: the platform hook's view models and callbacks applied to the dumb screen. The
+ * composer's controls are the theme toggle for now; the model, thinking, and agent pickers
+ * land beside it next.
  */
 export function App() {
 	const platform = usePlatform();
 	const [draft, setDraft] = useState("");
+	const [busyAction, setBusyAction] = useState<BusyAction>("steer");
 
 	const submit = (): void => {
 		const text = draft.trim();
 		if (text === "" || platform.active === undefined) return;
-		platform.send(text);
+		platform.send(text, busyAction);
 		setDraft("");
 	};
 
@@ -52,42 +52,6 @@ export function App() {
 		</Text>
 	);
 
-	const composer = (
-		<div data-slot="composer" className="w-full border-t border-border">
-			<Measure size="wide" padding="md">
-				<Stack direction="horizontal" gap="sm" align="end">
-					<Textarea
-						value={draft}
-						onChange={(event) => setDraft(event.target.value)}
-						onKeyDown={(event) => {
-							if (event.key === "Enter" && !event.shiftKey) {
-								event.preventDefault();
-								submit();
-							}
-						}}
-						disabled={platform.active === undefined}
-						placeholder={
-							platform.active === undefined ? "Pick a conversation" : "Send a message"
-						}
-					/>
-					{platform.active?.running === true ? (
-						<Button variant="outline" onClick={platform.abort}>
-							Stop
-						</Button>
-					) : (
-						<Button
-							onClick={submit}
-							disabled={platform.active === undefined || draft.trim() === ""}
-						>
-							Send
-						</Button>
-					)}
-					<ThemeToggle theme={platform.theme} onToggle={platform.toggleTheme} />
-				</Stack>
-			</Measure>
-		</div>
-	);
-
 	return (
 		<Shell
 			rail={rail}
@@ -97,7 +61,27 @@ export function App() {
 			railWidth={platform.railWidth}
 			onRailWidthChange={platform.setRailWidth}
 			transcript={<Transcript entries={platform.entries} onFork={platform.fork} />}
-			composer={composer}
+			composer={
+				<Composer
+					value={draft}
+					onChange={setDraft}
+					onSend={submit}
+					onAbort={platform.abort}
+					running={platform.active?.running === true}
+					steerable={platform.steerable}
+					busyAction={busyAction}
+					onBusyActionChange={setBusyAction}
+					disabled={platform.active === undefined}
+					placeholder={
+						platform.active === undefined ? "Pick a conversation" : "Send a message"
+					}
+					controls={
+						<Stack direction="horizontal" gap="2xs" align="center">
+							<ThemeToggle theme={platform.theme} onToggle={platform.toggleTheme} />
+						</Stack>
+					}
+				/>
+			}
 		/>
 	);
 }

@@ -261,6 +261,10 @@
 	 * inside come from highlight.js. */
 	--code-background: var(--base-neutral-900);
 	--code-foreground: var(--base-neutral-100);
+
+	/* A draft stops growing here and starts scrolling: past this it is not a draft any more,
+	 * it is a document, and it should not own the screen. */
+	--composer-max-height: 200px;
 }
 
 .dark {

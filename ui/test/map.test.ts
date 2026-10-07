@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { failureOf, textOf, toConversation, toTranscript } from "../src/app/map";
+import {
+	failureOf,
+	originLabel,
+	textOf,
+	toConversation,
+	toModelChoices,
+	toTranscript,
+} from "../src/app/map";
 import type { WireConversation, WireView } from "../src/app/wire";
 
 const conversation = (over: Partial<WireConversation> = {}): WireConversation => ({
@@ -131,5 +138,27 @@ describe("the wire mapping", () => {
 				{ type: "text", text: "hi" },
 			]),
 		).toBe("hi");
+	});
+
+	test("a provider without a credential is not a model choice", () => {
+		const choices = toModelChoices([
+			{
+				id: "wired",
+				name: "Wired",
+				authenticated: true,
+				models: [{ id: "opus-5", name: "Opus 5", thinkingLevels: ["low", "high"] }],
+			},
+			{ id: "dead", name: "Dead", authenticated: false, models: [{ id: "x", name: "X" }] },
+		]);
+		expect(choices).toHaveLength(1);
+		expect(choices[0]?.value).toBe("wired/opus-5");
+		expect(choices[0]?.thinkingLevels).toEqual(["low", "high"]);
+	});
+
+	test("an origin is said in words", () => {
+		expect(originLabel("workspace")).toBe("workspace default");
+		expect(originLabel("install")).toBe("install default");
+		expect(originLabel("last-resort")).toBe("last resort");
+		expect(originLabel(undefined)).toBeUndefined();
 	});
 });

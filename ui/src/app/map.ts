@@ -1,9 +1,11 @@
-import type { ConversationSummary, TranscriptEntry } from "./view-models";
+import type { ConversationSummary, ModelChoice, PickerGroup, TranscriptEntry } from "./view-models";
 import type {
+	WireAgentSummary,
 	WireContentBlock,
 	WireConversation,
 	WireEntry,
 	WireMessage,
+	WireProvider,
 	WireSender,
 	WireToolSlot,
 	WireView,
@@ -93,6 +95,72 @@ function toolEntry(
 		args: calls.get(slot.callId)?.args,
 		output: slot.output ?? "",
 	};
+}
+
+/**
+ * The models someone can actually call: a provider without a credential is not a choice, it
+ * is a dead end, and offering it would be offering a lie.
+ */
+export function toModelChoices(providers: WireProvider[]): ModelChoice[] {
+	return providers
+		.filter((provider) => provider.authenticated)
+		.flatMap((provider) =>
+			provider.models.map((model) => ({
+				value: `${provider.id}/${model.id}`,
+				provider: provider.id,
+				modelId: model.id,
+				label: model.name,
+				thinkingLevels: model.thinkingLevels ?? [],
+			})),
+		);
+}
+
+export function toModelGroups(providers: WireProvider[]): PickerGroup[] {
+	return providers
+		.filter((provider) => provider.authenticated && provider.models.length > 0)
+		.map((provider) => ({
+			label: provider.name,
+			options: provider.models.map((model) => ({
+				value: `${provider.id}/${model.id}`,
+				label: model.name,
+				detail:
+					model.contextWindow === undefined
+						? undefined
+						: `${Math.round(model.contextWindow / 1000)}k`,
+			})),
+		}));
+}
+
+export function toThinkingGroups(levels: string[]): PickerGroup[] {
+	return [{ options: levels.map((level) => ({ value: level, label: level })) }];
+}
+
+export function toAgentGroups(agents: WireAgentSummary[]): PickerGroup[] {
+	return [
+		{
+			options: agents.map((agent) => ({
+				value: agent.name,
+				label: agent.name,
+				detail: agent.description ?? agent.layer,
+			})),
+		},
+	];
+}
+
+/** The layer a value resolves from, in words: `install` is not something this conversation chose. */
+export function originLabel(origin: string | undefined): string | undefined {
+	switch (origin) {
+		case undefined:
+			return undefined;
+		case "workspace":
+			return "workspace default";
+		case "install":
+			return "install default";
+		case "last-resort":
+			return "last resort";
+		default:
+			return origin;
+	}
 }
 
 /**

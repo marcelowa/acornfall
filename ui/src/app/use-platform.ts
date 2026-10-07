@@ -9,7 +9,7 @@ import {
 	sendMessage,
 } from "./client";
 import { toConversation, toTranscript } from "./map";
-import type { ConversationSummary, TranscriptEntry } from "./view-models";
+import type { BusyAction, ConversationSummary, TranscriptEntry } from "./view-models";
 import type { WireSender, WireState, WireView } from "./wire";
 
 const RAIL_WIDTH_KEY = "acornfall.ui.railWidth";
@@ -55,6 +55,8 @@ export interface Platform {
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	workerUp: boolean;
+	/** The worker can take a steering input mid-turn; without it the choice is stop or queue. */
+	steerable: boolean;
 	railWidth?: number | undefined;
 	railOpen: boolean;
 	theme: "light" | "dark";
@@ -62,7 +64,7 @@ export interface Platform {
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
 	fork: (at: string) => void;
-	send: (text: string) => void;
+	send: (text: string, whenBusy: BusyAction) => void;
 	abort: () => void;
 	setRailWidth: (width: number) => void;
 	setRailOpen: (open: boolean) => void;
@@ -224,13 +226,10 @@ export function usePlatform(): Platform {
 		[workspace, activeId, reload, reportError],
 	);
 	const send = useCallback(
-		(text: string) => {
-			const busy = active?.running === true;
-			void sendMessage(workspace, activeId, text, busy ? "steer" : "followUp").catch(
-				reportError,
-			);
+		(text: string, whenBusy: BusyAction) => {
+			void sendMessage(workspace, activeId, text, whenBusy).catch(reportError);
 		},
-		[workspace, activeId, active, reportError],
+		[workspace, activeId, reportError],
 	);
 	const abort = useCallback(() => {
 		void abortConversation(workspace, activeId).catch(reportError);
@@ -250,6 +249,7 @@ export function usePlatform(): Platform {
 		active:
 			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
 		workerUp: state?.workerUp ?? false,
+		steerable: state?.capabilities.steer ?? false,
 		railWidth,
 		railOpen,
 		theme,

@@ -77,3 +77,29 @@ export interface NoticeEntry {
 	text: string;
 	at?: Date | undefined;
 }
+
+/** One choice in a picker: the value is what the wire takes, the label is what a person reads. */
+export interface PickerOption {
+	value: string;
+	label: string;
+	detail?: string | undefined;
+}
+
+export interface PickerGroup {
+	label?: string | undefined;
+	options: PickerOption[];
+}
+
+/** How a turn is sent while one is already running. */
+export type BusyAction = "steer" | "followUp";
+
+/** One selectable model, flattened from the providers that are actually authenticated. */
+export interface ModelChoice {
+	/** `provider/modelId`, the value the binding takes. */
+	value: string;
+	provider: string;
+	modelId: string;
+	label: string;
+	/** The levels this model supports; the picker never offers one that is a lie. */
+	thinkingLevels: string[];
+}

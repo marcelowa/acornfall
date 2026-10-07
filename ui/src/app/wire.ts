@@ -43,6 +43,68 @@ export interface WireSandbox {
 	problem?: string | undefined;
 }
 
+export interface WireModel {
+	id: string;
+	name: string;
+	contextWindow?: number | undefined;
+	/** The levels this model supports; ["off"] means it cannot reason at all. */
+	thinkingLevels?: string[] | undefined;
+}
+
+export interface WireProvider {
+	id: string;
+	name: string;
+	authenticated: boolean;
+	source?: string | undefined;
+	models: WireModel[];
+}
+
+export interface WireCapabilities {
+	steer: boolean;
+	subagents: boolean;
+	sandbox: string;
+}
+
+/** What a conversation chose; empty fields are inheriting. */
+export interface WireBinding {
+	provider: string;
+	modelId: string;
+	thinkingLevel?: string | undefined;
+	/** The level asked for when the model could not honour it, so the UI can say why. */
+	thinkingRequested?: string | undefined;
+	definition?: string | undefined;
+}
+
+/** Which layer each resolved default came from: `workspace`, `install`, or `last-resort`. */
+export interface WireDefaultsOrigin {
+	model?: string | undefined;
+	thinking?: string | undefined;
+	agent?: string | undefined;
+}
+
+/** True when the conversation never chose this field. */
+export interface WireInherited {
+	model: boolean;
+	thinking: boolean;
+	agent: boolean;
+}
+
+export interface WireAgentSummary {
+	name: string;
+	description?: string | undefined;
+	source: string;
+	layer: string;
+}
+
+export interface WireCommands {
+	commands: {
+		name: string;
+		description?: string | undefined;
+		argumentHint?: string | undefined;
+		source: string;
+	}[];
+}
+
 export interface WireState {
 	workspace: WireWorkspace;
 	workspaces: WireWorkspace[];
@@ -51,6 +113,15 @@ export interface WireState {
 	workerUp: boolean;
 	workerError?: string | undefined;
 	sandbox: WireSandbox;
+	capabilities: WireCapabilities;
+	agent: WireBinding;
+	defaultModel: WireBinding;
+	defaultThinking: string;
+	defaultAgent: string;
+	defaultsOrigin: WireDefaultsOrigin;
+	inherited: WireInherited;
+	agents: WireAgentSummary[];
+	providers: WireProvider[];
 	seq: number;
 }
 
