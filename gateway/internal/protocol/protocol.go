@@ -179,6 +179,10 @@ type ConversationInfo struct {
 	Running bool `json:"running,omitempty"`
 	// LastEntryID is the client's unread cursor.
 	LastEntryID string `json:"lastEntryId,omitempty"`
+	// UpdatedAt is last activity, Unix milliseconds: the newest entry's own
+	// message timestamp. Zero when the conversation has no entries yet, which
+	// the rail renders flat rather than as an activity that never happened.
+	UpdatedAt int64 `json:"updatedAt,omitempty"`
 	// Committed spend, so an unattended run is never invisible in cost.
 	Tokens float64 `json:"tokens,omitempty"`
 	Cost   float64 `json:"cost,omitempty"`

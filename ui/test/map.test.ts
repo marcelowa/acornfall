@@ -33,6 +33,14 @@ describe("the wire mapping", () => {
 		expect(toConversation(conversation({ hidden: true }), "1", "8").unread).toBe(false);
 	});
 
+	test("last activity is mapped onto the date the rail groups by", () => {
+		const when = Date.now();
+		const dated = toConversation(conversation({ updatedAt: when }), "1", "9");
+		expect(dated.updatedAt?.getTime()).toBe(when);
+		// Absent stays absent: a conversation that never moved renders flat, in no group.
+		expect(toConversation(conversation(), "1", "9").updatedAt).toBeUndefined();
+	});
+
 	test("a user entry keeps its sender and forks at the entry before it", () => {
 		const view: WireView = {
 			entries: [

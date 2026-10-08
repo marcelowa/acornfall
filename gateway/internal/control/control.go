@@ -98,11 +98,14 @@ type Conversation struct {
 	Root  bool   `json:"root"`
 	// Hidden conversations are tombstoned, not deleted; the UI can restore them.
 	Hidden bool `json:"hidden"`
-	// Running, LastEntryID, Tokens, and Cost are live state for the rail.
-	Running     bool    `json:"running"`
-	LastEntryID string  `json:"lastEntryId"`
-	Tokens      float64 `json:"tokens"`
-	Cost        float64 `json:"cost"`
+	// Running, LastEntryID, UpdatedAt, Tokens, and Cost are live state for the rail.
+	Running     bool   `json:"running"`
+	LastEntryID string `json:"lastEntryId"`
+	// UpdatedAt is last activity, Unix milliseconds, so the rail can group by date.
+	// Zero when the conversation has no entries yet, which renders flat.
+	UpdatedAt int64   `json:"updatedAt,omitempty"`
+	Tokens    float64 `json:"tokens"`
+	Cost      float64 `json:"cost"`
 	// Parent marks a subagent conversation: created by another conversation.
 	Parent   string   `json:"parent,omitempty"`
 	Children []string `json:"children,omitempty"`
@@ -2229,6 +2232,7 @@ func toConversations(infos []protocol.ConversationInfo) []Conversation {
 			Hidden:      info.Hidden,
 			Running:     info.Running,
 			LastEntryID: info.LastEntryID,
+			UpdatedAt:   info.UpdatedAt,
 			Tokens:      info.Tokens,
 			Cost:        info.Cost,
 			Parent:      info.Parent,

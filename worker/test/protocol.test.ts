@@ -195,7 +195,7 @@ describe("the worker protocol", () => {
 		expect(created.conversationId).not.toBe("");
 
 		const listed = await worker.call<{
-			conversations: { id: string; root: boolean; hidden: boolean }[];
+			conversations: { id: string; root: boolean; hidden: boolean; updatedAt?: number }[];
 		}>({
 			type: "conversations",
 		});
@@ -204,6 +204,8 @@ describe("the worker protocol", () => {
 		);
 		expect(conversation).toBeDefined();
 		expect(conversation?.root).toBe(false);
+		// A conversation that has not moved carries no activity, so the rail renders it flat.
+		expect(conversation?.updatedAt).toBeUndefined();
 
 		// Configuration is applied per conversation, and the answer says what it resolved to.
 		const opened = await worker.call<{ agent: { name: string }; model: unknown }>({
@@ -255,6 +257,16 @@ describe("the worker protocol", () => {
 				frame.type === "submission" && frame.conversationId === created.conversationId,
 		);
 		expect(submission.type).toBe("submission");
+
+		// The listing carries last activity, so the rail can group by date. The entry is fresh,
+		// so its timestamp is recent Unix milliseconds.
+		const listed = await worker.call<{
+			conversations: { id: string; updatedAt?: number }[];
+		}>({ type: "conversations" });
+		const moved = listed.conversations.find(
+			(candidate) => candidate.id === created.conversationId,
+		);
+		expect(moved?.updatedAt).toBeGreaterThan(Date.now() - 60_000);
 	});
 
 	test("expand rewrites a command into what the model will see", async () => {

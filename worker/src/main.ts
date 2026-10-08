@@ -327,6 +327,22 @@ async function deriveTitle(conversation: Conversation): Promise<string> {
 	return "New conversation";
 }
 
+/**
+ * Last activity is the newest entry's own message timestamp, which is when the
+ * conversation last moved. An entry without timestamps carries none, so the
+ * conversation keeps rendering flat rather than claiming an activity it never had.
+ */
+function lastActivityOf(
+	entry: { model?: readonly { timestamp?: number }[] } | undefined,
+): number | undefined {
+	let newest: number | undefined;
+	for (const message of entry?.model ?? []) {
+		if (typeof message.timestamp !== "number") continue;
+		if (newest === undefined || message.timestamp > newest) newest = message.timestamp;
+	}
+	return newest;
+}
+
 async function listConversations(): Promise<ConversationInfo[]> {
 	const found: ConversationInfo[] = [];
 	let cursor: Parameters<typeof storage.scanConversations>[2];
@@ -354,6 +370,7 @@ async function listConversations(): Promise<ConversationInfo[]> {
 			]);
 			const effectiveModel = agentConfig?.model;
 			const effectiveThinking = agentConfig?.thinkingLevel;
+			const lastActivity = lastActivityOf(newest.items[0]);
 			found.push({
 				id,
 				title,
@@ -363,6 +380,7 @@ async function listConversations(): Promise<ConversationInfo[]> {
 				// shows as running, and a background run is never invisible.
 				running: live?.run !== undefined,
 				lastEntryId: String(newest.items[0]?.id ?? ""),
+				...(lastActivity === undefined ? {} : { updatedAt: lastActivity }),
 				tokens: totalTokens(usage),
 				cost: totalCost(usage),
 				...(parent === undefined ? {} : { parent }),
