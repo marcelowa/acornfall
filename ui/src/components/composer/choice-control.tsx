@@ -70,13 +70,23 @@ export function ChoiceControl({
 							>
 								{choice.picker.value === "" ? "not set" : choice.picker.value}
 							</span>
-							{choice.picker.invalid === true && choice.picker.note !== undefined ? (
-								<span className="shrink-0 text-destructive">
-									· {choice.picker.note}
-								</span>
-							) : null}
 						</span>
 					))}
+					{choices.map((choice) =>
+						choice.picker.note === undefined ? null : (
+							<span
+								key={`${choice.key}-note`}
+								className={cn(
+									"shrink-0",
+									choice.picker.invalid === true
+										? "text-destructive"
+										: "text-muted-foreground",
+								)}
+							>
+								· {choice.picker.note}
+							</span>
+						),
+					)}
 					<ChevronsUpDown className="shrink-0" />
 				</Button>
 			</DialogTrigger>

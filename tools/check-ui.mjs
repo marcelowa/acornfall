@@ -11,6 +11,8 @@
 // covered the old client's version of it belong there.
 //
 // Needs a gateway on --addr; run with: bun run tools/check-ui.mjs [url]
+import { rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import puppeteer from "puppeteer-core";
 
 const url = process.argv[2] ?? process.env.ACORNFALL_URL ?? "http://127.0.0.1:7777";
@@ -66,21 +68,24 @@ async function showConversationWithContent(page) {
 	if (await page.evaluate((selector) => document.querySelectorAll(selector).length > 0, PANES)) {
 		return true;
 	}
-	const picked =
+	// Ask the server which conversation has something to show, then wait for the rail to have
+	// its row: the list is the app's, and it is not the same instant as the answer.
+	const target =
 		(await inPage(page, async () => {
 			const rows = await (await fetch("/api/workspaces/general/conversations")).json();
 			const withContent = (rows ?? []).find(
 				(row) => !row.hidden && row.parent === undefined && row.lastEntryId !== "",
 			);
-			if (withContent === undefined) return "";
-			const button = document.querySelector(
-				`[data-slot=conversation-select][data-conversation="${withContent.id}"]`,
-			);
-			if (button === null) return "";
-			button.click();
-			return withContent.id;
+			return withContent?.id ?? "";
 		})) ?? "";
-	if (picked === "") return false;
+	if (target === "") return false;
+	const row = `[data-slot=conversation-select][data-conversation="${target}"]`;
+	const rendered = await page
+		.waitForSelector(row, { timeout: 10000 })
+		.then(() => true)
+		.catch(() => false);
+	if (!rendered) return false;
+	await press(page, row);
 	await page.waitForFunction(
 		(selector) => document.querySelectorAll(selector).length > 0,
 		{ timeout: 20000, polling: 100 },
@@ -294,6 +299,74 @@ try {
 			);
 			check("the error strip can be dismissed", dismissed);
 		}
+
+		// Creating a workspace for real, which is the one flow here that leaves something
+		// behind. It is created, it has to open on a conversation the gateway made for it, and
+		// then it is forgotten. Forgetting keeps a workspace's state on purpose, and the
+		// sandbox manager writes that folder while tearing the sandbox down — so this leaves
+		// one directory behind, and the next run's cleanup at the top of this block is what
+		// removes it. A fixed name keeps that to one directory rather than one per run.
+		const scratch = "ui-check";
+		const workspacesDir = await page.evaluate(
+			async () => (await (await fetch("/api/state")).json()).workspacesDir ?? "",
+		);
+		const litter = [
+			join(workspacesDir, scratch),
+			join(dirname(workspacesDir), "state", scratch),
+		];
+		for (const path of litter) rmSync(path, { recursive: true, force: true });
+
+		await page.type("[data-slot=workspaces-create] input", scratch);
+		await press(page, "[data-slot=workspaces-create] button");
+		const opened = await page
+			.waitForFunction(
+				(name) =>
+					window.location.pathname === `/w/${name}` ||
+					window.location.pathname.startsWith(`/c/${name}/`),
+				{ timeout: 20000 },
+				scratch,
+			)
+			.then(() => true)
+			.catch(() => false);
+		check("creating a workspace opens it on a conversation", opened, scratch);
+		const fresh = await page.evaluate(async (name) => {
+			const state = await (await fetch(`/api/workspaces/${name}/state`)).json();
+			return {
+				active: state.conversation?.id ?? "",
+				conversations: (state.conversations ?? []).length,
+			};
+		}, scratch);
+		check(
+			"a new workspace opens on one conversation of its own",
+			fresh.active !== "" && fresh.conversations === 1,
+			JSON.stringify(fresh),
+		);
+
+		// Back to the workspace the rest of the suite runs in, before the scratch one goes
+		// away: a tab pointed at a removed workspace has nothing to show.
+		await press(page, "button[aria-label='Workspaces']");
+		await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 5000 });
+		await press(
+			page,
+			`[data-slot=workspace-row][data-name="${workspaceState.active}"] button[aria-label^='Open ']`,
+		);
+		const returned = await page
+			.waitForFunction(
+				(name) =>
+					window.location.pathname === `/w/${name}` ||
+					window.location.pathname.startsWith(`/c/${name}/`),
+				{ timeout: 20000 },
+				workspaceState.active,
+			)
+			.then(() => true)
+			.catch(() => false);
+		check("the workspace in view is reachable again", returned, workspaceState.active);
+
+		await page.evaluate(async (name) => {
+			await fetch(`/api/workspaces/${name}/remove`, { method: "POST" });
+		}, scratch);
+		for (const path of litter) rmSync(path, { recursive: true, force: true });
+
 		await press(page, "button[aria-label='Back to the conversation']");
 		await page.waitForSelector("[data-slot=composer]", { timeout: 5000 });
 	}
@@ -643,19 +716,23 @@ try {
 	// Selecting a conversation from the rail is what tells the harness about it, so this picks
 	// one first: a summary that reads "not set" for the conversation in view is the bug this
 	// part of the check exists for.
-	const selected = await inPage(page, async () => {
-		const rows = await (await fetch("/api/workspaces/general/conversations")).json();
-		const row = (rows ?? []).find(
-			(candidate) => !candidate.hidden && candidate.parent === undefined,
-		);
-		if (row === undefined) return "";
-		const button = document.querySelector(
-			`[data-slot=conversation-select][data-conversation="${row.id}"]`,
-		);
-		button?.click();
-		return button === null ? "" : row.id;
-	});
-	check("a conversation can be selected from the rail", (selected ?? "") !== "");
+	const target =
+		(await inPage(page, async () => {
+			const rows = await (await fetch("/api/workspaces/general/conversations")).json();
+			const row = (rows ?? []).find(
+				(candidate) => !candidate.hidden && candidate.parent === undefined,
+			);
+			return row?.id ?? "";
+		})) ?? "";
+	const targetRow = `[data-slot=conversation-select][data-conversation="${target}"]`;
+	const selectable =
+		target !== "" &&
+		(await page
+			.waitForSelector(targetRow, { timeout: 10000 })
+			.then(() => true)
+			.catch(() => false));
+	if (selectable) await press(page, targetRow);
+	check("a conversation can be selected from the rail", selectable, target);
 	const settled = await page
 		.waitForFunction(
 			async () => {
@@ -670,7 +747,7 @@ try {
 		)
 		.then(() => true)
 		.catch(() => false);
-	check("the conversation in view resolves its agent", settled, String(selected));
+	check("the conversation in view resolves its agent", settled, target);
 
 	const summary = await page.evaluate(
 		() =>
@@ -688,11 +765,13 @@ try {
 		};
 	});
 	// The model shows its display name and the other two show their values, so the check is
-	// that there are three parts and that the two it can name exactly are in the right places.
+	// that the three are there and that the two it can name exactly are in the right places. A
+	// note can follow them — a subagent's agent, a level that was clamped — which is why the
+	// count is a floor rather than an equality.
 	const parts = summary.split("·").map((part) => part.trim());
 	check(
 		"the composer says what runs this conversation in one line",
-		parts.length === 3 && parts.every((part) => part !== "") && wire.model !== "",
+		parts.length >= 3 && parts.slice(0, 3).every((part) => part !== "") && wire.model !== "",
 		`"${summary}"`,
 	);
 	check(
