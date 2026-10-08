@@ -166,7 +166,8 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 	root := c.waitForConversation("general")
 
 	got := c.state("general")
-	if len(got.Agents) != 1 || got.Agents[0].Name != "local-agent" {
+	// The workspace's own agent, beside the general one the worker ships.
+	if len(got.Agents) != 2 || got.Agents[0].Name != "general" || got.Agents[1].Name != "local-agent" {
 		t.Errorf("a workspace's agents should be offered, got %+v", got.Agents)
 	}
 	var commands struct {
