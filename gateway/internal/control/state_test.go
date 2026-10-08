@@ -48,3 +48,25 @@ func TestStateForDescribesTheConversationItWasAskedFor(t *testing.T) {
 		t.Error("the attached conversation has no explicit model, so it inherits one")
 	}
 }
+
+// The listing carries last activity, so the rail can group conversations by date. A
+// conversation that never moved carries none, which the wire omits rather than claiming
+// an activity that never happened: the rail renders it flat, above the groups.
+func TestConversationsCarryLastActivity(t *testing.T) {
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	control.conversations = []protocol.ConversationInfo{
+		{ID: "moved", UpdatedAt: 1767139200000},
+		{ID: "fresh"},
+	}
+
+	state := control.State()
+	if len(state.Conversations) != 2 {
+		t.Fatalf("expected two conversations, got %d", len(state.Conversations))
+	}
+	if state.Conversations[0].UpdatedAt != 1767139200000 {
+		t.Errorf("the listing should carry last activity, got %d", state.Conversations[0].UpdatedAt)
+	}
+	if state.Conversations[1].UpdatedAt != 0 {
+		t.Errorf("a conversation that never moved has no activity to report, got %d", state.Conversations[1].UpdatedAt)
+	}
+}

@@ -96,6 +96,9 @@ export interface ConversationInfo {
 	running: boolean;
 	/** Newest committed entry: the client's unread cursor. */
 	lastEntryId: string;
+	/** Last activity, Unix ms: the newest entry's message timestamp. Absent while
+	 * the conversation has no entries, so a fresh one renders flat until it moves. */
+	updatedAt?: number;
 	/** Committed spend, so a background run is never invisible in cost. */
 	tokens: number;
 	cost: number;

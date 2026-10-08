@@ -60,6 +60,9 @@ func TestConversationLifecycle(t *testing.T) {
 	if created.Root {
 		t.Error("a created conversation is not the root one")
 	}
+	if created.UpdatedAt != 0 {
+		t.Errorf("a conversation that has not moved has no activity to report, got %d", created.UpdatedAt)
+	}
 
 	c.prompt("general", created.ID, "remember this")
 	before := c.waitForText("general", created.ID, "I will remember.")
@@ -206,6 +209,10 @@ func TestPromptRoundTrip(t *testing.T) {
 	}
 	if idle.LastEntryID == "" {
 		t.Error("the newest entry id is the client's unread cursor, so it has to be reported")
+	}
+	// Last activity is what the rail groups by, so a conversation that ran has to carry it.
+	if idle.UpdatedAt == 0 {
+		t.Error("the conversation should report when it last moved, so the rail can group by date")
 	}
 	if idle.Model != "faux/faux-1" {
 		t.Errorf("the conversation should report the model it ran, got %q", idle.Model)

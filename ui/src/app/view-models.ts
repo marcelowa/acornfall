@@ -36,6 +36,9 @@ export interface SandboxSummary {
 export interface ConversationSummary {
 	id: string;
 	title: string;
+	/** Last activity, when the conversation has moved: the rail groups by it, and a
+	 * conversation that never moved renders flat, above the groups. */
+	updatedAt?: Date | undefined;
 	/** The conversation the workspace started with. Identity is text, not a second dot. */
 	root: boolean;
 	/** Tombstoned, not deleted: the rail tucks it under "Deleted" and offers restore. */

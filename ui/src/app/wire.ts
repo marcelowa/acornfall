@@ -25,6 +25,9 @@ export interface WireConversation {
 	hidden: boolean;
 	running: boolean;
 	lastEntryId: string;
+	/** Last activity, Unix ms, from the newest entry's message timestamp. Absent
+	 * while the conversation has no entries, so its row renders flat. */
+	updatedAt?: number | undefined;
 	tokens: number;
 	cost: number;
 	parent?: string | undefined;

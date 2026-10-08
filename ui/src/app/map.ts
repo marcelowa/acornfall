@@ -88,6 +88,9 @@ export function toConversation(
 		createdBy: conversation.createdBy,
 		model: conversation.model,
 		thinking: conversation.thinking,
+		// Last activity, so the rail can group by date; absent stays flat.
+		updatedAt:
+			conversation.updatedAt === undefined ? undefined : new Date(conversation.updatedAt),
 		tokens: conversation.tokens,
 		cost: conversation.cost,
 	};

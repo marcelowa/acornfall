@@ -618,6 +618,7 @@ type conversation struct {
 	Hidden      bool    `json:"hidden"`
 	Running     bool    `json:"running"`
 	LastEntryID string  `json:"lastEntryId"`
+	UpdatedAt   int64   `json:"updatedAt"`
 	Tokens      float64 `json:"tokens"`
 	Cost        float64 `json:"cost"`
 	Parent      string  `json:"parent"`
