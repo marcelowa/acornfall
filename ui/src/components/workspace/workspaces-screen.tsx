@@ -6,6 +6,7 @@ import { Stack } from "@/components/layout/stack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Text } from "@/components/typography/text";
 
 export interface WorkspacesScreenProps {
@@ -27,6 +28,10 @@ export interface WorkspacesScreenProps {
  * Creating one is a name, not a path: the folder is made inside the workspaces folder, and the
  * server refuses a name that would escape it. A new workspace opens with an empty conversation,
  * which is the app's doing — this screen only reports the name.
+ *
+ * Renaming is a dialog rather than a browser prompt, and forgetting is a button rather than a
+ * confirmation: the general workspace cannot be forgotten, and the others are a folder that
+ * stays where it is.
  */
 export function WorkspacesScreen({
 	workspaces,
@@ -37,6 +42,8 @@ export function WorkspacesScreen({
 	onClose,
 }: WorkspacesScreenProps) {
 	const [name, setName] = useState("");
+	/** The workspace being renamed, if any: the dialog is about one row at a time. */
+	const [renaming, setRenaming] = useState<WorkspaceSummary | undefined>(undefined);
 	const create = (): void => {
 		if (name.trim() === "") return;
 		onCreate(name.trim());
@@ -100,14 +107,7 @@ export function WorkspacesScreen({
 									size="xs"
 									variant="ghost"
 									aria-label={`Rename ${workspace.title}`}
-									onClick={() => {
-										const title = window.prompt(
-											"Rename workspace",
-											workspace.title,
-										);
-										if (title !== null && title.trim() !== "")
-											onRename(workspace.name, title.trim());
-									}}
+									onClick={() => setRenaming(workspace)}
 								>
 									Rename
 								</Button>
@@ -158,6 +158,16 @@ export function WorkspacesScreen({
 					</Stack>
 				</Stack>
 			</Measure>
+			<RenameDialog
+				open={renaming !== undefined}
+				title="Rename workspace"
+				initial={renaming?.title ?? ""}
+				onSave={(title) => {
+					if (renaming !== undefined) onRename(renaming.name, title);
+					setRenaming(undefined);
+				}}
+				onCancel={() => setRenaming(undefined)}
+			/>
 		</div>
 	);
 }
