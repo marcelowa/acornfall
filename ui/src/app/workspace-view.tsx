@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronsUpDown, Plus, Settings } from "lucide-react";
 import type { DefaultScope } from "./client";
-import type { BusyAction } from "./view-models";
+import type { BusyAction, ConversationSummary } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
 import { Composer } from "@/components/composer/composer";
 import { SlashMenu } from "@/components/composer/slash-menu";
@@ -19,6 +19,7 @@ import { SettingsScreen } from "@/components/settings/settings-screen";
 import { WorkspacesScreen } from "@/components/workspace/workspaces-screen";
 import { Transcript } from "@/components/transcript/transcript";
 import { Button } from "@/components/ui/button";
+import { RenameDialog } from "@/components/ui/rename-dialog";
 import { StatusPill } from "@/components/ui/status-pill";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
@@ -41,6 +42,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const [draft, setDraft] = useState("");
 	const [busyAction, setBusyAction] = useState<BusyAction>("steer");
 	const [scope, setScope] = useState<DefaultScope>("workspace");
+	/** The conversation being renamed, if any: the rail's menu asks, this dialog answers. */
+	const [renaming, setRenaming] = useState<ConversationSummary | undefined>(undefined);
 
 	// A draft that is one slash word is a command being typed: the menu lists what the server
 	// knows, Enter completes the word, and the expansion itself happens server-side.
@@ -334,7 +337,19 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					) : undefined
 				}
 			/>
-			{inspector}
+			{/* The inspector is about the conversation in front of you, so it is only there
+			 * when one is: on a screen, it would be answering a question nobody asked. */}
+			{screen === undefined ? inspector : null}
+			<RenameDialog
+				open={renaming !== undefined}
+				title="Rename conversation"
+				initial={renaming?.title ?? ""}
+				onSave={(title) => {
+					if (renaming !== undefined) platform.rename(renaming.id, title);
+					setRenaming(undefined);
+				}}
+				onCancel={() => setRenaming(undefined)}
+			/>
 		</>
 	);
 }
