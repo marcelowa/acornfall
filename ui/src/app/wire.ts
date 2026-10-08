@@ -75,20 +75,6 @@ export interface WireBinding {
 	definition?: string | undefined;
 }
 
-/** Which layer each resolved default came from: `workspace`, `install`, or `last-resort`. */
-export interface WireDefaultsOrigin {
-	model?: string | undefined;
-	thinking?: string | undefined;
-	agent?: string | undefined;
-}
-
-/** True when the conversation never chose this field. */
-export interface WireInherited {
-	model: boolean;
-	thinking: boolean;
-	agent: boolean;
-}
-
 export interface WireAgentSummary {
 	name: string;
 	description?: string | undefined;
@@ -139,8 +125,8 @@ export interface WireState {
 	/** Each scope's own layer, unresolved: what the settings screen shows per tab. */
 	workspaceDefaults: WireScopeDefaults;
 	installDefaults: WireScopeDefaults;
-	defaultsOrigin: WireDefaultsOrigin;
-	inherited: WireInherited;
+	/** True when another conversation created this one: its configuration is that one's. */
+	subagent: boolean;
 	agents: WireAgentSummary[];
 	providers: WireProvider[];
 	seq: number;

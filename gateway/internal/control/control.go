@@ -1267,6 +1267,13 @@ func (in resolveInputs) effective() protocol.ModelBinding {
 	if effective.Definition == "" {
 		effective.Definition = in.defaultAgent
 	}
+	// And the general agent is what runs when nothing named one. Naming it here is what lets
+	// the interface show an agent for every conversation, including a subagent's: that one's
+	// configuration is copied from its creator and never re-applied, so there is nothing
+	// else that would ever fill the name in.
+	if effective.Definition == "" {
+		effective.Definition = GeneralAgent
+	}
 	return effective
 }
 
