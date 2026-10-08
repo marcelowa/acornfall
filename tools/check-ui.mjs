@@ -292,8 +292,20 @@ try {
 			stripText.includes("cannot contain a slash"),
 			stripText.replace(/\s+/g, " ").slice(0, 90),
 		);
+		check(
+			"a refused action can be asked again",
+			strip === null
+				? false
+				: await strip.evaluate(
+					(element) =>
+						element.querySelector("button:not([aria-label='Dismiss the error'])") !==
+						null,
+					),
+		);
 		if (strip !== null) {
-			await strip.evaluate((element) => element.querySelector("button")?.click());
+			await strip.evaluate((element) =>
+				element.querySelector("button[aria-label='Dismiss the error']")?.click(),
+			);
 			const dismissed = await page.evaluate(
 				() => document.querySelector("[data-slot=error-strip]") === null,
 			);
@@ -836,13 +848,17 @@ try {
 		await page.keyboard.press("Backspace");
 	}
 
-	// 7. The inspector: an overlay behind a floating toggle in the top-right corner, closed by
-	// default, and not remembered — opening it is a question asked now, not a preference.
+	// 7. The inspector: an overlay behind the header toggle in the top-right corner, closed
+	// by default, and not remembered — opening it is a question asked now, not a preference.
 	await page.setViewport({ width: 1400, height: 900 });
-	const inspectorToggle = await page.$("[data-slot=inspector-toggle]");
-	check("the inspector has a toggle in the corner", inspectorToggle !== null);
-	if (inspectorToggle !== null) {
-		const corner = await inspectorToggle.evaluate((element) => {
+	// The toggle exists twice — the desktop header and the small-screen bar, one hidden —
+	// so the suite asks for the one a reader can see.
+	const visibleToggleBox = () =>
+		inPage(page, () => {
+			const element = [...document.querySelectorAll("[data-slot=inspector-toggle]")].find(
+				(candidate) => candidate.getClientRects().length > 0,
+			);
+			if (element === undefined) return null;
 			const box = element.getBoundingClientRect();
 			return {
 				fromTop: box.top,
@@ -850,8 +866,16 @@ try {
 				bottom: box.bottom,
 			};
 		});
+	const pressVisibleToggle = () =>
+		inPage(page, () => {
+			[...document.querySelectorAll("[data-slot=inspector-toggle]")
+			].find((candidate) => candidate.getClientRects().length > 0)?.click();
+		});
+	const corner = await visibleToggleBox();
+	check("the inspector has a toggle in the corner", corner !== null);
+	if (corner !== null) {
 		check(
-			"the toggle floats in the top-right corner",
+			"the toggle sits in the top-right corner",
 			corner.fromTop < 40 && corner.fromRight < 40,
 			`${Math.round(corner.fromTop)}px from the top, ${Math.round(corner.fromRight)}px from the right`,
 		);
@@ -860,7 +884,7 @@ try {
 			await page.evaluate(() => document.querySelector("[data-slot=inspector]") === null),
 		);
 
-		await press(page, "[data-slot=inspector-toggle]");
+		await pressVisibleToggle();
 		const overlay = await page
 			.waitForSelector("[data-slot=inspector]", { timeout: 5000 })
 			.catch(() => null);
@@ -921,7 +945,7 @@ try {
 			check("the inspector closes", true);
 
 			// Not remembered: the reload is the point of the check, so it comes after a visit.
-			await press(page, "[data-slot=inspector-toggle]");
+			await pressVisibleToggle();
 			await page.waitForSelector("[data-slot=inspector]", { timeout: 5000 });
 			await page.reload({ waitUntil: "domcontentloaded" });
 			await page.waitForSelector("[data-slot=inspector-toggle]", { timeout: 15000 });
