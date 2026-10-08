@@ -163,6 +163,8 @@ export interface Platform {
 	renameWorkspace: (name: string, title: string) => void;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
+	/** The conversation in view was created by another one, so its choices are not its own. */
+	subagent: boolean;
 	/** The worker can take a steering input mid-turn; without it the choice is stop or queue. */
 	steerable: boolean;
 	/** Model, thinking, and agent as the conversation resolves them, with their layer. */
@@ -399,6 +401,10 @@ export function usePlatform(): Platform {
 	// A pin can outlive what it names; the value is still shown — it is what the conversation
 	// is pinned to — and it is marked when it cannot run here any more.
 	const stale = state === undefined ? { model: false, agent: false } : stalePins(state);
+	// A subagent runs what its creator gave it: the pickers show that rather than offering a
+	// change the gateway would not apply.
+	const subagent = state?.subagent === true;
+	const fixed = activeId === "" || subagent;
 	const pinnedModel = modelChoices.find((choice) => choice.value === effectiveModel);
 
 	/** Every picker can go back to inheriting: a choice has to be undoable. */
@@ -412,7 +418,7 @@ export function usePlatform(): Platform {
 		invalid: stale.model,
 		note: stale.model ? "not available here" : undefined,
 		groups: withDefault(toModelGroups(state?.providers ?? [])),
-		disabled: activeId === "" || modelChoices.length === 0,
+		disabled: fixed || modelChoices.length === 0,
 		onSelect: (value) => {
 			if (value === "") {
 				choose({ provider: "", modelId: "" });
@@ -432,16 +438,16 @@ export function usePlatform(): Platform {
 				? `${state.agent.thinkingRequested ?? ""} was asked`
 				: undefined,
 		groups: withDefault(toThinkingGroups(thinkingLevels)),
-		disabled: activeId === "" || (thinkingLevels.length === 0 && thinkingValue === ""),
+		disabled: fixed || (thinkingLevels.length === 0 && thinkingValue === ""),
 		onSelect: (value) => choose({ thinkingLevel: value }),
 	};
 
 	const agent: ChoicePicker = {
 		value: agentValue,
 		invalid: stale.agent,
-		note: stale.agent ? "definition is gone" : undefined,
+		note: stale.agent ? "definition is gone" : subagent ? "set by its creator" : undefined,
 		groups: withDefault(toAgentGroups(state?.agents ?? [])),
-		disabled: activeId === "",
+		disabled: fixed,
 		onSelect: (value) => choose({ definition: value }),
 	};
 
@@ -566,27 +572,16 @@ export function usePlatform(): Platform {
 
 	const createWorkspace = useCallback(
 		(name: string) => {
-			act(
-				createWorkspaceRequest(name).then(() => createConversationRequest(name)),
-				() => {
-					// A new workspace is opened the way it is meant to be used: with an empty
-					// conversation ready, not an empty screen and a button to press.
-					void createConversationRequest(name)
-						.then((created) => {
-							const id = created.conversation?.id ?? "";
-							window.history.pushState(
-								null,
-								"",
-								`/c/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
-							);
-							setView(undefined);
-							setRoute({ screen: "conversation", workspace: name, conversation: id });
-						})
-						.catch(reportError);
-				},
-			);
+			act(createWorkspaceRequest(name), () => {
+				// The workspace opens on its first conversation, which the gateway makes for a
+				// workspace that has none — so there is nothing to create here, and creating one
+				// would leave the new workspace with two.
+				window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
+				setView(undefined);
+				setRoute({ screen: "conversation", workspace: name, conversation: "" });
+			});
 		},
-		[act, reportError],
+		[act],
 	);
 
 	const removeWorkspace = useCallback(
@@ -676,6 +671,7 @@ export function usePlatform(): Platform {
 		entries,
 		active:
 			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
+		subagent,
 		workerUp: state?.workerUp ?? false,
 		workerError: state?.workerError,
 		steerable: state?.capabilities.steer ?? false,

@@ -195,6 +195,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			},
 		],
 		selectWorkspace: noop,
+		subagent: false,
 		screen: "conversation",
 		showScreen: noop,
 		newConversation: noop,
