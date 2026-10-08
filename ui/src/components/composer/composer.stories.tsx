@@ -1,12 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState, type ReactNode } from "react";
-import type { BusyAction } from "@/app/view-models";
 import { Composer } from "./composer";
 import { ChoiceControl } from "./choice-control";
 import { SlashMenu } from "./slash-menu";
 
 const meta = {
-	title: "Composer/Composer",
+	title: "Conversation/Composer",
 	component: Composer,
 	parameters: { layout: "fullscreen" },
 } satisfies Meta<typeof Composer>;
@@ -66,8 +65,8 @@ export const Idle: Story = {
 		onAbort: noop,
 		running: false,
 		steerable: true,
-		busyAction: "steer",
-		onBusyActionChange: noop,
+		onSteer: noop,
+		onQueue: noop,
 		controls,
 	},
 	render: (args) => (
@@ -86,18 +85,18 @@ export const Running: Story = {
 		onAbort: noop,
 		running: true,
 		steerable: true,
-		busyAction: "steer",
-		onBusyActionChange: noop,
+		onSteer: noop,
+		onQueue: noop,
 		controls,
 	},
 };
 
 /** The worker cannot steer: the only busy choices are stop and queue. */
+/** The worker cannot steer: Stop and Queue are the only landings. */
 export const RunningWithoutSteering: Story = {
 	args: {
 		...Running.args,
 		steerable: false,
-		busyAction: "followUp",
 	},
 };
 
@@ -132,10 +131,74 @@ export const WithSlashMenu: Story = {
 	},
 };
 
-/** Steering chosen while a turn runs: the send button says how the message lands. */
-export const SteerChosen: Story = {
+const slashCommands = [
+	{ name: "compact", description: "Compact the context now", source: "builtin" },
+	{
+		name: "review",
+		description: "Review the current diff",
+		source: "workspace",
+		argumentHint: "[paths]",
+	},
+	{ name: "clear", description: "Start a fresh context", source: "builtin" },
+];
+
+/** The slash menu with its keyboard: arrows move, Enter picks, Escape dismisses. */
+function SlashKeyboardDemo() {
+	const [value, setValue] = useState("/r");
+	const [index, setIndex] = useState(0);
+	const word = /^\/(\S*)$/.exec(value)?.[1] ?? null;
+	const matches =
+		word === null ? [] : slashCommands.filter((command) => command.name.startsWith(word));
+	const clamped = matches.length === 0 ? 0 : Math.min(index, matches.length - 1);
+	return (
+		<Frame>
+			{([, setDraft]) => (
+				<Composer
+					value={value}
+					onChange={(next) => {
+						setValue(next);
+						setDraft(next);
+					}}
+					onSend={noop}
+					onAbort={noop}
+					running={false}
+					steerable
+					onSteer={noop}
+					onQueue={noop}
+					controls={controls}
+					above={
+						matches.length === 0 ? undefined : (
+							<SlashMenu
+								commands={matches}
+								highlighted={clamped}
+								onHighlight={setIndex}
+								onSelect={setValue}
+							/>
+						)
+					}
+					slashCount={matches.length}
+					slashIndex={clamped}
+					onSlashIndexChange={setIndex}
+					onSlashPick={(pick) => {
+						const match = matches[pick];
+						if (match !== undefined) setValue(`/${match.name} `);
+					}}
+					onSlashDismiss={() => setValue("")}
+				/>
+			)}
+		</Frame>
+	);
+}
+
+/** Busy on a phone: the summary gets its own row and the actions sit right below it. */
+export const RunningOnPhone: Story = {
 	args: {
 		...Running.args,
-		busyAction: "steer" as BusyAction,
 	},
+	globals: { viewport: { value: "phone" } },
+};
+
+export const SlashKeyboard: Story = {
+	args: { ...Idle.args, value: "/r" },
+	render: () => <SlashKeyboardDemo />,
 };

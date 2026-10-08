@@ -1,9 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { PanelRight } from "lucide-react";
 import { Text } from "@/components/typography/text";
+import { Button } from "@/components/ui/button";
 import { Inspector, type InspectorSection } from "./inspector";
 
+const trigger = (
+	<Button type="button" variant="ghost" size="icon-sm" aria-label="Inspector">
+		<PanelRight />
+	</Button>
+);
+
 const meta = {
-	title: "Inspector/Inspector",
+	title: "Conversation/Inspector",
 	component: Inspector,
 	parameters: { layout: "fullscreen" },
 } satisfies Meta<typeof Inspector>;
@@ -38,9 +46,9 @@ const sections: InspectorSection[] = [
 	},
 ];
 
-/** The overlay closed: what the interface shows is the toggle in the top-right corner. */
+/** The overlay closed: what the interface shows is the header toggle. */
 export const Closed: Story = {
-	args: { sections },
+	args: { sections, trigger },
 };
 
 /**
@@ -48,12 +56,12 @@ export const Closed: Story = {
  * open state, so this one starts open — the app never passes this.
  */
 export const Open: Story = {
-	args: { sections, defaultOpen: true },
+	args: { sections, trigger, defaultOpen: true },
 };
 
 /** The catalogue's other state: a reader who put one section away while reading another. */
 export const SectionPutAway: Story = {
-	args: { sections, defaultOpen: true },
+	args: { sections, trigger, defaultOpen: true },
 	play: async ({ canvasElement }) => {
 		const button = canvasElement.querySelector<HTMLButtonElement>(
 			'[data-section="agent"] button[aria-expanded]',

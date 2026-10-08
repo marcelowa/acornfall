@@ -34,10 +34,16 @@ interface RowAction {
 }
 
 /**
- * One rail row: the title, live state as a dot, and identity as text — the rule ADR 0009
- * settled, because a second coloured dot would be three meanings for one shape. Identity is
- * the visible metadata (`#3 ·peer`) and spend lives in the tooltip, as the old client had
- * it: a 280px rail has room for a title or a column of numbers, not both.
+ * One rail row: the live state as a dot in a fixed leading column, then the title, nothing
+ * else on the line. The dot sits at the same x on every row, so running and unread align
+ * down the rail instead of jittering after variable-width titles; identity (`#3 ·peer`) and
+ * spend live in the tooltip, as the old client had them. A 280px rail has room for a title
+ * or a column of numbers, not both — and the strongest position in the line belongs to the
+ * title, not the metadata.
+ *
+ * The active row says so three ways at once — the subtle wash, a semibold title, and a
+ * brand bar at the left edge — because a wash alone cannot be found at a glance. Hover is
+ * the full accent, not a half wash, for the same reason.
  *
  * The actions are a menu, not two buttons waiting on a hover: a hover does not exist on a
  * touch screen, and the second button was a delete sitting one slip away from a rename. The
@@ -59,18 +65,17 @@ export function ConversationRow({
 		conversation.root ? "root" : null,
 		conversation.createdBy === undefined ? null : "peer",
 	].filter((tag) => tag !== null);
-	const identity = `#${conversation.id}${tags.length === 0 ? "" : ` ·${tags.join(" ·")}`}`;
-	const spend =
-		conversation.tokens > 0
-			? `${formatTokens(conversation.tokens)}${
-					conversation.cost > 0 ? ` · ${formatCost(conversation.cost)}` : ""
-				}`
-			: "";
+	// Identity and spend are tooltip-only: the line keeps the title.
 	const title = [
+		`#${conversation.id}${tags.length === 0 ? "" : ` ·${tags.join(" ·")}`}`,
 		conversation.createdBy === undefined
 			? ""
 			: `created by conversation ${conversation.createdBy}`,
-		spend,
+		conversation.tokens > 0
+			? `${formatTokens(conversation.tokens)}${
+					conversation.cost > 0 ? ` · ${formatCost(conversation.cost)}` : ""
+					}`
+			: "",
 	]
 		.filter((part) => part !== "")
 		.join(" · ");
@@ -88,39 +93,43 @@ export function ConversationRow({
 			data-id={conversation.id}
 			data-active={active}
 			className={cn(
-				"group flex items-center gap-1 rounded-md px-2 py-1.5",
-				active ? "bg-accent" : "hover:bg-accent/50",
+				"group relative flex items-center gap-1 rounded-md px-2 py-1.5",
+				active ? "bg-primary-subtle hover:bg-primary-subtle" : "hover:bg-accent",
 				className,
 			)}
-		>
+			>
+			{active ? (
+				<span
+					aria-hidden
+					className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary"
+				/>
+			) : null}
 			<button
 				type="button"
 				data-slot="conversation-select"
 				data-conversation={conversation.id}
 				onClick={() => onSelect?.(conversation.id)}
 				aria-current={active ? "true" : undefined}
-				className="flex min-w-0 flex-1 items-center gap-2 text-left"
+				title={title === "" ? undefined : title}
+				className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-2 text-left"
 			>
+				<span className="flex w-4 shrink-0 items-center justify-center">
+					{conversation.running ? (
+						<StatusDot state="running" />
+					) : conversation.unread ? (
+						<StatusDot state="unread" />
+					) : null}
+				</span>
 				<span
 					className={cn(
 						"truncate text-sm",
 						conversation.hidden
 							? "text-muted-foreground line-through"
 							: "text-foreground",
+						active && "font-semibold",
 					)}
 				>
 					{conversation.title}
-				</span>
-				{conversation.running ? (
-					<StatusDot state="running" />
-				) : conversation.unread ? (
-					<StatusDot state="unread" />
-				) : null}
-				<span
-					className="ml-auto flex shrink-0 items-center gap-1 font-mono text-2xs text-muted-foreground"
-					title={title === "" ? undefined : title}
-				>
-					<span>{identity}</span>
 				</span>
 			</button>
 			<span className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">

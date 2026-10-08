@@ -49,7 +49,7 @@ export function UserMessage({ entry, onOpenConversation, onFork }: UserMessagePr
 			data-slot="user"
 			className="flex w-fit max-w-full flex-col self-end rounded-lg bg-secondary px-4 py-3"
 		>
-			<Text as="div" className="whitespace-pre-wrap">
+			<Text as="div" size="lg" className="whitespace-pre-wrap">
 				{entry.text}
 			</Text>
 			<PaneFooter at={entry.at}>

@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SlashMenu } from "./slash-menu";
 
 const meta = {
-	title: "Composer/SlashMenu",
+	title: "Conversation/SlashMenu",
 	component: SlashMenu,
 	parameters: { layout: "centered" },
 } satisfies Meta<typeof SlashMenu>;
@@ -30,4 +30,24 @@ export const Commands: Story = {
 
 export const Empty: Story = {
 	args: { commands: [], onSelect: noop },
+};
+
+/** The keyboard highlight; hover syncs it. */
+export const Highlighted: Story = {
+	args: {
+		...Commands.args,
+		highlighted: 1,
+	},
+};
+
+/** More than a screen of matches: the menu caps at eight and says so. */
+export const Overflow: Story = {
+	args: {
+		commands: Array.from({ length: 12 }, (_, index) => ({
+			name: `command-${index}`,
+			description: `Does thing number ${index}`,
+			source: "builtin",
+		})),
+		onSelect: noop,
+	},
 };

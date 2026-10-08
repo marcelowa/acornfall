@@ -27,28 +27,53 @@ const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
 	variants: {
 		gap: gapScale,
 		collapsed: { true: "", false: "" },
+		docked: { true: "", false: "" },
 	},
 	compoundVariants: [
 		{
 			collapsed: false,
+			docked: false,
 			className: "lg:grid-cols-[var(--rail-width)_minmax(0,1fr)]",
 		},
 		{
 			collapsed: true,
+			docked: false,
 			className: "lg:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)]",
 		},
+		{
+			collapsed: false,
+			docked: true,
+			className:
+				"lg:grid-cols-[var(--rail-width)_minmax(0,1fr)] 2xl:grid-cols-[var(--rail-width)_minmax(0,1fr)_var(--inspector-width)]",
+		},
+		{
+			collapsed: true,
+			docked: true,
+			className:
+				"lg:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)] 2xl:grid-cols-[var(--rail-collapsed-width)_minmax(0,1fr)_var(--inspector-width)]",
+		},
 	],
-	defaultVariants: { gap: "none", collapsed: false },
+	defaultVariants: { gap: "none", collapsed: false, docked: false },
 });
 
 export interface SplitProps extends VariantProps<typeof splitVariants> {
 	aside: ReactNode;
 	/** Sits in the small-screen bar beside the rail toggle. The conversation title, usually. */
 	bar?: ReactNode | undefined;
+	/** The desktop row above the transcript: the title again, beside pane controls. */
+	header?: ReactNode | undefined;
+	/** A third column where the screen has room (2xl): the docked inspector, usually. */
+	inspector?: ReactNode | undefined;
 	asideLabel?: string | undefined;
 	/** The drawer, below `lg`. */
 	asideOpen?: boolean | undefined;
 	onAsideOpenChange?: ((open: boolean) => void) | undefined;
+	/**
+	 * The app carries the collapse toggle itself — in the rail head, beside the workspace
+	 * title — instead of Split floating one over the rail. The collapsed strip keeps its
+	 * own way back either way.
+	 */
+	inlineAsideToggle?: boolean | undefined;
 	/** The column, from `lg` up. False keeps it open, which is the default. */
 	asideCollapsed?: boolean | undefined;
 	onAsideCollapsedChange?:
@@ -63,9 +88,12 @@ export interface SplitProps extends VariantProps<typeof splitVariants> {
 export function Split({
 	aside,
 	bar,
+	header,
+	inspector,
 	asideLabel = "Conversations",
 	asideOpen,
 	onAsideOpenChange,
+	inlineAsideToggle = false,
 	asideCollapsed = false,
 	onAsideCollapsedChange,
 	asideWidth,
@@ -130,14 +158,17 @@ export function Split({
 
 	return (
 		<div
-			className={cn(splitVariants({ gap, collapsed: asideCollapsed }), className)}
+			className={cn(
+				splitVariants({ gap, collapsed: asideCollapsed, docked: inspector !== undefined }),
+				className,
+			)}
 			style={width}
 		>
 			<aside className="relative hidden min-h-0 min-w-0 flex-col lg:flex">
 				{asideCollapsed ? (
 					// Collapsed, the rail is the toggle and nothing else: a strip that keeps the
 					// way back where the rail was, instead of a button floating over the transcript.
-					<div className="flex min-h-0 flex-1 flex-col items-center overflow-hidden border-r border-border bg-card py-1">
+					<div className="flex min-h-0 flex-1 flex-col items-center overflow-hidden border-r border-border bg-rail py-1">
 						{toggle}
 					</div>
 				) : (
@@ -145,7 +176,9 @@ export function Split({
 						{/* The pane clips; its content owns its scroll. The handle stays outside the clip
 						 * so a drag does not lose the half that sits on the border. */}
 						<div className="flex min-h-0 flex-1 flex-col overflow-hidden">{aside}</div>
-						<div className="absolute top-1 right-1 z-10">{toggle}</div>
+						{inlineAsideToggle ? null : (
+							<div className="absolute top-1 right-1 z-10">{toggle}</div>
+						)}
 						{onAsideWidthChange === undefined ? null : (
 							<div
 								role="separator"
@@ -199,8 +232,11 @@ export function Split({
 							aria-describedby={undefined}
 						>
 							<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
-							<div className="relative flex min-h-0 flex-1 flex-col">
-								<div className="absolute top-1 right-1 z-10">
+							<div className="flex min-h-0 flex-1 flex-col">
+								{/* The close gets its own row: absolutely positioned over the rail
+								 * it would land on the head's own icon buttons, which is exactly
+								 * the overlap the floating toggle used to be. */}
+								<div className="flex shrink-0 items-center justify-end">
 									<SheetClose asChild>
 										<Button
 											type="button"
@@ -220,8 +256,16 @@ export function Split({
 						<div className="flex min-w-0 flex-1 items-center">{bar}</div>
 					)}
 				</div>
+				{header === undefined ? null : (
+					<div className="hidden shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 lg:flex">
+						{header}
+					</div>
+				)}
 				{children}
 			</div>
+			{inspector === undefined ? null : (
+				<div className="hidden min-h-0 min-w-0 flex-col 2xl:flex">{inspector}</div>
+			)}
 		</div>
 	);
 }

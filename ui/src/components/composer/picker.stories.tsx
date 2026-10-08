@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Picker } from "./picker";
 
 const meta = {
-	title: "Composer/Picker",
+	title: "Conversation/Picker",
 	component: Picker,
 	parameters: { layout: "centered" },
 } satisfies Meta<typeof Picker>;

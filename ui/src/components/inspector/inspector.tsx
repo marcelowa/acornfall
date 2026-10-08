@@ -1,6 +1,4 @@
-import { useState, type ReactNode } from "react";
-import { ChevronRight, PanelRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import type { ReactNode } from "react";
 import {
 	Dialog,
 	DialogContent,
@@ -10,6 +8,7 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "cn";
+import { InspectorSections } from "./inspector-sections";
 
 export interface InspectorSection {
 	key: string;
@@ -19,17 +18,31 @@ export interface InspectorSection {
 	body: ReactNode;
 }
 
-export interface InspectorProps {
+export type InspectorProps = {
 	sections: InspectorSection[];
-	/** Open on mount, for the catalogue: the overlay is otherwise the toggle's business. */
-	defaultOpen?: boolean | undefined;
+	/** The control that asks the question. Absent in the app: the header toggle opens a
+	 * controlled dialog, so there is exactly one toggle in the tree. */
+	trigger?: ReactNode | undefined;
 	className?: string | undefined;
-}
+} & (
+	| {
+			open: boolean;
+			onOpenChange: (open: boolean) => void;
+			defaultOpen?: never;
+	  }
+	| {
+			open?: never;
+			onOpenChange?: never;
+			/** Open on mount, for the catalogue: the app always starts closed. */
+			defaultOpen?: boolean;
+	  }
+);
 
 /**
- * The panel that answers "why did it see that", as an overlay rather than a column: the
- * question is about the conversation in front of you, and it is asked rarely enough that a
- * pane which is always there costs more than it gives.
+ * The panel that answers "why did it see that", as an overlay: the question is about the
+ * conversation in front of you. Where the screen has room (2xl) the app docks the same
+ * sections beside the transcript instead — see `InspectorPanel` — and this dialog stays
+ * the small-screen form.
  *
  * It is not remembered. Opening it is a question you ask now; the next visit starts closed,
  * because a panel that reappears because it appeared once is a panel you have to close.
@@ -37,31 +50,17 @@ export interface InspectorProps {
  * Every section is open when the overlay opens — you asked for the details — and a section
  * can be put away while you read another.
  */
-export function Inspector({ sections, defaultOpen, className }: InspectorProps) {
-	const [closed, setClosed] = useState<string[]>([]);
-	const initial = defaultOpen === undefined ? {} : { defaultOpen };
-
-	const toggle = (key: string): void =>
-		setClosed((current) =>
-			current.includes(key)
-				? current.filter((candidate) => candidate !== key)
-				: [...current, key],
-		);
-
-	return (
-		<Dialog {...initial}>
-			<DialogTrigger asChild>
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-sm"
-					aria-label="Inspector"
-					data-slot="inspector-toggle"
-					className="fixed top-2 right-2 z-40"
-				>
-					<PanelRight />
-				</Button>
-			</DialogTrigger>
+export function Inspector({
+	sections,
+	trigger,
+	open,
+	onOpenChange,
+	defaultOpen,
+	className,
+}: InspectorProps) {
+	const triggerNode =
+		trigger === undefined ? null : <DialogTrigger asChild>{trigger}</DialogTrigger>;
+	const content = (
 			<DialogContent
 				data-slot="inspector"
 				className={cn(
@@ -77,39 +76,22 @@ export function Inspector({ sections, defaultOpen, className }: InspectorProps) 
 					</DialogDescription>
 				</DialogHeader>
 				<div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-					{sections.map((section) => {
-						const isOpen = !closed.includes(section.key);
-						return (
-							<section
-								key={section.key}
-								data-section={section.key}
-								className="border-b border-border last:border-b-0"
-							>
-								<button
-									type="button"
-									aria-expanded={isOpen}
-									onClick={() => toggle(section.key)}
-									className="flex w-full min-w-0 items-center gap-1.5 py-2 text-left text-sm hover:text-foreground"
-								>
-									<ChevronRight
-										className={cn(
-											"size-3.5 shrink-0 transition-transform",
-											isOpen && "rotate-90",
-										)}
-									/>
-									<span className="font-medium">{section.title}</span>
-									{isOpen || section.hint === undefined ? null : (
-										<span className="truncate text-2xs text-muted-foreground">
-											{section.hint}
-										</span>
-									)}
-								</button>
-								{isOpen ? <div className="pb-3">{section.body}</div> : null}
-							</section>
-						);
-					})}
+					<InspectorSections sections={sections} />
 				</div>
 			</DialogContent>
+		);
+	if (open !== undefined && onOpenChange !== undefined) {
+		return (
+			<Dialog open={open} onOpenChange={onOpenChange}>
+				{triggerNode}
+				{content}
+			</Dialog>
+		);
+	}
+	return (
+		<Dialog defaultOpen={defaultOpen === true}>
+			{triggerNode}
+			{content}
 		</Dialog>
 	);
 }

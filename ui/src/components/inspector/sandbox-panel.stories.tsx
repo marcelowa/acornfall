@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SandboxPanel } from "./sandbox-panel";
 
 const meta = {
-	title: "Inspector/SandboxPanel",
+	title: "Conversation/SandboxPanel",
 	component: SandboxPanel,
 	parameters: { layout: "fullscreen" },
 	decorators: [

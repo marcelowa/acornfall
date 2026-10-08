@@ -23,6 +23,13 @@ const preview: Preview = {
 	],
 	parameters: {
 		layout: "fullscreen",
+		options: {
+			// The catalogue reads base-first: tokens, layout, primitives, then the
+			// feature areas, then the screens that compose them.
+			storySort: {
+				order: ["Foundations", "Layout", "UI", "Conversation", "Screens"],
+			},
+		},
 		// The layout is responsive, so the sizes it changes at are in the toolbar: 1024 (lg)
 		// moves the rail behind the toggle, 1536 (2xl) gives the inspector its room. A story
 		// pins one with `globals: { viewport: { value: … } }` — Storybook 10 removed both

@@ -51,7 +51,7 @@ export function ChoiceControl({
 					disabled={disabled}
 					data-slot="choice-control"
 					aria-label="What runs this conversation"
-					className={className}
+					className={cn("w-full sm:w-auto", className)}
 				>
 					{choices.map((choice, index) => (
 						<span key={choice.key} className="flex min-w-0 items-baseline gap-1">

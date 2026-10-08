@@ -4,7 +4,7 @@ import type { WireEntry } from "@/app/wire";
 import { ContextPanel } from "./context-panel";
 
 const meta = {
-	title: "Inspector/ContextPanel",
+	title: "Conversation/ContextPanel",
 	component: ContextPanel,
 	parameters: { layout: "fullscreen" },
 	decorators: [

@@ -1,5 +1,6 @@
 import type { WireResolvedAgent } from "@/app/wire";
 import { Stack } from "@/components/layout/stack";
+import { Fact } from "./fact";
 import { Code } from "@/components/typography/code";
 import { Text } from "@/components/typography/text";
 
@@ -13,16 +14,6 @@ export interface AgentPanelProps {
 	thinkingRequested?: string | undefined;
 	sandbox?: string | undefined;
 	harness?: string | undefined;
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-	if (value === "") return null;
-	return (
-		<div className="flex gap-2 text-2xs">
-			<span className="w-20 shrink-0 text-muted-foreground">{label}</span>
-			<span className="min-w-0 break-all">{value}</span>
-		</div>
-	);
 }
 
 /**

@@ -3,7 +3,7 @@ import type { ChoicePicker } from "@/app/view-models";
 import { ChoiceControl } from "./choice-control";
 
 const meta = {
-	title: "Composer/Choice control",
+	title: "Conversation/ChoiceControl",
 	component: ChoiceControl,
 	parameters: { layout: "centered" },
 } satisfies Meta<typeof ChoiceControl>;

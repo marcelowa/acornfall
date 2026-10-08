@@ -1,5 +1,8 @@
+import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import type { ConversationSummary } from "@/app/view-models";
 import { Text } from "@/components/typography/text";
+import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 import { ConversationRow } from "./conversation-row";
 
@@ -13,21 +16,78 @@ export interface ConversationListProps {
 	onRename?: ((id: string) => void) | undefined;
 	onHide?: ((id: string) => void) | undefined;
 	onRestore?: ((id: string) => void) | undefined;
-	title?: string | undefined;
 	className?: string | undefined;
+}
+
+interface Group {
+	key: string;
+	label: string;
+	items: ConversationSummary[];
+}
+
+function startOfDay(date: Date): Date {
+	return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function daysAgo(date: Date, now: Date): number {
+	return Math.round(
+		(startOfDay(now).getTime() - startOfDay(date).getTime()) / 86_400_000,
+	);
+}
+
+/**
+ * Date groups for the rail. Conversations without `updatedAt` — which is all of them until
+ * the gateway provides timestamps — render flat, exactly as before. Once dates exist, the
+ * groups lead and undated rows fall to the tail, so a straggler never displaces Today.
+ */
+export function groupConversations(
+	conversations: ConversationSummary[],
+	now = new Date(),
+): { groups: Group[]; undated: ConversationSummary[] } {
+	const dated = conversations.filter(
+		(conversation): conversation is ConversationSummary & { updatedAt: Date } =>
+			conversation.updatedAt instanceof Date,
+	);
+	const undated = conversations.filter(
+		(conversation) => !(conversation.updatedAt instanceof Date),
+	);
+	if (dated.length === 0) return { groups: [], undated };
+
+	const buckets: Record<"today" | "yesterday" | "week" | "older", ConversationSummary[]> = {
+		today: [],
+		yesterday: [],
+		week: [],
+		older: [],
+	};
+	for (const conversation of dated) {
+		const age = daysAgo(conversation.updatedAt, now);
+		if (age <= 0) buckets["today"]?.push(conversation);
+		else if (age === 1) buckets["yesterday"]?.push(conversation);
+		else if (age <= 7) buckets["week"]?.push(conversation);
+		else buckets["older"]?.push(conversation);
+	}
+	const groups: Group[] = [
+		{ key: "today", label: "Today", items: buckets["today"] ?? [] },
+		{ key: "yesterday", label: "Yesterday", items: buckets["yesterday"] ?? [] },
+		{ key: "week", label: "This week", items: buckets["week"] ?? [] },
+		{ key: "older", label: "Older", items: buckets["older"] ?? [] },
+	].filter((group) => group.items.length > 0);
+	return { groups, undated };
 }
 
 export function ConversationList({
 	conversations,
 	deleted,
 	activeId,
-	title = "Conversations",
 	className,
 	onSelect,
 	onRename,
 	onHide,
 	onRestore,
 }: ConversationListProps) {
+	const [deletedOpen, setDeletedOpen] = useState(false);
+	const { groups, undated } = groupConversations(conversations);
+
 	const row = (conversation: ConversationSummary) => (
 		<ConversationRow
 			key={conversation.id}
@@ -43,25 +103,45 @@ export function ConversationList({
 	return (
 		<div
 			data-slot="conversation-list"
-			className={cn("flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto", className)}
+			className={cn("flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto", className)}
 		>
-			<Text as="h2" size="sm" weight="semibold" className="px-2 pb-1">
-				{title}
-			</Text>
 			{conversations.length === 0 ? (
 				<Text size="sm" tone="muted" className="px-2">
 					No conversations yet.
 				</Text>
 			) : (
-				conversations.map(row)
+				<>
+					{groups.map((group) => (
+						<div key={group.key} className="flex flex-col gap-1">
+							<Text size="2xs" weight="medium" tone="muted" className="px-2 pt-2 uppercase">
+								{group.label}
+							</Text>
+							{group.items.map(row)}
+						</div>
+					))}
+					{/* Undated rows are a tail, never a displacement of Today. */}
+					{undated.map(row)}
+				</>
 			)}
 			{deleted.length === 0 ? null : (
-				<details className="mt-1">
-					<summary className="cursor-pointer rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent/50">
+				<div className="mt-1 flex flex-col gap-1">
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						className="justify-start text-muted-foreground"
+						aria-expanded={deletedOpen}
+						onClick={() => setDeletedOpen((open) => !open)}
+					>
+						<ChevronRight
+							className={cn("transition-transform", deletedOpen && "rotate-90")}
+						/>
 						Deleted ({deleted.length})
-					</summary>
-					<div className="mt-1 flex flex-col gap-1">{deleted.map(row)}</div>
-				</details>
+					</Button>
+					{deletedOpen ? (
+						<div className="flex flex-col gap-1">{deleted.map(row)}</div>
+					) : null}
+				</div>
 			)}
 		</div>
 	);

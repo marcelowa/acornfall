@@ -1,33 +1,10 @@
 import type { SandboxSummary } from "@/app/view-models";
+import { Fact } from "./fact";
 
 export interface SandboxPanelProps {
 	sandbox?: SandboxSummary | undefined;
 	/** Where the active workspace keeps its bytes, when the engine reports it. */
 	workspacePath?: string | undefined;
-}
-
-function Fact({
-	label,
-	value,
-	tone,
-}: {
-	label: string;
-	value: string;
-	tone?: "danger" | undefined;
-}) {
-	if (value === "") return null;
-	return (
-		<div className="flex gap-2 text-2xs">
-			<span className="w-20 shrink-0 text-muted-foreground">{label}</span>
-			<span
-				className={
-					tone === "danger" ? "min-w-0 break-all text-destructive" : "min-w-0 break-all"
-				}
-			>
-				{value}
-			</span>
-		</div>
-	);
 }
 
 /**

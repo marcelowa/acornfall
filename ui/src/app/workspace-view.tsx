@@ -1,16 +1,18 @@
-import { useState } from "react";
-import { ChevronsUpDown, Plus, Settings } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronsUpDown, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
 import type { DefaultScope } from "./client";
-import type { BusyAction, ConversationSummary } from "./view-models";
+import type { ConversationSummary } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
 import { Composer } from "@/components/composer/composer";
 import { SlashMenu } from "@/components/composer/slash-menu";
 import { AgentPanel } from "@/components/inspector/agent-panel";
 import { ContextPanel } from "@/components/inspector/context-panel";
 import { Inspector } from "@/components/inspector/inspector";
+import { InspectorPanel } from "@/components/inspector/inspector-panel";
 import { RunPanel } from "@/components/inspector/run-panel";
 import { SandboxPanel } from "@/components/inspector/sandbox-panel";
 import { Stack } from "@/components/layout/stack";
+import { Rail } from "@/components/layout/rail";
 import { Measure } from "@/components/layout/measure";
 import { ErrorStrip } from "@/components/ui/error-strip";
 import { ChoiceControl } from "@/components/composer/choice-control";
@@ -30,6 +32,21 @@ export interface WorkspaceViewProps {
 	platform: Platform;
 }
 
+/** True at 2xl, where the inspector docks beside the transcript instead of overlaying it. */
+function useWide(): boolean {
+	const [wide, setWide] = useState(
+		() => typeof window !== "undefined" && window.matchMedia("(min-width: 1536px)").matches,
+	);
+	useEffect(() => {
+		const query = window.matchMedia("(min-width: 1536px)");
+		const update = (): void => setWide(query.matches);
+		update();
+		query.addEventListener("change", update);
+		return () => query.removeEventListener("change", update);
+	}, []);
+	return wide;
+}
+
 /**
  * The composition, with no data of its own: the platform hook's view models and callbacks
  * applied to the dumb screen. `App` is this plus the hook, and Storybook renders this with
@@ -40,10 +57,12 @@ export interface WorkspaceViewProps {
  */
 export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const [draft, setDraft] = useState("");
-	const [busyAction, setBusyAction] = useState<BusyAction>("steer");
 	const [scope, setScope] = useState<DefaultScope>("workspace");
 	/** The conversation being renamed, if any: the rail's menu asks, this dialog answers. */
 	const [renaming, setRenaming] = useState<ConversationSummary | undefined>(undefined);
+	/** The inspector, asked or not: a dialog below 2xl, a docked column where it fits. */
+	const [inspectorOpen, setInspectorOpen] = useState(false);
+	const wide = useWide();
 
 	// A draft that is one slash word is a command being typed: the menu lists what the server
 	// knows, Enter completes the word, and the expansion itself happens server-side.
@@ -52,82 +71,134 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		slashWord === null
 			? []
 			: platform.commands.filter((command) => command.name.startsWith(slashWord[1] ?? ""));
+	// Slash keyboard navigation: the arrows move the highlight, Enter picks it, and Escape
+	// dismisses the menu for the word being typed — typing on reopens it for the new word.
+	const slashKey = slashWord?.[1] ?? null;
+	const [slashIndex, setSlashIndex] = useState(0);
+	const [slashHiddenFor, setSlashHiddenFor] = useState<string | null>(null);
+	// The draft belongs to one visit to one conversation: switching conversations starts a
+	// new visit, not a delivery of the old half-thought into the new room.
+	const activeId = platform.active?.id;
+	useEffect(() => {
+		setDraft("");
+		setSlashIndex(0);
+	}, [activeId]);
+	// Stop stays a button and goes quiet while the abort lands: a slow abort invites
+	// repeated clicks, and repeated clicks are repeated abort calls. The run ending, a
+	// different conversation, or ten seconds clears it — whichever answers first.
+	const [aborting, setAborting] = useState(false);
+	const running = platform.active?.running === true;
+	useEffect(() => {
+		if (!running) setAborting(false);
+	}, [running, activeId]);
+	useEffect(() => {
+		if (!aborting) return;
+		const timer = window.setTimeout(() => setAborting(false), 10_000);
+		return () => window.clearTimeout(timer);
+	}, [aborting]);
+	useEffect(() => {
+		setSlashIndex(0);
+	}, [slashKey]);
+	const visibleSlash = slashKey !== null && slashHiddenFor !== slashKey ? slashMatches : [];
+	const clampedSlash =
+		visibleSlash.length === 0 ? 0 : Math.min(slashIndex, visibleSlash.length - 1);
 
-	const submit = (): void => {
+	const sendText = (action: "steer" | "followUp"): void => {
 		const text = draft.trim();
 		if (text === "") return;
-		const first = slashMatches[0];
-		if (first !== undefined) {
-			setDraft(`/${first.name} `);
-			return;
-		}
 		if (platform.active === undefined) return;
 		setDraft("");
 		// A refused send keeps what was typed: the draft comes back if nothing else does.
-		void platform.send(text, busyAction).catch(() => {
+		void platform.send(text, action).catch(() => {
 			setDraft((current) => (current === "" ? text : current));
 		});
 	};
 
+	const submit = (): void => {
+		const text = draft.trim();
+		if (text === "") return;
+		const first = visibleSlash[clampedSlash];
+		if (first !== undefined) {
+			setDraft(`/${first.name} `);
+			return;
+		}
+		sendText("steer");
+	};
+
 	const activeWorkspace = platform.workspaces.find((workspace) => workspace.active);
 
-	// Three zones: the workspace on top, its conversations scrolling in the middle, and the two
-	// things that are always worth reaching at the bottom.
-	// Three zones: the workspace on top, its conversations scrolling in the middle, and the two
-	// things that are always worth reaching pinned at the bottom. The stack is what bounds the
-	// middle zone — a rail that is not a flex column has nothing to scroll inside, and a long
-	// list pushes the bottom out of the pane.
+	// Three zones, one quiet idiom: the workspace as a title row with its icon buttons, the
+	// conversations scrolling in the middle, and two sibling rows pinned at the bottom. Nothing
+	// in the chrome is saturated or outlined — the rail is navigation, and the active
+	// conversation carries the column's only emphasis.
 	const rail = (
-		<Stack gap="sm" fill className="border-r border-border bg-card p-2">
-			{/* The rail's own toggle floats in the top-right corner, so the top zone stops short of
-			 * it: the button's chevron belongs beside its own border, not under a control that is
-			 * not part of it. */}
-			<Stack gap="none" className="shrink-0 pr-8">
-				<Button
-					// Outlined rather than bare: it opens a screen, and nothing about a line of text
-					// with a chevron after it says that out loud.
-					variant="outline"
-					size="sm"
-					className="w-full justify-between"
-					aria-label="Workspaces"
-					onClick={() => platform.showScreen("workspaces")}
-				>
-					<span className="truncate">{activeWorkspace?.title ?? "Workspaces"}</span>
-					<ChevronsUpDown />
-				</Button>
-			</Stack>
-			<ConversationList
-				conversations={platform.conversations}
-				deleted={platform.deleted}
-				activeId={platform.active?.id}
-				onSelect={platform.select}
-				onRename={(id) => {
-					const current = platform.conversations.find(
-						(conversation) => conversation.id === id,
-					);
-					const title = window.prompt("Rename conversation", current?.title ?? "");
-					if (title !== null && title.trim() !== "") platform.rename(id, title.trim());
-				}}
-				onHide={(id) => platform.hide(id, true)}
-				onRestore={(id) => platform.hide(id, false)}
-			/>
-			<Stack gap="2xs" className="shrink-0">
-				<Button size="sm" aria-label="New conversation" onClick={platform.newConversation}>
-					<Plus />
-					New conversation
-				</Button>
-				<Button
-					variant="ghost"
-					size="sm"
-					className="justify-start"
-					aria-label="Settings"
-					onClick={() => platform.showScreen("settings")}
-				>
-					<Settings />
-					Settings
-				</Button>
-			</Stack>
-		</Stack>
+		<Rail
+			head={
+				<Text size="sm" weight="semibold" className="truncate">
+					{activeWorkspace?.title ?? "Workspaces"}
+				</Text>
+			}
+			headActions={
+				<>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						aria-label="Workspaces"
+						onClick={() => platform.showScreen("workspaces")}
+					>
+						<ChevronsUpDown />
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						className="hidden lg:flex"
+						aria-label="Hide the rail"
+						onClick={platform.toggleRail}
+					>
+						<PanelLeftClose />
+					</Button>
+				</>
+			}
+			list={
+				<ConversationList
+					conversations={platform.conversations}
+					deleted={platform.deleted}
+					activeId={platform.active?.id}
+					onSelect={platform.select}
+					onRename={(id) =>
+						setRenaming(platform.conversations.find((conversation) => conversation.id === id))
+					}
+					onHide={(id) => platform.hide(id, true)}
+					onRestore={(id) => platform.hide(id, false)}
+				/>
+			}
+			foot={
+				<>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="justify-start"
+						aria-label="New conversation"
+						onClick={platform.newConversation}
+					>
+						<Plus />
+						New conversation
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="justify-start"
+						aria-label="Settings"
+						onClick={() => platform.showScreen("settings")}
+					>
+						<Settings />
+						Settings
+					</Button>
+				</>
+			}
+		/>
 	);
 
 	const barTitle = (
@@ -139,10 +210,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	// The inspector: the answer to "why did it see that", from the fold — one request, what
 	// changed since the one before it, and which layer set what.
 	const latest = platform.context.at(-1);
-	const inspector = (
-		<Inspector
-			sections={[
-				{
+	const inspectorSections = ([{
 					key: "context",
 					title: "Context",
 					hint:
@@ -196,10 +264,47 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							thinking={platform.thinking.value}
 						/>
 					),
-				},
-			]}
+				}
+			]);
+	// The toggle exists twice — the desktop header and the small-screen bar, one hidden at
+	// any width — because below `lg` the header is not in the DOM at all, and without the bar
+	// twin the inspector (and the spend it answers) would be unreachable on a phone.
+	const inspectorToggle = (className?: string) => (
+		<Button
+			type="button"
+			variant="ghost"
+			size="icon-sm"
+			aria-label="Inspector"
+			aria-expanded={inspectorOpen}
+			data-slot="inspector-toggle"
+			className={className}
+			onClick={() => setInspectorOpen((open) => !open)}
+		>
+			<PanelRight />
+		</Button>
+	);
+	const header = (
+		<>
+			<div className="flex min-w-0 flex-1 items-center">{barTitle}</div>
+			{inspectorToggle()}
+		</>
+	);
+	const bar = (
+		<>
+			<div className="flex min-w-0 flex-1 items-center">{barTitle}</div>
+			{inspectorToggle("lg:hidden")}
+		</>
+	);
+	const inspectorDialog = (
+		<Inspector
+			sections={inspectorSections}
+			open={inspectorOpen && !wide}
+			onOpenChange={setInspectorOpen}
 		/>
 	);
+	const dockedInspector = inspectorOpen ? (
+		<InspectorPanel sections={inspectorSections} />
+	) : undefined;
 
 	const scoped = scope === "workspace" ? platform.defaults.workspace : platform.defaults.global;
 
@@ -270,9 +375,12 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		<>
 			<Shell
 				rail={rail}
-				bar={barTitle}
+				bar={bar}
+				header={screen === undefined ? header : undefined}
+				inspector={screen === undefined ? dockedInspector : undefined}
 				railOpen={platform.railOpen}
 				onRailOpenChange={platform.setRailOpen}
+				inlineRailToggle
 				railCollapsed={platform.railCollapsed}
 				onRailCollapsedChange={platform.toggleRail}
 				railWidth={platform.railWidth}
@@ -283,12 +391,19 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							<ErrorStrip
 								message={platform.failure}
 								onDismiss={platform.clearFailure}
+								onRetry={platform.reload}
 							/>
 						</Measure>
 					)
 				}
 				transcript={
-					screen ?? <Transcript entries={platform.entries} onFork={platform.fork} />
+					screen ?? (
+						<Transcript
+							entries={platform.entries}
+							ready={platform.ready}
+							onFork={platform.fork}
+						/>
+					)
 				}
 				composer={
 					screen === undefined ? (
@@ -296,22 +411,42 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							value={draft}
 							onChange={setDraft}
 							onSend={submit}
-							onAbort={platform.abort}
+							onAbort={() => {
+								setAborting(true);
+								platform.abort();
+							}}
 							running={platform.active?.running === true}
+							aborting={aborting}
+							focusConversation={platform.active?.id}
 							steerable={platform.steerable}
-							busyAction={busyAction}
-							onBusyActionChange={setBusyAction}
+							onSteer={() => sendText("steer")}
+							onQueue={() => sendText("followUp")}
 							disabled={platform.active === undefined || !platform.workerUp}
 							placeholder={
 								platform.active === undefined
 									? "Pick a conversation"
-									: "Send a message"
+										: platform.workerUp
+											? "Send a message"
+											: "The harness is down"
 							}
 							above={
-								slashWord === null ? undefined : (
-									<SlashMenu commands={slashMatches} onSelect={setDraft} />
+								visibleSlash.length === 0 ? undefined : (
+									<SlashMenu
+										commands={visibleSlash}
+										highlighted={clampedSlash}
+										onHighlight={setSlashIndex}
+										onSelect={setDraft}
+									/>
 								)
 							}
+							slashCount={visibleSlash.length}
+							slashIndex={clampedSlash}
+							onSlashIndexChange={setSlashIndex}
+							onSlashPick={(index) => {
+								const match = visibleSlash[index];
+								if (match !== undefined) setDraft(`/${match.name} `);
+							}}
+							onSlashDismiss={() => setSlashHiddenFor(slashKey)}
 							controls={
 								<>
 									{/* Ambient state first: a dropped stream or a dead harness is the thing to know
@@ -339,7 +474,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			/>
 			{/* The inspector is about the conversation in front of you, so it is only there
 			 * when one is: on a screen, it would be answering a question nobody asked. */}
-			{screen === undefined ? inspector : null}
+			{screen === undefined ? inspectorDialog : null}
 			<RenameDialog
 				open={renaming !== undefined}
 				title="Rename conversation"

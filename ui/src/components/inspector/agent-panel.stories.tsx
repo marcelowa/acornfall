@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { AgentPanel } from "./agent-panel";
 
 const meta = {
-	title: "Inspector/AgentPanel",
+	title: "Conversation/AgentPanel",
 	component: AgentPanel,
 	parameters: { layout: "fullscreen" },
 	decorators: [

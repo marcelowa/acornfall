@@ -4,7 +4,7 @@
  * theme; the token colours inside the block come from highlight.js. */
 .markdown {
 	color: var(--foreground);
-	font-size: var(--text-base);
+	font-size: var(--text-lg);
 	line-height: var(--leading-normal);
 	overflow-wrap: anywhere;
 }
@@ -34,18 +34,18 @@
 }
 
 .markdown h1 {
-	font-size: var(--text-xl);
+	font-size: var(--text-2xl);
 }
 
 .markdown h2 {
-	font-size: var(--text-lg);
+	font-size: var(--text-xl);
 }
 
 .markdown h3,
 .markdown h4,
 .markdown h5,
 .markdown h6 {
-	font-size: var(--text-base);
+	font-size: var(--text-lg);
 }
 
 .markdown ul,

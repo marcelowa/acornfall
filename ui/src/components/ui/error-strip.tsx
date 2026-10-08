@@ -6,6 +6,12 @@ export interface ErrorStripProps {
 	/** The server's own words: a refusal is an answer, and paraphrasing it loses the answer. */
 	message: string;
 	onDismiss: () => void;
+	/**
+	 * What retry means here: reloading the state, for failures where the platform knows how
+	 * to ask again. Absent where retry would be a guess — a refused send already restores
+	 * the draft, and only a fresh send can mean it.
+	 */
+	onRetry?: (() => void) | undefined;
 	className?: string | undefined;
 }
 
@@ -14,7 +20,7 @@ export interface ErrorStripProps {
  * about is worth leaving where they will read it — and the next successful action clears it.
  * Where it sits is the shell's business, so it carries no margin of its own.
  */
-export function ErrorStrip({ message, onDismiss, className }: ErrorStripProps) {
+export function ErrorStrip({ message, onDismiss, onRetry, className }: ErrorStripProps) {
 	return (
 		<div
 			data-slot="error-strip"
@@ -27,6 +33,11 @@ export function ErrorStrip({ message, onDismiss, className }: ErrorStripProps) {
 			<span className="min-w-0 flex-1 text-sm break-words whitespace-pre-wrap text-destructive-subtle-foreground">
 				{message}
 			</span>
+			{onRetry === undefined ? null : (
+				<Button type="button" variant="secondary" size="xs" onClick={onRetry}>
+					Try again
+				</Button>
+			)}
 			<Button
 				type="button"
 				variant="ghost"

@@ -1,8 +1,13 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown } from "lucide-react";
 import type { TranscriptEntry } from "@/app/view-models";
 import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
+import { Heading } from "@/components/typography/heading";
 import { Text } from "@/components/typography/text";
+import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
+import { groupTurns } from "@/lib/turns";
 import { AssistantMessage } from "./assistant-message";
 import { NoticeLine } from "./notice-line";
 import { PendingMessage } from "./pending-message";
@@ -11,8 +16,39 @@ import { UserMessage } from "./user-message";
 
 export interface TranscriptProps {
 	entries: TranscriptEntry[];
+	/**
+	 * The first load has not landed: the transcript shows a loading line, not the empty
+	 * state — inviting someone to start a conversation over content about to arrive is a
+	 * lie the slow network tells.
+	 */
+	ready?: boolean | undefined;
 	onOpenConversation?: ((id: string) => void) | undefined;
 	onFork?: ((at: string) => void) | undefined;
+}
+
+function Entry({
+	entry,
+	onOpenConversation,
+	onFork,
+}: {
+	entry: TranscriptEntry;
+	onOpenConversation?: ((id: string) => void) | undefined;
+	onFork?: ((at: string) => void) | undefined;
+}) {
+	switch (entry.kind) {
+		case "user":
+			return (
+				<UserMessage entry={entry} onOpenConversation={onOpenConversation} onFork={onFork} />
+			);
+		case "assistant":
+			return <AssistantMessage key={entry.id} entry={entry} />;
+		case "tool":
+			return <ToolCard key={entry.id} entry={entry} />;
+		case "notice":
+			return <NoticeLine key={entry.id} entry={entry} />;
+		case "pending":
+			return <PendingMessage key={entry.id} entry={entry} />;
+	}
 }
 
 /**
@@ -20,10 +56,19 @@ export interface TranscriptProps {
  * following the end: it opens there — the answer is what someone came for — keeps following
  * while text arrives, and stops the moment the reader scrolls away. The next conversation
  * starts at its end again.
+ *
+ * Entries render as turns with two rhythms: tight within a turn, wide between turns. When
+ * the reader has scrolled away, a pill offers the way back.
  */
-export function Transcript({ entries, onOpenConversation, onFork }: TranscriptProps) {
+export function Transcript({
+	entries,
+	ready = true,
+	onOpenConversation,
+	onFork,
+}: TranscriptProps) {
 	const scroller = useRef<HTMLDivElement>(null);
 	const following = useRef(true);
+	const [away, setAway] = useState(false);
 
 	// The first entry changes when the conversation does; the last entry's shape changes when
 	// text arrives, including while it is still being written.
@@ -35,6 +80,7 @@ export function Transcript({ entries, onOpenConversation, onFork }: TranscriptPr
 
 	useLayoutEffect(() => {
 		following.current = true;
+		setAway(false);
 	}, [conversation]);
 
 	useLayoutEffect(() => {
@@ -43,47 +89,70 @@ export function Transcript({ entries, onOpenConversation, onFork }: TranscriptPr
 		element.scrollTop = element.scrollHeight;
 	}, [dependency, conversation]);
 
+	const jumpLatest = (): void => {
+		const element = scroller.current;
+		if (element === null) return;
+		following.current = true;
+		setAway(false);
+		element.scrollTop = element.scrollHeight;
+	};
+
+	const turns = groupTurns(entries);
+
 	return (
-		<div
-			ref={scroller}
-			data-slot="transcript"
-			onScroll={() => {
-				const element = scroller.current;
-				if (element === null) return;
-				following.current =
-					element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-			}}
-			className="min-h-0 flex-1 overflow-y-auto [&>*]:shrink-0"
-		>
-			<Measure size="wide" padding="lg">
-				{entries.length === 0 ? (
-					<Text tone="muted">No messages yet.</Text>
-				) : (
-					<Stack gap="xl">
-						{entries.map((entry) => {
-							switch (entry.kind) {
-								case "user":
-									return (
-										<UserMessage
+		<div data-slot="transcript" className="relative flex min-h-0 flex-1 flex-col">
+			<div
+				ref={scroller}
+				onScroll={() => {
+					const element = scroller.current;
+					if (element === null) return;
+					following.current =
+						element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+					setAway(!following.current);
+				}}
+				className="min-h-0 flex-1 overflow-y-auto [&>*]:shrink-0"
+			>
+				<Measure size="wide" padding="lg">
+					{!ready ? (
+						<Stack gap="sm" align="center" className="py-16 text-center">
+							<Text tone="muted">Loading…</Text>
+						</Stack>
+					) : entries.length === 0 ? (
+						<Stack gap="sm" align="center" className="py-16 text-center">
+							<Heading level={2}>Start a conversation</Heading>
+							<Text tone="muted">
+								Send a message below, or type <Kbd>/</Kbd> for commands.
+							</Text>
+						</Stack>
+					) : (
+						<Stack gap="2xl">
+							{turns.map((turn, index) => (
+								<Stack key={turn[0]?.id ?? index} gap="lg" data-turn={index}>
+									{turn.map((entry) => (
+										<Entry
 											key={entry.id}
 											entry={entry}
 											onOpenConversation={onOpenConversation}
 											onFork={onFork}
 										/>
-									);
-								case "assistant":
-									return <AssistantMessage key={entry.id} entry={entry} />;
-								case "tool":
-									return <ToolCard key={entry.id} entry={entry} />;
-								case "notice":
-									return <NoticeLine key={entry.id} entry={entry} />;
-								case "pending":
-									return <PendingMessage key={entry.id} entry={entry} />;
-							}
-						})}
-					</Stack>
-				)}
-			</Measure>
+									))}
+								</Stack>
+							))}
+						</Stack>
+					)}
+				</Measure>
+			</div>
+			{away && entries.length > 0 ? (
+				<Button
+					type="button"
+					size="sm"
+					className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+					onClick={jumpLatest}
+				>
+					<ArrowDown />
+					Latest
+				</Button>
+			) : null}
 		</div>
 	);
 }

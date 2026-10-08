@@ -44,6 +44,24 @@ export const Desktop: Story = {
 	globals: { viewport: { value: "laptop" } },
 };
 
+/** Wide: a third column for the docked inspector, only where the screen has it. */
+export const Docked: Story = {
+	args: {
+		aside,
+		header: <Text size="sm">Conversation title</Text>,
+		inspector: (
+			<Stack gap="sm" padding="md" fill className="border-l border-border bg-card">
+				<Text weight="semibold">The inspector, docked</Text>
+				<Text size="sm" tone="muted">
+					At --inspector-width from 2xl up; an overlay below that.
+				</Text>
+			</Stack>
+		),
+		children: main,
+	},
+	globals: { viewport: { value: "wide" } },
+};
+
 /** Phone: the rail is behind the toggle in the bar, and the middle pane is the whole screen. */
 export const Phone: Story = {
 	args: { aside, bar: <Text size="sm">Conversation</Text>, children: main },

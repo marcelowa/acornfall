@@ -30,10 +30,13 @@
 	--color-foreground: var(--foreground);
 	--color-card: var(--card);
 	--color-card-foreground: var(--card-foreground);
+	--color-rail: var(--rail);
 	--color-popover: var(--popover);
 	--color-popover-foreground: var(--popover-foreground);
 	--color-primary: var(--primary);
 	--color-primary-foreground: var(--primary-foreground);
+	--color-primary-subtle: var(--primary-subtle);
+	--color-primary-subtle-foreground: var(--primary-subtle-foreground);
 	--color-secondary: var(--secondary);
 	--color-secondary-foreground: var(--secondary-foreground);
 	--color-muted: var(--muted);
@@ -140,6 +143,7 @@
 	--radius-lg: var(--base-radius-lg);
 	--radius-xl: var(--base-radius-xl);
 	--radius-2xl: var(--base-radius-2xl);
+	--radius-full: var(--base-radius-full);
 
 	--shadow-*: initial;
 	--shadow-2xs: var(--base-shadow-2xs);
@@ -166,6 +170,7 @@
 	--ease-in: var(--base-ease-in);
 	--ease-out: var(--base-ease-out);
 	--ease-in-out: var(--base-ease-in-out);
+	--ease-swift: var(--base-ease-swift);
 	--ease-default: var(--base-ease-in-out);
 	--default-transition-duration: var(--base-duration-normal);
 	--default-transition-timing-function: var(--base-ease-in-out);
@@ -179,6 +184,16 @@
 }
 
 @layer base {
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		::before,
+		::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+		}
+	}
+
 	* {
 		@apply border-border;
 

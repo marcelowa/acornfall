@@ -110,6 +110,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		workerUp: true,
 		connection: "live",
 		clearFailure: noop,
+		reload: noop,
 		steerable: true,
 		model: {
 			value: "DeepSeek V4.1 Flash",
@@ -254,10 +255,24 @@ export const EmptyConversation: Story = {
 	args: { platform: makePlatform({ entries: [], active: rootConversation }) },
 };
 
-/** A run is underway: stop, steer, or queue. */
+/** The transcript mid-run: the question asked, the answer arriving, the dots promising more. */
+const runningEntries: TranscriptEntry[] = [
+	...entries,
+	{ kind: "user", id: "5", at, text: "Now check the lock order too" },
+	{
+		kind: "assistant",
+		id: "6",
+		at,
+		markdown: "On it — reading the supervisor",
+		live: true,
+	},
+];
+
+/** A run is underway: the transcript shows it arriving, the footer offers stop, steer, queue. */
 export const Running: Story = {
 	args: {
 		platform: makePlatform({
+			entries: runningEntries,
 			active: { ...streamConversation, running: true },
 		}),
 	},
@@ -267,6 +282,7 @@ export const Running: Story = {
 export const RunningWithoutSteering: Story = {
 	args: {
 		platform: makePlatform({
+			entries: runningEntries,
 			active: { ...streamConversation, running: true },
 			steerable: false,
 		}),

@@ -29,6 +29,27 @@ export const TwoColumns: Story = {
 	),
 };
 
+/** One column on a phone, two from sm, four from md: the responsive story. */
+export const Responsive: Story = {
+	args: {
+		columns: "1",
+		sm: "2",
+		md: "4",
+		gap: "sm",
+		children: cells.map((cell) => (
+			<div key={cell} className="rounded-md bg-secondary px-4 py-2">
+				<Text size="sm">{cell}</Text>
+			</div>
+		)),
+	},
+	render: (args) => (
+		<div className="w-full max-w-2xl">
+			<Grid {...args} />
+		</div>
+	),
+	globals: { viewport: { value: "phone" } },
+};
+
 export const FourColumns: Story = {
 	args: {
 		columns: "4",

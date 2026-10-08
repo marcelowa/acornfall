@@ -32,7 +32,7 @@ export function PaneFooter({ at, className, children }: PaneFooterProps) {
 			gap="sm"
 			className={cn("pt-1", className)}
 		>
-			<Text as="span" size="2xs" tone="muted">
+			<Text as="span" size="2xs" tone="muted" className="tabular-nums">
 				{at === undefined ? "" : formatAt(at)}
 			</Text>
 			{children === undefined ? null : (

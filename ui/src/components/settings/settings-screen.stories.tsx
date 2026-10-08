@@ -6,7 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SettingsScreen } from "./settings-screen";
 
 const meta = {
-	title: "Components/Settings screen",
+	title: "Screens/Settings",
 	component: SettingsScreen,
 	parameters: { layout: "fullscreen" },
 } satisfies Meta<typeof SettingsScreen>;

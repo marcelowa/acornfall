@@ -33,11 +33,27 @@ export function AssistantMessage({ entry, defaultRaw = false }: AssistantMessage
 	}
 
 	// While the text is still arriving it has no controls: it is incomplete, and the pane gets
-	// them the moment it is committed.
+	// them the moment it is committed. The dots are the promise that something is coming:
+	// without them a thinking model with no output yet renders as nothing at all.
 	if (entry.live === true) {
 		return (
 			<div data-slot="assistant" data-live="true" className="w-full">
-				<Markdown>{entry.markdown}</Markdown>
+				{entry.markdown === "" ? null : <Markdown>{entry.markdown}</Markdown>}
+				<div
+					data-slot="thinking"
+					role="status"
+					aria-label="Responding"
+					className="flex items-center gap-1 py-2"
+				>
+					{[0, 1, 2].map((dot) => (
+						<span
+							key={dot}
+							aria-hidden
+							className="size-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse"
+							style={{ animationDelay: `${dot * 150}ms` }}
+						/>
+					))}
+				</div>
 			</div>
 		);
 	}
@@ -45,7 +61,7 @@ export function AssistantMessage({ entry, defaultRaw = false }: AssistantMessage
 	return (
 		<div data-slot="assistant" className="w-full">
 			{raw ? (
-				<Text as="div" className="whitespace-pre-wrap">
+				<Text as="div" size="lg" className="whitespace-pre-wrap">
 					{entry.markdown}
 				</Text>
 			) : (

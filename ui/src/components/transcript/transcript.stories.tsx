@@ -69,6 +69,38 @@ export const Conversation: Story = {
 
 export const Empty: Story = { args: { entries: [] } };
 
+/** Two user turns: the gap between turns is wider than the gap within one. */
+export const MultiTurn: Story = {
+	args: {
+		entries: [
+			{ kind: "user", id: "1", at, text: "Why did the worker restart?", forkAt: "0" },
+			{
+				kind: "assistant",
+				id: "2",
+				at,
+				markdown: "The supervisor saw the process exit and restarted it.",
+			},
+			{
+				kind: "tool",
+				id: "3",
+				at,
+				name: "bash",
+				status: "done",
+				isError: false,
+				args: { command: "go test ./internal/workerpool" },
+				output: "ok  \tgithub.com/acornfall/acornfall/gateway/internal/workerpool\t0.21s",
+			},
+			{ kind: "user", id: "4", at, text: "And the second announcement?", forkAt: "1" },
+			{
+				kind: "assistant",
+				id: "5",
+				at,
+				markdown: "That was the race: the second death announcement beat the first.",
+			},
+		],
+	},
+};
+
 export const Notice: Story = {
 	args: {
 		entries: [
@@ -103,6 +135,27 @@ export const PeerAsk: Story = {
 				at,
 				text: "[from conversation 2] Can you check the migration while I hold the lock?",
 				sender: { kind: "ask", name: "scout", conversationId: "2" },
+			},
+		],
+	},
+};
+
+/** The answer arriving: streaming text with the thinking dots still promising more. */
+/** The first load: the reader waits, and is told so. */
+export const Loading: Story = {
+	args: { entries: [], ready: false },
+};
+
+export const Streaming: Story = {
+	args: {
+		entries: [
+			{ kind: "user", id: "1", at, text: "Why did the worker restart?" },
+			{
+				kind: "assistant",
+				id: "2",
+				at,
+				markdown: "The supervisor saw the process exit and",
+				live: true,
 			},
 		],
 	},

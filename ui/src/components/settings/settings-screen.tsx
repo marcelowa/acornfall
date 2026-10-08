@@ -49,6 +49,14 @@ export function SettingsScreen({
 		setNetwork(workspace?.network ?? "on");
 	}, [workspace?.name, workspace?.image, workspace?.network]);
 
+	// One model: everything applies as it is chosen. The image commits when the field is
+	// left rather than per keystroke, and the caption below says when anything here takes
+	// effect — so there is no save button teaching a second model.
+	const commit = (next: { image: string; network: string }): void => {
+		if (workspace === undefined) return;
+		onUpdateWorkspace(next);
+	};
+
 	return (
 		<div data-slot="settings-screen" className="min-h-0 flex-1 overflow-y-auto">
 			<Measure size="page" padding="lg">
@@ -110,6 +118,12 @@ export function SettingsScreen({
 								placeholder="the engine's default image"
 								aria-label="Sandbox image"
 								onChange={(event) => setImage(event.target.value)}
+								onBlur={() => commit({ image, network })}
+								onKeyDown={(event) => {
+									if (event.key !== "Enter") return;
+									event.preventDefault();
+									commit({ image, network });
+								}}
 							/>
 						</Stack>
 						<Stack gap="2xs">
@@ -120,7 +134,9 @@ export function SettingsScreen({
 								type="single"
 								value={network}
 								onValueChange={(next) => {
-									if (next === "on" || next === "off") setNetwork(next);
+									if (next !== "on" && next !== "off") return;
+									setNetwork(next);
+									commit({ image, network: next });
 								}}
 								variant="outline"
 								size="sm"
@@ -132,17 +148,9 @@ export function SettingsScreen({
 							</ToggleGroup>
 						</Stack>
 						<Text size="2xs" tone="muted">
-							Takes effect at the next sandbox.
+							Applies as chosen — the image when you leave the field — and takes
+							effect at the next sandbox.
 						</Text>
-						<div>
-							<Button
-								size="sm"
-								disabled={workspace === undefined}
-								onClick={() => onUpdateWorkspace({ image, network })}
-							>
-								Save
-							</Button>
-						</div>
 					</Stack>
 
 					<Stack gap="sm" data-slot="settings-defaults">

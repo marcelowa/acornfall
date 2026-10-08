@@ -24,6 +24,7 @@ const easings = [
 	{ name: "--base-ease-in", value: "var(--base-ease-in)" },
 	{ name: "--base-ease-out", value: "var(--base-ease-out)" },
 	{ name: "--base-ease-in-out", value: "var(--base-ease-in-out)" },
+	{ name: "--base-ease-swift", value: "var(--base-ease-swift)" },
 ];
 
 const durations = [

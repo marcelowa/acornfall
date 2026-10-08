@@ -68,3 +68,30 @@ const deleted: ConversationSummary[] = [
 export const Mixed: Story = { args: { conversations, deleted, activeId: "3" } };
 export const Empty: Story = { args: { conversations: [], deleted: [] } };
 export const WithoutDeleted: Story = { args: { conversations, deleted: [] } };
+
+const now = new Date(2026, 9, 8, 14, 32);
+const day = 86_400_000;
+
+/** Date groups appear once the gateway provides `updatedAt`; undated rows render flat above them. */
+export const Grouped: Story = {
+	args: {
+		conversations: [
+			{ ...conversations[0]!, updatedAt: now },
+			{ ...conversations[1]!, updatedAt: new Date(now.getTime() - day) },
+			{ ...conversations[2]!, updatedAt: new Date(now.getTime() - 3 * day) },
+			{
+				id: "5",
+				title: "Old migration notes",
+				root: false,
+				hidden: false,
+				running: false,
+				unread: false,
+				tokens: 300,
+				cost: 0.001,
+				updatedAt: new Date(now.getTime() - 30 * day),
+			},
+		],
+		deleted,
+		activeId: "3",
+	},
+};

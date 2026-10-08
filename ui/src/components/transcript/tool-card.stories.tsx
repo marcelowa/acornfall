@@ -64,6 +64,44 @@ export const Running: Story = {
 	},
 };
 
+export const LongOutput: Story = {
+	args: {
+		entry: {
+			kind: "tool",
+			id: "5",
+			at,
+			name: "bash",
+			status: "done",
+			isError: false,
+			args: { command: "go test ./..." },
+			output: Array.from(
+				{ length: 40 },
+				(_, index) => `ok  \tpackage-${index}\t0.2${index}s`,
+			).join("\n"),
+		},
+	},
+};
+
+/** The open form of a long card, with the way back to less. */
+export const Expanded: Story = {
+	args: {
+		entry: {
+			kind: "tool",
+			id: "6",
+			at,
+			name: "bash",
+			status: "done",
+			isError: false,
+			args: { command: "go test ./..." },
+			output: Array.from(
+				{ length: 40 },
+				(_, index) => `ok  \tpackage-${index}\t0.2${index}s`,
+			).join("\n"),
+		},
+		defaultExpanded: true,
+	},
+};
+
 export const NoArguments: Story = {
 	args: {
 		entry: {

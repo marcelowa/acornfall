@@ -4,7 +4,7 @@ import { Text } from "@/components/typography/text";
 import { Shell } from "./shell";
 
 const meta = {
-	title: "Layout/Shell",
+	title: "Screens/Shell",
 	component: Shell,
 	parameters: { layout: "fullscreen" },
 } satisfies Meta<typeof Shell>;
@@ -28,6 +28,14 @@ const pane = (title: string, note: string) => (
 
 export const Slots: Story = {
 	args: {
+		header: <Text size="sm">conversation title</Text>,
+		inspector: (
+			<div className="border-l border-border bg-card p-2">
+				<Text size="sm" weight="semibold">
+					inspector
+				</Text>
+			</div>
+		),
 		rail: (
 			<div className="h-full border-r border-border bg-card p-2">
 				<Text size="sm" weight="semibold">

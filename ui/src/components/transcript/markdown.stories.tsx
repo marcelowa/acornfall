@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Markdown } from "./markdown";
 
 const meta = {
-	title: "UI/Markdown",
+	title: "Conversation/Markdown",
 	parameters: {
 		layout: "centered",
 		docs: {

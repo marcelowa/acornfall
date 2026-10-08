@@ -129,6 +129,8 @@ export interface Platform {
 	 * action succeeds. */
 	failure?: string | undefined;
 	clearFailure: () => void;
+	/** Ask the server for the state again; a success clears the last refusal. */
+	reload: () => void;
 	workerUp: boolean;
 	workerError?: string | undefined;
 	conversations: ConversationSummary[];
@@ -666,6 +668,9 @@ export function usePlatform(): Platform {
 		connection,
 		failure,
 		clearFailure,
+		reload: () => {
+			void reload();
+		},
 		conversations,
 		deleted,
 		entries,

@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { RenameDialog } from "./rename-dialog";
 
 const meta = {
-	title: "UI/Rename dialog",
+	title: "UI/RenameDialog",
 	component: RenameDialog,
 	parameters: { layout: "centered" },
 } satisfies Meta<typeof RenameDialog>;

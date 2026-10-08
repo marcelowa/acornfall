@@ -1,4 +1,5 @@
 import { Stack } from "@/components/layout/stack";
+import { Fact } from "./fact";
 
 export interface RunPanelProps {
 	running: boolean;
@@ -7,15 +8,6 @@ export interface RunPanelProps {
 	/** What will actually run. */
 	model: string;
 	thinking: string;
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-	return (
-		<div className="flex gap-2 text-2xs">
-			<span className="w-20 shrink-0 text-muted-foreground">{label}</span>
-			<span className="min-w-0 break-all">{value}</span>
-		</div>
-	);
 }
 
 /** The live facts: what the turn is doing, what is waiting, and what it will run on. */

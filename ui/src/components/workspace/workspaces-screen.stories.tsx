@@ -3,7 +3,7 @@ import type { WorkspaceSummary } from "@/app/view-models";
 import { WorkspacesScreen } from "./workspaces-screen";
 
 const meta = {
-	title: "Components/Workspaces screen",
+	title: "Screens/Workspaces",
 	component: WorkspacesScreen,
 	parameters: { layout: "fullscreen" },
 } satisfies Meta<typeof WorkspacesScreen>;

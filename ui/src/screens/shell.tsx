@@ -20,10 +20,15 @@ export interface ShellProps {
 	composer?: ReactNode | undefined;
 	/** The small-screen bar's content, beside the rail toggle. The conversation title, usually. */
 	bar?: ReactNode | undefined;
+	/** The desktop row above the transcript. A screen that is not a conversation has no title, so this is absent there too. */
+	header?: ReactNode | undefined;
+	/** A third column where the screen has room. Absent below 2xl and whenever it is not asked for. */
+	inspector?: ReactNode | undefined;
 	/** Above everything in the main pane: the last refused action, usually. It sits here rather
 	 * than in the composer so a screen that is not a conversation still shows it. */
 	notice?: ReactNode | undefined;
 	railOpen?: boolean | undefined;
+	inlineRailToggle?: boolean | undefined;
 	onRailOpenChange?: ((open: boolean) => void) | undefined;
 	/** The desktop column: false keeps it open, which is the default. */
 	railCollapsed?: boolean | undefined;
@@ -38,8 +43,11 @@ export function Shell({
 	transcript,
 	composer,
 	bar,
+	header,
+	inspector,
 	notice,
 	railOpen,
+	inlineRailToggle,
 	onRailOpenChange,
 	railCollapsed,
 	onRailCollapsedChange,
@@ -51,8 +59,11 @@ export function Shell({
 			<Split
 				aside={rail}
 				bar={bar}
+				header={header}
+				inspector={inspector}
 				asideOpen={railOpen}
 				onAsideOpenChange={onRailOpenChange}
+				inlineAsideToggle={inlineRailToggle}
 				asideCollapsed={railCollapsed}
 				onAsideCollapsedChange={onRailCollapsedChange}
 				asideWidth={railWidth}

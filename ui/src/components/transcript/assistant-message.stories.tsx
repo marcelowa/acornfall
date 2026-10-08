@@ -41,6 +41,26 @@ export const Formatted: Story = { args: { entry } };
 /** The same reply, toggled to the source the model actually wrote, per pane. */
 export const Raw: Story = { args: { entry, defaultRaw: true } };
 
+/** A turn is running: streamed text so far, and the dots promising the rest. */
+export const Live: Story = {
+	args: {
+		entry: {
+			kind: "assistant",
+			id: "3",
+			at,
+			markdown: "The supervisor saw the",
+			live: true,
+		},
+	},
+};
+
+/** Thinking with no output yet: the dots are the whole pane. */
+export const Thinking: Story = {
+	args: {
+		entry: { kind: "assistant", id: "4", at, markdown: "", live: true },
+	},
+};
+
 export const Failure: Story = {
 	args: {
 		entry: {

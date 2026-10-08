@@ -37,6 +37,8 @@
 	--base-neutral-600: oklch(0.442 0.015 286);
 	--base-neutral-700: oklch(0.37 0.012 286);
 	--base-neutral-800: oklch(0.274 0.007 286);
+	--base-neutral-850: oklch(0.243 0.007 286);
+	--base-neutral-875: oklch(0.257 0.006 286);
 	--base-neutral-900: oklch(0.21 0.006 286);
 	--base-neutral-950: oklch(0.141 0.005 286);
 
@@ -56,6 +58,7 @@
 	/* Success */
 	--base-success-50: oklch(0.97 0.02 165);
 	--base-success-100: oklch(0.94 0.04 165);
+	--base-success-200: oklch(0.9 0.07 165);
 	--base-success-300: oklch(0.84 0.1 165);
 	--base-success-400: oklch(0.75 0.14 165);
 	--base-success-500: oklch(0.66 0.15 163);
@@ -68,6 +71,7 @@
 	/* Warning: the one status whose fill takes dark text; amber is too light for white */
 	--base-warning-50: oklch(0.98 0.02 85);
 	--base-warning-100: oklch(0.96 0.05 85);
+	--base-warning-200: oklch(0.92 0.08 82);
 	--base-warning-300: oklch(0.88 0.1 80);
 	--base-warning-400: oklch(0.81 0.14 75);
 	--base-warning-500: oklch(0.73 0.16 70);
@@ -80,6 +84,7 @@
 	/* Danger */
 	--base-danger-50: oklch(0.97 0.015 20);
 	--base-danger-100: oklch(0.94 0.04 20);
+	--base-danger-200: oklch(0.88 0.07 21);
 	--base-danger-300: oklch(0.82 0.1 22);
 	--base-danger-400: oklch(0.71 0.16 22);
 	--base-danger-500: oklch(0.61 0.2 22);
@@ -92,6 +97,7 @@
 	/* Info */
 	--base-info-50: oklch(0.97 0.02 215);
 	--base-info-100: oklch(0.94 0.04 215);
+	--base-info-200: oklch(0.885 0.065 215);
 	--base-info-300: oklch(0.83 0.09 215);
 	--base-info-400: oklch(0.74 0.11 215);
 	--base-info-500: oklch(0.65 0.11 215);
@@ -165,6 +171,7 @@
 	--base-radius-lg: 12px;
 	--base-radius-xl: 16px;
 	--base-radius-2xl: 20px;
+	--base-radius-full: 999px;
 
 	/* Shadow: one family, five weights; the dark theme keeps them because raised is raised */
 	--base-shadow-2xs: 0 1px 1px rgb(0 0 0 / 0.04);
@@ -181,6 +188,7 @@
 	--base-ease-in: cubic-bezier(0.4, 0, 1, 1);
 	--base-ease-out: cubic-bezier(0, 0, 0.2, 1);
 	--base-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+	--base-ease-swift: cubic-bezier(0.2, 0, 0, 1);
 
 	/* Layout widths */
 	--base-container-xs: 320px;
@@ -202,10 +210,15 @@
 	--foreground: var(--base-neutral-900);
 	--card: var(--base-neutral-0);
 	--card-foreground: var(--base-neutral-900);
+	/* The rail sits one step below the content: the page itself in light, card-level in
+	 * dark. It is a token rather than a raw background so both themes recess the same way. */
+	--rail: var(--base-neutral-50);
 	--popover: var(--base-neutral-0);
 	--popover-foreground: var(--base-neutral-900);
 	--primary: var(--base-brand-600);
 	--primary-foreground: var(--base-neutral-0);
+	--primary-subtle: color-mix(in oklab, var(--primary) 10%, transparent);
+	--primary-subtle-foreground: var(--base-brand-700);
 	--secondary: var(--base-neutral-100);
 	--secondary-foreground: var(--base-neutral-900);
 	--muted: var(--base-neutral-100);
@@ -240,6 +253,7 @@
 	/* The scrim behind a modal. Theme-dependent: the same ink over a dark surface reads
 	 * weaker than over a light one. */
 	--overlay: color-mix(in oklab, var(--base-neutral-950) 50%, transparent);
+	--surface-highlight: transparent;
 
 	/* The scrollbar is part of the interface: a translucent thumb derived from the muted
 	 * foreground, so it follows the theme by construction, over no track at all. */
@@ -267,25 +281,30 @@
 	/* A draft stops growing here and starts scrolling: past this it is not a draft any more,
 	 * it is a document, and it should not own the screen. */
 	--composer-max-height: 200px;
+
+	/* A completed tool card shows this much before asking: the evidence stays one click away,
+	 * but a 400-line dump stops pushing the answer off the screen. */
+	--tool-card-collapsed-height: 200px;
 }
 
 .dark {
 	color-scheme: dark;
 
 	--background: var(--base-neutral-950);
-	--foreground: var(--base-neutral-100);
+	--foreground: var(--base-neutral-200);
 	--card: var(--base-neutral-900);
-	--card-foreground: var(--base-neutral-100);
-	--popover: var(--base-neutral-900);
-	--popover-foreground: var(--base-neutral-100);
+	--card-foreground: var(--base-neutral-200);
+	--rail: var(--base-neutral-900);
+	--popover: var(--base-neutral-850);
+	--popover-foreground: var(--base-neutral-200);
 	--primary: var(--base-brand-500);
 	--primary-foreground: var(--base-neutral-950);
 	--secondary: var(--base-neutral-800);
-	--secondary-foreground: var(--base-neutral-100);
+	--secondary-foreground: var(--base-neutral-200);
 	--muted: var(--base-neutral-800);
 	--muted-foreground: var(--base-neutral-400);
-	--accent: var(--base-neutral-800);
-	--accent-foreground: var(--base-neutral-100);
+	--accent: color-mix(in oklab, var(--base-neutral-800) 70%, var(--base-neutral-700));
+	--accent-foreground: var(--base-neutral-200);
 	--destructive: var(--base-danger-500);
 	--destructive-foreground: var(--base-neutral-950);
 	--border: var(--base-neutral-800);
@@ -302,5 +321,8 @@
 	--warning-subtle-foreground: var(--base-warning-300);
 	--info-subtle-foreground: var(--base-info-300);
 	--destructive-subtle-foreground: var(--base-danger-300);
-	--overlay: color-mix(in oklab, var(--base-neutral-950) 65%, transparent);
+	--primary-subtle: color-mix(in oklab, var(--primary) 14%, transparent);
+	--primary-subtle-foreground: var(--base-brand-300);
+	--surface-highlight: inset 0 1px 0 oklch(1 0 0 / 0.07);
+	--overlay: color-mix(in oklab, var(--base-neutral-950) 70%, transparent);
 }

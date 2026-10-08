@@ -1,10 +1,16 @@
 import { useState } from "react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Ellipsis } from "lucide-react";
 import type { WorkspaceSummary } from "@/app/view-models";
 import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Text } from "@/components/typography/text";
@@ -29,9 +35,10 @@ export interface WorkspacesScreenProps {
  * server refuses a name that would escape it. A new workspace opens with an empty conversation,
  * which is the app's doing — this screen only reports the name.
  *
- * Renaming is a dialog rather than a browser prompt, and forgetting is a button rather than a
- * confirmation: the general workspace cannot be forgotten, and the others are a folder that
- * stays where it is.
+ * Opening is the row's own button; renaming and forgetting live in the row's menu, the way
+ * the rail's rows keep destructive gestures one step away. Forgetting is not a confirmation:
+ * the general workspace cannot be forgotten, and the others are a folder that stays where
+ * it is.
  */
 export function WorkspacesScreen({
 	workspaces,
@@ -103,24 +110,31 @@ export function WorkspacesScreen({
 										Open
 									</Button>
 								)}
-								<Button
-									size="xs"
-									variant="ghost"
-									aria-label={`Rename ${workspace.title}`}
-									onClick={() => setRenaming(workspace)}
-								>
-									Rename
-								</Button>
-								{workspace.general ? null : (
-									<Button
-										size="xs"
-										variant="ghost"
-										aria-label={`Forget ${workspace.title}`}
-										onClick={() => onForget(workspace.name)}
-									>
-										Forget
-									</Button>
-								)}
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-xs"
+											aria-label={`Actions for ${workspace.title}`}
+										>
+											<Ellipsis />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end">
+										<DropdownMenuItem onSelect={() => setRenaming(workspace)}>
+											Rename
+										</DropdownMenuItem>
+										{workspace.general ? null : (
+											<DropdownMenuItem
+												variant="destructive"
+												onSelect={() => onForget(workspace.name)}
+											>
+												Forget
+											</DropdownMenuItem>
+										)}
+									</DropdownMenuContent>
+								</DropdownMenu>
 							</div>
 						))}
 					</Stack>
