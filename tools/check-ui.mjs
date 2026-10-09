@@ -1011,6 +1011,12 @@ try {
 	// what would have caught the crash this replaces.
 	await page.goto(`${url}/c/general/does-not-exist`, { waitUntil: "domcontentloaded" });
 	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
+	await page
+		.waitForFunction(
+			() => document.querySelector("[data-slot=error-strip]") !== null,
+			{ timeout: 15000 },
+		)
+		.catch(() => null);
 	const refusal = await page.evaluate(
 		() => document.querySelector("[data-slot=error-strip]")?.textContent ?? "",
 	);

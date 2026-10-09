@@ -220,7 +220,12 @@ type Control struct {
 	// lastResort is what is left when no layer chose a model. It is computed from what the
 	// credentials actually offer and is never persisted: a guess written into a workspace
 	// would outrank the install default for good, which is the opposite of a fallback.
-	lastResort  protocol.ModelBinding
+	lastResort protocol.ModelBinding
+	// promptedAt remembers an accepted prompt per conversation, in Unix milliseconds. The
+	// worker's run record lags behind the click and outlives dead runs; the stamp covers
+	// both directions: just-prompted counts as busy before the record exists, and only a
+	// record with recent activity counts after.
+	promptedAt  map[string]int64
 	resolved    map[string]*protocol.ResolvedAgent
 	catalog     protocol.AgentsData
 	providers   []protocol.ProviderInfo
@@ -255,6 +260,7 @@ func New(opts Options) *Control {
 		subscriberConversation: map[int]string{},
 		attachments:            map[string]int{},
 		policies:               map[string]json.RawMessage{},
+		promptedAt:             map[string]int64{},
 	}
 }
 
@@ -776,7 +782,7 @@ func (c *Control) StateFor(conversationID string) State {
 		WorkspacesDir: c.opts.WorkspacesDir,
 		Harness:       c.describe.Provider,
 		Capabilities:  c.describe.Capabilities,
-		Conversations: toConversations(c.conversations),
+		Conversations: c.toConversations(c.conversations),
 		// Agent is the effective binding, so pickers show what will actually run;
 		// Inherited says which parts of it this conversation chose itself.
 		Agent:           inputs.effective(),
@@ -1880,12 +1886,18 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 			text = expanded.Text
 		}
 	}
-	return c.worker.CallInto(ctx, protocol.Command{
+	if err := c.worker.CallInto(ctx, protocol.Command{
 		Type:           "prompt",
 		ConversationID: conversationID,
 		Text:           text,
 		WhenBusy:       when,
-	}, nil)
+	}, nil); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.promptedAt[conversationID] = time.Now().UnixMilli()
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *Control) Abort(ctx context.Context, conversationID string) error {
@@ -2227,7 +2239,27 @@ func (c *Control) persist() {
 	_ = os.Rename(temp, c.opts.SettingsPath)
 }
 
-func toConversations(infos []protocol.ConversationInfo) []Conversation {
+// runActive is the one busy rule the interface reads. The worker's run record is the
+// signal, but it lags behind the click and outlives dead runs, so both directions are
+// gated: a prompt accepted in the last ten seconds counts before the record exists, and a
+// record only counts while the activity is fresh. Thirty minutes of silence with no new
+// prompt is a residue, not a run — a legitimately quiet hour-long tool call is the known
+// cost, and its tool cards still say it is working.
+func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
+	c.mu.RLock()
+	prompted := c.promptedAt[info.ID]
+	c.mu.RUnlock()
+	if now-prompted < 10_000 {
+		return true
+	}
+	if !info.Running || info.UpdatedAt <= 0 {
+		return false
+	}
+	return now-info.UpdatedAt < 30*60_1000
+}
+
+func (c *Control) toConversations(infos []protocol.ConversationInfo) []Conversation {
+	now := time.Now().UnixMilli()
 	conversations := make([]Conversation, 0, len(infos))
 	for _, info := range infos {
 		conversations = append(conversations, Conversation{
@@ -2235,7 +2267,7 @@ func toConversations(infos []protocol.ConversationInfo) []Conversation {
 			Title:       info.Title,
 			Root:        info.Root,
 			Hidden:      info.Hidden,
-			Running:     info.Running,
+			Running:     c.runActive(info, now),
 			LastEntryID: info.LastEntryID,
 			UpdatedAt:   info.UpdatedAt,
 			Tokens:      info.Tokens,

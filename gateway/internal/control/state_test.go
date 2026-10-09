@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"time"
 )
 
 // StateFor must describe the conversation it was asked about, not the one the worker
@@ -52,6 +53,39 @@ func TestStateForDescribesTheConversationItWasAskedFor(t *testing.T) {
 // The listing carries last activity, so the rail can group conversations by date. A
 // conversation that never moved carries none, which the wire omits rather than claiming
 // an activity that never happened: the rail renders it flat, above the groups.
+// Busy is one rule: a fresh record, or a prompt the record has not caught up to. A
+// record with ancient activity is a dead run's residue, and a conversation that never
+// moved is not busy no matter what the worker once claimed.
+func TestRunningMeansLiveOrJustPrompted(t *testing.T) {
+	now := time.Now().UnixMilli()
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	control.conversations = []protocol.ConversationInfo{
+		{ID: "live", Running: true, UpdatedAt: now - 60_000},
+		{ID: "stuck", Running: true, UpdatedAt: now - 60*60_1000},
+		{ID: "fresh", Running: true},
+		{ID: "prompted", Running: false},
+	}
+	control.promptedAt["prompted"] = now
+
+	state := control.State()
+	byID := map[string]Conversation{}
+	for _, conversation := range state.Conversations {
+		byID[conversation.ID] = conversation
+	}
+	if !byID["live"].Running {
+		t.Error("a run with recent activity is busy")
+	}
+	if byID["stuck"].Running {
+		t.Error("an hour-old record with no new prompt is a residue, not a run")
+	}
+	if byID["fresh"].Running {
+		t.Error("a record with no activity at all is not a run")
+	}
+	if !byID["prompted"].Running {
+		t.Error("an accepted prompt counts before the record exists")
+	}
+}
+
 func TestConversationsCarryLastActivity(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	control.conversations = []protocol.ConversationInfo{

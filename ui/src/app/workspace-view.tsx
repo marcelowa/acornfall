@@ -222,21 +222,10 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
-	// Busy is two signals, not one: the flag says a run exists, the transcript says one is
-	// visibly happening. Either one alone lies sometimes — a stuck flag after a restart, a
-	// quiet gap before the first token — so the composer and the header listen to both.
-	// The flag only counts while the activity is fresh: a run from hours ago with no live
-	// evidence is a stuck flag, not a busy conversation.
-	const updatedAt = platform.active?.updatedAt?.getTime();
-	const fresh = updatedAt !== undefined && Date.now() - updatedAt < 30 * 60_000;
-	const hasLive = platform.entries.some(
-		(entry) =>
-			(entry.kind === "assistant" && entry.live === true) ||
-			(entry.kind === "thinking" && entry.live === true) ||
-			(entry.kind === "tool" && entry.status === "running") ||
-			entry.kind === "pending",
-	);
-	const busy = hasLive || (running && fresh);
+	// Busy is the flag: the gateway owns the rule now — a fresh record, or an accepted
+	// prompt the record has not caught up to — so the interface reads it instead of
+	// re-deriving it from transcript evidence.
+	const busy = running;
 	const barTitle = (
 		<span className="flex min-w-0 items-center gap-2">
 			{busy ? <StatusDot state="running" /> : null}
