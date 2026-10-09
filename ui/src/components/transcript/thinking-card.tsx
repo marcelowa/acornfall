@@ -22,6 +22,9 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 	const open = entry.live === true;
 	const [expanded, setExpanded] = useState(defaultExpanded ?? open);
 	const lines = entry.text === "" ? 0 : entry.text.split("\n").length;
+	// Same rule as a tool card: short reasoning stays open with no button, because a
+	// put-away control for two visible lines is noise, not power.
+	const collapsible = lines > 10 || entry.text.length > 2000;
 
 	return (
 		<div
@@ -41,7 +44,7 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 			<div
 				className={cn(
 					"overflow-y-hidden px-3 py-2",
-					!expanded && "max-h-(--thinking-card-collapsed-height)",
+					collapsible && !expanded && "max-h-(--thinking-card-collapsed-height)",
 				)}
 			>
 				<Text as="div" size="sm" className="whitespace-pre-wrap">
@@ -49,11 +52,11 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 				</Text>
 			</div>
 			<PaneFooter at={entry.at} className="px-3 pb-2">
-				{open ? null : (
+					{!collapsible || open ? null : (
 					<Button type="button" variant="ghost" size="xs" onClick={() => setExpanded((value) => !value)}>
 						{expanded ? "Show less" : `Show thinking (${lines} lines)`}
 					</Button>
-				)}
+					)}
 				<CopyButton value={entry.text} />
 			</PaneFooter>
 		</div>

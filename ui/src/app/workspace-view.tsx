@@ -58,9 +58,6 @@ function useWide(): boolean {
  */
 export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const [draft, setDraft] = useState("");
-	// Optimistic busy: between sending and the first live evidence, neither the flag
-	// nor the transcript knows a run started. The send itself is the evidence.
-	const [justSent, setJustSent] = useState(false);
 	const [scope, setScope] = useState<DefaultScope>("workspace");
 	/** The conversation being renamed, if any: the rail's menu asks, this dialog answers. */
 	const [renaming, setRenaming] = useState<ConversationSummary | undefined>(undefined);
@@ -86,7 +83,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	useEffect(() => {
 		setDraft("");
 		setSlashIndex(0);
-		setJustSent(false);
 	}, [activeId]);
 	// Stop stays a button and goes quiet while the abort lands: a slow abort invites
 	// repeated clicks, and repeated clicks are repeated abort calls. The run ending, a
@@ -113,7 +109,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		if (text === "") return;
 		if (platform.active === undefined) return;
 		setDraft("");
-		setJustSent(true);
 		// A refused send keeps what was typed: the draft comes back if nothing else does.
 		void platform.send(text, action).catch(() => {
 			setDraft((current) => (current === "" ? text : current));
@@ -241,15 +236,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			(entry.kind === "tool" && entry.status === "running") ||
 			entry.kind === "pending",
 	);
-	const busy = hasLive || (running && fresh) || justSent;
-	useEffect(() => {
-		if (hasLive) setJustSent(false);
-	}, [hasLive]);
-	useEffect(() => {
-		if (!justSent) return;
-		const timer = window.setTimeout(() => setJustSent(false), 60_000);
-		return () => window.clearTimeout(timer);
-	}, [justSent]);
+	const busy = hasLive || (running && fresh);
 	const barTitle = (
 		<span className="flex min-w-0 items-center gap-2">
 			{busy ? <StatusDot state="running" /> : null}

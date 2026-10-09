@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
 	createConversation as createConversationRequest,
@@ -377,12 +377,36 @@ export function usePlatform(): Platform {
 				),
 		[state, activeId, seen],
 	);
+	// The send is evidence too: between the click and the first live content, neither the
+	// flag nor the transcript knows a run started. The mapping turns recency into the dots
+	// entry, so busy follows from the entries alone. Full optimism lasts five seconds —
+	// pickup is measured in fractions of one — and after that the flag has to agree, so a
+	// fast failed run stops looking busy instead of riding out the minute.
+	const [lastSendAt, setLastSendAt] = useState<number | null>(null);
 	const runningNow =
 		(state?.conversations ?? []).find((conversation) => conversation.id === activeId)
 			?.running === true;
+	const sendAge = lastSendAt === null ? Infinity : Date.now() - lastSendAt;
+	const recentSend =
+		lastSendAt !== null && (sendAge < 5_000 || (runningNow && sendAge < 60_000));
+	useEffect(() => {
+		if (lastSendAt === null) return;
+		const timer = window.setTimeout(() => setLastSendAt(null), 60_000);
+		return () => window.clearTimeout(timer);
+	}, [lastSendAt]);
+	useEffect(() => {
+		setLastSendAt(null);
+	}, [activeId]);
+	// The send's evidence expires the moment the flag says the run ended: without this,
+	// a fast run with no live leftovers would look busy until the minute runs out.
+	const wasRunning = useRef(false);
+	useEffect(() => {
+		if (wasRunning.current && !runningNow) setLastSendAt(null);
+		wasRunning.current = runningNow;
+	}, [runningNow]);
 	const entries = useMemo(
-		() => toTranscript(view, senders, runningNow),
-		[view, senders, runningNow],
+		() => toTranscript(view, senders, runningNow || recentSend),
+		[view, senders, runningNow, recentSend],
 	);
 	const active = useMemo(
 		() => (state?.conversations ?? []).find((conversation) => conversation.id === activeId),
@@ -548,6 +572,7 @@ export function usePlatform(): Platform {
 		async (text: string, whenBusy: BusyAction): Promise<void> => {
 			try {
 				await sendMessage(workspace, activeId, text, whenBusy);
+				setLastSendAt(Date.now());
 				setFailure(undefined);
 			} catch (cause) {
 				// The caller restores the draft; the failure is also the strip's to show.
