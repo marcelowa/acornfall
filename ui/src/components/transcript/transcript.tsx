@@ -72,13 +72,22 @@ export function Transcript({ entries, ready = true, onOpenConversation, onFork }
 	const following = useRef(true);
 	const [away, setAway] = useState(false);
 
-	// The first entry changes when the conversation does; the last entry's shape changes when
-	// text arrives, including while it is still being written.
+	// The first entry changes when the conversation does; the last entry's shape changes
+	// while it is still being written — an answer, a thought, a tool's output. Anything
+	// growing keeps the view pinned to its end, where the thinking indicator lives.
 	const conversation = entries[0]?.id ?? "";
 	const last = entries.at(-1);
-	const dependency = `${entries.length}:${last?.id ?? ""}:${
-		last?.kind === "assistant" ? last.markdown.length : 0
-	}`;
+	const lastText =
+		last === undefined
+			? ""
+			: last.kind === "assistant"
+				? last.markdown
+				: last.kind === "thinking"
+					? last.text
+					: last.kind === "tool"
+						? last.output
+						: last.text;
+	const dependency = `${entries.length}:${last?.id ?? ""}:${lastText.length}`;
 
 	useLayoutEffect(() => {
 		following.current = true;
@@ -127,8 +136,9 @@ export function Transcript({ entries, ready = true, onOpenConversation, onFork }
 							</Text>
 						</Stack>
 					) : (
-						<Stack gap="2xl">
-							{turns.map((turn, index) => (
+						<>
+							<Stack gap="2xl">
+								{turns.map((turn, index) => (
 								<Stack key={turn[0]?.id ?? index} gap="lg" data-turn={index}>
 									{turn.map((entry) => (
 										<Entry
@@ -139,8 +149,12 @@ export function Transcript({ entries, ready = true, onOpenConversation, onFork }
 										/>
 									))}
 								</Stack>
-							))}
-						</Stack>
+								))}
+							</Stack>
+							{/* Air below the indicator: the end of a run should rest above the
+							 * composer with room to breathe, not glued to its edge. */}
+							<div aria-hidden className="h-8" />
+						</>
 					)}
 				</Measure>
 			</div>

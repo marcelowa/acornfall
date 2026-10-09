@@ -138,6 +138,20 @@ describe("the wire mapping", () => {
 		expect(toTranscript(view, {}).filter((entry) => entry.kind === "tool")).toHaveLength(1);
 	});
 
+	test("a not-started tool counts as the run happening, not as done", () => {
+		const view: WireView = {
+			entries: [],
+			docs: {
+				"pi.live": {
+					tools: [{ callId: "c1", name: "bash", output: "", status: "pending" }],
+				},
+			},
+		};
+		const [tool] = toTranscript(view, {});
+		if (tool?.kind !== "tool") throw new Error("expected the live tool");
+		expect(tool.status).toBe("running");
+	});
+
 	test("failureOf ignores a clean message", () => {
 		expect(failureOf({ content: "fine", stopReason: "stop" })).toBeUndefined();
 		expect(failureOf(undefined)).toBeUndefined();

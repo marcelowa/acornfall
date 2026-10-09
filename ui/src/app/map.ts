@@ -129,7 +129,9 @@ function toolEntry(
 		kind: "tool",
 		id: `live-${slot.callId}`,
 		name: slot.name,
-		status: slot.status === "running" ? "running" : "done",
+		// Only done is done: a pending call has not started yet, but its round is live,
+		// so the card stays open and counts as the run happening.
+		status: slot.status === "done" ? "done" : "running",
 		isError: (slot.diagnostics ?? []).some((diagnostic) => diagnostic.severity === "error"),
 		args: calls.get(slot.callId)?.args,
 		output: slot.output ?? "",
