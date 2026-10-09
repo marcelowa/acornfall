@@ -52,7 +52,14 @@ type Runner interface {
 
 // Version is the engine release acornfall pins. The SDK the worker uses ships the same
 // version, and the two share their on-disk state, so this is not a free upgrade.
-const Version = "0.7.7"
+//
+// 0.7.6 is pinned on purpose, not left behind. 0.7.7 added a CPUID mask to its krun crate
+// with the flag off and no way to ask for it, so its guests stopped seeing hardware
+// virtualization — upstream issue #1778 — and the opt-in that restores it (microsandbox
+// #823, `msb create --nested-virt`) is in no release yet. 0.7.6 predates the mask, so a
+// guest nests whenever the machine can. Move this forward when the release carrying #823
+// exists: nesting then becomes a choice per workspace instead of an engine default.
+const Version = "0.7.6"
 
 const releaseBase = "https://github.com/microsandbox/microsandbox/releases/download"
 
