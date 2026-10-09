@@ -1911,10 +1911,6 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 	channel := make(chan protocol.Frame, 1)
 	c.subscribers[id] = channel
 	c.subscriberConversation[id] = conversationID
-	// The newest watcher decides what a new tab opens on.
-	if conversationID != "" {
-		c.active = conversationID
-	}
 	cached, hasCache := c.views[conversationID]
 	c.mu.Unlock()
 
@@ -1931,6 +1927,15 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 			c.policies[conversationID] = policy
 			c.mu.Unlock()
 		}
+	}
+
+	// The newest watcher decides what a new tab opens on — but only a conversation the
+	// worker could attach to. A failed attach must not poison the active conversation for
+	// every tab behind it.
+	if conversationID != "" {
+		c.mu.Lock()
+		c.active = conversationID
+		c.mu.Unlock()
 	}
 
 	var initial *protocol.Frame
