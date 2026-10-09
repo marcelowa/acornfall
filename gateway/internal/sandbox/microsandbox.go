@@ -322,7 +322,7 @@ func (m *Microsandbox) detectEngineNesting(ctx context.Context) NestingSupport {
 		return unavailable("cannot ask engine %s whether it can nest: %v", Version, err)
 	}
 	if !strings.Contains(help, "--nested-virt") {
-		return unavailable("engine %s does not offer nested virtualization (needs `msb create --nested-virt`)", Version)
+		return unavailable("engine %s has no nesting switch: nesting is the engine's own default", Version)
 	}
 	return NestingSupport{Available: true}
 }
