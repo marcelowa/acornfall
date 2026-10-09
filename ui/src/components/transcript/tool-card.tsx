@@ -55,23 +55,20 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 				<Text as="span" size="sm" weight="semibold" className="font-mono">
 					{entry.name}
 				</Text>
-				<span className="ml-auto flex items-center gap-2">
-					{status === "running" ? <ThinkingDots /> : null}
-					<Text
-						as="span"
-						size="2xs"
-						className={cn(
-							"font-mono tabular-nums",
-							status === "error"
-								? "text-destructive"
-								: status === "running"
-									? "text-primary"
-									: "text-muted-foreground",
+				<Text
+					as="span"
+					size="2xs"
+					className={cn(
+						"ml-auto font-mono tabular-nums",
+						status === "error"
+							? "text-destructive"
+							: status === "running"
+								? "text-primary"
+								: "text-muted-foreground",
 						)}
 					>
 						{status}
 					</Text>
-				</span>
 			</div>
 			{body === "" ? null : (
 				<pre
@@ -83,6 +80,11 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 					{body}
 				</pre>
 			)}
+			{status === "running" ? (
+				<div className="px-3 pb-2">
+					<ThinkingDots />
+				</div>
+			) : null}
 			<PaneFooter at={entry.at} className="px-3 pb-2">
 				{collapsible ? (
 					<Button

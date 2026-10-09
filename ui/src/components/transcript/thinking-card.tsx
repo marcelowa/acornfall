@@ -38,12 +38,9 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 				<Text as="span" size="sm" weight="semibold">
 					Thinking
 				</Text>
-				<span className="ml-auto flex items-center gap-2">
-					{open ? <ThinkingDots /> : null}
-					<Text as="span" size="2xs" className="tabular-nums text-muted-foreground">
-						{open ? "live" : `${lines} lines`}
-					</Text>
-				</span>
+				<Text as="span" size="2xs" className="ml-auto tabular-nums text-muted-foreground">
+					{open ? "live" : `${lines} lines`}
+				</Text>
 			</div>
 			<div
 				className={cn(
@@ -55,6 +52,11 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 					{entry.text}
 				</Text>
 			</div>
+			{open ? (
+				<div className="px-3 pb-2">
+					<ThinkingDots />
+				</div>
+			) : null}
 			<PaneFooter at={entry.at} className="px-3 pb-2">
 					{!collapsible || open ? null : (
 					<Button type="button" variant="ghost" size="xs" onClick={() => setExpanded((value) => !value)}>
