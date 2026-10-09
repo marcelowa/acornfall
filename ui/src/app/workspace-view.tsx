@@ -131,8 +131,26 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	// conversations scrolling in the middle, and two sibling rows pinned at the bottom. Nothing
 	// in the chrome is saturated or outlined — the rail is navigation, and the active
 	// conversation carries the column's only emphasis.
+	// The brand is a neutral tile and the name: a mark, not a second accent. It opens
+	// nothing — the workspace switcher below it is the navigation.
+	const brand = (
+		<span className="flex items-center gap-2">
+			<span
+				aria-hidden
+				className="flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground"
+			>
+				<Text as="span" size="xs" weight="semibold" className="text-background">
+					A
+				</Text>
+			</span>
+			<Text as="span" size="sm" weight="semibold">
+				Acornfall
+			</Text>
+		</span>
+	);
 	const rail = (
 		<Rail
+			brand={brand}
 			head={
 				<Text size="sm" weight="semibold" className="truncate">
 					{activeWorkspace?.title ?? "Workspaces"}
@@ -143,7 +161,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					<Button
 						type="button"
 						variant="ghost"
-						size="icon-xs"
+						size="icon-sm"
 						aria-label="Workspaces"
 						onClick={() => platform.showScreen("workspaces")}
 					>
@@ -152,7 +170,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					<Button
 						type="button"
 						variant="ghost"
-						size="icon-xs"
+						size="icon-sm"
 						className="hidden lg:flex"
 						aria-label="Hide the rail"
 						onClick={platform.toggleRail}

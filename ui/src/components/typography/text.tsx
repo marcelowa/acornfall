@@ -10,6 +10,7 @@ const textVariants = cva("", {
 			sm: "text-sm",
 			base: "text-base",
 			lg: "text-lg",
+			xl: "text-xl",
 		},
 		tone: {
 			default: "text-foreground",

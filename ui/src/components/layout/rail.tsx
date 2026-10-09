@@ -12,6 +12,8 @@ import { cn } from "cn";
  * over the rail — so there is no notch, and the head aligns with the rows below it.
  */
 export interface RailProps {
+	/** The mark and name above everything: branding, not navigation. */
+	brand?: ReactNode | undefined;
 	head: ReactNode;
 	/** Icon buttons that belong to the head row: switching and collapsing, usually. */
 	headActions?: ReactNode | undefined;
@@ -20,7 +22,8 @@ export interface RailProps {
 	className?: string | undefined;
 }
 
-export function Rail({ head, list, headActions, foot, className }: RailProps) {
+export function Rail({ brand, head, list, headActions, foot, className }: RailProps) {
+
 	return (
 		<div
 			data-slot="rail"
@@ -29,6 +32,11 @@ export function Rail({ head, list, headActions, foot, className }: RailProps) {
 				className,
 			)}
 		>
+			{brand === undefined ? null : (
+				<div data-slot="rail-brand" className="flex shrink-0 items-center px-2">
+					{brand}
+				</div>
+			)}
 			<div data-slot="rail-head" className="flex shrink-0 items-center gap-1 px-2">
 				<div className="min-w-0 flex-1 pl-6">{head}</div>
 				{headActions === undefined ? null : (

@@ -72,7 +72,7 @@ export function WorkspacesScreen({
 							<ChevronLeft />
 							Back to the conversation
 						</Button>
-						<Text as="h1" size="lg" weight="semibold">
+						<Text as="h1" size="xl" weight="semibold">
 							Workspaces
 						</Text>
 						<Text size="sm" tone="muted">

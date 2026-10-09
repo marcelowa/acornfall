@@ -20,6 +20,22 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+const brand = (
+	<span className="flex items-center gap-2">
+		<span
+			aria-hidden
+			className="flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground"
+		>
+			<Text as="span" size="xs" weight="semibold" className="text-background">
+				A
+			</Text>
+		</span>
+		<Text as="span" size="sm" weight="semibold">
+			Acornfall
+		</Text>
+	</span>
+);
+
 const head = (
 	<Text size="sm" weight="semibold" className="truncate">
 		workspace
@@ -63,4 +79,4 @@ const foot = (
  * a pinned foot of quiet sibling rows. The recessed surface and the padding are the
  * primitive's — the app passes slots, not classes.
  */
-export const Zones: Story = { args: { head, headActions, list, foot } };
+export const Zones: Story = { args: { brand, head, headActions, list, foot } };

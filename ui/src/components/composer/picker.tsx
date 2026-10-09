@@ -76,7 +76,7 @@ export function Picker({
 					<ChevronDown className="shrink-0" />
 				</Button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start" className="w-(--container-sm)">
+			<DropdownMenuContent side="top" align="start" className="w-(--container-sm)">
 				{groups.map((group, index) => (
 					<div key={group.label ?? String(index)}>
 						{index > 0 ? <DropdownMenuSeparator /> : null}

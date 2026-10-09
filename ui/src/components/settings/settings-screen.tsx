@@ -72,7 +72,7 @@ export function SettingsScreen({
 							<ChevronLeft />
 							Back to the conversation
 						</Button>
-						<Text as="h1" size="lg" weight="semibold">
+						<Text as="h1" size="xl" weight="semibold">
 							Settings
 						</Text>
 					</Stack>

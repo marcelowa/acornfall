@@ -184,6 +184,17 @@
 }
 
 @layer base {
+	/* Phones read at arm's length: small text steps up one notch below sm, but the
+	 * body stays 14px — 16px body was too large. The line-heights are ratios, so
+	 * leading follows for free. */
+	@media (max-width: 639px) {
+		:root {
+			--text-2xs: var(--base-font-size-xs);
+			--text-xs: var(--base-font-size-sm);
+			--text-sm: var(--base-font-size-base);
+		}
+	}
+
 	@media (prefers-reduced-motion: reduce) {
 		*,
 		::before,
