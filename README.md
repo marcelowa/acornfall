@@ -42,9 +42,9 @@ Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
 `--token <secret>`, `--worker-dir <dir>`, `--workspaces-dir <dir>` (default
 `~/acornfall/workspaces`), `--sandbox-engine <microsandbox|host>` (default: microsandbox;
 `host` runs the tools on this machine with no isolation — see
-[ADR 0015](docs/adr/0015-host-engine.md)), `--allow-vm-nesting <true|false>` (default: true;
-a workspace's sandbox is asked to nest virtual machines when the engine and the machine can,
-and boots without it otherwise — see [ADR 0018](docs/adr/0018-allow-vm-nesting.md)).
+[ADR 0015](docs/adr/0015-host-engine.md)), `--disable-vm-nesting` (default: false;
+a workspace's sandbox nests virtual machines when the engine and the machine can unless
+refused — see [ADR 0018](docs/adr/0018-disable-vm-nesting.md)).
 
 Each of those has an environment variable, for a service manager or a container that should
 not carry flags: `ACORNFALL_HOME` or `ACORNFALL_DATA` for the install folder,
@@ -131,11 +131,11 @@ make dev
   or the hypervisor is missing the tools refuse rather than run on the host; `acornfall doctor`
   says which it is. `--sandbox-engine host` is the explicit alternative for a machine without a
   hypervisor or a fast development loop: the tools run on the host, unconfined, and the state
-  and doctor say so. A workspace is allowed to nest virtual machines — run a hypervisor inside
-  its sandbox — when the engine offers it and the machine can grant it; when it cannot, the
-  sandbox boots without it and doctor and the state say why. See `docs/adr/0012-sandbox.md`,
+  and doctor say so. A workspace nests virtual machines — runs a hypervisor inside
+  its sandbox — when the engine offers it and the machine can grant it, unless nesting is
+  disabled; when it cannot, the sandbox boots without it and doctor and the state say why. See `docs/adr/0012-sandbox.md`,
   `docs/adr/0014-global-resources-in-the-sandbox.md`, `docs/adr/0015-host-engine.md`, and
-  `docs/adr/0018-allow-vm-nesting.md`.
+  `docs/adr/0018-disable-vm-nesting.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
   `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
   name, `prompts/` — expanded server-side so the transcript records what the model saw.

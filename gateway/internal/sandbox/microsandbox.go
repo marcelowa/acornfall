@@ -290,14 +290,20 @@ func needsQuotes(value string) bool {
 }
 
 // Nesting reports whether a sandbox here could nest virtual machines. Two things have to
-// say yes: the engine has to offer nesting (`msb create --nested-virt`, which arrived after
-// the release this build pins) and the machine has to be able to grant it (nested
-// virtualization on the host).
+// agree: the engine has to allow nesting on its side and the machine has to be able to
+// grant it (nested virtualization on the host). On the pinned 0.7.6 there is no switch
+// to offer — its guests nest by default whenever the machine can — so the host half is
+// the whole answer there; remove that branch when the pin moves to the release carrying
+// `msb create --nested-virt`.
 func (m *Microsandbox) Nesting(ctx context.Context) NestingSupport {
-	if engine := m.engineNesting(ctx); !engine.Available {
-		return engine
+	engine := m.engineNesting(ctx)
+	if engine.Available {
+		return m.hostNesting()
 	}
-	return m.hostNesting()
+	if m.Installed() && Version == "0.7.6" {
+		return m.hostNesting()
+	}
+	return engine
 }
 
 // engineNesting answers the engine half: whether this build of it offers nesting at all. It
@@ -322,7 +328,7 @@ func (m *Microsandbox) detectEngineNesting(ctx context.Context) NestingSupport {
 		return unavailable("cannot ask engine %s whether it can nest: %v", Version, err)
 	}
 	if !strings.Contains(help, "--nested-virt") {
-		return unavailable("engine %s has no nesting switch: nesting is the engine's own default", Version)
+		return unavailable("engine %s has no nesting switch: its guests cannot nest", Version)
 	}
 	return NestingSupport{Available: true}
 }
@@ -355,9 +361,11 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	// The engine is told about nesting only if it knows the flag, but then it is told either
 	// way: allowed and possible is `--nested-virt`, refused is `--nested-virt=false` —
 	// explicit, so that a default in the engine's own configuration cannot overrule the
-	// workspace. An engine that cannot nest has nothing to hear; the state and doctor say why.
+	// workspace. An engine without the flag has nothing to hear. (On the pinned 0.7.6 a
+	// refusal cannot be honored — there is no off switch — which the ADR owns as an interim
+	// limitation: the sandbox still boots.)
 	if engine := m.engineNesting(ctx); engine.Available {
-		if !policy.AllowVMNesting {
+		if policy.DisableVMNesting {
 			args = append(args, "--nested-virt=false")
 		} else if m.hostNesting().Available {
 			args = append(args, "--nested-virt")

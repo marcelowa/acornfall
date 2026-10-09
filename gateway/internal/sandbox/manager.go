@@ -61,7 +61,7 @@ type Driver interface {
 	// Nesting reports whether a sandbox on this machine could nest virtual machines, and why
 	// not when it could not. It is a capability, not a policy: whether a workspace asks for
 	// nesting is the policy's business, and the two have to agree before the engine hears
-	// about it. See docs/adr/0018-allow-vm-nesting.md.
+	// about it. See docs/adr/0018-disable-vm-nesting.md.
 	Nesting(ctx context.Context) NestingSupport
 	// List reports every sandbox the engine knows about, ours or not.
 	List(ctx context.Context) ([]Instance, error)

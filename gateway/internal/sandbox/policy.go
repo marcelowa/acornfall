@@ -29,12 +29,12 @@ type Policy struct {
 	// CPUs and Memory bound the sandbox. Zero values take the defaults.
 	CPUs   int
 	Memory string
-	// AllowVMNesting is whether this workspace may nest virtual machines inside its sandbox.
-	// It is an allowance, not a demand: the engine is asked for nesting only when it offers
-	// it and this machine can grant it, and a sandbox on a machine that cannot nest still
-	// boots. Nesting widens what runs inside the sandbox, so every surface that describes
-	// one says when it has it. See docs/adr/0018-allow-vm-nesting.md.
-	AllowVMNesting bool
+	// DisableVMNesting is whether this workspace must not nest virtual machines inside its
+	// sandbox. False (the default) allows nesting wherever the engine offers it and this
+	// machine can grant it; true refuses it, and the engine is told so explicitly where
+	// it has the switch. A sandbox on a machine that cannot nest still boots. See
+	// docs/adr/0018-disable-vm-nesting.md.
+	DisableVMNesting bool
 	// Egress allows the sandbox to reach the network. On by default for new workspaces;
 	// ADR 0012 records what that exposes.
 	Egress bool
