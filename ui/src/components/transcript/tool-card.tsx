@@ -75,7 +75,12 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 			)}
 			<PaneFooter at={entry.at} className="px-3 pb-2">
 				{collapsible ? (
-					<Button type="button" variant="ghost" size="xs" onClick={() => setExpanded((value) => !value)}>
+					<Button
+						type="button"
+						variant="ghost"
+						size="xs"
+						onClick={() => setExpanded((value) => !value)}
+					>
 						{expanded ? "Show less" : `Show output (${lineCount} lines)`}
 					</Button>
 				) : null}

@@ -24,7 +24,10 @@ export function Rail({ head, list, headActions, foot, className }: RailProps) {
 	return (
 		<div
 			data-slot="rail"
-			className={cn("flex min-h-0 flex-1 flex-col gap-2 border-r border-border bg-rail p-2", className)}
+			className={cn(
+				"flex min-h-0 flex-1 flex-col gap-2 border-r border-border bg-rail p-2",
+				className,
+			)}
 		>
 			<div data-slot="rail-head" className="flex shrink-0 items-center gap-1 px-2">
 				<div className="min-w-0 flex-1 pl-6">{head}</div>

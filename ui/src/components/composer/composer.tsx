@@ -123,12 +123,10 @@ export function Composer({
 						aria-expanded={slashOpen}
 						aria-controls="slash-menu-listbox"
 						aria-autocomplete="list"
-						aria-activedescendant={
-							slashOpen ? `slash-option-${slashIndex}` : undefined
-						}
+						aria-activedescendant={slashOpen ? `slash-option-${slashIndex}` : undefined}
 						className="max-h-(--composer-max-height) rounded-t-xl border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-base dark:bg-transparent"
 					/>
-				<div className="flex flex-col gap-2 px-2 pb-2 sm:flex-row sm:items-end">
+					<div className="flex flex-col gap-2 px-2 pb-2 sm:flex-row sm:items-end">
 						<div className="order-2 flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:order-1">
 							{controls}
 						</div>
@@ -145,7 +143,12 @@ export function Composer({
 										Stop
 									</Button>
 									{steerable ? (
-										<Button type="button" size="sm" onClick={onSteer} disabled={!canSend}>
+										<Button
+											type="button"
+											size="sm"
+											onClick={onSteer}
+											disabled={!canSend}
+										>
 											Steer
 										</Button>
 									) : null}

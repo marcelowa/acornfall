@@ -168,7 +168,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					activeId={platform.active?.id}
 					onSelect={platform.select}
 					onRename={(id) =>
-						setRenaming(platform.conversations.find((conversation) => conversation.id === id))
+						setRenaming(
+							platform.conversations.find((conversation) => conversation.id === id),
+						)
 					}
 					onHide={(id) => platform.hide(id, true)}
 					onRestore={(id) => platform.hide(id, false)}
@@ -210,62 +212,59 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	// The inspector: the answer to "why did it see that", from the fold — one request, what
 	// changed since the one before it, and which layer set what.
 	const latest = platform.context.at(-1);
-	const inspectorSections = ([{
-					key: "context",
-					title: "Context",
-					hint:
-						latest === undefined
-							? "nothing sent yet"
-							: `${latest.sections.size} sections · ${latest.tools.size} tools`,
-					body: <ContextPanel requests={platform.context} usage={platform.usage} />,
-				},
-				{
-					key: "agent",
-					title: "Agent",
-					hint: platform.agent.value,
-					body: (
-						<AgentPanel
-							resolved={platform.resolved}
-							model={platform.model.value}
-							thinking={platform.thinking.value}
-							thinkingRequested={platform.thinkingRequested}
-							sandbox={platform.sandbox?.engine}
-							harness={platform.harness}
-						/>
-					),
-				},
-				{
-					key: "sandbox",
-					title: "Sandbox",
-					hint:
-						platform.sandbox === undefined
-							? "unknown"
-							: `${platform.sandbox.engine} · ${platform.sandbox.status}`,
-					body: (
-						<SandboxPanel
-							sandbox={platform.sandbox}
-							workspacePath={
-								platform.workspaces.find((workspace) => workspace.active)?.path
-							}
-						/>
-					),
-				},
-				{
-					key: "run",
-					title: "Run",
-					hint: platform.active?.running === true ? "running" : "idle",
-					body: (
-						<RunPanel
-							running={platform.active?.running === true}
-							queued={
-								platform.entries.filter((entry) => entry.kind === "pending").length
-							}
-							model={platform.model.value}
-							thinking={platform.thinking.value}
-						/>
-					),
-				}
-			]);
+	const inspectorSections = [
+		{
+			key: "context",
+			title: "Context",
+			hint:
+				latest === undefined
+					? "nothing sent yet"
+					: `${latest.sections.size} sections · ${latest.tools.size} tools`,
+			body: <ContextPanel requests={platform.context} usage={platform.usage} />,
+		},
+		{
+			key: "agent",
+			title: "Agent",
+			hint: platform.agent.value,
+			body: (
+				<AgentPanel
+					resolved={platform.resolved}
+					model={platform.model.value}
+					thinking={platform.thinking.value}
+					thinkingRequested={platform.thinkingRequested}
+					sandbox={platform.sandbox?.engine}
+					harness={platform.harness}
+				/>
+			),
+		},
+		{
+			key: "sandbox",
+			title: "Sandbox",
+			hint:
+				platform.sandbox === undefined
+					? "unknown"
+					: `${platform.sandbox.engine} · ${platform.sandbox.status}`,
+			body: (
+				<SandboxPanel
+					sandbox={platform.sandbox}
+					workspacePath={platform.workspaces.find((workspace) => workspace.active)?.path}
+				/>
+			),
+		},
+		{
+			key: "run",
+			title: "Run",
+			hint: platform.active?.running === true ? "running" : "idle",
+			body: (
+				<RunPanel
+					running={platform.active?.running === true}
+					queued={platform.entries.filter((entry) => entry.kind === "pending").length}
+					model={platform.model.value}
+					thinking={platform.thinking.value}
+				/>
+			),
+		},
+	];
 	// The toggle exists twice — the desktop header and the small-screen bar, one hidden at
 	// any width — because below `lg` the header is not in the DOM at all, and without the bar
 	// twin the inspector (and the spend it answers) would be unreachable on a phone.
@@ -425,9 +424,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							placeholder={
 								platform.active === undefined
 									? "Pick a conversation"
-										: platform.workerUp
-											? "Send a message"
-											: "The harness is down"
+									: platform.workerUp
+										? "Send a message"
+										: "The harness is down"
 							}
 							above={
 								visibleSlash.length === 0 ? undefined : (

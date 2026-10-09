@@ -38,7 +38,11 @@ function Entry({
 	switch (entry.kind) {
 		case "user":
 			return (
-				<UserMessage entry={entry} onOpenConversation={onOpenConversation} onFork={onFork} />
+				<UserMessage
+					entry={entry}
+					onOpenConversation={onOpenConversation}
+					onFork={onFork}
+				/>
 			);
 		case "assistant":
 			return <AssistantMessage key={entry.id} entry={entry} />;
@@ -60,12 +64,7 @@ function Entry({
  * Entries render as turns with two rhythms: tight within a turn, wide between turns. When
  * the reader has scrolled away, a pill offers the way back.
  */
-export function Transcript({
-	entries,
-	ready = true,
-	onOpenConversation,
-	onFork,
-}: TranscriptProps) {
+export function Transcript({ entries, ready = true, onOpenConversation, onFork }: TranscriptProps) {
 	const scroller = useRef<HTMLDivElement>(null);
 	const following = useRef(true);
 	const [away, setAway] = useState(false);

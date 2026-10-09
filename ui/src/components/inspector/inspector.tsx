@@ -61,25 +61,25 @@ export function Inspector({
 	const triggerNode =
 		trigger === undefined ? null : <DialogTrigger asChild>{trigger}</DialogTrigger>;
 	const content = (
-			<DialogContent
-				data-slot="inspector"
-				className={cn(
-					"inset-0 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0",
-					"sm:inset-4 sm:max-w-none sm:rounded-lg",
-					className,
-				)}
-			>
-				<DialogHeader className="border-b border-border px-4 py-3">
-					<DialogTitle>Inspector</DialogTitle>
-					<DialogDescription>
-						What the model saw, what the harness is doing, and where the tools run.
-					</DialogDescription>
-				</DialogHeader>
-				<div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-					<InspectorSections sections={sections} />
-				</div>
-			</DialogContent>
-		);
+		<DialogContent
+			data-slot="inspector"
+			className={cn(
+				"inset-0 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0",
+				"sm:inset-4 sm:max-w-none sm:rounded-lg",
+				className,
+			)}
+		>
+			<DialogHeader className="border-b border-border px-4 py-3">
+				<DialogTitle>Inspector</DialogTitle>
+				<DialogDescription>
+					What the model saw, what the harness is doing, and where the tools run.
+				</DialogDescription>
+			</DialogHeader>
+			<div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+				<InspectorSections sections={sections} />
+			</div>
+		</DialogContent>
+	);
 	if (open !== undefined && onOpenChange !== undefined) {
 		return (
 			<Dialog open={open} onOpenChange={onOpenChange}>

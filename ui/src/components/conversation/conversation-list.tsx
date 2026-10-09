@@ -30,9 +30,7 @@ function startOfDay(date: Date): Date {
 }
 
 function daysAgo(date: Date, now: Date): number {
-	return Math.round(
-		(startOfDay(now).getTime() - startOfDay(date).getTime()) / 86_400_000,
-	);
+	return Math.round((startOfDay(now).getTime() - startOfDay(date).getTime()) / 86_400_000);
 }
 
 /**
@@ -113,7 +111,12 @@ export function ConversationList({
 				<>
 					{groups.map((group) => (
 						<div key={group.key} className="flex flex-col gap-1">
-							<Text size="2xs" weight="medium" tone="muted" className="px-2 pt-2 uppercase">
+							<Text
+								size="2xs"
+								weight="medium"
+								tone="muted"
+								className="px-2 pt-2 uppercase"
+							>
 								{group.label}
 							</Text>
 							{group.items.map(row)}

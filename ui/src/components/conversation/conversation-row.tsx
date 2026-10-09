@@ -74,7 +74,7 @@ export function ConversationRow({
 		conversation.tokens > 0
 			? `${formatTokens(conversation.tokens)}${
 					conversation.cost > 0 ? ` · ${formatCost(conversation.cost)}` : ""
-					}`
+				}`
 			: "",
 	]
 		.filter((part) => part !== "")
@@ -97,7 +97,7 @@ export function ConversationRow({
 				active ? "bg-primary-subtle hover:bg-primary-subtle" : "hover:bg-accent",
 				className,
 			)}
-			>
+		>
 			{active ? (
 				<span
 					aria-hidden
