@@ -1,3 +1,3 @@
 module github.com/acornfall/acornfall/gateway
 
-go 1.27
+go 1.27.2
