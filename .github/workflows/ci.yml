@@ -10,7 +10,6 @@ name: ci
 
 on:
   push:
-  pull_request:
   workflow_dispatch:
     inputs:
       runner:
@@ -40,7 +39,7 @@ jobs:
 
   commits:
     # The commit format is a standard (`.pi/skills/conventional-commits`), so it is checked
-    # rather than trusted — over the commits a pull request or a push adds, not all of history.
+    # rather than trusted — over the commits a push adds, not all of history.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -53,9 +52,7 @@ jobs:
       - name: Decide what to check
         id: range
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "value=${{ github.event.pull_request.base.sha }}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
+          if [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
             echo "value=${{ github.event.before }}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
           elif git rev-parse --verify -q origin/main >/dev/null; then
             # A rebase rewrites the pushed-away commit, so `before` is gone from history;
