@@ -329,7 +329,9 @@ describe("thinking and silence", () => {
 			entries: [],
 			docs: { "pi.live": { generation: { message: { content: "On it" } } } },
 		};
-		expect(toTranscript(streaming, {}, true).filter((entry) => entry.id === "live")).toHaveLength(1);
+		expect(
+			toTranscript(streaming, {}, true).filter((entry) => entry.id === "live"),
+		).toHaveLength(1);
 	});
 });
 

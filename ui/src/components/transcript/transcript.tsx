@@ -139,16 +139,16 @@ export function Transcript({ entries, ready = true, onOpenConversation, onFork }
 						<>
 							<Stack gap="2xl">
 								{turns.map((turn, index) => (
-								<Stack key={turn[0]?.id ?? index} gap="lg" data-turn={index}>
-									{turn.map((entry) => (
-										<Entry
-											key={entry.id}
-											entry={entry}
-											onOpenConversation={onOpenConversation}
-											onFork={onFork}
-										/>
-									))}
-								</Stack>
+									<Stack key={turn[0]?.id ?? index} gap="lg" data-turn={index}>
+										{turn.map((entry) => (
+											<Entry
+												key={entry.id}
+												entry={entry}
+												onOpenConversation={onOpenConversation}
+												onFork={onFork}
+											/>
+										))}
+									</Stack>
 								))}
 							</Stack>
 							{/* Air below the indicator: the end of a run should rest above the

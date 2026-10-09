@@ -58,11 +58,16 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 				</div>
 			) : null}
 			<PaneFooter at={entry.at} className="px-3 pb-2">
-					{!collapsible || open ? null : (
-					<Button type="button" variant="ghost" size="xs" onClick={() => setExpanded((value) => !value)}>
+				{!collapsible || open ? null : (
+					<Button
+						type="button"
+						variant="ghost"
+						size="xs"
+						onClick={() => setExpanded((value) => !value)}
+					>
 						{expanded ? "Show less" : `Show thinking (${lines} lines)`}
 					</Button>
-					)}
+				)}
 				<CopyButton value={entry.text} />
 			</PaneFooter>
 		</div>

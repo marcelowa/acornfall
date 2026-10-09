@@ -65,10 +65,10 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 							: status === "running"
 								? "text-primary"
 								: "text-muted-foreground",
-						)}
-					>
-						{status}
-					</Text>
+					)}
+				>
+					{status}
+				</Text>
 			</div>
 			{body === "" ? null : (
 				<pre

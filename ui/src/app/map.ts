@@ -52,7 +52,9 @@ export function failureOf(message: WireMessage | undefined): string | undefined 
  * reply they produced. A fully redacted block still renders — as the fact of hiding —
  * because silence about silence reads as nothing happening.
  */
-function thinkingOf(messages: { content?: string | WireContentBlock[] | undefined }[]): string | undefined {
+function thinkingOf(
+	messages: { content?: string | WireContentBlock[] | undefined }[],
+): string | undefined {
 	const parts: string[] = [];
 	let redacted = false;
 	for (const message of messages) {
@@ -268,7 +270,12 @@ export function toTranscript(
 					.trim();
 				const thinking = thinkingOf(messages);
 				if (thinking !== undefined) {
-					transcript.push({ kind: "thinking", id: `${id}-thinking`, text: thinking, at: at(first) });
+					transcript.push({
+						kind: "thinking",
+						id: `${id}-thinking`,
+						text: thinking,
+						at: at(first),
+					});
 				}
 				if (failure === undefined && markdown === "") break;
 				transcript.push({ kind: "assistant", id, markdown, at: at(first), failure });

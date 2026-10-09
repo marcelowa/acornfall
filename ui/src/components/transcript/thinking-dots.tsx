@@ -6,7 +6,13 @@ import { cn } from "cn";
  * the same way. With a label it is a status; without, decoration beside words that
  * already say what is happening.
  */
-export function ThinkingDots({ label, className }: { label?: string | undefined; className?: string | undefined }) {
+export function ThinkingDots({
+	label,
+	className,
+}: {
+	label?: string | undefined;
+	className?: string | undefined;
+}) {
 	const dots = [0, 1, 2].map((dot) => (
 		<span
 			key={dot}
@@ -15,7 +21,8 @@ export function ThinkingDots({ label, className }: { label?: string | undefined;
 			style={{ animationDelay: `${dot * 150}ms` }}
 		/>
 	));
-	if (label === undefined) return <span className={cn("flex items-center gap-1", className)}>{dots}</span>;
+	if (label === undefined)
+		return <span className={cn("flex items-center gap-1", className)}>{dots}</span>;
 	return (
 		<span role="status" aria-label={label} className={cn("flex items-center gap-1", className)}>
 			{dots}

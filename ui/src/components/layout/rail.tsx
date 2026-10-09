@@ -23,7 +23,6 @@ export interface RailProps {
 }
 
 export function Rail({ brand, head, list, headActions, foot, className }: RailProps) {
-
 	return (
 		<div
 			data-slot="rail"
