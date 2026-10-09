@@ -51,6 +51,18 @@ func TestIsolationSaysWhichEngineSeparatesFromTheHost(t *testing.T) {
 	}
 }
 
+// Nesting is refused by name: the host engine has no sandbox to nest, and a "yes" here
+// would put a nesting badge over a run that has the whole machine already.
+func TestHostSaysThereIsNothingToNest(t *testing.T) {
+	support := NewHost().Nesting(context.Background())
+	if support.Available {
+		t.Error("the host engine cannot nest anything: it is not a sandbox")
+	}
+	if support.Reason == "" {
+		t.Error("a refusal has to say why, because doctor prints it")
+	}
+}
+
 // Engine is how a run names what it wants. A name nobody implements is refused with the
 // choices: defaulting to the host for a typo would turn a sandboxed run unconfined.
 func TestEngineRefusesANameItDoesNotImplement(t *testing.T) {

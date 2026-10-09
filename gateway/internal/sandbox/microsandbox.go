@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // Microsandbox is the microVM engine: libkrun microVMs with a command line for the
@@ -33,6 +34,13 @@ type Microsandbox struct {
 	// base is where releases are fetched from. Set in tests to a local server, so that
 	// downloading, verifying, and unpacking are exercised rather than assumed.
 	base string
+	// hostNested is the machine half of Nesting: what this computer can grant. It is a field
+	// so that tests can answer for a machine that is not this one.
+	hostNested func() NestingSupport
+	// nestingMu guards the answer below, which is taken once: a running gateway does not
+	// swap engine builds under itself.
+	nestingMu sync.Mutex
+	engine    *NestingSupport
 }
 
 // Runner runs the engine and returns its combined output. It is an interface so that the
@@ -57,7 +65,7 @@ const statePathLimit = 50
 
 // NewMicrosandbox builds the driver. The engine is installed on first use.
 func NewMicrosandbox(home string) *Microsandbox {
-	return &Microsandbox{home: home, base: releaseBase + "/v" + Version}
+	return &Microsandbox{home: home, base: releaseBase + "/v" + Version, hostNested: hostNestedSupport}
 }
 
 // WithRunner replaces the engine binary, which is how the driver is tested without one.
@@ -274,7 +282,51 @@ func needsQuotes(value string) bool {
 	return strings.ContainsAny(value[:1], "-?:,[]{}#&*!|>'\"%@`")
 }
 
-// Create writes the policy file and boots a sandbox from it.
+// Nesting reports whether a sandbox here could nest virtual machines. Two things have to
+// say yes: the engine has to offer nesting (`msb create --nested-virt`, which arrived after
+// the release this build pins) and the machine has to be able to grant it (nested
+// virtualization on the host).
+func (m *Microsandbox) Nesting(ctx context.Context) NestingSupport {
+	if engine := m.engineNesting(ctx); !engine.Available {
+		return engine
+	}
+	return m.hostNesting()
+}
+
+// engineNesting answers the engine half: whether this build of it offers nesting at all. It
+// is asked once and kept — except while the engine is not installed yet, which is a state
+// the first workspace to need it changes.
+func (m *Microsandbox) engineNesting(ctx context.Context) NestingSupport {
+	if !m.Installed() {
+		return unavailable("the engine is not installed")
+	}
+	m.nestingMu.Lock()
+	defer m.nestingMu.Unlock()
+	if m.engine == nil {
+		answer := m.detectEngineNesting(ctx)
+		m.engine = &answer
+	}
+	return *m.engine
+}
+
+func (m *Microsandbox) detectEngineNesting(ctx context.Context) NestingSupport {
+	help, err := m.run(ctx, "create", "--help")
+	if err != nil {
+		return unavailable("cannot ask engine %s whether it can nest: %v", Version, err)
+	}
+	if !strings.Contains(help, "--nested-virt") {
+		return unavailable("engine %s does not offer nested virtualization (needs `msb create --nested-virt`)", Version)
+	}
+	return NestingSupport{Available: true}
+}
+
+// hostNesting is the machine half, with the test seam applied.
+func (m *Microsandbox) hostNesting() NestingSupport {
+	if m.hostNested != nil {
+		return m.hostNested()
+	}
+	return hostNestedSupport()
+}
 func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir string) error {
 	if strings.TrimSpace(policyDir) == "" {
 		return errors.New("sandbox: no directory for the policy file")
@@ -292,7 +344,19 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	if err := os.WriteFile(path, policy.Render(), 0o644); err != nil {
 		return err
 	}
-	_, err := m.run(ctx, "create", "--conf", path, "--name", Name(policy.Workspace), "--label", "acornfall")
+	args := []string{"create", "--conf", path, "--name", Name(policy.Workspace), "--label", "acornfall"}
+	// The engine is told about nesting only if it knows the flag, but then it is told either
+	// way: allowed and possible is `--nested-virt`, refused is `--nested-virt=false` —
+	// explicit, so that a default in the engine's own configuration cannot overrule the
+	// workspace. An engine that cannot nest has nothing to hear; the state and doctor say why.
+	if engine := m.engineNesting(ctx); engine.Available {
+		if !policy.AllowVMNesting {
+			args = append(args, "--nested-virt=false")
+		} else if m.hostNesting().Available {
+			args = append(args, "--nested-virt")
+		}
+	}
+	_, err := m.run(ctx, args...)
 	return err
 }
 

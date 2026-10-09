@@ -58,6 +58,11 @@ type Driver interface {
 	// facility, the permissions. It is checked before anything is created so that the
 	// refusal is an explanation rather than a crash.
 	Usable() error
+	// Nesting reports whether a sandbox on this machine could nest virtual machines, and why
+	// not when it could not. It is a capability, not a policy: whether a workspace asks for
+	// nesting is the policy's business, and the two have to agree before the engine hears
+	// about it. See docs/adr/0018-allow-vm-nesting.md.
+	Nesting(ctx context.Context) NestingSupport
 	// List reports every sandbox the engine knows about, ours or not.
 	List(ctx context.Context) ([]Instance, error)
 	// Create makes a sandbox from a policy and boots it.
@@ -160,6 +165,11 @@ func (m *Manager) ensure(ctx context.Context) error {
 
 // Driver is the engine in use, for callers that need to name it.
 func (m *Manager) Driver() Driver { return m.driver }
+
+// Nesting reports what this machine's engine says about nesting: a capability of the engine
+// and the machine, the same for every workspace, which the policy and this have to agree on
+// before the engine is told anything.
+func (m *Manager) Nesting(ctx context.Context) NestingSupport { return m.driver.Nesting(ctx) }
 
 // Problem is why sandboxes cannot be used here, or nil. Callers record it; they do not
 // decide it.

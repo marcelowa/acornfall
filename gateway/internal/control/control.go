@@ -57,6 +57,10 @@ type Options struct {
 	// which is what ACORNFALL_NO_SANDBOX asks the gateway for: the workspace still opens and
 	// its tools refuse.
 	Sandbox *sandbox.Manager
+	// AllowVMNesting is the install default for nesting, from --allow-vm-nesting. A
+	// workspace's own setting wins over it, and the engine and the machine have the last
+	// word: see docs/adr/0018-allow-vm-nesting.md.
+	AllowVMNesting bool
 }
 
 // SandboxState says what the agent's tools can reach here. When Tools is false the tools
@@ -70,6 +74,12 @@ type SandboxState struct {
 	Tools    bool   `json:"tools"`
 	Isolated bool   `json:"isolated"`
 	Problem  string `json:"problem,omitempty"`
+	// Nested says this workspace is allowed to nest and the machine can grant it, which is
+	// what the next sandbox will get — like an image change, nesting applies when a sandbox
+	// is created. NestedReason says why not when it cannot, so a workspace that wanted
+	// nesting and did not get it is visible rather than a surprise.
+	Nested       bool   `json:"nested,omitempty"`
+	NestedReason string `json:"nestedReason,omitempty"`
 }
 
 // WorkspaceState is a workspace as the interface needs it: what it is called, where it
@@ -81,7 +91,10 @@ type WorkspaceState struct {
 	General bool   `json:"general"`
 	Image   string `json:"image,omitempty"`
 	Network string `json:"network,omitempty"`
-	Running bool   `json:"running"`
+	// AllowVMNesting is nil when this workspace follows the install's --allow-vm-nesting,
+	// and a choice of its own otherwise.
+	AllowVMNesting *bool `json:"allow_vm_nesting,omitempty"`
+	Running        bool  `json:"running"`
 }
 
 // Inherited reports which fields the active conversation left to the defaults.
@@ -708,11 +721,20 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 		state.Problem = problem.Error()
 		return state
 	}
-	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome)
+	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome, c.opts.AllowVMNesting)
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()
 		workerpool.Log("sandbox for %s: %v", c.opts.Workspace.Name, err)
 		return state
+	}
+	// Whether the sandbox that is running nests is what it was created with; this says what
+	// the next one gets, and why it cannot when it cannot.
+	if policy.AllowVMNesting {
+		if support := manager.Nesting(ctx); support.Available {
+			state.Nested = true
+		} else {
+			state.NestedReason = support.Reason
+		}
 	}
 	if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {
 		state.Status = status

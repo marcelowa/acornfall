@@ -44,6 +44,13 @@ func (h *Host) Install(context.Context, func(string, ...any)) error { return nil
 // facility, no group — just the machine the gateway already runs on.
 func (h *Host) Usable() error { return nil }
 
+// Nesting reports that there is no sandbox here to nest: the host engine's commands already
+// run on the machine itself, with all of it. The refusal is the honest one — a badge saying
+// "nested" over an unconfined run would be worse than useless.
+func (h *Host) Nesting(context.Context) NestingSupport {
+	return unavailable("the host engine is not a sandbox: commands already run on the machine itself")
+}
+
 // List reports nothing: there are no sandboxes to list. Each workspace is its own folder.
 func (h *Host) List(context.Context) ([]Instance, error) { return nil, nil }
 

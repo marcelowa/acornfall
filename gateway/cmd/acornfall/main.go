@@ -54,6 +54,7 @@ func serve(argv []string) error {
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor) or host (no isolation)")
+	allowVMNesting := flags.Bool("allow-vm-nesting", true, "let a workspace's sandbox nest virtual machines when the engine and the machine can; a workspace's own setting wins")
 	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: "bun run src/main.ts")`)
 	workerDir := flags.String("worker-dir", "", "worker directory")
@@ -134,6 +135,9 @@ func serve(argv []string) error {
 		WorkerDir:     worker,
 		Model:         *model,
 		Sandbox:       engine,
+		// Nesting is an allowance by default: a workspace's sandbox is asked for it when the
+		// engine offers it and the machine can grant it, and boots without it otherwise.
+		AllowVMNesting: *allowVMNesting,
 	})
 	if err := workspaces.Open(ctx); err != nil {
 		return err

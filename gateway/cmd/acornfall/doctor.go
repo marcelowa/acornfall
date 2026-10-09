@@ -40,8 +40,14 @@ func doctorCommand(argv []string) {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
 	report := manager.Report()
+	nesting := manager.Nesting(context.Background())
 	if *asJSON {
-		payload, err := json.MarshalIndent(report, "", "  ")
+		// The report plus what the engine and the machine say about nesting: two answers,
+		// because either half can refuse and the reason is worth reading.
+		payload, err := json.MarshalIndent(struct {
+			sandbox.Report
+			Nesting sandbox.NestingSupport `json:"nesting"`
+		}{Report: report, Nesting: nesting}, "", "  ")
 		if err != nil {
 			log.Fatalf("acornfall doctor: %v", err)
 		}
@@ -62,6 +68,11 @@ func doctorCommand(argv []string) {
 			fmt.Printf("  state     %s\n", report.StateDir)
 		}
 		fmt.Printf("  isolated  %s\n", yesNo(report.Isolated))
+		if nesting.Available {
+			fmt.Printf("  nesting   yes\n")
+		} else {
+			fmt.Printf("  nesting   no (%s)\n", nesting.Reason)
+		}
 		if report.Problem != "" {
 			fmt.Printf("  problem   %s\n", report.Problem)
 			fmt.Println("\ntools will refuse until this is fixed; they do not run on the host")
