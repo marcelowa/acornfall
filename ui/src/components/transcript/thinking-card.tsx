@@ -6,6 +6,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Text } from "@/components/typography/text";
 import { cn } from "cn";
 import { PaneFooter } from "./pane-footer";
+import { ThinkingDots } from "./thinking-dots";
 
 export interface ThinkingCardProps {
 	entry: ThinkingEntry;
@@ -37,9 +38,12 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 				<Text as="span" size="sm" weight="semibold">
 					Thinking
 				</Text>
-				<Text as="span" size="2xs" className="ml-auto tabular-nums text-muted-foreground">
-					{open ? "live" : `${lines} lines`}
-				</Text>
+				<span className="ml-auto flex items-center gap-2">
+					{open ? <ThinkingDots /> : null}
+					<Text as="span" size="2xs" className="tabular-nums text-muted-foreground">
+						{open ? "live" : `${lines} lines`}
+					</Text>
+				</span>
 			</div>
 			<div
 				className={cn(

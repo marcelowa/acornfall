@@ -5,6 +5,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Text } from "@/components/typography/text";
 import { Markdown } from "./markdown";
 import { PaneFooter } from "./pane-footer";
+import { ThinkingDots } from "./thinking-dots";
 
 export interface AssistantMessageProps {
 	entry: AssistantEntry;
@@ -39,20 +40,8 @@ export function AssistantMessage({ entry, defaultRaw = false }: AssistantMessage
 		return (
 			<div data-slot="assistant" data-live="true" className="w-full">
 				{entry.markdown === "" ? null : <Markdown>{entry.markdown}</Markdown>}
-				<div
-					data-slot="thinking"
-					role="status"
-					aria-label="Responding"
-					className="flex items-center gap-1 py-2"
-				>
-					{[0, 1, 2].map((dot) => (
-						<span
-							key={dot}
-							aria-hidden
-							className="size-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse"
-							style={{ animationDelay: `${dot * 150}ms` }}
-						/>
-					))}
+				<div data-slot="thinking" className="py-2">
+					<ThinkingDots label="Responding" />
 				</div>
 			</div>
 		);

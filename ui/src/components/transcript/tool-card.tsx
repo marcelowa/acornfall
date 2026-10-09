@@ -6,6 +6,7 @@ import { Text } from "@/components/typography/text";
 import { stripAnsi } from "@/lib/text";
 import { cn } from "cn";
 import { PaneFooter } from "./pane-footer";
+import { ThinkingDots } from "./thinking-dots";
 
 /**
  * A completed card longer than this many lines — or this many characters — starts
@@ -54,20 +55,23 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 				<Text as="span" size="sm" weight="semibold" className="font-mono">
 					{entry.name}
 				</Text>
-				<Text
-					as="span"
-					size="2xs"
-					className={cn(
-						"ml-auto font-mono tabular-nums",
-						status === "error"
-							? "text-destructive"
-							: status === "running"
-								? "text-primary"
-								: "text-muted-foreground",
-					)}
-				>
-					{status}
-				</Text>
+				<span className="ml-auto flex items-center gap-2">
+					{status === "running" ? <ThinkingDots /> : null}
+					<Text
+						as="span"
+						size="2xs"
+						className={cn(
+							"font-mono tabular-nums",
+							status === "error"
+								? "text-destructive"
+								: status === "running"
+									? "text-primary"
+									: "text-muted-foreground",
+						)}
+					>
+						{status}
+					</Text>
+				</span>
 			</div>
 			{body === "" ? null : (
 				<pre
