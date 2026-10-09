@@ -1006,6 +1006,20 @@ try {
 		check("the drawer closes", true);
 	}
 
+	// 9. A conversation the worker no longer knows is a refusal, not a white screen: the
+	// rail stays up, and the strip names the id that failed. The final error check below is
+	// what would have caught the crash this replaces.
+	await page.goto(`${url}/c/general/does-not-exist`, { waitUntil: "domcontentloaded" });
+	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
+	const refusal = await page.evaluate(
+		() => document.querySelector("[data-slot=error-strip]")?.textContent ?? "",
+	);
+	check(
+		"a gone conversation refuses instead of crashing",
+		refusal.includes("does-not-exist"),
+		refusal.replace(/\s+/g, " ").slice(0, 90),
+	);
+
 	// The composer's controls have to fit a phone: wrapping is fine, running past the edge is
 	// the bug this check exists for.
 	const controlOverflow = await page.evaluate(() => {

@@ -268,7 +268,19 @@ export function usePlatform(): Platform {
 				if (!cancelled) setConnection("live");
 			},
 			onState: (next) => {
-				if (!cancelled) setState(next);
+				if (cancelled) return;
+				// A state event can be a refusal with no workspace behind it: subscribing
+				// to a conversation the worker no longer knows, for instance. That is a
+				// failure to report, not a state to render — setting it would wipe the
+				// transcript for an explanation nobody wrote.
+				if (next.workspace === undefined) {
+					reportError(
+						(next as unknown as { error?: unknown }).error ??
+							"the stream refused the conversation",
+					);
+					return;
+				}
+				setState(next);
 			},
 			onView: (nextView, nextSenders) => {
 				if (cancelled) return;
@@ -284,7 +296,7 @@ export function usePlatform(): Platform {
 			cancelled = true;
 			source.close();
 		};
-	}, [workspace, route.conversation]);
+	}, [workspace, route.conversation, reportError]);
 
 	const reload = useCallback(async (): Promise<void> => {
 		try {
@@ -349,7 +361,7 @@ export function usePlatform(): Platform {
 	const contextFold = useMemo(() => foldContext(view?.entries ?? []), [view]);
 
 	const workspaces = useMemo(
-		() => toWorkspaces(state?.workspaces ?? [], state?.workspace.name ?? ""),
+		() => toWorkspaces(state?.workspaces ?? [], state?.workspace?.name ?? ""),
 		[state],
 	);
 	const sandbox = useMemo(
@@ -455,7 +467,7 @@ export function usePlatform(): Platform {
 
 	const select = useCallback(
 		(id: string) => {
-			const name = state?.workspace.name ?? workspace;
+			const name = state?.workspace?.name ?? workspace;
 			window.history.pushState(
 				null,
 				"",
@@ -472,7 +484,7 @@ export function usePlatform(): Platform {
 	const showScreen = useCallback(
 		(screen: Screen) => {
 			if (screen === "conversation") {
-				const name = state?.workspace.name ?? workspace;
+				const name = state?.workspace?.name ?? workspace;
 				const id = state?.conversation?.id ?? activeId;
 				window.history.pushState(
 					null,
