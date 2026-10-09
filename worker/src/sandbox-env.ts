@@ -446,11 +446,15 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 	): Promise<void> {
 		const info = await this.sandbox.stat(path);
 		if (info === null) return;
-		snapshot.set(path, fingerprint(info));
-		if (!info.directory) return;
-		const entries = await this.sandbox.list(path);
-		for (const entry of entries) {
-			if (isExcluded(entry.name, target.exclude)) continue;
+		if (!info.directory) {
+			snapshot.set(path, fingerprint(info));
+			return;
+		}
+		const visible = (await this.sandbox.list(path)).filter(
+			(entry) => !isExcluded(entry.name, target.exclude),
+		);
+		snapshot.set(path, directoryFingerprint(visible.map((entry) => entry.name)));
+		for (const entry of visible) {
 			const child = joinPaths([path, entry.name]);
 			snapshot.set(child, fingerprint(entry));
 			if (target.recursive === true && entry.directory) {
@@ -773,9 +777,28 @@ function quote(value: string): string {
 /** How often a watch compares snapshots; the mode is honest, the latency should not be. */
 const WATCH_INTERVAL_MS = 100;
 
-/** A state string that changes when an entry's contents or identity do. */
+/**
+ * A state string for a file, and for a directory the walk does not enter: size and
+ * modification time, which is all the engine reports about an entry. Directories the walk
+ * enters are compared by their entries instead; see `directoryFingerprint`.
+ */
 function fingerprint(info: { directory: boolean; size: number; mtimeMs: number }): string {
 	return `${info.directory ? "d" : "f"}:${info.size}:${info.mtimeMs}`;
+}
+
+/**
+ * A state string for a directory: the names it holds, sorted so that the order a listing
+ * comes back in cannot itself read as a change.
+ *
+ * Not its own size and modification time, which are not identity: a directory replaced at
+ * the same path keeps both whenever the replacement happens inside the file system's
+ * timestamp granularity — four milliseconds on the machine this was found on — and the watch
+ * then reported the entries that vanished without the directory they vanished from. What a
+ * directory is, at this level, is the names it holds. Joined by NUL, the one byte a name
+ * cannot contain.
+ */
+function directoryFingerprint(names: readonly string[]): string {
+	return `d:${[...names].sort().join("\u0000")}`;
 }
 
 function isExcluded(name: string, exclude: WatchTarget["exclude"]): boolean {
