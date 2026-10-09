@@ -258,6 +258,9 @@ func TestTheLifecycleCallsTheEngineAsDocumented(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := [][]string{
+		// What the engine can do is asked once, before it is told what to do: the answer
+		// decides whether the create call carries `--nested-virt=false`.
+		{"create", "--help"},
 		{"create", "--conf"},
 		{"start", "ws"},
 		{"stop", "ws"},
@@ -275,8 +278,8 @@ func TestTheLifecycleCallsTheEngineAsDocumented(t *testing.T) {
 		}
 	}
 	// Removal must not depend on the sandbox being down first.
-	if !strings.Contains(strings.Join(runner.calls[3], " "), "--force") {
-		t.Errorf("remove should force: %v", runner.calls[3])
+	if !strings.Contains(strings.Join(runner.calls[len(runner.calls)-1], " "), "--force") {
+		t.Errorf("remove should force: %v", runner.calls)
 	}
 }
 
@@ -293,6 +296,141 @@ func TestThePolicyFileIsWrittenBesideTheWorkspaceState(t *testing.T) {
 	}
 	if !strings.Contains(string(written), "image: "+DefaultImage) {
 		t.Errorf("policy file should hold the policy, got:\n%s", written)
+	}
+}
+
+// -- nesting -------------------------------------------------------------------------
+
+// nestedHelp is the line a later engine advertises; the release this build pins has none.
+const nestedHelp = "Options:\n      --nested-virt  Enable nested virtualization"
+
+// helpRunner answers `create --help` with what the test says the engine publishes.
+type helpRunner struct {
+	recorded
+	help string
+}
+
+func (r *helpRunner) Run(_ context.Context, args ...string) (string, error) {
+	r.calls = append(r.calls, args)
+	if len(args) == 2 && args[0] == "create" && args[1] == "--help" {
+		return r.help, nil
+	}
+	return "", nil
+}
+
+// nestingDriver is a driver with an engine installed, told what the engine advertises and
+// what the machine can grant — neither of which is this machine's business in a test.
+func nestingDriver(t *testing.T, help string, host NestingSupport) (*Microsandbox, *helpRunner) {
+	t.Helper()
+	runner := &helpRunner{help: help}
+	driver := NewMicrosandbox(shortTempDir(t)).WithRunner(runner)
+	driver.installed = true
+	driver.hostNested = func() NestingSupport { return host }
+	return driver, runner
+}
+
+// createCall is the create invocation, skipping the question about nesting.
+func createCall(t *testing.T, runner *helpRunner) []string {
+	t.Helper()
+	for _, call := range runner.calls {
+		if len(call) > 0 && call[0] == "create" && (len(call) < 2 || call[1] != "--help") {
+			return call
+		}
+	}
+	t.Fatalf("no create call among %v", runner.calls)
+	return nil
+}
+
+func TestCreateAsksForNestingWhenAllowedAndPossible(t *testing.T) {
+	driver, runner := nestingDriver(t, nestedHelp, NestingSupport{Available: true})
+	policy := Policy{Workspace: "/home/me/work", AllowVMNesting: true}
+	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
+		t.Errorf("a capable engine and machine should be asked for nesting: %v", runner.calls)
+	}
+}
+
+func TestCreateLeavesNestingOffWhenTheWorkspaceDoesNotAllowIt(t *testing.T) {
+	driver, runner := nestingDriver(t, nestedHelp, NestingSupport{Available: true})
+	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	// A refusal is said explicitly, so a default in the engine's own configuration cannot
+	// turn nesting on under a workspace that chose against it.
+	if !strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt=false") {
+		t.Errorf("a workspace that refuses nesting should say so: %v", runner.calls)
+	}
+}
+
+func TestCreateSaysNothingAboutNestingToAnEngineThatCannot(t *testing.T) {
+	driver, runner := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
+	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
+		t.Errorf("an engine without the flag has nothing to be told: %v", runner.calls)
+	}
+}
+
+func TestCreateLeavesNestingOffWhenTheEngineCannot(t *testing.T) {
+	driver, runner := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
+	policy := Policy{Workspace: "/home/me/work", AllowVMNesting: true}
+	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
+		t.Errorf("an engine without the flag cannot nest and must not be told to: %v", runner.calls)
+	}
+}
+
+func TestCreateLeavesNestingOffWhenTheMachineCannot(t *testing.T) {
+	driver, runner := nestingDriver(t, nestedHelp, unavailable("the host kernel has nested virtualization off"))
+	policy := Policy{Workspace: "/home/me/work", AllowVMNesting: true}
+	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
+		t.Errorf("a machine that cannot nest must not be asked to: %v", runner.calls)
+	}
+}
+
+func TestNestingSaysWhichHalfRefused(t *testing.T) {
+	engine, _ := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
+	if support := engine.Nesting(context.Background()); support.Available || !strings.Contains(support.Reason, Version) {
+		t.Errorf("an engine without the flag is the reason, and it names the version: %+v", support)
+	}
+	machine, _ := nestingDriver(t, nestedHelp, unavailable("this machine cannot nest"))
+	if support := machine.Nesting(context.Background()); support.Available || support.Reason != "this machine cannot nest" {
+		t.Errorf("the machine's own reason should come through: %+v", support)
+	}
+}
+
+func TestNestingIsAskedOnceAndNotBeforeInstall(t *testing.T) {
+	runner := &helpRunner{help: nestedHelp}
+	driver := NewMicrosandbox(shortTempDir(t)).WithRunner(runner)
+	driver.hostNested = func() NestingSupport { return NestingSupport{Available: true} }
+	if support := driver.Nesting(context.Background()); support.Available || !strings.Contains(support.Reason, "not installed") {
+		t.Fatalf("nesting before install = %+v", support)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("an engine that is not installed has nothing to ask: %v", runner.calls)
+	}
+	driver.installed = true
+	for range 2 {
+		if support := driver.Nesting(context.Background()); !support.Available {
+			t.Fatalf("nesting when capable = %+v", support)
+		}
+	}
+	asked := 0
+	for _, call := range runner.calls {
+		if strings.Join(call, " ") == "create --help" {
+			asked++
+		}
+	}
+	if asked != 1 {
+		t.Errorf("the engine was asked %d times, want once", asked)
 	}
 }
 

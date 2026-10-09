@@ -67,3 +67,31 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 		t.Errorf("the rewrite lost something: %+v", reloaded.Workspaces)
 	}
 }
+
+// Nesting is an allowance, and whose allowance it is matters: the install's flag is the
+// default, a workspace's own setting wins over it, and nil is not false — it is "follow the
+// install", which is exactly why the field is a pointer.
+func TestNestingFollowsTheInstallUnlessTheWorkspaceChooses(t *testing.T) {
+	const home, userHome = "/home/me/.acornfall", "/home/me"
+	on, off := true, false
+	cases := []struct {
+		name      string
+		workspace *bool
+		install   bool
+		want      bool
+	}{
+		{"no setting follows an install that allows", nil, true, true},
+		{"no setting follows an install that does not", nil, false, false},
+		{"a workspace can allow what the install does not", &on, false, true},
+		{"a workspace can refuse what the install allows", &off, true, false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := Workspace{AllowVMNesting: test.workspace}
+			got := workspace.SandboxPolicy(home, userHome, test.install).AllowVMNesting
+			if got != test.want {
+				t.Errorf("AllowVMNesting = %t, want %t", got, test.want)
+			}
+		})
+	}
+}

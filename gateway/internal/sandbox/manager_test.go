@@ -14,6 +14,9 @@ type fakeDriver struct {
 	listed []Instance
 	err    error
 	usable error
+	// nesting is what this engine says about nesting here; the zero value is a refusal
+	// with no reason, which is what a test that never asks about it wants.
+	nesting NestingSupport
 	// installed flips to true after Install, so "installs once" can be asserted.
 	installed   bool
 	installErrs []error
@@ -39,7 +42,8 @@ func (f *fakeDriver) Install(_ context.Context, _ func(string, ...any)) error {
 	return nil
 }
 
-func (f *fakeDriver) Usable() error { return f.usable }
+func (f *fakeDriver) Usable() error                          { return f.usable }
+func (f *fakeDriver) Nesting(context.Context) NestingSupport { return f.nesting }
 func (f *fakeDriver) List(context.Context) ([]Instance, error) {
 	f.calls = append(f.calls, "list")
 	return f.listed, f.err

@@ -20,8 +20,8 @@ import (
 // Policy is a workspace's intent for its sandbox. It says what the workspace needs; how that
 // becomes an engine's configuration is the driver's business, which is why the engine's own
 // vocabulary does not appear here. It is the whole policy: what the sandbox
-// is made of, how big it may get, whether it may reach the network, and which host folder
-// it may see. The engine reads it as sandbox.yaml.
+// is made of, how big it may get, whether it may reach the network, whether it may nest
+// virtual machines, and which host folder it may see. The engine reads it as sandbox.yaml.
 type Policy struct {
 	// Image is the project's environment — Go, Rust, Python, Node, Ruby, whatever the work
 	// needs. It is deliberately not the worker's runtime: the worker is not in here.
@@ -29,6 +29,12 @@ type Policy struct {
 	// CPUs and Memory bound the sandbox. Zero values take the defaults.
 	CPUs   int
 	Memory string
+	// AllowVMNesting is whether this workspace may nest virtual machines inside its sandbox.
+	// It is an allowance, not a demand: the engine is asked for nesting only when it offers
+	// it and this machine can grant it, and a sandbox on a machine that cannot nest still
+	// boots. Nesting widens what runs inside the sandbox, so every surface that describes
+	// one says when it has it. See docs/adr/0018-allow-vm-nesting.md.
+	AllowVMNesting bool
 	// Egress allows the sandbox to reach the network. On by default for new workspaces;
 	// ADR 0012 records what that exposes.
 	Egress bool
