@@ -145,6 +145,8 @@ export interface WireScopeDefaults {
 export interface WireContentBlock {
 	type: string;
 	text?: string | undefined;
+	thinking?: string | undefined;
+	redacted?: boolean | undefined;
 	id?: string | undefined;
 	name?: string | undefined;
 	arguments?: unknown;

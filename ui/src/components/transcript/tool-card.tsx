@@ -7,9 +7,13 @@ import { stripAnsi } from "@/lib/text";
 import { cn } from "cn";
 import { PaneFooter } from "./pane-footer";
 
-/** A completed card longer than this many lines starts collapsed: the header already says
- * what ran, and the footer says how much is waiting. */
+/**
+ * A completed card longer than this many lines — or this many characters — starts
+ * collapsed: the header already says what ran, and the footer says how much is waiting.
+ * The character rule catches the one-line dump that line counting cannot see.
+ */
 const COLLAPSE_AFTER_LINES = 10;
+const COLLAPSE_AFTER_CHARS = 2000;
 
 export interface ToolCardProps {
 	entry: ToolEntry;
@@ -31,10 +35,12 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 		.trim();
 	const status = entry.isError ? "error" : entry.status;
 	const lineCount = body === "" ? 0 : body.split("\n").length;
+	const collapsible =
+		status === "done" &&
+		(lineCount > COLLAPSE_AFTER_LINES || body.length > COLLAPSE_AFTER_CHARS);
 
 	// Only a completed card with room to spare collapses: what is still running, or failed,
 	// is what the reader is here for.
-	const collapsible = status === "done" && lineCount > COLLAPSE_AFTER_LINES;
 	const [expanded, setExpanded] = useState(defaultExpanded);
 	const clamped = collapsible && !expanded;
 

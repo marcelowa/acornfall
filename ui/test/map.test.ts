@@ -258,6 +258,67 @@ describe("the wire mapping", () => {
 	});
 });
 
+describe("thinking and silence", () => {
+	test("reasoning blocks become their own card, ahead of the reply", () => {
+		const view: WireView = {
+			entries: [
+				{
+					id: 1,
+					kind: "pi.assistant",
+					model: [
+						{
+							content: [
+								{ type: "thinking", thinking: "check the lock order first" },
+								{ type: "text", text: "On it." },
+							],
+						},
+					],
+				},
+			],
+		};
+		const entries = toTranscript(view, {});
+		expect(entries).toHaveLength(2);
+		const [thinking, reply] = entries;
+		if (thinking?.kind !== "thinking" || reply?.kind !== "assistant")
+			throw new Error("expected a thinking card before the reply");
+		expect(thinking.text).toBe("check the lock order first");
+		expect(thinking.live).toBeUndefined();
+		expect(reply.markdown).toBe("On it.");
+	});
+
+	test("a redacted block renders as the fact of hiding", () => {
+		const view: WireView = {
+			entries: [
+				{
+					id: 1,
+					kind: "pi.assistant",
+					model: [{ content: [{ type: "thinking", redacted: true }] }],
+				},
+			],
+		};
+		const [thinking] = toTranscript(view, {});
+		if (thinking?.kind !== "thinking") throw new Error("expected a thinking card");
+		expect(thinking.text).toBe("Hidden by safety filters.");
+	});
+
+	test("a run with no visible evidence yet gets the dots, and only then", () => {
+		const view: WireView = { entries: [] };
+		const silent = toTranscript(view, {}, true);
+		expect(silent).toHaveLength(1);
+		const [dots] = silent;
+		if (dots?.kind !== "assistant") throw new Error("expected the dots pane");
+		expect(dots.live).toBe(true);
+		expect(dots.markdown).toBe("");
+		// Idle stays empty, and evidence needs no dots.
+		expect(toTranscript(view, {})).toHaveLength(0);
+		const streaming: WireView = {
+			entries: [],
+			docs: { "pi.live": { generation: { message: { content: "On it" } } } },
+		};
+		expect(toTranscript(streaming, {}, true).filter((entry) => entry.id === "live")).toHaveLength(1);
+	});
+});
+
 describe("pins that outlived what they name", () => {
 	const state = (over: Partial<WireState> = {}): WireState =>
 		({

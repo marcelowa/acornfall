@@ -285,6 +285,9 @@
 	/* A completed tool card shows this much before asking: the evidence stays one click away,
 	 * but a 400-line dump stops pushing the answer off the screen. */
 	--tool-card-collapsed-height: 200px;
+	/* A finished thinking card shows this much: reasoning is narrower than output, so its
+	 * collapsed form is shorter. */
+	--thinking-card-collapsed-height: 120px;
 }
 
 .dark {

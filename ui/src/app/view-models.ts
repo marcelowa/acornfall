@@ -64,7 +64,26 @@ export interface AgentSender {
 	conversationId: string;
 }
 
-export type TranscriptEntry = UserEntry | AssistantEntry | ToolEntry | NoticeEntry | PendingEntry;
+export type TranscriptEntry =
+	| UserEntry
+	| AssistantEntry
+	| ToolEntry
+	| ThinkingEntry
+	| NoticeEntry
+	| PendingEntry;
+
+/**
+ * The model's reasoning, when the provider shares it. It renders as a card that starts
+ * open and collapses when done — evidence, not the reply. A redacted block carries no
+ * words, only the fact that words were hidden.
+ */
+export interface ThinkingEntry {
+	kind: "thinking";
+	id: string;
+	at?: Date | undefined;
+	text: string;
+	live?: boolean | undefined;
+}
 
 export interface UserEntry {
 	kind: "user";

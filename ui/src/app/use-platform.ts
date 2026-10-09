@@ -377,7 +377,13 @@ export function usePlatform(): Platform {
 				),
 		[state, activeId, seen],
 	);
-	const entries = useMemo(() => toTranscript(view, senders), [view, senders]);
+	const runningNow =
+		(state?.conversations ?? []).find((conversation) => conversation.id === activeId)
+			?.running === true;
+	const entries = useMemo(
+		() => toTranscript(view, senders, runningNow),
+		[view, senders, runningNow],
+	);
 	const active = useMemo(
 		() => (state?.conversations ?? []).find((conversation) => conversation.id === activeId),
 		[state, activeId],

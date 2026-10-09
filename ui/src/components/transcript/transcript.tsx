@@ -12,6 +12,7 @@ import { AssistantMessage } from "./assistant-message";
 import { NoticeLine } from "./notice-line";
 import { PendingMessage } from "./pending-message";
 import { ToolCard } from "./tool-card";
+import { ThinkingCard } from "./thinking-card";
 import { UserMessage } from "./user-message";
 
 export interface TranscriptProps {
@@ -48,6 +49,8 @@ function Entry({
 			return <AssistantMessage key={entry.id} entry={entry} />;
 		case "tool":
 			return <ToolCard key={entry.id} entry={entry} />;
+		case "thinking":
+			return <ThinkingCard key={entry.id} entry={entry} />;
 		case "notice":
 			return <NoticeLine key={entry.id} entry={entry} />;
 		case "pending":

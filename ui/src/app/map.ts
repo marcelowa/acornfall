@@ -46,6 +46,31 @@ export function failureOf(message: WireMessage | undefined): string | undefined 
 	return `${message.provider ?? "provider"}/${message.model ?? "model"}: ${detail}`;
 }
 
+/**
+ * The reasoning the provider shared, if any. Thinking blocks ride inside the message
+ * content beside the text; the transcript lifts them into their own card, ahead of the
+ * reply they produced. A fully redacted block still renders — as the fact of hiding —
+ * because silence about silence reads as nothing happening.
+ */
+function thinkingOf(messages: { content?: string | WireContentBlock[] | undefined }[]): string | undefined {
+	const parts: string[] = [];
+	let redacted = false;
+	for (const message of messages) {
+		if (!Array.isArray(message.content)) continue;
+		for (const block of message.content) {
+			if (block.type !== "thinking") continue;
+			if (typeof block.thinking === "string" && block.thinking.trim() !== "") {
+				parts.push(block.thinking);
+			} else if (block.redacted === true) {
+				redacted = true;
+			}
+		}
+	}
+	if (parts.length > 0) return parts.join("\n");
+	if (redacted) return "Hidden by safety filters.";
+	return undefined;
+}
+
 /** Tool results name the call they answer; the call's arguments and name live on the assistant message. */
 function toolCalls(
 	entries: WireEntry[],
@@ -200,6 +225,7 @@ export function toAgentGroups(agents: WireAgentSummary[]): PickerGroup[] {
 export function toTranscript(
 	view: WireView | undefined,
 	senders: Record<string, WireSender>,
+	running = false,
 ): TranscriptEntry[] {
 	const entries = view?.entries ?? [];
 	const calls = toolCalls(entries);
@@ -238,6 +264,10 @@ export function toTranscript(
 					.map((message) => textOf(message.content))
 					.join("\n")
 					.trim();
+				const thinking = thinkingOf(messages);
+				if (thinking !== undefined) {
+					transcript.push({ kind: "thinking", id: `${id}-thinking`, text: thinking, at: at(first) });
+				}
 				if (failure === undefined && markdown === "") break;
 				transcript.push({ kind: "assistant", id, markdown, at: at(first), failure });
 				break;
@@ -279,8 +309,14 @@ export function toTranscript(
 			.map((entry) => entry.model?.[0]?.toolCallId)
 			.filter((callId) => callId !== undefined),
 	);
+	// Whether the run left visible evidence: streaming text, a running tool, the
+	// thinking itself, or an accepted draft. A run with none of those is silence, and
+	// silence gets the dots — but only while the run is real, so a stuck flag cannot
+	// promise forever.
+	let liveContent = false;
 	for (const slot of live?.tools ?? []) {
 		if (settled.has(slot.callId)) continue;
+		if (slot.status === "running") liveContent = true;
 		transcript.push(toolEntry(slot, calls));
 	}
 
@@ -288,7 +324,22 @@ export function toTranscript(
 	if (streaming !== undefined) {
 		const failure = failureOf(streaming);
 		const markdown = textOf(streaming.content).trim();
+		const thinking =
+			streaming.content === undefined || typeof streaming.content === "string"
+				? undefined
+				: thinkingOf([{ content: streaming.content }]);
+		if (thinking !== undefined) {
+			liveContent = true;
+			transcript.push({
+				kind: "thinking",
+				id: "live-thinking",
+				text: thinking,
+				at: at(streaming),
+				live: true,
+			});
+		}
 		if (failure !== undefined) {
+			liveContent = true;
 			transcript.push({
 				kind: "assistant",
 				id: "live",
@@ -297,6 +348,7 @@ export function toTranscript(
 				failure,
 			});
 		} else if (markdown !== "") {
+			liveContent = true;
 			transcript.push({
 				kind: "assistant",
 				id: "live",
@@ -314,7 +366,14 @@ export function toTranscript(
 		if (item.mode !== "steer" && item.mode !== "followUp") continue;
 		const text = textOf(item.content).trim();
 		if (text === "") continue;
+		liveContent = true;
 		transcript.push({ kind: "pending", id: `pending-${item.id}`, text, action: item.mode });
+	}
+
+	// A run with no visible evidence yet is thinking with no output: the dots are the
+	// whole pane, and the promise that something is coming.
+	if (running && !liveContent) {
+		transcript.push({ kind: "assistant", id: "live", markdown: "", live: true });
 	}
 
 	return transcript;

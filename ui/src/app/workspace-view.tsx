@@ -22,6 +22,7 @@ import { WorkspacesScreen } from "@/components/workspace/workspaces-screen";
 import { Transcript } from "@/components/transcript/transcript";
 import { Button } from "@/components/ui/button";
 import { RenameDialog } from "@/components/ui/rename-dialog";
+import { StatusDot } from "@/components/ui/status-dot";
 import { StatusPill } from "@/components/ui/status-pill";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
@@ -221,10 +222,28 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
+	// Busy is two signals, not one: the flag says a run exists, the transcript says one is
+	// visibly happening. Either one alone lies sometimes — a stuck flag after a restart, a
+	// quiet gap before the first token — so the composer and the header listen to both.
+	// The flag only counts while the activity is fresh: a run from hours ago with no live
+	// evidence is a stuck flag, not a busy conversation.
+	const updatedAt = platform.active?.updatedAt?.getTime();
+	const fresh = updatedAt !== undefined && Date.now() - updatedAt < 30 * 60_000;
+	const hasLive = platform.entries.some(
+		(entry) =>
+			(entry.kind === "assistant" && entry.live === true) ||
+			(entry.kind === "thinking" && entry.live === true) ||
+			(entry.kind === "tool" && entry.status === "running") ||
+			entry.kind === "pending",
+	);
+	const busy = hasLive || (running && fresh);
 	const barTitle = (
-		<Text as="span" size="sm" weight="medium" className="truncate">
-			{platform.active?.title ?? "Acornfall"}
-		</Text>
+		<span className="flex min-w-0 items-center gap-2">
+			{busy ? <StatusDot state="running" /> : null}
+			<Text as="span" size="sm" weight="medium" className="truncate">
+				{platform.active?.title ?? "Acornfall"}
+			</Text>
+		</span>
 	);
 
 	// The inspector: the answer to "why did it see that", from the fold — one request, what
@@ -432,7 +451,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 								setAborting(true);
 								platform.abort();
 							}}
-							running={platform.active?.running === true}
+							running={busy}
 							aborting={aborting}
 							focusConversation={platform.active?.id}
 							steerable={platform.steerable}
