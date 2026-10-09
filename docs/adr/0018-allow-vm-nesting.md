@@ -62,9 +62,11 @@ direction. The engine's own check remains the authority once the flag is passed.
 
 ## Consequences
 
-- The feature is inert until the pinned engine release carries `--nested-virt`; on today's
-  engine every workspace reports `nested: false` with the engine as the reason. Moving the pin
-  is what turns it on, and the commit that moves it should say so.
+- The switch is inert while the engine has none. On the pinned 0.7.6, guests nest whenever the
+  machine can — the engine's own default — while `doctor` and the state report `nested: false`
+  with the engine as the reason; the reason is about the missing switch, not the capability.
+  Moving the pin to the release carrying `--nested-virt` is what turns the switch on, and the
+  commit that moves it should say so.
 - `acornfall doctor` grows a nesting line, text and JSON; the state frame grows two fields.
 - The two flags differ on purpose: acornfall's `--allow-vm-nesting` says what it grants, the
   engine's `--nested-virt` says what it does with a sandbox.
