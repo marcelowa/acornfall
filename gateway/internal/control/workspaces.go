@@ -60,11 +60,11 @@ type Workspace struct {
 	// default, which is on. A string rather than a bool so that "not set" is expressible —
 	// and so an allowlist can be added later without a migration.
 	Network string `json:"network,omitempty"`
-	// AllowVMNesting is whether this workspace's sandbox may nest virtual machines: run a
-	// hypervisor inside it. Nil means "not set", which follows the install's
-	// --allow-vm-nesting; a pointer because false is a choice and absent is not. Like Image,
+	// DisableVMNesting is whether this workspace's sandbox must not nest virtual machines:
+	// run a hypervisor inside it. Nil means "not set", which follows the install's
+	// --disable-vm-nesting; a pointer because true is a choice and absent is not. Like Image,
 	// it takes effect at the next sandbox, because nesting is decided when one is created.
-	AllowVMNesting *bool `json:"allow_vm_nesting,omitempty"`
+	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
@@ -77,18 +77,18 @@ const NetworkOff = "off"
 // stored so that a new field cannot be forgotten in one of the two places. `home` is the
 // installation folder and `userHome` is the user's, because the global resources live in two
 // places and the worker reads both: the sandbox mounts the same paths at the same strings.
-// `allowVMNesting` is the install's own answer, --allow-vm-nesting, and a workspace's own
-// setting wins over it.
-func (w Workspace) SandboxPolicy(home, userHome string, allowVMNesting bool) sandbox.Policy {
-	if w.AllowVMNesting != nil {
-		allowVMNesting = *w.AllowVMNesting
+// `disableVMNesting` is the install's own answer, --disable-vm-nesting, and a workspace's
+// own setting wins over it.
+func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) sandbox.Policy {
+	if w.DisableVMNesting != nil {
+		disableVMNesting = *w.DisableVMNesting
 	}
 	return sandbox.Policy{
-		Image:          w.Image,
-		Workspace:      w.Path,
-		Egress:         w.Network != NetworkOff,
-		AllowVMNesting: allowVMNesting,
-		Global:         sandbox.GlobalPaths(home, userHome),
+		Image:            w.Image,
+		Workspace:        w.Path,
+		Egress:           w.Network != NetworkOff,
+		DisableVMNesting: disableVMNesting,
+		Global:           sandbox.GlobalPaths(home, userHome),
 	}
 }
 
@@ -130,9 +130,9 @@ type WorkspacesOptions struct {
 	Model string
 	// Sandbox is the machine's sandbox tier, shared by every workspace.
 	Sandbox *sandbox.Manager
-	// AllowVMNesting is the install default from --allow-vm-nesting: a workspace's sandbox
-	// may nest when the engine and the machine can, unless a workspace says otherwise.
-	AllowVMNesting bool
+	// DisableVMNesting is the install default from --disable-vm-nesting: a workspace's
+	// sandbox nests when the engine and the machine can, unless a workspace refuses it.
+	DisableVMNesting bool
 }
 
 // Workspaces is the install: a registry of workspaces and their started Controls.
@@ -402,19 +402,19 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	}
 
 	control = New(Options{
-		Workspace:      workspace,
-		Credentials:    filepath.Join(w.opts.Home, "credentials.json"),
-		Registry:       w.List,
-		WorkspacesDir:  w.Dir(),
-		Home:           w.opts.Home,
-		UserHome:       w.opts.UserHome,
-		StoragePath:    filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
-		SettingsPath:   filepath.Join(w.opts.Home, "state", name, "settings.json"),
-		Sandbox:        w.opts.Sandbox,
-		WorkerCommand:  w.opts.WorkerCommand,
-		WorkerDir:      w.opts.WorkerDir,
-		Model:          w.opts.Model,
-		AllowVMNesting: w.opts.AllowVMNesting,
+		Workspace:        workspace,
+		Credentials:      filepath.Join(w.opts.Home, "credentials.json"),
+		Registry:         w.List,
+		WorkspacesDir:    w.Dir(),
+		Home:             w.opts.Home,
+		UserHome:         w.opts.UserHome,
+		StoragePath:      filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
+		SettingsPath:     filepath.Join(w.opts.Home, "state", name, "settings.json"),
+		Sandbox:          w.opts.Sandbox,
+		WorkerCommand:    w.opts.WorkerCommand,
+		WorkerDir:        w.opts.WorkerDir,
+		Model:            w.opts.Model,
+		DisableVMNesting: w.opts.DisableVMNesting,
 	})
 	if err := os.MkdirAll(filepath.Join(w.opts.Home, "state", name), 0o700); err != nil {
 		return nil, err

@@ -120,10 +120,10 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		Path    *string `json:"path"`
 		Image   *string `json:"image"`
 		Network *string `json:"network"`
-		// AllowVMNesting, when present, decides whether this workspace's sandbox may nest;
-		// absent follows the install's --allow-vm-nesting.
-		AllowVMNesting *bool `json:"allow_vm_nesting"`
-		Trusted        *bool `json:"trusted"`
+		// DisableVMNesting, when true, keeps this workspace's sandbox from nesting;
+		// absent or false follows the install's --disable-vm-nesting.
+		DisableVMNesting *bool `json:"disable_vm_nesting"`
+		Trusted          *bool `json:"trusted"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -157,8 +157,8 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	if body.Network != nil {
 		workspace.Network = *body.Network
 	}
-	if body.AllowVMNesting != nil {
-		workspace.AllowVMNesting = body.AllowVMNesting
+	if body.DisableVMNesting != nil {
+		workspace.DisableVMNesting = body.DisableVMNesting
 	}
 	if err := s.workspaces.Update(workspace); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -182,9 +182,9 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		Image   *string `json:"image"`
 		Network *string `json:"network"`
 		Trusted *bool   `json:"trusted"`
-		// AllowVMNesting, when present, decides whether this workspace's sandbox may nest;
+		// DisableVMNesting, when present, keeps this workspace's sandbox from nesting;
 		// absent leaves the workspace's own setting alone.
-		AllowVMNesting *bool `json:"allow_vm_nesting"`
+		DisableVMNesting *bool `json:"disable_vm_nesting"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -208,8 +208,8 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.Network != nil {
 		existing.Network = *body.Network
 	}
-	if body.AllowVMNesting != nil {
-		existing.AllowVMNesting = body.AllowVMNesting
+	if body.DisableVMNesting != nil {
+		existing.DisableVMNesting = body.DisableVMNesting
 	}
 	if err := s.workspaces.Update(existing); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)

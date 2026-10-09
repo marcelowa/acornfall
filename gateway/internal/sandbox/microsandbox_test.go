@@ -341,10 +341,10 @@ func createCall(t *testing.T, runner *helpRunner) []string {
 	return nil
 }
 
-func TestCreateAsksForNestingWhenAllowedAndPossible(t *testing.T) {
+func TestCreateAsksForNestingWhenPossible(t *testing.T) {
 	driver, runner := nestingDriver(t, nestedHelp, NestingSupport{Available: true})
-	policy := Policy{Workspace: "/home/me/work", AllowVMNesting: true}
-	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
+	// The zero policy allows nesting: absence is not a refusal.
+	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
@@ -352,9 +352,10 @@ func TestCreateAsksForNestingWhenAllowedAndPossible(t *testing.T) {
 	}
 }
 
-func TestCreateLeavesNestingOffWhenTheWorkspaceDoesNotAllowIt(t *testing.T) {
+func TestCreateRefusesNestingExplicitlyWhenDisabled(t *testing.T) {
 	driver, runner := nestingDriver(t, nestedHelp, NestingSupport{Available: true})
-	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+	policy := Policy{Workspace: "/home/me/work", DisableVMNesting: true}
+	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	// A refusal is said explicitly, so a default in the engine's own configuration cannot
@@ -374,12 +375,15 @@ func TestCreateSaysNothingAboutNestingToAnEngineThatCannot(t *testing.T) {
 	}
 }
 
-func TestCreateLeavesNestingOffWhenTheEngineCannot(t *testing.T) {
+func TestCreateCannotRefuseToAnEngineWithoutTheFlag(t *testing.T) {
 	driver, runner := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
-	policy := Policy{Workspace: "/home/me/work", AllowVMNesting: true}
+	policy := Policy{Workspace: "/home/me/work", DisableVMNesting: true}
 	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
+	// There is no off switch to send it on. On the pinned 0.7.6 this refusal is an
+	// interim limitation the ADR owns: the sandbox still boots, nesting when the machine
+	// can. The engine without the flag must not be told to do what it cannot hear.
 	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
 		t.Errorf("an engine without the flag cannot nest and must not be told to: %v", runner.calls)
 	}
@@ -387,8 +391,7 @@ func TestCreateLeavesNestingOffWhenTheEngineCannot(t *testing.T) {
 
 func TestCreateLeavesNestingOffWhenTheMachineCannot(t *testing.T) {
 	driver, runner := nestingDriver(t, nestedHelp, unavailable("the host kernel has nested virtualization off"))
-	policy := Policy{Workspace: "/home/me/work", AllowVMNesting: true}
-	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
+	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
@@ -396,11 +399,21 @@ func TestCreateLeavesNestingOffWhenTheMachineCannot(t *testing.T) {
 	}
 }
 
-func TestNestingSaysWhichHalfRefused(t *testing.T) {
+// On the pinned 0.7.6 there is no switch to offer and guests nest by default, so the
+// engine half never refuses: a flagless engine reports what the machine says, and the
+// state tells the truth while the pin lasts. Remove with the pin.
+func TestNestingNestsByDefaultOnThePinnedEngine(t *testing.T) {
 	engine, _ := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
-	if support := engine.Nesting(context.Background()); support.Available || !strings.Contains(support.Reason, Version) {
-		t.Errorf("an engine without the flag is the reason, and it names the version: %+v", support)
+	if support := engine.Nesting(context.Background()); !support.Available {
+		t.Errorf("0.7.6 nests by default, so a capable machine should report nesting: %+v", support)
 	}
+	weak, _ := nestingDriver(t, "Options:\n      --cpus", unavailable("this machine cannot nest"))
+	if support := weak.Nesting(context.Background()); support.Available || support.Reason != "this machine cannot nest" {
+		t.Errorf("without the switch the machine's own reason is the whole answer: %+v", support)
+	}
+}
+
+func TestNestingSaysWhenTheMachineRefuses(t *testing.T) {
 	machine, _ := nestingDriver(t, nestedHelp, unavailable("this machine cannot nest"))
 	if support := machine.Nesting(context.Background()); support.Available || support.Reason != "this machine cannot nest" {
 		t.Errorf("the machine's own reason should come through: %+v", support)

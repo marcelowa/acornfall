@@ -68,9 +68,9 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 	}
 }
 
-// Nesting is an allowance, and whose allowance it is matters: the install's flag is the
-// default, a workspace's own setting wins over it, and nil is not false — it is "follow the
-// install", which is exactly why the field is a pointer.
+// Nesting is allowed unless refused, and whose refusal it is matters: the install's flag
+// is the default, a workspace's own setting wins over it, and nil is not false — it is
+// "follow the install", which is exactly why the field is a pointer.
 func TestNestingFollowsTheInstallUnlessTheWorkspaceChooses(t *testing.T) {
 	const home, userHome = "/home/me/.acornfall", "/home/me"
 	on, off := true, false
@@ -80,17 +80,17 @@ func TestNestingFollowsTheInstallUnlessTheWorkspaceChooses(t *testing.T) {
 		install   bool
 		want      bool
 	}{
-		{"no setting follows an install that allows", nil, true, true},
-		{"no setting follows an install that does not", nil, false, false},
-		{"a workspace can allow what the install does not", &on, false, true},
-		{"a workspace can refuse what the install allows", &off, true, false},
+		{"no setting follows an install that allows", nil, false, false},
+		{"no setting follows an install that refuses", nil, true, true},
+		{"a workspace can refuse what the install allows", &on, false, true},
+		{"a workspace can allow what the install refuses", &off, true, false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			workspace := Workspace{AllowVMNesting: test.workspace}
-			got := workspace.SandboxPolicy(home, userHome, test.install).AllowVMNesting
+			workspace := Workspace{DisableVMNesting: test.workspace}
+			got := workspace.SandboxPolicy(home, userHome, test.install).DisableVMNesting
 			if got != test.want {
-				t.Errorf("AllowVMNesting = %t, want %t", got, test.want)
+				t.Errorf("DisableVMNesting = %t, want %t", got, test.want)
 			}
 		})
 	}
