@@ -69,6 +69,26 @@ func TestAStaleDefaultAgentIsNotPinned(t *testing.T) {
 	}
 }
 
+// An empty catalog means the worker has not described itself yet, not that no
+// definition exists: pinning must still name the agent rather than leave the
+// conversation unnamed until the catalog arrives.
+func TestPinningNamesTheAgentBeforeTheCatalogArrives(t *testing.T) {
+	deepseek := binding("opencode-go", "deepseek-v4.1-flash")
+	control := layered(t, Defaults{Model: deepseek, Thinking: "high"}, Defaults{}, deepseek)
+	control.catalog = protocol.AgentsData{}
+	control.conversations = []protocol.ConversationInfo{{ID: "8"}}
+
+	if !control.hasAgentDefinition(GeneralAgent) {
+		t.Fatal("an empty catalog is an undescribed worker, not a missing definition")
+	}
+	if !control.pinOne("8") {
+		t.Fatal("a conversation with a provider to resolve should be pinned")
+	}
+	if got := control.bindings["8"]; got.Definition != GeneralAgent {
+		t.Fatalf("pinned %+v, want the general agent named", got)
+	}
+}
+
 // A default agent that does exist is pinned with the rest.
 func TestADefaultAgentIsPinned(t *testing.T) {
 	deepseek := binding("opencode-go", "deepseek-v4.1-flash")

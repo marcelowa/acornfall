@@ -1161,15 +1161,12 @@ func (c *Control) pinMissing(conversations []protocol.ConversationInfo) {
 	}
 }
 
+// hasAgentDefinition shares definitionExists' leniency: an empty catalog means the
+// worker has not described itself yet, not that no definition exists.
 func (c *Control) hasAgentDefinition(name string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	for _, agent := range c.catalog.Agents {
-		if agent.Name == name {
-			return true
-		}
-	}
-	return false
+	return definitionExists(c.catalog.Agents, name)
 }
 
 // AgentChange is a partial update. A nil field means "leave it alone" and an
