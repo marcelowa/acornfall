@@ -149,6 +149,7 @@ export const Default: Story = {
 		defaults,
 		providers: <ProvidersSection providers={providers} />,
 		updates,
+		version: "v0.9.2",
 		onClose: noop,
 	},
 };
