@@ -479,8 +479,9 @@ func assetNamed(release Release, name string) Asset {
 }
 
 // Backup copies config, state DB, and workspace list into
-// <home>/backups/<timestamp>/ and keeps the last 3. Update stops when
-// backup fails.
+// <home>/backups/<timestamp>/ and keeps the last 3. Secrets are never
+// backed up: credentials.json stays out, and old copies are scrubbed.
+// Update stops when backup fails.
 func (m *Manager) Backup() (string, error) {
 	stamp := time.Now().UTC().Format("20060102-150405.000000000")
 	dir := filepath.Join(m.backupsDir(), stamp)
@@ -492,7 +493,7 @@ func (m *Manager) Backup() (string, error) {
 		}
 		dir = filepath.Join(m.backupsDir(), fmt.Sprintf("%s-%d", stamp, i))
 	}
-	files := []string{"config.json", "credentials.json", "settings.json", "workspaces.json", "version", "update.json"}
+	files := []string{"config.json", "settings.json", "workspaces.json", "version", "update.json"}
 	for _, name := range files {
 		source := filepath.Join(m.home, name)
 		payload, err := os.ReadFile(source)
@@ -512,6 +513,7 @@ func (m *Manager) Backup() (string, error) {
 	if err := m.pruneBackups(); err != nil {
 		return "", err
 	}
+	m.scrubSecrets()
 	return dir, nil
 }
 
@@ -529,6 +531,14 @@ func (m *Manager) Backups() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// scrubSecrets removes credentials.json from kept backup sets: old
+// backups may hold secrets, new ones never do.
+func (m *Manager) scrubSecrets() {
+	for _, name := range m.Backups() {
+		_ = os.Remove(filepath.Join(m.backupsDir(), name, "credentials.json"))
+	}
 }
 
 func (m *Manager) pruneBackups() error {
