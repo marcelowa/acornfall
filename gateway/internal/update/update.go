@@ -34,9 +34,6 @@ const LatestURL = "https://api.github.com/repos/marcelowa/acornfall/releases/lat
 // CheckInterval is how often the gateway checks on its own.
 const CheckInterval = time.Hour
 
-// HealthWindow is how long /healthz must pass after a switch.
-const HealthWindow = 30 * time.Second
-
 // MaxBackups is how many backup sets are kept.
 const MaxBackups = 3
 
@@ -479,8 +476,9 @@ func assetNamed(release Release, name string) Asset {
 }
 
 // Backup copies config, state DB, and workspace list into
-// <home>/backups/<timestamp>/ and keeps the last 3. Update stops when
-// backup fails.
+// <home>/backups/<timestamp>/ and keeps the last 3. Secrets are never
+// backed up: credentials.json stays out, and old copies are scrubbed.
+// Update stops when backup fails.
 func (m *Manager) Backup() (string, error) {
 	stamp := time.Now().UTC().Format("20060102-150405.000000000")
 	dir := filepath.Join(m.backupsDir(), stamp)
@@ -492,7 +490,7 @@ func (m *Manager) Backup() (string, error) {
 		}
 		dir = filepath.Join(m.backupsDir(), fmt.Sprintf("%s-%d", stamp, i))
 	}
-	files := []string{"config.json", "credentials.json", "settings.json", "workspaces.json", "version", "update.json"}
+	files := []string{"config.json", "settings.json", "workspaces.json", "version", "update.json"}
 	for _, name := range files {
 		source := filepath.Join(m.home, name)
 		payload, err := os.ReadFile(source)
@@ -512,6 +510,7 @@ func (m *Manager) Backup() (string, error) {
 	if err := m.pruneBackups(); err != nil {
 		return "", err
 	}
+	m.scrubSecrets()
 	return dir, nil
 }
 
@@ -529,6 +528,14 @@ func (m *Manager) Backups() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// scrubSecrets removes credentials.json from kept backup sets: old
+// backups may hold secrets, new ones never do.
+func (m *Manager) scrubSecrets() {
+	for _, name := range m.Backups() {
+		_ = os.Remove(filepath.Join(m.backupsDir(), name, "credentials.json"))
+	}
 }
 
 func (m *Manager) pruneBackups() error {
@@ -1042,30 +1049,4 @@ func (m *Manager) RunPending(ctx context.Context) error {
 	}
 	m.ClearPending()
 	return nil
-}
-
-// WaitHealthy polls url until it answers 200 or the window ends.
-func WaitHealthy(ctx context.Context, url string, window time.Duration) error {
-	deadline := time.Now().Add(window)
-	client := &http.Client{Timeout: 5 * time.Second}
-	for time.Now().Before(deadline) {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return err
-		}
-		response, err := client.Do(request)
-		if err == nil {
-			_, _ = io.Copy(io.Discard, response.Body)
-			_ = response.Body.Close()
-			if response.StatusCode == http.StatusOK {
-				return nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-	}
-	return fmt.Errorf("healthy check: %s never answered 200 in %s", url, window)
 }
