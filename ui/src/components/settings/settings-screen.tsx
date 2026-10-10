@@ -19,6 +19,8 @@ export interface SettingsScreenProps {
 	onUpdateWorkspace: (change: { image: string; network: string }) => void;
 	/** The defaults section, built by the app from the pickers it already has. */
 	defaults: ReactNode;
+	/** The providers section: global keys, so it never sits under workspace tabs. */
+	providers: ReactNode;
 	/** Back to the conversation that was in view. */
 	onClose: () => void;
 }
@@ -38,6 +40,7 @@ export function SettingsScreen({
 	workspace,
 	onUpdateWorkspace,
 	defaults,
+	providers,
 	onClose,
 }: SettingsScreenProps) {
 	const [image, setImage] = useState(workspace?.image ?? "");
@@ -163,6 +166,8 @@ export function SettingsScreen({
 						</Text>
 						{defaults}
 					</Stack>
+
+					{providers}
 				</Stack>
 			</Measure>
 		</div>

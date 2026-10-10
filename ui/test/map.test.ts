@@ -6,12 +6,13 @@ import {
 	toAgentGroups,
 	toConversation,
 	toModelChoices,
+	toProviders,
 	toSandbox,
 	toScopeDefaults,
 	toTranscript,
 	toWorkspaces,
 } from "../src/app/map";
-import type { WireConversation, WireState, WireView } from "../src/app/wire";
+import type { WireConversation, WireProvider, WireState, WireView } from "../src/app/wire";
 
 const conversation = (over: Partial<WireConversation> = {}): WireConversation => ({
 	id: "3",
@@ -384,5 +385,43 @@ describe("pins that outlived what they name", () => {
 				.agent,
 		).toBe(false);
 		expect(stalePins(state()).agent).toBe(false);
+	});
+});
+
+describe("the provider list", () => {
+	const provider = (over: Partial<WireProvider> = {}): WireProvider => ({
+		id: "opencode-go",
+		name: "OpenCode Go",
+		authenticated: false,
+		models: [],
+		...over,
+	});
+
+	test("connected rows lead, the rest follow by name", () => {
+		const rows = toProviders([
+			provider({ id: "b", name: "B" }),
+			provider({ id: "a", name: "A", authenticated: true }),
+			provider({ id: "c", name: "C" }),
+		]);
+		expect(rows.map((row) => row.id)).toEqual(["a", "b", "c"]);
+	});
+
+	test("auth methods and model counts pass through; absent methods are ambient-only", () => {
+		const rows = toProviders([
+			provider({
+				authenticated: true,
+				source: "OPENCODE_API_KEY",
+				authType: "api_key",
+				authTypes: ["api_key", "oauth"],
+				models: [
+					{ id: "m1", name: "M1", thinkingLevels: [] },
+					{ id: "m2", name: "M2", thinkingLevels: [] },
+				],
+			}),
+		]);
+		expect(rows[0]?.modelCount).toBe(2);
+		expect(rows[0]?.source).toBe("OPENCODE_API_KEY");
+		expect(rows[0]?.authTypes).toEqual(["api_key", "oauth"]);
+		expect(toProviders([provider()])[0]?.authTypes).toEqual([]);
 	});
 });

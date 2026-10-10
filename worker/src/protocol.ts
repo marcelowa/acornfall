@@ -69,6 +69,11 @@ export interface ProviderInfo {
 	name: string;
 	authenticated: boolean;
 	source?: string;
+	/** How this install is authenticated, when it is: key or sign-in. */
+	authType?: "api_key" | "oauth";
+	/** Login methods the provider offers here. Empty means ambient-only:
+	 * the key comes from the environment or a file, and there is nothing to type. */
+	authTypes: ("api_key" | "oauth")[];
 	models: ProviderModelInfo[];
 }
 

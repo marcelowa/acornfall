@@ -242,6 +242,23 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		setRailWidth: noop,
 		setRailOpen: noop,
 		toggleRail: noop,
+		providers: [
+			{
+				id: "opencode-go",
+				name: "OpenCode Go",
+				authenticated: true,
+				source: "OPENCODE_API_KEY",
+				authType: "api_key",
+				authTypes: ["api_key", "oauth"],
+				modelCount: 29,
+			},
+		],
+		startLogin: noop,
+		answerLoginPrompt: noop,
+		cancelLogin: noop,
+		closeLogin: noop,
+		logoutProvider: noop,
+		refreshProviders: noop,
 		...overrides,
 	};
 }

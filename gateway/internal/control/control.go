@@ -1829,10 +1829,10 @@ func (c *Control) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// Login runs a provider login flow in the worker. It returns as soon as the
+// Login runs a provider login flow in the worker. It returns the flow id as soon as the
 // flow starts: the interaction arrives as `auth` frames, and a device flow can
 // take minutes.
-func (c *Control) Login(ctx context.Context, providerID, authType string) error {
+func (c *Control) Login(ctx context.Context, providerID, authType string) (string, error) {
 	c.mu.Lock()
 	c.nextSub++
 	authID := fmt.Sprintf("auth-%d", c.nextSub)
@@ -1853,7 +1853,7 @@ func (c *Control) Login(ctx context.Context, providerID, authType string) error 
 		}
 		c.publish(protocol.Frame{Type: "state"})
 	}()
-	return nil
+	return authID, nil
 }
 
 // Logout forgets one provider's stored credential and re-adopts bindings, so a

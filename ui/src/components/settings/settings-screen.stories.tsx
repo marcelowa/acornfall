@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type { WorkspaceSummary } from "@/app/view-models";
+import type { ProviderSummary, WorkspaceSummary } from "@/app/view-models";
 import { Stack } from "@/components/layout/stack";
 import { Picker } from "@/components/composer/picker";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ProvidersSection } from "./providers-section";
 import { SettingsScreen } from "./settings-screen";
 
 const meta = {
@@ -88,6 +89,32 @@ const defaults = (
 	</Stack>
 );
 
+const providers: ProviderSummary[] = [
+	{
+		id: "opencode-go",
+		name: "OpenCode Go",
+		authenticated: true,
+		source: "OPENCODE_API_KEY",
+		authType: "api_key",
+		authTypes: ["api_key", "oauth"],
+		modelCount: 29,
+	},
+	{
+		id: "commandcode",
+		name: "CommandCode",
+		authenticated: false,
+		authTypes: ["api_key"],
+		modelCount: 0,
+	},
+	{
+		id: "aws",
+		name: "AWS Bedrock",
+		authenticated: false,
+		authTypes: [],
+		modelCount: 0,
+	},
+];
+
 export const Default: Story = {
 	args: {
 		theme: "system",
@@ -95,6 +122,7 @@ export const Default: Story = {
 		workspace,
 		onUpdateWorkspace: noop,
 		defaults,
+		providers: <ProvidersSection providers={providers} />,
 		onClose: noop,
 	},
 };

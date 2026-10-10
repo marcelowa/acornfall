@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	abortConversation,
+	answerAuthPrompt,
+	cancelAuthFlow,
 	createConversation as createConversationRequest,
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
 	fetchState,
 	forkConversation,
 	hideConversation,
+	logoutProvider,
 	openStream,
+	refreshProviders,
 	removeWorkspace as removeWorkspaceRequest,
 	renameConversation,
 	sendMessage,
@@ -15,9 +19,11 @@ import {
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultThinking,
+	startProviderLogin,
 	updateWorkspace,
 	type AgentChange,
 	type DefaultScope,
+	type ProviderAuthType,
 } from "./client";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
@@ -26,6 +32,7 @@ import {
 	toConversation,
 	toModelChoices,
 	toModelGroups,
+	toProviders,
 	toSandbox,
 	toScopeDefaults,
 	toThinkingGroups,
@@ -37,12 +44,21 @@ import type {
 	ChoicePicker,
 	ConversationSummary,
 	PickerGroup,
+	ProviderSummary,
 	SandboxSummary,
 	SlashCommand,
 	TranscriptEntry,
 	WorkspaceSummary,
 } from "./view-models";
-import type { WireResolvedAgent, WireSender, WireState, WireUsage, WireView } from "./wire";
+import type {
+	WireAuthEvent,
+	WireAuthNotice,
+	WireResolvedAgent,
+	WireSender,
+	WireState,
+	WireUsage,
+	WireView,
+} from "./wire";
 
 const RAIL_WIDTH_KEY = "acornfall.ui.railWidth";
 const RAIL_COLLAPSED_KEY = "acornfall.ui.railCollapsed";
@@ -126,6 +142,21 @@ function timeOf(updatedAt: Date | undefined): number {
 	return updatedAt instanceof Date ? updatedAt.getTime() : Number.NEGATIVE_INFINITY;
 }
 
+/** One provider login in flight: the dialog renders this, nothing else. */
+export interface AuthFlow {
+	authId: string;
+	provider: ProviderSummary;
+	method: ProviderAuthType;
+	/** Notices so far: info, links, codes, progress. Prompts are not notices. */
+	notices: WireAuthNotice[];
+	/** The prompt waiting for an answer, if any. */
+	prompt?: Extract<WireAuthEvent, { kind: "prompt" }> | undefined;
+	/** An answer on its way: the dialog holds its submit until it lands. */
+	answering: boolean;
+	/** How the flow ended, when it ended. The dialog stays open to say so. */
+	outcome?: { ok: true } | { ok: false; message: string } | undefined;
+}
+
 export interface Platform {
 	ready: boolean;
 	/** The stream is following, or trying to be. */
@@ -168,6 +199,22 @@ export interface Platform {
 	createWorkspace: (name: string) => void;
 	removeWorkspace: (name: string) => void;
 	renameWorkspace: (name: string, title: string) => void;
+	/** Every provider, connected first: the settings screen lists these. */
+	providers: ProviderSummary[];
+	/** A login in flight, if any: the connect dialog renders it. */
+	authFlow?: AuthFlow | undefined;
+	/** Start connecting a provider. Prompts arrive on the stream. */
+	startLogin: (provider: ProviderSummary, method: ProviderAuthType) => void;
+	/** Answer the waiting prompt. */
+	answerLoginPrompt: (value: string) => void;
+	/** Abort the running flow. */
+	cancelLogin: () => void;
+	/** Dismiss a finished flow. */
+	closeLogin: () => void;
+	/** Forget one provider's stored key. */
+	logoutProvider: (id: string) => void;
+	/** Re-read the catalog, for a key added outside the app. */
+	refreshProviders: () => void;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	/** The conversation in view was created by another one, so its choices are not its own. */
@@ -232,6 +279,7 @@ export function usePlatform(): Platform {
 	const [failure, setFailure] = useState<string | undefined>(undefined);
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
 	const [ready, setReady] = useState(false);
+	const [authFlow, setAuthFlow] = useState<AuthFlow | undefined>(undefined);
 
 	const reportError = useCallback((cause: unknown): void => {
 		setFailure(cause instanceof Error ? cause.message : String(cause));
@@ -291,6 +339,25 @@ export function usePlatform(): Platform {
 				if (cancelled) return;
 				setView(nextView);
 				setSenders(nextSenders);
+			},
+			onAuth: (authId, event) => {
+				if (cancelled) return;
+				// A login belongs to the dialog that started it: frames from another
+				// tab's flow are not ours to render.
+				setAuthFlow((current) => {
+					if (current?.authId !== authId) return current;
+					if (event.kind === "prompt")
+						return { ...current, prompt: event, answering: false };
+					if (event.kind === "done")
+						return { ...current, prompt: undefined, outcome: { ok: true } };
+					if (event.kind === "error")
+						return {
+							...current,
+							prompt: undefined,
+							outcome: { ok: false, message: event.message },
+						};
+					return { ...current, notices: [...current.notices, event] };
+				});
 			},
 			onReconnecting: () => {
 				if (!cancelled) setConnection("reconnecting");
@@ -414,6 +481,7 @@ export function usePlatform(): Platform {
 	// what will actually run; `inherited` says whether this conversation chose it, and
 	// `defaultsOrigin` names the layer when it did not.
 	const modelChoices = useMemo(() => toModelChoices(state?.providers ?? []), [state]);
+	const providers = useMemo(() => toProviders(state?.providers ?? []), [state]);
 	const effectiveModel =
 		state === undefined ? "" : `${state.agent.provider}/${state.agent.modelId}`;
 	const thinkingLevels =
@@ -638,6 +706,59 @@ export function usePlatform(): Platform {
 		[act, reload],
 	);
 
+	// Provider logins. The start answers 202 with a flow id; every step after that
+	// arrives as an auth frame on the stream, matched to the dialog that started it.
+	const startLogin = useCallback(
+		(provider: ProviderSummary, method: ProviderAuthType) => {
+			void startProviderLogin(workspace, provider.id, method)
+				.then((authId) => {
+					setFailure(undefined);
+					setAuthFlow({
+						authId,
+						provider,
+						method,
+						notices: [],
+						prompt: undefined,
+						answering: false,
+						outcome: undefined,
+					});
+				})
+				.catch(reportError);
+		},
+		[workspace, reportError],
+	);
+	const answerLoginPrompt = useCallback(
+		(value: string) => {
+			if (authFlow?.prompt === undefined) return;
+			const { authId, prompt } = { authId: authFlow.authId, prompt: authFlow.prompt };
+			setAuthFlow({ ...authFlow, answering: true });
+			void answerAuthPrompt(authId, prompt.promptId, value)
+				.then(() => setFailure(undefined))
+				.catch((cause: unknown) => {
+					reportError(cause);
+					setAuthFlow((current) =>
+						current?.authId === authId ? { ...current, answering: false } : current,
+					);
+				});
+		},
+		[authFlow, reportError],
+	);
+	const cancelLogin = useCallback(() => {
+		const authId = authFlow?.authId;
+		setAuthFlow(undefined);
+		if (authId !== undefined) void cancelAuthFlow(authId).catch(reportError);
+	}, [authFlow, reportError]);
+	const closeLogin = useCallback(() => setAuthFlow(undefined), []);
+	const logoutProviderById = useCallback(
+		(id: string) => {
+			act(logoutProvider(workspace, id), () => void reload());
+		},
+		[act, workspace, reload],
+	);
+	const refreshProvidersNow = useCallback(() => {
+		act(refreshProviders(workspace), () => void reload());
+	}, [act, workspace, reload]);
+
 	const newConversation = useCallback(() => {
 		void createConversationRequest(workspace)
 			.then((created) => {
@@ -746,5 +867,13 @@ export function usePlatform(): Platform {
 		setRailWidth,
 		setRailOpen,
 		renameWorkspace,
+		providers,
+		authFlow,
+		startLogin,
+		answerLoginPrompt,
+		cancelLogin,
+		closeLogin,
+		logoutProvider: logoutProviderById,
+		refreshProviders: refreshProvidersNow,
 	};
 }

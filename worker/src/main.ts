@@ -422,11 +422,18 @@ async function describe(): Promise<DescribeData> {
 		const check = await models.checkAuth(provider.id).catch(() => undefined);
 		const authenticated = check !== undefined;
 		const list = authenticated ? await models.getAvailable(provider.id).catch(() => []) : [];
+		// What the connect dialog can offer: a key field only when the provider asks for
+		// one, sign-in only when it implements it, nothing when the key is ambient.
+		const authTypes: DescribeData["providers"][number]["authTypes"] = [];
+		if (provider.auth.apiKey?.login !== undefined) authTypes.push("api_key");
+		if (provider.auth.oauth !== undefined) authTypes.push("oauth");
 		providers.push({
 			id: provider.id,
 			name: provider.name ?? provider.id,
 			authenticated,
 			...(check?.source === undefined ? {} : { source: check.source }),
+			...(check?.type === undefined ? {} : { authType: check.type }),
+			authTypes,
 			models: list.map((model) => ({
 				id: model.id,
 				name: model.name ?? model.id,

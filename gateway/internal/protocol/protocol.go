@@ -203,11 +203,15 @@ type ConversationInfo struct {
 
 // ProviderInfo is one model provider and its auth state.
 type ProviderInfo struct {
-	ID            string      `json:"id"`
-	Name          string      `json:"name"`
-	Authenticated bool        `json:"authenticated"`
-	Source        string      `json:"source,omitempty"`
-	Models        []ModelInfo `json:"models"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Authenticated bool   `json:"authenticated"`
+	Source        string `json:"source,omitempty"`
+	// How this install authenticated, when it did: key or sign-in.
+	AuthType string `json:"authType,omitempty"`
+	// Login methods the provider offers: empty is ambient-only, nothing to type.
+	AuthTypes []string    `json:"authTypes,omitempty"`
+	Models    []ModelInfo `json:"models"`
 }
 
 // Capabilities reports optional worker features so the UI never assumes.

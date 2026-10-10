@@ -1,5 +1,12 @@
 import type { SlashCommand } from "./view-models";
-import type { WireCommands, WireFrame, WireSender, WireState, WireView } from "./wire";
+import type {
+	WireAuthEvent,
+	WireCommands,
+	WireFrame,
+	WireSender,
+	WireState,
+	WireView,
+} from "./wire";
 
 /**
  * The gateway client. One fetch for state, one EventSource for everything after it, and the
@@ -21,6 +28,7 @@ export interface StreamHandlers {
 	onOpen: () => void;
 	onState: (state: WireState) => void;
 	onView: (view: WireView, senders: Record<string, WireSender>) => void;
+	onAuth?: ((authId: string, event: WireAuthEvent) => void) | undefined;
 	onReconnecting: () => void;
 }
 
@@ -41,6 +49,10 @@ export function openStream(
 	});
 	source.addEventListener("frame", (event) => {
 		const frame = JSON.parse((event as MessageEvent<string>).data) as WireFrame;
+		if (frame.type === "auth" && frame.authId !== undefined && frame.event !== undefined) {
+			handlers.onAuth?.(frame.authId, frame.event);
+			return;
+		}
 		if (frame.type !== "view" || frame.value === undefined) return;
 		handlers.onView(frame.value, frame.acornfall?.senders ?? {});
 	});
@@ -211,4 +223,47 @@ export async function fetchCommands(workspace: string): Promise<SlashCommand[]> 
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	const body = (await response.json()) as WireCommands;
 	return body.commands;
+}
+
+/** The login methods a provider offers. Empty is ambient-only: nothing to type. */
+export type ProviderAuthType = "api_key" | "oauth";
+
+/** Start a login flow. Prompts arrive as auth frames on the stream. Answers with the flow id. */
+export async function startProviderLogin(
+	workspace: string,
+	providerId: string,
+	authType: ProviderAuthType,
+): Promise<string> {
+	const response = await fetch(workspacePath(workspace, "/providers/login"), {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ providerId, authType }),
+	});
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return ((await response.json()) as { authId: string }).authId;
+}
+
+/** Forget one provider's stored key. Ambient keys cannot be removed this way. */
+export function logoutProvider(workspace: string, providerId: string): Promise<void> {
+	return post(workspacePath(workspace, "/providers/logout"), { providerId });
+}
+
+/** Re-read the provider catalog, for a key added outside the app. */
+export function refreshProviders(workspace: string): Promise<void> {
+	return post(workspacePath(workspace, "/providers/refresh"), {});
+}
+
+/** Answer one login prompt. A blank answer with cancelled rejects it. */
+export function answerAuthPrompt(
+	authId: string,
+	promptId: string,
+	value: string,
+	cancelled = false,
+): Promise<void> {
+	return post("/api/auth/answer", { authId, promptId, value, cancelled });
+}
+
+/** Abort a running login flow. */
+export function cancelAuthFlow(authId: string): Promise<void> {
+	return post("/api/auth/cancel", { authId });
 }

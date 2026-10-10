@@ -719,11 +719,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authType must be api_key or oauth", http.StatusBadRequest)
 		return
 	}
-	if err := ctl.Login(r.Context(), body.ProviderID, authType); err != nil {
+	authID, err := ctl.Login(r.Context(), body.ProviderID, authType)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "authId": authID})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

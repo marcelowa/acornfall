@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronsUpDown, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
-import type { DefaultScope } from "./client";
-import type { ConversationSummary } from "./view-models";
+import type { DefaultScope, ProviderAuthType } from "./client";
+import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
 import { Composer } from "@/components/composer/composer";
 import { SlashMenu } from "@/components/composer/slash-menu";
@@ -18,6 +18,8 @@ import { ErrorStrip } from "@/components/ui/error-strip";
 import { ChoiceControl } from "@/components/composer/choice-control";
 import { Picker } from "@/components/composer/picker";
 import { SettingsScreen } from "@/components/settings/settings-screen";
+import { ProvidersSection } from "@/components/settings/providers-section";
+import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesScreen } from "@/components/workspace/workspaces-screen";
 import { Transcript } from "@/components/transcript/transcript";
 import { Button } from "@/components/ui/button";
@@ -61,6 +63,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const [scope, setScope] = useState<DefaultScope>("workspace");
 	/** The conversation being renamed, if any: the rail's menu asks, this dialog answers. */
 	const [renaming, setRenaming] = useState<ConversationSummary | undefined>(undefined);
+	/** The provider being connected: the dialog's method choice, before a flow starts. */
+	const [connecting, setConnecting] = useState<ProviderSummary | undefined>(undefined);
 	/** The inspector, asked or not: a dialog below 2xl, a docked column where it fits. */
 	const [inspectorOpen, setInspectorOpen] = useState(false);
 	const wide = useWide();
@@ -373,6 +377,26 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		</Stack>
 	);
 
+	// Provider keys are global, so their section never sits under the workspace tabs.
+	const providers = (
+		<ProvidersSection
+			providers={platform.providers}
+			onConnect={setConnecting}
+			onDisconnect={platform.logoutProvider}
+			onRefresh={platform.refreshProviders}
+		/>
+	);
+
+	const pickMethod = (method: ProviderAuthType): void => {
+		if (connecting === undefined) return;
+		platform.startLogin(connecting, method);
+	};
+	const dismissLogin = (abort: boolean): void => {
+		setConnecting(undefined);
+		if (abort) platform.cancelLogin();
+		else platform.closeLogin();
+	};
+
 	// The screens replace the conversation rather than sitting over it: they are places, and
 	// the rail is how you leave and how you come back.
 	const screen =
@@ -392,6 +416,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				workspace={activeWorkspace}
 				onUpdateWorkspace={platform.setWorkspace}
 				defaults={defaults}
+				providers={providers}
 				onClose={() => platform.showScreen("conversation")}
 			/>
 		) : undefined;
@@ -509,6 +534,19 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					setRenaming(undefined);
 				}}
 				onCancel={() => setRenaming(undefined)}
+			/>
+			<ProviderLoginDialog
+				pending={platform.authFlow === undefined ? connecting : undefined}
+				flow={platform.authFlow}
+				onPickMethod={pickMethod}
+				onAnswer={platform.answerLoginPrompt}
+				onCancel={() => dismissLogin(true)}
+				onClose={() => dismissLogin(false)}
+				onRetry={() => {
+					const provider = platform.authFlow?.provider;
+					platform.closeLogin();
+					setConnecting(provider);
+				}}
 			/>
 		</>
 	);

@@ -2,6 +2,7 @@ import type {
 	ConversationSummary,
 	ModelChoice,
 	PickerGroup,
+	ProviderSummary,
 	SandboxSummary,
 	TranscriptEntry,
 	WorkspaceSummary,
@@ -163,6 +164,26 @@ export function toSandbox(sandbox: WireSandbox): SandboxSummary {
 		isolated: sandbox.isolated,
 		problem: sandbox.problem,
 	};
+}
+
+/**
+ * The providers as settings lists them: connected first, then by name.
+ * The server already sorts this way; the copy keeps it true either way.
+ */
+export function toProviders(providers: WireProvider[]): ProviderSummary[] {
+	return [...providers]
+		.map((provider) => ({
+			id: provider.id,
+			name: provider.name,
+			authenticated: provider.authenticated,
+			source: provider.source,
+			authType: provider.authType,
+			authTypes: provider.authTypes ?? [],
+			modelCount: provider.models.length,
+		}))
+		.sort(
+			(a, b) => Number(b.authenticated) - Number(a.authenticated) || a.id.localeCompare(b.id),
+		);
 }
 
 /**

@@ -136,6 +136,22 @@ export interface PendingEntry {
 	action: "steer" | "followUp";
 }
 
+/** One model provider as the settings screen lists it. */
+export interface ProviderSummary {
+	id: string;
+	name: string;
+	authenticated: boolean;
+	/** Where the working key came from, when one works: env var, OAuth, a file. */
+	source?: string | undefined;
+	/** How this install authenticated, when it did: typed key or sign-in. */
+	authType?: "api_key" | "oauth" | undefined;
+	/** Login methods on offer. Empty is ambient-only: the key lives
+	 * outside the app, and there is nothing to type. */
+	authTypes: ("api_key" | "oauth")[];
+	/** Models on offer once connected. A count, not a list: the picker owns the list. */
+	modelCount: number;
+}
+
 /** One choice in a picker: the value is what the wire takes, the label is what a person reads. */
 export interface PickerOption {
 	value: string;

@@ -59,8 +59,51 @@ export interface WireProvider {
 	name: string;
 	authenticated: boolean;
 	source?: string | undefined;
+	/** How this install authenticated, when it did: key or sign-in. */
+	authType?: "api_key" | "oauth" | undefined;
+	/** Login methods the provider offers. Empty is ambient-only. */
+	authTypes?: ("api_key" | "oauth")[] | undefined;
 	models: WireModel[];
 }
+
+/** One step of a provider login, a 1:1 projection of the worker's auth frames. */
+export type WireAuthEvent =
+	| {
+			kind: "prompt";
+			promptId: string;
+			promptType: "text" | "secret" | "select" | "manual_code";
+			message: string;
+			placeholder?: string | undefined;
+			options?: { id: string; label: string; description?: string }[] | undefined;
+	  }
+	| {
+			kind: "info";
+			message: string;
+			links?: { url: string; label?: string }[] | undefined;
+	  }
+	| { kind: "auth_url"; url: string; instructions?: string | undefined }
+	| {
+			kind: "device_code";
+			userCode: string;
+			verificationUri: string;
+			intervalSeconds?: number | undefined;
+			expiresInSeconds?: number | undefined;
+	  }
+	| { kind: "progress"; message: string }
+	| { kind: "done"; providerId: string }
+	| { kind: "error"; message: string };
+
+export interface WireAuthFrame {
+	type: "auth";
+	authId: string;
+	event: WireAuthEvent;
+}
+
+/** The events a dialog renders as steps: prompts and outcomes are not notices. */
+export type WireAuthNotice = Extract<
+	WireAuthEvent,
+	{ kind: "info" | "auth_url" | "device_code" | "progress" }
+>;
 
 export interface WireCapabilities {
 	steer: boolean;
@@ -232,4 +275,6 @@ export interface WireFrame {
 	conversationId?: string | undefined;
 	value?: WireView | undefined;
 	acornfall?: { senders?: Record<string, WireSender> | undefined } | undefined;
+	authId?: string | undefined;
+	event?: WireAuthEvent | undefined;
 }

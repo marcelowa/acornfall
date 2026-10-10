@@ -176,7 +176,7 @@ describe("the worker protocol", () => {
 		const described = await worker.call<{
 			provider: string;
 			workdir: string;
-			providers: { id: string; authenticated: boolean }[];
+			providers: { id: string; authenticated: boolean; authTypes: unknown[] }[];
 			capabilities: { steer: boolean };
 		}>({ type: "describe" });
 
@@ -188,6 +188,11 @@ describe("the worker protocol", () => {
 			),
 		).toBe(true);
 		expect(described.capabilities.steer).toBe(true);
+		// The connect dialog offers only methods the provider implements:
+		// every entry says which, and ambient-only says none.
+		for (const provider of described.providers) {
+			expect(Array.isArray(provider.authTypes)).toBe(true);
+		}
 	});
 
 	test("creates, lists, opens, renames, and hides a conversation", async () => {
