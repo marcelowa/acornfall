@@ -100,6 +100,52 @@ type Status struct {
 	RestartRequired bool `json:"restartRequired,omitempty"`
 }
 
+// Preflight is doctor's update section: what runs, what the worker is,
+// whether the toolchain is here, and whether releases answer. Missing
+// pieces say "first boot fetches": an install is complete before its
+// first run, and doctor must not demand a network to say the rest.
+type Preflight struct {
+	Version  string `json:"version"`
+	Worker   string `json:"worker"`
+	Bun      string `json:"bun"`
+	Latest   string `json:"latest,omitempty"`
+	Releases string `json:"releases"`
+}
+
+// Preflight builds the update section. The release check degrades to a
+// sentence offline: everything local is still answered.
+func (m *Manager) Preflight(ctx context.Context) Preflight {
+	status := m.Status()
+	preflight := Preflight{Version: status.Current}
+	if worker := m.WorkerVersion(); worker != "" {
+		preflight.Worker = worker
+	} else if status.Current == "dev" {
+		preflight.Worker = "dev (repo sources)"
+	} else {
+		preflight.Worker = "missing (first boot fetches)"
+	}
+	if path, ok := m.bunReady(); ok {
+		preflight.Bun = BunVersion + " (" + path + ")"
+	} else {
+		preflight.Bun = "missing (first boot fetches)"
+	}
+	release, err := m.Check(ctx)
+	if err != nil {
+		preflight.Releases = releaseProblem(err)
+	} else {
+		preflight.Latest = release.Tag
+		preflight.Releases = "reachable"
+	}
+	return preflight
+}
+
+func releaseProblem(err error) string {
+	if os.Getenv("ACORNFALL_GITHUB_TOKEN") == "" && strings.Contains(err.Error(), "404") {
+		return "not found: a private repo needs ACORNFALL_GITHUB_TOKEN, or no releases exist yet"
+	}
+	return "unreachable: " + err.Error()
+}
+
 // ApplyOptions are POST /api/update/apply.
 type ApplyOptions struct {
 	CleanVMs bool
