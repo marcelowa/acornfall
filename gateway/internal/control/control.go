@@ -1373,7 +1373,6 @@ func (c *Control) effectiveDefaults() (Defaults, DefaultOrigins) {
 	case lastResort.Provider != "" && lastResort.ModelID != "":
 		resolved.Model, origins.Model = lastResort, originLastResort
 	}
-	resolved.Thinking, origins.Thinking = "", ""
 	switch {
 	case workspace.Thinking != "":
 		resolved.Thinking, origins.Thinking = workspace.Thinking, originWorkspace
@@ -2321,9 +2320,9 @@ func (c *Control) persist() {
 // gated: a prompt accepted in the last ten seconds counts before the record exists, and a
 // record only counts while the activity is fresh. A settlement clears its prompt stamp,
 // so the grace ends when the run does: the sign comes down with the answer rather than
-// outliving it by seconds. Thirty minutes of silence with no new
-// prompt is a residue, not a run — a legitimately quiet hour-long tool call is the known
-// cost, and its tool cards still say it is working.
+// outliving it by seconds. Thirty minutes of silence with no new prompt is a residue,
+// not a run — a legitimately quiet hour-long tool call is the known cost, and its tool
+// cards still say it is working.
 func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	c.mu.RLock()
 	prompted := c.promptedAt[info.ID]
