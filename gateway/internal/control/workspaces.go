@@ -516,6 +516,15 @@ func (w *Workspaces) running() []*Control {
 	return controls
 }
 
+// StopWorkers terminates every started workspace's worker process and
+// leaves warm sandboxes alone: the next open reattaches. No failure is
+// possible beyond the waits inside, so there is no error to return.
+func (w *Workspaces) StopWorkers() {
+	for _, control := range w.running() {
+		control.stopWorker()
+	}
+}
+
 // AbortAll stops every running conversation in every started workspace.
 // One failure does not stop the rest: an update that asked for drain-stop
 // wants everything quiet, and the joined error says what stayed loud.

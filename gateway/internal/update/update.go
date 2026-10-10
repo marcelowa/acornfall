@@ -197,6 +197,10 @@ type Manager struct {
 	// CleanVMs wipes the sandbox tier for a Start-clean update. Injected
 	// for the same reason as RunsActive.
 	CleanVMs func(ctx context.Context) error
+	// StopWorkers terminates worker processes without touching sandboxes.
+	// Apply calls it before wiping (so no orphan resurrects the VMs) and
+	// Restart calls it before exec (so no orphan serves old code).
+	StopWorkers func()
 	// IsAdmin decides POST /api/update/apply. Default allow: single user
 	// now, admin later. Return false to get the 403 path today.
 	IsAdmin func(r *http.Request) bool
@@ -718,6 +722,9 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 		if m.CleanVMs == nil {
 			return fmt.Errorf("update: clean VMs asked and nothing can wipe them")
 		}
+		if m.StopWorkers != nil {
+			m.StopWorkers()
+		}
 		if err := m.CleanVMs(ctx); err != nil {
 			return fmt.Errorf("update: cannot wipe sandboxes: %w", err)
 		}
@@ -981,6 +988,11 @@ func (m *Manager) Rollback(cause error) error {
 // its own. A failure keeps the old process: the screen still says
 // restartRequired and a human restarts instead.
 func (m *Manager) Restart() error {
+	// Workers die first: an orphan would keep serving old code past the
+	// exec, and resurrect sandboxes a clean update just wiped.
+	if m.StopWorkers != nil {
+		m.StopWorkers()
+	}
 	bin, err := filepath.Abs(m.binPath)
 	if err != nil {
 		return err

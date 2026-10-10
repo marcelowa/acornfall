@@ -292,3 +292,13 @@ func TestStateWithoutUpdateIsEmpty(t *testing.T) {
 		t.Fatalf("no update tier must read empty, got %+v", state.Update)
 	}
 }
+
+func TestStopWorkersIsSafeEmpty(t *testing.T) {
+	workspaces := &Workspaces{}
+	workspaces.StopWorkers()
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	control.stopWorker()
+	if control.WorkerUp() {
+		t.Fatal("no worker must mean not up")
+	}
+}

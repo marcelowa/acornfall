@@ -779,3 +779,93 @@ func TestCheckExecRunsStagedBinary(t *testing.T) {
 		t.Fatal("garbage must fail")
 	}
 }
+
+func TestRuntimeTagPrefersStamp(t *testing.T) {
+	old := BuildVersion
+	BuildVersion = "v0.9.9"
+	defer func() { BuildVersion = old }()
+	manager, _ := testManager(t)
+	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.RuntimeTag(); got != "v0.9.9" {
+		t.Fatalf("execution must match the binary, got %q", got)
+	}
+}
+
+func TestReleaseForFetchesByTag(t *testing.T) {
+	manager, _ := testManager(t)
+	var hits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path != "/o/r/releases/tags/v0.8.0" {
+			t.Errorf("wrong release path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(releaseJSON("v0.8.0", "")))
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+	release, err := manager.releaseFor(context.Background(), "v0.8.0")
+	if err != nil || release.Tag != "v0.8.0" {
+		t.Fatalf("release = %+v, %v", release, err)
+	}
+	if hits != 1 {
+		t.Fatalf("one fetch, got %d", hits)
+	}
+	// Cached latest answers without the network.
+	manager.mu.Lock()
+	manager.latest = release
+	manager.mu.Unlock()
+	if _, err := manager.releaseFor(context.Background(), "v0.8.0"); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 1 {
+		t.Fatal("cached tag must not refetch")
+	}
+	// The check state is untouched: latest stays what the check found.
+	if status := manager.Status(); status.Latest != "v0.8.0" {
+		t.Fatalf("latest = %q", status.Latest)
+	}
+}
+
+func TestReleaseForNamesMissingTag(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+	if _, err := manager.releaseFor(context.Background(), "vnope"); err == nil {
+		t.Fatal("missing tag must fail plainly")
+	} else if !strings.Contains(err.Error(), "vnope") {
+		t.Fatalf("error must name the tag: %v", err)
+	}
+}
+
+func TestApplyStopsWorkersBeforeWipe(t *testing.T) {
+	manager, _ := testManager(t)
+	order := []string{}
+	manager.StopWorkers = func() { order = append(order, "stop") }
+	manager.CleanVMs = func(context.Context) error {
+		order = append(order, "wipe")
+		if len(order) != 2 || order[0] != "stop" {
+			t.Errorf("workers must stop before the wipe: %v", order)
+		}
+		return nil
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(versionScript("v0.9.0")))
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{CleanVMs: true, Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
