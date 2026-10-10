@@ -905,12 +905,6 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 	if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 		return err
 	}
-	// The conversation in view is the one whose model, level, and agent someone is about to
-	// read off the screen, so the worker is told about it here rather than at the first
-	// message. `ensureConversation` is a no-op for one that is already configured.
-	if err := c.ensureConversation(ctx, conversationID); err != nil {
-		return err
-	}
 	c.mu.Lock()
 	c.active = conversationID
 	c.mu.Unlock()
@@ -920,8 +914,10 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 	if _, err := c.listConversations(ctx); err != nil {
 		workerpool.Log("refresh conversations after select: %v", err)
 	}
-	// Attaching to a conversation that has no model yet would fail on its next
-	// prompt, so selecting one is where it gets configured.
+	// A conversation that has no model yet would fail on its next prompt, so selecting
+	// one is where it gets configured — and where the pickers read what will actually
+	// run. No provider is a state, not a failure: selecting lands, and sending is what
+	// says a provider is needed.
 	if err := c.ensureConversation(ctx, conversationID); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}

@@ -132,6 +132,10 @@ type settings struct {
 	script []scriptRule
 	slow   bool
 	setup  []setup
+	// noDevProvider runs the worker as a fresh production install does: the real
+	// providers, none of which authenticate in the curated test environment, and no
+	// --model flag to guess from.
+	noDevProvider bool
 }
 
 // withScript is what the model does: the first rule whose Match is a substring of the last
@@ -157,6 +161,14 @@ func withSlowModel() func(*settings) {
 // config, agents, and commands are read from scratch.
 func withSetup(fn setup) func(*settings) {
 	return func(s *settings) { s.setup = append(s.setup, fn) }
+}
+
+// withoutDevProvider runs the install as a fresh production one does: the real providers,
+// none of which authenticate in the curated test environment, and no --model flag to guess
+// from. Selecting must still land — "no authenticated provider" is a state, not a failure —
+// and only sending says a provider is needed.
+func withoutDevProvider() func(*settings) {
+	return func(s *settings) { s.noDevProvider = true }
 }
 
 // system is one running install: its own home, its own workspaces folder, its own port.
@@ -250,10 +262,14 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		"--home", s.Home,
 		"--workspaces-dir", s.WorkspacesDir,
 		"--workspace", s.General,
-		"--model", "faux/faux-1",
 		"--worker-dir", workerDir,
 		"--addr", "127.0.0.1:0",
 		"--insecure",
+	}
+	// A fresh install has no model flag: the last resort is derived, not given. Every other
+	// test runs with one, so a prompt always has something to run without credentials.
+	if !s.cfg.noDevProvider {
+		args = append(args, "--model", "faux/faux-1")
 	}
 	// A resource test runs on the host engine: it needs the workspace's files, not a microVM,
 	// and this is the engine that needs no hypervisor and no state directory. Everything else
@@ -287,7 +303,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 			t.Fatal(err)
 		}
 		env = append(env, "ACORNFALL_DEV_SCRIPT="+scriptPath)
-	} else {
+	} else if !s.cfg.noDevProvider {
 		env = append(env, "ACORNFALL_DEV_PROVIDER=1")
 	}
 	cmd.Env = env

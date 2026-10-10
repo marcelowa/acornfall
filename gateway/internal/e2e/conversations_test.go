@@ -100,6 +100,34 @@ func TestConversationLifecycle(t *testing.T) {
 	}
 }
 
+// Selecting lands even with no provider: "no authenticated provider" is a state, not a
+// failure, and the friendly error arrives at send-time, not click-time.
+func TestSelectingLandsWithNoProvider(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withoutDevProvider())
+	c := s.client()
+
+	// The listing is refreshed before answering, so the root is here even though no state
+	// was ever announced for it.
+	listed := c.conversations("general")
+	if len(listed) != 1 {
+		t.Fatalf("a fresh install should have one conversation, got %d", len(listed))
+	}
+	status, body := c.postStatus(c.conversationPath("general", listed[0].ID)+"/select", nil)
+	if status != 200 {
+		t.Fatalf("selecting with no provider should land, got %d: %s", status, body)
+	}
+
+	status, body = c.postStatus(c.conversationPath("general", listed[0].ID)+"/messages", map[string]any{"text": "hello"})
+	if status == 200 {
+		t.Error("sending with no provider should be refused")
+	}
+	if !strings.Contains(body, "connect a provider") {
+		t.Errorf("the refusal should say a provider is needed, got %q", body)
+	}
+}
+
 // An unnamed conversation is named after its first user message, so the rail is readable
 // without anyone naming anything.
 func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
