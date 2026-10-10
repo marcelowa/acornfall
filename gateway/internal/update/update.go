@@ -184,9 +184,35 @@ func swapFile(path string, payload []byte) error {
 			return fmt.Errorf("update: cannot move %s aside: %w", path, err)
 		}
 	}
-	if err := os.WriteFile(path, payload, 0o755); err != nil {
+	if err := writeAtomic(path, payload); err != nil {
 		_ = os.Rename(path+".bak", path)
+		return err
+	}
+	return nil
+}
+
+// writeAtomic publishes payload at path through a temp file and a rename:
+// a worker restarting mid-swap execs the old file or the new one, never a
+// half-written one.
+func writeAtomic(path string, payload []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), ".new-*")
+	if err != nil {
+		return fmt.Errorf("update: cannot stage %s: %w", path, err)
+	}
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if _, err := temp.Write(payload); err != nil {
+		_ = temp.Close()
 		return fmt.Errorf("update: cannot write %s: %w", path, err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("update: cannot write %s: %w", path, err)
+	}
+	if err := os.Chmod(tempPath, 0o755); err != nil {
+		return fmt.Errorf("update: cannot write %s: %w", path, err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("update: cannot publish %s: %w", path, err)
 	}
 	return nil
 }
@@ -727,10 +753,10 @@ func (m *Manager) swap(payload []byte, tag string) error {
 	if err := os.Rename(m.binPath, m.backupBinPath()); err != nil {
 		return fmt.Errorf("update: cannot move running binary aside: %w", err)
 	}
-	if err := os.WriteFile(m.binPath, payload, 0o755); err != nil {
+	if err := writeAtomic(m.binPath, payload); err != nil {
 		// The new file failed: put the old one back, so the path still runs.
 		_ = os.Rename(m.backupBinPath(), m.binPath)
-		return fmt.Errorf("update: cannot write new binary: %w", err)
+		return err
 	}
 	m.mu.Lock()
 	previous := m.current
