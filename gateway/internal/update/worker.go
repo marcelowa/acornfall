@@ -362,7 +362,9 @@ func (m *Manager) installWorker(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("update: bun %s is not installed; run with network once", BunVersion)
 	}
-	command := exec.CommandContext(ctx, bun, "install", "--frozen-lockfile")
+	// Production only: type definitions and linters never run. Smaller,
+	// faster, and the difference that fits a small disk.
+	command := exec.CommandContext(ctx, bun, "install", "--frozen-lockfile", "--production")
 	command.Dir = m.workerDir()
 	output, err := command.CombinedOutput()
 	if err != nil {
