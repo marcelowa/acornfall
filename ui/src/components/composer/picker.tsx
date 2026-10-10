@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type { PickerGroup } from "@/app/view-models";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { cn } from "cn";
 
 export interface PickerProps {
@@ -23,13 +25,40 @@ export interface PickerProps {
 	groups: PickerGroup[];
 	onSelect: (value: string) => void;
 	disabled?: boolean | undefined;
+	/** Open on mount, for the catalogue: the menu is otherwise the button's business. */
+	defaultOpen?: boolean | undefined;
 	className?: string | undefined;
+}
+
+/** Options on screen before narrowing: the same eight the slash menu shows. */
+export const PICKER_FILTER_AFTER = 8;
+
+/**
+ * Substring narrowing across groups, the way the slash menu and the scripted provider
+ * match: the label and the value both count, so `opus` finds `Opus 5` either way it is
+ * written. An empty query is the whole list.
+ */
+export function filterPickerGroups(groups: PickerGroup[], query: string): PickerGroup[] {
+	const needle = query.trim().toLowerCase();
+	if (needle === "") return groups;
+	return groups
+		.map((group) => ({
+			...group,
+			options: group.options.filter((option) =>
+				`${option.label} ${option.value}`.toLowerCase().includes(needle),
+			),
+		}))
+		.filter((group) => group.options.length > 0);
 }
 
 /**
  * One picker, used for all three choices. The label, the value, and the menu — nothing else:
  * the layers are the settings screen's tabs, and a value that is inherited is shown as the
  * value it is.
+ *
+ * Past eight options the menu grows a filter: a dozen models are found by typing, not by
+ * scrolling. The menu owns Escape and Tab; every other keystroke is the query's, so the
+ * caret stays where the typing is.
  *
  * An invalid value is shown in the destructive tone with its note, because a pin that cannot
  * run is not a choice to read past.
@@ -43,12 +72,31 @@ export function Picker({
 	groups,
 	onSelect,
 	disabled = false,
+	defaultOpen = false,
 	className,
 }: PickerProps) {
-	const empty = groups.every((group) => group.options.length === 0);
+	const [open, setOpen] = useState(defaultOpen);
+	const [query, setQuery] = useState("");
+	const filter = useRef<HTMLInputElement>(null);
+	const total = groups.reduce((count, group) => count + group.options.length, 0);
+	const narrowable = total > PICKER_FILTER_AFTER;
+	const shown = filterPickerGroups(groups, query);
+	const matched = shown.reduce((count, group) => count + group.options.length, 0);
 
 	return (
-		<DropdownMenu>
+		<DropdownMenu
+			open={open}
+			onOpenChange={(next) => {
+				setOpen(next);
+				if (!next) {
+					setQuery("");
+				} else if (narrowable) {
+					// Radix takes focus into the list on open; the filter is the typing
+					// surface, so it claims focus on the frame after.
+					requestAnimationFrame(() => filter.current?.focus());
+				}
+			}}
+		>
 			<DropdownMenuTrigger asChild>
 				<Button
 					type="button"
@@ -77,7 +125,24 @@ export function Picker({
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent side="top" align="start" className="w-(--container-sm)">
-				{groups.map((group, index) => (
+				{narrowable ? (
+					<div className="p-1">
+						<Input
+							ref={filter}
+							inputSize="sm"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+							placeholder={`Filter ${label.toLowerCase()}…`}
+							aria-label={`Filter ${label} options`}
+							onKeyDown={(event) => {
+								if (event.key !== "Escape" && event.key !== "Tab") {
+									event.stopPropagation();
+								}
+							}}
+						/>
+					</div>
+				) : null}
+				{shown.map((group, index) => (
 					<div key={group.label ?? String(index)}>
 						{index > 0 ? <DropdownMenuSeparator /> : null}
 						{group.label === undefined ? null : (
@@ -108,7 +173,11 @@ export function Picker({
 						))}
 					</div>
 				))}
-				{empty ? <DropdownMenuItem disabled>Nothing to choose</DropdownMenuItem> : null}
+				{total === 0 ? (
+					<DropdownMenuItem disabled>Nothing to choose</DropdownMenuItem>
+				) : matched === 0 ? (
+					<DropdownMenuItem disabled>No matches — keep typing to narrow</DropdownMenuItem>
+				) : null}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

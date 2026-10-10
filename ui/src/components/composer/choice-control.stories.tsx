@@ -67,9 +67,42 @@ export const Default: Story = {
 	args: { agent, model, thinking },
 };
 
-/** The menu behind it: the same three choices, each saying which layer its value came from. */
+/** The square behind it: three dropdowns, one per choice, each saying its value. */
 export const MenuOpen: Story = {
 	args: { agent, model, thinking, defaultOpen: true },
+};
+
+/** A dozen models: the model dropdown narrows with a filter instead of one long scroll. */
+export const ManyModels: Story = {
+	args: {
+		agent,
+		model: {
+			...model,
+			groups: [
+				{
+					label: "opencode-go",
+					options: [
+						{
+							value: "deepseek-v4.1-flash",
+							label: "DeepSeek V4.1 Flash",
+							detail: "128k",
+						},
+						{ value: "minimax-m3", label: "MiniMax M3", detail: "192k" },
+						{ value: "opus-5", label: "Opus 5", detail: "200k" },
+						{ value: "sonnet-6", label: "Sonnet 6", detail: "200k" },
+						{ value: "haiku-5", label: "Haiku 5", detail: "200k" },
+						{ value: "gpt-5", label: "GPT 5", detail: "400k" },
+						{ value: "gpt-5-mini", label: "GPT 5 Mini", detail: "400k" },
+						{ value: "gemini-3", label: "Gemini 3", detail: "1m" },
+						{ value: "grok-4", label: "Grok 4", detail: "256k" },
+						{ value: "llama-4", label: "Llama 4", detail: "local" },
+					],
+				},
+			],
+		},
+		thinking,
+		defaultOpen: true,
+	},
 };
 
 /** Nothing authenticated: the control says so instead of offering a choice that would fail. */

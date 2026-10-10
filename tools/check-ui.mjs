@@ -793,24 +793,24 @@ try {
 	);
 
 	const opened = await press(page, "[data-slot=composer] [data-slot=choice-control]");
-	const dialog = await page
-		.waitForSelector("[data-slot=dialog-content]", { timeout: 5000 })
+	const panel = await page
+		.waitForSelector("[data-slot=popover-content]", { timeout: 5000 })
 		.catch(() => null);
-	check("the control opens the three choices", opened && dialog !== null);
-	if (dialog !== null) {
+	check("the control opens the three choices", opened && panel !== null);
+	if (panel !== null) {
 		const inside = await page.evaluate(() =>
 			["Agent", "Model", "Thinking"].map(
 				(label) =>
 					document
 						.querySelector(
-							`[data-slot=dialog-content] button[aria-label="${label}"]`,
+							`[data-slot=popover-content] button[aria-label="${label}"]`,
 						)
 						?.textContent?.trim()
 						.replace(/\s+/g, " ") ?? "",
 			),
 		);
 		check(
-			"the dialog is the three choices, each labelled once",
+			"the panel is the three choices, each labelled once",
 			inside.every((text, index) => {
 				const label = ["Agent", "Model", "Thinking"][index];
 				return text.startsWith(`${label}:`) && text.split(label).length === 2;
@@ -824,10 +824,10 @@ try {
 		);
 		await page.keyboard.press("Escape");
 		await page.waitForFunction(
-			() => document.querySelector("[data-slot=dialog-content]") === null,
+			() => document.querySelector("[data-slot=popover-content]") === null,
 			{ timeout: 5000 },
 		);
-		check("the dialog closes", true);
+		check("the panel closes", true);
 	}
 
 	const commandCount = await page.evaluate(async () => {

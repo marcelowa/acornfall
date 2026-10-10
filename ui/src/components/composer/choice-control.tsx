@@ -1,8 +1,10 @@
-import { Check, ChevronsUpDown } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import type { ChoicePicker } from "@/app/view-models";
+import { Stack } from "@/components/layout/stack";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "cn";
+import { Picker } from "./picker";
 
 export interface ChoiceControlProps {
 	/** What runs the conversation, in the order the summary reads: agent, model, thinking. */
@@ -20,9 +22,11 @@ export interface ChoiceControlProps {
  * on a phone they wrapped, and three triggers took three times the room.
  *
  * The summary reads like the answer to "what will run this": `general ·
- * deepseek-v4.1-flash · max`, and the menu above it is the three pickers and nothing else —
- * no title, no explanation, and no label repeated above the label each section already has.
- * A tap outside closes it, and picking keeps it open so all three can change in one go.
+ * deepseek-v4.1-flash · max`, and the square above it is the three pickers and nothing
+ * else — no title, no explanation, and no label repeated above the label the picker
+ * already has. One long menu did not scale: a dozen models buried thinking below the
+ * fold, so each dimension narrows on its own, and a long one grows a filter. A tap
+ * outside closes the square, and picking keeps it open so all three can change in one go.
  */
 export function ChoiceControl({
 	agent,
@@ -89,89 +93,23 @@ export function ChoiceControl({
 					<ChevronsUpDown className="shrink-0" />
 				</Button>
 			</PopoverTrigger>
-			<PopoverContent
-				side="top"
-				align="start"
-				sideOffset={8}
-				className="max-h-80 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto p-1"
-			>
-				{choices.map((choice, choiceIndex) => {
-					const empty = choice.picker.groups.every((group) => group.options.length === 0);
-					return (
-						<div key={choice.key}>
-							{choiceIndex > 0 ? (
-								<div aria-hidden className="-mx-1 my-1 h-px bg-border" />
-							) : null}
-							<div className="flex items-baseline gap-2 px-2 py-1.5">
-								<span className="text-sm font-medium">{choice.label}</span>
-								{choice.picker.note === undefined ? null : (
-									<span
-										className={cn(
-											"truncate text-xs",
-											choice.picker.invalid === true
-												? "text-destructive"
-												: "text-muted-foreground",
-										)}
-									>
-										{choice.picker.note}
-									</span>
-								)}
-							</div>
-							{choice.picker.groups.map((group, groupIndex) => (
-								<div key={group.label ?? String(groupIndex)}>
-									{group.label === undefined ? null : (
-										<div className="px-2 py-1 text-xs font-medium text-muted-foreground">
-											{group.label}
-										</div>
-									)}
-									{group.options.map((option) => {
-										const selected = option.value === choice.picker.value;
-										return (
-											<button
-												key={option.value}
-												type="button"
-												role="menuitemradio"
-												aria-checked={selected}
-												disabled={choice.picker.disabled}
-												onClick={() => choice.picker.onSelect(option.value)}
-												className="flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-											>
-												<Check
-													className={cn(
-														"mt-0.5 size-4 shrink-0",
-														selected ? "opacity-100" : "opacity-0",
-													)}
-												/>
-												<span className="flex min-w-0 flex-col gap-0.5">
-													<span className="flex items-baseline gap-2">
-														<span className="truncate font-medium">
-															{option.label}
-														</span>
-														{option.detail === undefined ? null : (
-															<span className="shrink-0 font-mono text-2xs text-muted-foreground">
-																{option.detail}
-															</span>
-														)}
-													</span>
-													{option.description === undefined ? null : (
-														<span className="whitespace-normal text-2xs text-muted-foreground">
-															{option.description}
-														</span>
-													)}
-												</span>
-											</button>
-										);
-									})}
-								</div>
-							))}
-							{empty ? (
-								<div className="px-2 py-1.5 text-sm text-muted-foreground">
-									Nothing to choose
-								</div>
-							) : null}
-						</div>
-					);
-				})}
+			<PopoverContent side="top" align="start" sideOffset={8}>
+				<Stack gap="sm">
+					{choices.map((choice) => (
+						<Picker
+							key={choice.key}
+							label={choice.label}
+							value={choice.picker.value}
+							placeholder="not set"
+							note={choice.picker.note}
+							invalid={choice.picker.invalid}
+							groups={choice.picker.groups}
+							onSelect={choice.picker.onSelect}
+							disabled={choice.picker.disabled}
+							className="w-full"
+						/>
+					))}
+				</Stack>
 			</PopoverContent>
 		</Popover>
 	);
