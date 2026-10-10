@@ -54,13 +54,13 @@ Permission lives in the overlay, alongside `allow-tools`, so install defaults,
 workspace defaults, and a definition all apply:
 
 ```json
-{ "defaults": { "delegation": { "spawn": true, "peers": true,
+{ "defaults": { "delegation": { "child": true, "peer": true,
                                "maxChildren": 4, "maxDepth": 1, "maxPeers": 2 } } }
 ```
 
 ```markdown
 ---
-delegation: spawn, peers
+delegation: child, peer
 max-children: 3
 max-depth: 2
 ---

@@ -32,10 +32,10 @@ export const GENERAL_AGENT = "general";
  * cannot spawn children, but it can make siblings.
  */
 export interface Delegation {
-	/** May create a conversation it owns, which it can wait for and abort. */
-	spawn: boolean;
-	/** May create a normal conversation, which appears in the rail and outlives it. */
-	peers: boolean;
+	/** May create a child: a conversation it owns, which it can wait for and abort. */
+	child: boolean;
+	/** May create a peer: a normal conversation, which appears in the rail and outlives it. */
+	peer: boolean;
 	maxChildren: number;
 	maxDepth: number;
 	maxPeers: number;
@@ -59,8 +59,8 @@ export interface Delegation {
 }
 
 export const DEFAULT_DELEGATION: Delegation = {
-	spawn: true,
-	peers: true,
+	child: true,
+	peer: true,
 	maxChildren: 4,
 	maxDepth: 1,
 	maxPeers: 2,
@@ -136,6 +136,19 @@ export interface ResolvedAgent {
 	layers: LayerTrace[];
 }
 
+/** Every key a `delegation` object may carry. A renamed key must land here, or the
+ * file that uses the old name fails loudly instead of silently losing a rule. */
+const KNOWN_DELEGATION_KEYS = new Set([
+	"child",
+	"peer",
+	"maxChildren",
+	"maxDepth",
+	"maxPeers",
+	"maxWakes",
+	"address",
+	"maxPeersTotal",
+]);
+
 const KNOWN_KEYS = new Set([
 	"name",
 	"description",
@@ -154,38 +167,25 @@ const KNOWN_KEYS = new Set([
 	"max-peers-total",
 ]);
 
-/** `delegation: spawn, peers` — a list, so the two permissions read separately. */
-function parseDelegation(raw: string): Partial<Delegation> {
+/** `delegation: child, peer` — a list, so the two permissions read separately. */
+function parseDelegation(raw: string, path: string): Partial<Delegation> {
 	const parts = parseList(raw).map((part) => part.toLowerCase());
-	if (parts.includes("none")) return { spawn: false, peers: false };
-	const policy: Partial<Delegation> = {};
-	if (parts.some((part) => part === "spawn" || part === "both" || part === "all"))
-		policy.spawn = true;
-	if (
-		parts.some(
-			(part) => part === "peers" || part === "peer" || part === "both" || part === "all",
-		)
-	)
-		policy.peers = true;
-	if (
-		!parts.some(
-			(part) => part === "spawn" || part === "both" || part === "all" || part === "none",
-		)
-	)
-		policy.spawn = false;
-	if (
-		!parts.some(
-			(part) =>
-				part === "peers" ||
-				part === "peer" ||
-				part === "both" ||
-				part === "all" ||
-				part === "none",
-		)
-	) {
-		policy.peers = false;
+	for (const part of parts) {
+		if (part !== "child" && part !== "peer" && part !== "all" && part !== "none") {
+			throw new Error(
+				`${path}: unknown delegation "${part}"; expected "child", "peer", "all", or "none"`,
+			);
+		}
 	}
-	return policy;
+	// An explicit denial wins: like a guard, `none` beside anything else still denies.
+	if (parts.includes("none")) return { child: false, peer: false };
+	// `all` names every permission there is. A new permission joins this list when it
+	// is added: `all` must keep meaning all of them, not the ones known when it was written.
+	if (parts.includes("all")) return { child: true, peer: true };
+	// An empty list states no opinion and merges to nothing. Naming a permission grants
+	// it and denies the unnamed one.
+	if (parts.length === 0) return {};
+	return { child: parts.includes("child"), peer: parts.includes("peer") };
 }
 
 /** A guard that cannot be understood is an error, not a rule that quietly does nothing. */
@@ -286,14 +286,21 @@ async function loadConfig(
 	if (source.delegation !== undefined && typeof source.delegation === "object") {
 		const raw = source.delegation as Record<string, unknown>;
 		const policy: Partial<Delegation> = {};
-		if (typeof raw.spawn === "boolean") policy.spawn = raw.spawn;
-		if (typeof raw.peers === "boolean") policy.peers = raw.peers;
+		if (typeof raw.child === "boolean") policy.child = raw.child;
+		if (typeof raw.peer === "boolean") policy.peer = raw.peer;
 		if (typeof raw.maxChildren === "number") policy.maxChildren = raw.maxChildren;
 		if (typeof raw.maxDepth === "number") policy.maxDepth = raw.maxDepth;
 		if (typeof raw.maxPeers === "number") policy.maxPeers = raw.maxPeers;
 		if (typeof raw.maxWakes === "number") policy.maxWakes = raw.maxWakes;
 		if (raw.address === "known" || raw.address === "any") policy.address = raw.address;
 		if (typeof raw.maxPeersTotal === "number") policy.maxPeersTotal = raw.maxPeersTotal;
+		// A key this build does not know is an error naming the file, never a rule that
+		// quietly does nothing — which is what a renamed key would otherwise become.
+		for (const key of Object.keys(raw)) {
+			if (!KNOWN_DELEGATION_KEYS.has(key)) {
+				throw new Error(`${path}: unknown delegation key "${key}"`);
+			}
+		}
 		contributions.delegation = policy;
 	}
 	if (Array.isArray(source.skills)) contributions.skills = source.skills.map(String);
@@ -329,7 +336,7 @@ async function loadAgentDir(
 			contributions.denyTools = parseList(values["deny-tools"]);
 		const delegation: Partial<Delegation> = {};
 		if (values.delegation !== undefined)
-			Object.assign(delegation, parseDelegation(values.delegation));
+			Object.assign(delegation, parseDelegation(values.delegation, path));
 		if (values["max-children"] !== undefined)
 			delegation.maxChildren = parseCount(values["max-children"], "max-children");
 		if (values["max-depth"] !== undefined)

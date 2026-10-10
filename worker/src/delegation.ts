@@ -243,7 +243,7 @@ export async function policyFor(
 	const policy = resolved.delegation;
 
 	let blockedBy: string | undefined;
-	if (!policy.spawn) blockedBy = `agent "${resolved.name}" does not allow delegation`;
+	if (!policy.child) blockedBy = `agent "${resolved.name}" does not allow delegation`;
 	else if (depth >= policy.maxDepth) blockedBy = `depth ${depth} of max-depth ${policy.maxDepth}`;
 	else if (children >= policy.maxChildren)
 		blockedBy = `${children} children of max-children ${policy.maxChildren}`;
@@ -502,7 +502,7 @@ export function delegationExtension(deps: DelegationDeps) {
 								text: `${name} was not started: agents have made ${policy.peersTotal} conversations in this workspace of max-peers-total ${policy.delegation.maxPeersTotal}.`,
 							};
 						}
-						if (!policy.delegation.peers) {
+						if (!policy.delegation.peer) {
 							return {
 								text: "Cannot create a peer here: this agent does not allow peers.",
 							};

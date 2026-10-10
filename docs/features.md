@@ -119,7 +119,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | H1 | `delegate` hands a task to a subagent and returns its answer as the result of the call. | `TestDelegateWaitsForTheChildAndReturnsItsAnswer` |
 | H2 | A peer is a normal conversation: it is listed, records who created it, and is not owned. | `TestAPeerIsANormalConversation` |
 | H3 | The overlay decides what a conversation may do, and the policy is reported so a refusal can be explained. | `TestDelegationPolicyCanForbidSpawning` |
-| H4 | `spawn`, `peers`, `maxChildren`, `maxDepth`, `maxPeers`, `maxWakes`, `address`, `maxPeersTotal` parse and override the defaults. | `worker/test/config.test.ts` |
+| H4 | `child`, `peer`, `maxChildren`, `maxDepth`, `maxPeers`, `maxWakes`, `address`, `maxPeersTotal` parse and override the defaults. | `worker/test/config.test.ts` |
 
 ## Liveness and the stream
 

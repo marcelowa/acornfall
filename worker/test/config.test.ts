@@ -183,14 +183,14 @@ describe("folding the layers", () => {
 		const { home, workspace, user } = await scratch();
 		await write(
 			join(workspace, ".acornfall", "config.json"),
-			`{"defaults":{"delegation":{"spawn":false,"maxChildren":1}}}`,
+			`{"defaults":{"delegation":{"child":false,"maxChildren":1}}}`,
 		);
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, undefined);
-		expect(resolved.delegation.spawn).toBe(false);
+		expect(resolved.delegation.child).toBe(false);
 		expect(resolved.delegation.maxChildren).toBe(1);
 		// Everything the layer did not mention keeps its default.
-		expect(resolved.delegation.peers).toBe(true);
+		expect(resolved.delegation.peer).toBe(true);
 		expect(resolved.delegation.maxWakes).toBe(12);
 	});
 
@@ -202,8 +202,63 @@ describe("folding the layers", () => {
 		);
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		const resolved = resolveAgent(catalog, "leaf");
-		expect(resolved.delegation.spawn).toBe(false);
-		expect(resolved.delegation.peers).toBe(false);
+		expect(resolved.delegation.child).toBe(false);
+		expect(resolved.delegation.peer).toBe(false);
+	});
+
+	test("the list grants what it names and denies the unnamed one", async () => {
+		const cases = [
+			{ delegation: "child", child: true, peer: false },
+			{ delegation: "peer", child: false, peer: true },
+			{ delegation: "child, peer", child: true, peer: true },
+			{ delegation: "peer, child", child: true, peer: true },
+			{ delegation: "all", child: true, peer: true },
+		] as const;
+		for (const testCase of cases) {
+			const { home, workspace, user } = await scratch();
+			await write(
+				join(workspace, ".acornfall", "agents", "one.md"),
+				`---\nname: one\ndelegation: ${testCase.delegation}\n---\nBody`,
+			);
+			const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
+			const resolved = resolveAgent(catalog, "one");
+			expect(resolved.delegation.child).toBe(testCase.child);
+			expect(resolved.delegation.peer).toBe(testCase.peer);
+		}
+	});
+
+	test("an unknown delegation word is refused, naming what it got", async () => {
+		const { home, workspace, user } = await scratch();
+		await write(
+			join(workspace, ".acornfall", "agents", "one.md"),
+			"---\nname: one\ndelegation: both\n---\nBody",
+		);
+		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(
+			/unknown delegation "both"/,
+		);
+	});
+
+	test("an empty list states no opinion, so the defaults stand", async () => {
+		const { home, workspace, user } = await scratch();
+		await write(
+			join(workspace, ".acornfall", "agents", "one.md"),
+			"---\nname: one\ndelegation:\n---\nBody",
+		);
+		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
+		const resolved = resolveAgent(catalog, "one");
+		expect(resolved.delegation.child).toBe(true);
+		expect(resolved.delegation.peer).toBe(true);
+	});
+
+	test("an unknown delegation key in config is refused", async () => {
+		const { home, workspace, user } = await scratch();
+		await write(
+			join(workspace, ".acornfall", "config.json"),
+			`{"defaults":{"delegation":{"spawn":false}}}`,
+		);
+		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(
+			/unknown delegation key "spawn"/,
+		);
 	});
 
 	test("a definition that does not exist resolves to the layered defaults", async () => {
