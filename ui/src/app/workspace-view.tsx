@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, PanelRight, Plus, Settings } from "lucide-react";
+import { ChevronsUpDown, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
 import type { DefaultScope, ProviderAuthType } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
@@ -134,7 +134,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 
 	// The brand lives in the top bar, not the rail: the bar spans the full width on
 	// mobile and desktop, so the mark stays put whether the rail is open or not.
-	// It opens nothing — the workspace switcher in the rail head is the navigation.
+	// It opens nothing — below `lg` the drawer toggle beside it opens the rail,
+	// and the workspace switcher in the rail head is the navigation.
 	const brand = (
 		<span className="flex shrink-0 items-center gap-2">
 			<img src="/logo.svg" alt="" aria-hidden className="size-6 shrink-0 rounded-md" />
@@ -151,15 +152,27 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				</Text>
 			}
 			headActions={
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-sm"
-					aria-label="Workspaces"
-					onClick={() => platform.showScreen("workspaces")}
-				>
-					<ChevronsUpDown />
-				</Button>
+				<>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Workspaces"
+						onClick={() => platform.showScreen("workspaces")}
+					>
+						<ChevronsUpDown />
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						className="hidden lg:flex"
+						aria-label="Hide the rail"
+						onClick={platform.toggleRail}
+					>
+						<PanelLeftClose />
+					</Button>
+				</>
 			}
 			list={
 				<ConversationList
@@ -393,7 +406,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		) : undefined;
 
 	// The full-width bar: the brand, then the active name, then the pane control.
-	// The rail toggle lives in Split beside it, so the mark stays put rail open or not.
+	// No rail buttons here from `lg`: the rail head closes it and the collapsed strip
+	// opens it. Below `lg` Split puts the drawer toggle beside the brand.
 	const topbar = (
 		<>
 			{brand}
