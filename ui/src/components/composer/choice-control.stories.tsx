@@ -67,8 +67,8 @@ export const Default: Story = {
 	args: { agent, model, thinking },
 };
 
-/** The dialog behind it: the same three choices, each saying which layer its value came from. */
-export const DialogOpen: Story = {
+/** The menu behind it: the same three choices, each saying which layer its value came from. */
+export const MenuOpen: Story = {
 	args: { agent, model, thinking, defaultOpen: true },
 };
 
