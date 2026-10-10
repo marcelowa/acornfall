@@ -103,13 +103,18 @@ covers the common case; clean covers format changes.
 
 ## Self-contained releases
 
-- The worker ships compiled (`bun build --compile`), one binary per
-  OS/arch next to the gateway: no bun, no sources, no `node_modules`
-  at runtime. Dev keeps `bun run src/main.ts`; `--worker` wins, then
-  `--worker-bin`, then the beside-the-binary worker, then bun.
-- Migrate scripts are baked into the gateway (`go:embed`);
-  `--migrate-dir` overrides for script authors.
-- Update downloads and verifies both binaries against one checksum file
-  and swaps worker first, gateway second. Releases before the worker
-  asset skip the worker step.
+- The worker ships as sources (`worker.tar.gz`: package.json, bun.lock,
+  src), never `node_modules`. Compiled was tried and rejected: the
+  sandbox SDK is a native module no bundler inlines, so the binary
+  crashes where it matters most.
+- The gateway ensures a pinned bun under `<home>/tools` (downloaded
+  once, version smoke-tested) and installs dependencies under
+  `<home>/worker` when the lockfile changes. Dev keeps system bun:
+  `--worker` wins, then `--worker-bin`, then `--worker-dir`, then the
+  managed path.
+- Update downloads and verifies the tarball against the one checksum
+  file and stages it; the new gateway unpacks (paths jailed), stamps
+  VERSION, and installs at boot. Boot failures refuse loudly, never
+  brick: migrate failure still stops boot, a missing toolchain only
+  stops workers.
 - Everything lives under the install folder. The host stays clean.

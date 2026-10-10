@@ -16,10 +16,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - { os: ubuntu-latest, goos: linux, goarch: amd64, bunTarget: bun-linux-x64 }
-          - { os: ubuntu-latest, goos: linux, goarch: arm64, bunTarget: bun-linux-arm64 }
-          - { os: macos-latest, goos: darwin, goarch: amd64, bunTarget: bun-darwin-x64 }
-          - { os: macos-latest, goos: darwin, goarch: arm64, bunTarget: bun-darwin-arm64 }
+          - { os: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { os: ubuntu-latest, goos: linux, goarch: arm64 }
+          - { os: macos-latest, goos: darwin, goarch: amd64 }
+          - { os: macos-latest, goos: darwin, goarch: arm64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -32,10 +32,10 @@ jobs:
           bun-version: latest
 
       # The gateway serves the built interface, so a binary without it is a
-      # 500 on every page. Build it first, then both binaries for this leg:
-      # the gateway and the compiled worker. The worker needs no bun at
-      # runtime — `bun build --compile` bundles it — so a release runs with
-      # nothing on the host PATH and nothing outside the install folder.
+      # 500 on every page. Build it first, then the gateway for this leg.
+      # The worker ships as sources, not a binary: its sandbox SDK is a
+      # native module no bundler inlines. The gateway ensures a pinned bun
+      # and installs dependencies under the install folder on first boot.
       - run: cd ui && bun install && bun run build
       - run: >
           cd gateway &&
@@ -44,17 +44,23 @@ jobs:
           -ldflags "-X github.com/acornfall/acornfall/gateway/internal/update.BuildVersion=${{ github.ref_name }}"
           -o ../acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
           ./cmd/acornfall
-      - run: cd worker && bun install
-      - run: >
-          cd worker &&
-          bun build --compile --target=${{ matrix.bunTarget }}
-          src/main.ts --outfile ../acornfall-worker-${{ matrix.goos }}-${{ matrix.goarch }}
       - uses: actions/upload-artifact@v4
         with:
           name: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
-            acornfall-worker-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  worker-sources:
+    # Platform-independent: one tarball for every leg. Sources only, never
+    # node_modules — the gateway installs those once, under the install
+    # folder, so no release bytes are spent on them and no host is touched.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: tar -czf worker.tar.gz -C worker package.json bun.lock src
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worker-sources
+          path: worker.tar.gz
 
   publish:
     needs: binaries
@@ -64,9 +70,9 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      # The checksum file is what the gateway verifies a download against
-      # before swapping binaries. No checksum file, no verify — see ADR 0019.
-      - run: cd dist && sha256sum acornfall-* > sha256sums.txt && ls -la
+      # The checksum file is what the gateway verifies downloads against
+      # before swapping or staging. No checksum file, no verify — see ADR 0019.
+      - run: cd dist && sha256sum acornfall-* worker.tar.gz > sha256sums.txt && ls -la
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

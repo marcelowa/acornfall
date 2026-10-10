@@ -1,6 +1,10 @@
 package update
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -165,33 +169,85 @@ func TestMigrateEmbeddedMissingIsNothingToDo(t *testing.T) {
 	}
 }
 
-func TestApplySwapsWorkerToo(t *testing.T) {
-	manager, _ := testManager(t)
-	workerBin := manager.workerBinPath()
-	if err := os.WriteFile(workerBin, []byte("old-worker"), 0o755); err != nil {
+// workerTar builds a gzipped sources tarball from name->body.
+func workerTar(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var plain bytes.Buffer
+	writer := tar.NewWriter(&plain)
+	for name, body := range files {
+		if err := writer.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
+	var zipped bytes.Buffer
+	zippedWriter := gzip.NewWriter(&zipped)
+	if _, err := zippedWriter.Write(plain.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := zippedWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return zipped.Bytes()
+}
+
+func workerFiles(tag string) map[string]string {
+	return map[string]string{
+		"package.json": "{\"name\":\"worker\"}\n",
+		"bun.lock":     "lock-for-" + tag + "\n",
+		"src/main.ts":  "// " + tag + "\n",
+	}
+}
+
+func zipWriter(t *testing.T, out *bytes.Buffer) *zip.Writer {
+	t.Helper()
+	return zip.NewWriter(out)
+}
+
+func writeZipFile(t *testing.T, writer *zip.Writer, name, body string) {
+	t.Helper()
+	file, err := writer.Create(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyStagesWorkerTarball(t *testing.T) {
+	manager, _ := testManager(t)
+	tarball := workerTar(t, workerFiles("v0.9.0"))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("payload-for-" + r.URL.Path))
+		if r.URL.Path == "/worker.tgz" {
+			_, _ = w.Write(tarball)
+			return
+		}
+		_, _ = w.Write([]byte("new-gateway"))
 	}))
 	defer server.Close()
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
 		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
-		{Name: "acornfall-worker-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/worker"},
+		{Name: WorkerTarball, URL: server.URL + "/worker.tgz"},
 	}}
 	manager.mu.Unlock()
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := os.ReadFile(workerBin)
-	if string(got) != "payload-for-/worker" {
-		t.Fatalf("worker not swapped, got %q", got)
+	// Staged, not activated: the new gateway unpacks and installs at boot.
+	staged, err := os.ReadFile(manager.workerPending())
+	if err != nil || !bytes.Equal(staged, tarball) {
+		t.Fatal("worker tarball must be staged byte-exact")
 	}
-	backup, err := os.ReadFile(workerBin + ".bak")
-	if err != nil || string(backup) != "old-worker" {
-		t.Fatalf("worker backup = %q, %v", backup, err)
+	if _, err := os.Stat(manager.workerDir()); !os.IsNotExist(err) {
+		t.Fatal("live sources must be untouched until boot")
 	}
 }
 
@@ -210,9 +266,9 @@ func TestApplySkipsWorkerWhenReleasePredatesIt(t *testing.T) {
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
 		t.Fatal(err)
 	}
-	// No worker asset, no worker beside the binary: nothing to do, no error.
-	if _, err := os.Stat(manager.workerBinPath()); !os.IsNotExist(err) {
-		t.Fatalf("worker must be untouched, stat err = %v", err)
+	// No worker asset: nothing staged, live sources untouched.
+	if _, err := os.Stat(manager.workerPending()); !os.IsNotExist(err) {
+		t.Fatal("no worker tarball, nothing to stage")
 	}
 }
 
@@ -400,5 +456,137 @@ func TestApplySwapsAndRollbackRestores(t *testing.T) {
 	}
 	if status := manager.Status(); status.Failed == "" {
 		t.Fatal("the screen must show the rollback cause")
+	}
+}
+
+// fakeBun installs a script answering --version and accepting install.
+func fakeBun(t *testing.T, manager *Manager) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(manager.BunPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo " + BunVersion + "; fi\nexit 0\n"
+	if err := os.WriteFile(manager.BunPath(), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureWorkerUnpacksAndStamps(t *testing.T) {
+	manager, _ := testManager(t)
+	fakeBun(t, manager)
+	tarball := workerTar(t, workerFiles("v0.9.0"))
+	if err := os.WriteFile(manager.workerPending(), tarball, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	live := manager.workerDir()
+	if err := os.MkdirAll(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(live, "VERSION"), []byte("v0.8.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.EnsureWorker(context.Background(), "v0.9.0"); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.WorkerVersion(); got != "v0.9.0" {
+		t.Fatalf("VERSION = %q", got)
+	}
+	main, err := os.ReadFile(filepath.Join(live, "src", "main.ts"))
+	if err != nil || string(main) != "// v0.9.0\n" {
+		t.Fatalf("sources not unpacked: %q, %v", main, err)
+	}
+	if _, err := os.Stat(live + ".bak"); err != nil {
+		t.Fatal("old sources must be kept as .bak")
+	}
+	if _, err := os.Stat(manager.workerPending()); !os.IsNotExist(err) {
+		t.Fatal("staged tarball must be consumed")
+	}
+}
+
+func TestEnsureWorkerSkipsWhenCurrent(t *testing.T) {
+	manager, _ := testManager(t)
+	live := manager.workerDir()
+	if err := os.MkdirAll(filepath.Join(live, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(live, "VERSION"), []byte("v0.9.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := []byte("lock\n")
+	if err := os.WriteFile(filepath.Join(live, "bun.lock"), lock, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(lock)
+	if err := os.WriteFile(manager.workerMark(), []byte(hex.EncodeToString(sum[:])+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Lock matches the marker: unpack skipped, install skipped, no bun needed.
+	if err := manager.EnsureWorker(context.Background(), "v0.9.0"); err != nil {
+		t.Fatalf("current worker must pass untouched: %v", err)
+	}
+}
+
+func TestRollbackRestoresWorkerSources(t *testing.T) {
+	manager, _ := testManager(t)
+	if err := os.WriteFile(manager.backupBinPath(), []byte("old-gateway"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(manager.workerDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manager.workerDir(), "src.ts"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(manager.workerBak(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manager.workerBak(), "src.ts"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Rollback(fmt.Errorf("boom")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(manager.workerDir(), "src.ts"))
+	if err != nil || string(got) != "old" {
+		t.Fatalf("worker sources not restored: %q, %v", got, err)
+	}
+}
+
+func TestUntarRefusesEscape(t *testing.T) {
+	manager, _ := testManager(t)
+	tarball := workerTar(t, map[string]string{"../evil.sh": "x\n", "package.json": "{}\n"})
+	if err := untarWorker(tarball, manager.workerDir()); err == nil {
+		t.Fatal("a tarball escaping the dir must refuse")
+	}
+}
+
+func TestEnsureBunDownloads(t *testing.T) {
+	manager, _ := testManager(t)
+	var hits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		var zipped bytes.Buffer
+		writer := zipWriter(t, &zipped)
+		writeZipFile(t, writer, "bun-linux-x64/bun", "#!/bin/sh\necho "+BunVersion+"\n")
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write(zipped.Bytes())
+	}))
+	defer server.Close()
+	manager.bunBaseURL = server.URL
+	manager.client = server.Client()
+	path, err := manager.EnsureBun(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("bun not installed: %v", err)
+	}
+	if _, err := manager.EnsureBun(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 1 {
+		t.Fatalf("installed bun must be reused, downloads = %d", hits)
 	}
 }

@@ -5,40 +5,59 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/acornfall/acornfall/gateway/internal/update"
 )
 
-func TestResolveWorkerCommandPrefersExplicit(t *testing.T) {
-	got := resolveWorkerCommand("bun run --bun src/main.ts", "/bin/worker", "ENV_WORKER")
+func TestResolveWorkerPrefersExplicit(t *testing.T) {
+	manager := update.New(t.TempDir(), "", "")
+	got, _, managed := resolveWorker("bun run --bun src/main.ts", "", "", manager)
 	if !slices.Equal(got, []string{"bun", "run", "--bun", "src/main.ts"}) {
 		t.Fatalf("explicit command must win, got %q", got)
 	}
-}
-
-func TestResolveWorkerCommandPrefersBinFlagOverEnv(t *testing.T) {
-	got := resolveWorkerCommand("", "/bin/flag-worker", "/bin/env-worker")
-	if !slices.Equal(got, []string{"/bin/flag-worker"}) {
-		t.Fatalf("bin flag must win over env, got %q", got)
+	if managed {
+		t.Fatal("explicit command is never managed")
 	}
 }
 
-func TestResolveWorkerCommandFallsBackToBun(t *testing.T) {
-	// No flag, no env, and no acornfall-worker beside the test binary: bun.
-	dir := t.TempDir()
-	got := resolveWorkerCommandWithExe("", "", "", filepath.Join(dir, "acornfall"))
-	if !slices.Equal(got, []string{"bun", "run", "src/main.ts"}) {
-		t.Fatalf("want bun default, got %q", got)
+func TestResolveWorkerPrefersBinFlag(t *testing.T) {
+	manager := update.New(t.TempDir(), "", "")
+	got, dir, managed := resolveWorker("", "", "/bin/worker", manager)
+	if !slices.Equal(got, []string{"/bin/worker"}) || dir != "" || managed {
+		t.Fatalf("bin flag must win unmanaged: %q %q %v", got, dir, managed)
 	}
 }
 
-func TestResolveWorkerCommandFindsBesideExecutable(t *testing.T) {
-	dir := t.TempDir()
-	candidate := filepath.Join(dir, "acornfall-worker")
-	if err := os.WriteFile(candidate, []byte("x"), 0o755); err != nil {
+func TestResolveWorkerDirFlagUsesSystemBun(t *testing.T) {
+	home := t.TempDir()
+	manager := update.New(home, "", "")
+	sources := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sources, "src"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fakeExe := filepath.Join(dir, "acornfall")
-	got := resolveWorkerCommandWithExe("", "", "", fakeExe)
-	if !slices.Equal(got, []string{candidate}) {
-		t.Fatalf("worker beside the gateway must win, got %q", got)
+	if err := os.WriteFile(filepath.Join(sources, "src", "main.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, dir, managed := resolveWorker("", sources, "", manager)
+	if !slices.Equal(got, []string{"bun", "run", "src/main.ts"}) {
+		t.Fatalf("worker dir must mean system bun, got %q", got)
+	}
+	if managed || dir != sources {
+		t.Fatalf("worker dir keeps dev resolution: dir=%q managed=%v", dir, managed)
+	}
+}
+
+func TestResolveWorkerDefaultsToManaged(t *testing.T) {
+	home := t.TempDir()
+	manager := update.New(home, "", "")
+	got, dir, managed := resolveWorker("", "", "", manager)
+	if !managed {
+		t.Fatal("default worker must be managed")
+	}
+	if !slices.Equal(got, []string{manager.BunPath(), "run", "src/main.ts"}) {
+		t.Fatalf("managed command must be ensured bun, got %q", got)
+	}
+	if dir != manager.WorkerDir() {
+		t.Fatalf("managed dir must be ensured sources, got %q", dir)
 	}
 }

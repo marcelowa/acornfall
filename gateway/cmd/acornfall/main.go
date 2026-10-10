@@ -58,9 +58,9 @@ func serve(argv []string) error {
 	migrateDir := flags.String("migrate-dir", "", "release migrate scripts directory (default: the scripts baked into the binary)")
 	disableVMNesting := flags.Bool("disable-vm-nesting", false, "keep a workspace's sandbox from nesting virtual machines; by default a sandbox nests when the engine and the machine can, and a workspace's own setting wins")
 	model := flags.String("model", "", "default model as provider/modelId")
-	workerCommand := flags.String("worker", "", `worker command (default: "bun run src/main.ts")`)
-	workerDir := flags.String("worker-dir", "", "worker directory")
-	workerBin := flags.String("worker-bin", "", "compiled worker binary (default: acornfall-worker beside the gateway binary, else bun + --worker-dir)")
+	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
+	workerDir := flags.String("worker-dir", "", "worker directory (development: system bun over these sources, no ensure)")
+	workerBin := flags.String("worker-bin", "", "single compiled worker binary (explicit opt-in; needs no sources)")
 	if err := flags.Parse(argv); err != nil {
 		return err
 	}
@@ -96,22 +96,31 @@ func serve(argv []string) error {
 			general = cwd
 		}
 	}
-	command := resolveWorkerCommand(*workerCommand, *workerBin, os.Getenv("ACORNFALL_WORKER_BIN"))
-
-	// The worker sources are only needed in bun mode: a compiled worker
-	// beside the gateway (what releases ship) needs no directory.
-	worker := ""
-	if *workerCommand != "" || (len(command) > 0 && command[0] == "bun") {
-		var err error
-		worker, err = resolveWorkerDir(*workerDir)
-		if err != nil {
-			return err
-		}
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// The self-update tier, owned early: boot readiness (migrate, bun, worker
+	// sources) is decided before anything serves.
+	updates := update.New(dir, "", *migrateDir)
+	if err := updates.Open(); err != nil {
+		return err
+	}
+	// A failing migrate stops boot and rolls back: the supervisor restarts
+	// the last good build instead of a dead UI.
+	if err := updates.RunPending(ctx); err != nil {
+		return err
+	}
+	command, worker, workerManaged := resolveWorker(*workerCommand, *workerDir, *workerBin, updates)
+	if workerManaged && updates.Status().Current != "dev" {
+		// Best effort, never fatal: a missing toolchain with no network is
+		// a loud refusal at workspace open, not a bricked boot.
+		if _, err := updates.EnsureBun(ctx); err != nil {
+			log.Printf("worker: %v", err)
+		}
+		if err := updates.EnsureWorker(ctx, updates.Status().Current); err != nil {
+			log.Printf("worker: %v", err)
+		}
+	}
 	guard, err := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"), dir, *addr, *insecure)
 	if err != nil {
 		return err
@@ -132,17 +141,6 @@ func serve(argv []string) error {
 		return err
 	}
 
-	// The self-update tier. Version file, release check, backup set, migrate
-	// runner, rollback: docs/adr/0019-self-update.md. A pending migrate runs
-	// before serving; a failing script restores the backup and stops boot, so
-	// the supervisor restarts the last good build instead of a dead UI.
-	updates := update.New(dir, "", resolveMigrateDir(*migrateDir, dir))
-	if err := updates.Open(); err != nil {
-		return err
-	}
-	if err := updates.RunPending(ctx); err != nil {
-		return err
-	}
 	go updates.StartLoop(ctx)
 
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
@@ -321,39 +319,34 @@ func writeCredentials(path string, all map[string]credential) error {
 	return os.Rename(temp, path)
 }
 
-// resolveWorkerCommand picks the worker process. An explicit --worker wins,
-// then --worker-bin, then a compiled acornfall-worker beside the gateway
-// binary (what releases ship: no bun, no sources), then bun over the worker
-// sources (development).
-func resolveWorkerCommand(explicit, binFlag, binEnv string) []string {
-	executable, _ := os.Executable()
-	return resolveWorkerCommandWithExe(explicit, binFlag, binEnv, executable)
-}
-
-func resolveWorkerCommandWithExe(explicit, binFlag, binEnv, executable string) []string {
+// resolveWorker picks the worker process and its directory, and whether
+// the runtime is managed. An explicit --worker wins, then --worker-bin,
+// then an explicit --worker-dir over the system bun (development), then
+// the managed path: ensured bun over ensured sources, both under the
+// install folder, nothing on the host.
+func resolveWorker(explicit, dirFlag, binFlag string, updates *update.Manager) ([]string, string, bool) {
 	if explicit != "" {
-		return strings.Fields(explicit)
+		worker, err := resolveWorkerDir(dirFlag)
+		if err != nil {
+			return strings.Fields(explicit), "", false
+		}
+		return strings.Fields(explicit), worker, false
 	}
 	bin := binFlag
 	if bin == "" {
-		bin = binEnv
-	}
-	if bin == "" && executable != "" {
-		candidate := filepath.Join(filepath.Dir(executable), "acornfall-worker")
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			bin = candidate
-		}
+		bin = os.Getenv("ACORNFALL_WORKER_BIN")
 	}
 	if bin != "" {
-		return []string{bin}
+		return []string{bin}, "", false
 	}
-	return []string{"bun", "run", "src/main.ts"}
-}
-
-// resolveMigrateDir finds the release migrate scripts. An explicit flag wins
-// (for script authors); otherwise the scripts baked into the binary run.
-func resolveMigrateDir(flagValue, _ string) string {
-	return flagValue
+	if dirFlag != "" {
+		worker, err := resolveWorkerDir(dirFlag)
+		if err != nil {
+			return []string{"bun", "run", "src/main.ts"}, "", false
+		}
+		return []string{"bun", "run", "src/main.ts"}, worker, false
+	}
+	return []string{updates.BunPath(), "run", "src/main.ts"}, updates.WorkerDir(), true
 }
 
 // displayAddr turns a wildcard bind into something clickable.
