@@ -2342,6 +2342,30 @@ func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	return now-info.UpdatedAt < 30*60*1000
 }
 
+// AnyRunning is the update gate: true while any conversation runs. It mirrors
+// runActive without calling it, because runActive takes the lock itself and
+// this scan already holds a copy made under it.
+func (c *Control) AnyRunning() bool {
+	now := time.Now().UnixMilli()
+	c.mu.RLock()
+	infos := make([]protocol.ConversationInfo, len(c.conversations))
+	copy(infos, c.conversations)
+	prompted := make(map[string]int64, len(c.promptedAt))
+	for id, at := range c.promptedAt {
+		prompted[id] = at
+	}
+	c.mu.RUnlock()
+	for _, info := range infos {
+		if now-prompted[info.ID] < 10_000 {
+			return true
+		}
+		if info.Running && info.UpdatedAt > 0 && now-info.UpdatedAt < 30*60*1000 {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Control) toConversations(infos []protocol.ConversationInfo) []Conversation {
 	now := time.Now().UnixMilli()
 	conversations := make([]Conversation, 0, len(infos))

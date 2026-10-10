@@ -1,0 +1,62 @@
+# A tag `v*` ships the self-update binaries: one per OS/arch, named the
+# way the gateway's update check picks them (`acornfall-<goos>-<goarch>`),
+# plus the checksum file the gateway verifies against. See ADR 0019.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { os: ubuntu-latest, goos: linux, goarch: arm64 }
+          - { os: macos-latest, goos: darwin, goarch: amd64 }
+          - { os: macos-latest, goos: darwin, goarch: arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: gateway/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The gateway serves the built interface, so a binary without it is a
+      # 500 on every page. Build it first, then the binary for this leg.
+      - run: cd ui && bun install && bun run build
+      - run: >
+          cd gateway &&
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }}
+          go build
+          -ldflags "-X github.com/acornfall/acornfall/gateway/internal/update.BuildVersion=${{ github.ref_name }}"
+          -o ../acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
+          ./cmd/acornfall
+      - uses: actions/upload-artifact@v4
+        with:
+          name: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  publish:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # The checksum file is what the gateway verifies a download against
+      # before swapping binaries. No checksum file, no verify — see ADR 0019.
+      - run: cd dist && sha256sum acornfall-* > sha256sums.txt && ls -la
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

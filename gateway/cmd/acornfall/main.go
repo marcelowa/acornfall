@@ -19,6 +19,7 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/httpapi"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/update"
 	"github.com/acornfall/acornfall/gateway/web"
 )
 
@@ -54,6 +55,7 @@ func serve(argv []string) error {
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor) or host (no isolation)")
+	migrateDir := flags.String("migrate-dir", "", "where release migrate scripts live (default: ./scripts/migrate when present, else <home>/migrate)")
 	disableVMNesting := flags.Bool("disable-vm-nesting", false, "keep a workspace's sandbox from nesting virtual machines; by default a sandbox nests when the engine and the machine can, and a workspace's own setting wins")
 	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: "bun run src/main.ts")`)
@@ -126,6 +128,19 @@ func serve(argv []string) error {
 		return err
 	}
 
+	// The self-update tier. Version file, release check, backup set, migrate
+	// runner, rollback: docs/adr/0019-self-update.md. A pending migrate runs
+	// before serving; a failing script restores the backup and stops boot, so
+	// the supervisor restarts the last good build instead of a dead UI.
+	updates := update.New(dir, "", resolveMigrateDir(*migrateDir, dir))
+	if err := updates.Open(); err != nil {
+		return err
+	}
+	if err := updates.RunPending(ctx); err != nil {
+		return err
+	}
+	go updates.StartLoop(ctx)
+
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
 		Home:          dir,
 		UserHome:      userHome,
@@ -144,9 +159,11 @@ func serve(argv []string) error {
 	}
 	defer workspaces.Close()
 
+	updates.RunsActive = workspaces.AnyRunning
+
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           httpapi.RequireToken(httpapi.New(workspaces, web.Files).Handler(), guard),
+		Handler:           httpapi.RequireToken(httpapi.New(workspaces, web.Files, updates).Handler(), guard),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -298,6 +315,19 @@ func writeCredentials(path string, all map[string]credential) error {
 		return err
 	}
 	return os.Rename(temp, path)
+}
+
+// resolveMigrateDir finds the release migrate scripts. An explicit flag wins;
+// otherwise a ./scripts/migrate beside the working directory (a source checkout)
+// wins; otherwise the install's own folder, where a release can ship them.
+func resolveMigrateDir(flagValue, home string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if info, err := os.Stat(filepath.Join("scripts", "migrate")); err == nil && info.IsDir() {
+		return filepath.Join("scripts", "migrate")
+	}
+	return filepath.Join(home, "migrate")
 }
 
 // displayAddr turns a wildcard bind into something clickable.

@@ -2,8 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	abortConversation,
 	answerAuthPrompt,
+	applyUpdate,
 	cancelAuthFlow,
+	checkUpdate,
 	createConversation as createConversationRequest,
+	fetchUpdateStatus,
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
 	fetchState,
@@ -14,16 +17,20 @@ import {
 	refreshProviders,
 	removeWorkspace as removeWorkspaceRequest,
 	renameConversation,
+	rollbackUpdate,
 	sendMessage,
 	setAgent,
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultThinking,
+	setUpdatePrefs as saveUpdatePrefs,
 	startProviderLogin,
 	updateWorkspace,
 	type AgentChange,
 	type DefaultScope,
 	type ProviderAuthType,
+	type UpdatePrefs,
+	type UpdateStatus,
 } from "./client";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
@@ -78,9 +85,15 @@ interface Route {
 export type Screen = "conversation" | "workspaces" | "settings";
 
 /** The settings pages, each with its own URL under /settings. */
-export type SettingsTab = "workspace" | "defaults" | "providers" | "appearance";
+export type SettingsTab = "workspace" | "defaults" | "providers" | "appearance" | "updates";
 
-const SETTINGS_TABS: SettingsTab[] = ["workspace", "defaults", "providers", "appearance"];
+const SETTINGS_TABS: SettingsTab[] = [
+	"workspace",
+	"defaults",
+	"providers",
+	"appearance",
+	"updates",
+];
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
 	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "workspace";
@@ -233,6 +246,18 @@ export interface Platform {
 	logoutProvider: (id: string) => void;
 	/** Re-read the catalog, for a key added outside the app. */
 	refreshProviders: () => void;
+	/** The self-update state, if the gateway answered yet. One dot, not a list. */
+	update?: UpdateStatus | undefined;
+	/** Ask the gateway for the update state again; a success clears the last refusal. */
+	refreshUpdate: () => void;
+	/** Force a release check now. */
+	checkUpdateNow: () => void;
+	/** Back up, download, verify, swap. Refusals land in `failure`. */
+	applyUpdateNow: (cleanVMs: boolean, drain: "wait" | "stop") => void;
+	/** Restore the last good build. */
+	rollbackUpdateNow: () => void;
+	/** The Updates tab: channel, auto-check, pinned tag. */
+	setUpdatePrefs: (prefs: UpdatePrefs) => void;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	/** The conversation in view was created by another one, so its choices are not its own. */
@@ -821,6 +846,56 @@ export function usePlatform(): Platform {
 		act(refreshProviders(workspace), () => void reload());
 	}, [act, workspace, reload]);
 
+	// The self-update state: once at load, then every 15 minutes. The gateway
+	// checks releases hourly itself; this keeps the header dot honest. A failed
+	// poll clears to unknown rather than failing the whole screen: the update
+	// screen is advisory, the conversation is not.
+	const [update, setUpdate] = useState<UpdateStatus | undefined>(undefined);
+	useEffect(() => {
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const next = await fetchUpdateStatus();
+				if (!cancelled) setUpdate(next);
+			} catch {
+				if (!cancelled) setUpdate(undefined);
+			}
+		};
+		void load();
+		const timer = window.setInterval(
+			() => {
+				void load();
+			},
+			15 * 60 * 1000,
+		);
+		return () => {
+			cancelled = true;
+			window.clearInterval(timer);
+		};
+	}, []);
+
+	const refreshUpdate = useCallback((): void => {
+		void fetchUpdateStatus().then(setUpdate, reportError);
+	}, [reportError]);
+	const checkUpdateNow = useCallback((): void => {
+		act(checkUpdate().then(setUpdate));
+	}, [act]);
+	const applyUpdateNow = useCallback(
+		(cleanVMs: boolean, drain: "wait" | "stop"): void => {
+			act(applyUpdate(cleanVMs, drain).then(setUpdate));
+		},
+		[act],
+	);
+	const rollbackUpdateNow = useCallback((): void => {
+		act(rollbackUpdate().then(setUpdate));
+	}, [act]);
+	const setUpdatePrefs = useCallback(
+		(prefs: UpdatePrefs): void => {
+			act(saveUpdatePrefs(prefs).then(setUpdate));
+		},
+		[act],
+	);
+
 	const newConversation = useCallback(() => {
 		void createConversationRequest(workspace)
 			.then((created) => {
@@ -944,5 +1019,11 @@ export function usePlatform(): Platform {
 		closeLogin,
 		logoutProvider: logoutProviderById,
 		refreshProviders: refreshProvidersNow,
+		update,
+		refreshUpdate,
+		checkUpdateNow,
+		applyUpdateNow,
+		rollbackUpdateNow,
+		setUpdatePrefs,
 	};
 }

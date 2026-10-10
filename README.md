@@ -174,6 +174,17 @@ make dev
   two seconds. The stream sends a keepalive and the client reconnects on its own.
   See [ADR 0009](docs/adr/0009-liveness-and-recovery.md).
 - Credentials live in `~/.acornfall/credentials.json` (0600), never in the worker's home.
+- **Self-update**: the gateway checks GitHub releases hourly (plus a Refresh button).
+  A header dot (count 1) leads to Settings > Updates: current tag, new tag, notes,
+  backup note, Update now / Later. Backup (config, state DB, workspace list, last 3)
+  runs first and stops the update on failure; VM disks are not backed up. Keep VMs is
+  the default; Start clean wipes the sandbox root only. A running conversation blocks
+  with a choice: wait for drain, stop runs and update, or cancel. The new binary
+  migrates at boot (`scripts/migrate/<tag>.sh`, non-zero stops boot) and `GET /healthz`
+  must pass for 30s; failure restores `acornfall.bak` and names the cause on the screen.
+  Pin a tag for no prompts. While the repo is private, set `ACORNFALL_GITHUB_TOKEN`
+  (read-only, one repo) so the check, download, and checksum fetch can read releases;
+  drop it when releases go public. See [ADR 0019](docs/adr/0019-self-update.md).
 
 ## Write an agent
 

@@ -26,6 +26,8 @@ export interface SettingsScreenProps {
 	defaults: ReactNode;
 	/** The providers section: global keys, so it never sits under workspace tabs. */
 	providers: ReactNode;
+	/** The update screen: release card on top, prefs below. */
+	updates: ReactNode;
 	/** Back to the conversation that was in view. */
 	onClose: () => void;
 }
@@ -49,6 +51,7 @@ export function SettingsScreen({
 	onUpdateWorkspace,
 	defaults,
 	providers,
+	updates,
 	onClose,
 }: SettingsScreenProps) {
 	const [image, setImage] = useState(workspace?.image ?? "");
@@ -95,7 +98,8 @@ export function SettingsScreen({
 								next === "workspace" ||
 								next === "defaults" ||
 								next === "providers" ||
-								next === "appearance"
+								next === "appearance" ||
+								next === "updates"
 							)
 								onTabChange(next);
 						}}
@@ -105,6 +109,7 @@ export function SettingsScreen({
 							<TabsTrigger value="defaults">Defaults</TabsTrigger>
 							<TabsTrigger value="providers">Providers</TabsTrigger>
 							<TabsTrigger value="appearance">Appearance</TabsTrigger>
+							<TabsTrigger value="updates">Updates</TabsTrigger>
 						</TabsList>
 					</Tabs>
 
@@ -206,6 +211,8 @@ export function SettingsScreen({
 					) : null}
 
 					{tab === "providers" ? providers : null}
+
+					{tab === "updates" ? updates : null}
 				</Stack>
 			</Measure>
 		</div>

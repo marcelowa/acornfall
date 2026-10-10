@@ -13,15 +13,17 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/acornfall/acornfall/gateway/internal/update"
 )
 
 type Server struct {
 	workspaces *control.Workspaces
 	static     fs.FS
+	update     *update.Manager
 }
 
-func New(workspaces *control.Workspaces, static fs.FS) *Server {
-	return &Server{workspaces: workspaces, static: static}
+func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager) *Server {
+	return &Server{workspaces: workspaces, static: static, update: updates}
 }
 
 // controlFor finds the workspace a request is about. The workspace-scoped routes name it;
@@ -77,6 +79,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/defaults/model", s.setInstallDefaultModel)
 	mux.HandleFunc("POST /api/defaults/thinking", s.setInstallDefaultThinking)
 	mux.HandleFunc("POST /api/defaults/agent", s.setInstallDefaultAgent)
+
+	mux.HandleFunc("GET /healthz", s.health)
+
+	mux.HandleFunc("GET /api/update/status", s.updateStatus)
+	mux.HandleFunc("POST /api/update/check", s.updateCheck)
+	mux.HandleFunc("POST /api/update/apply", s.updateApply)
+	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
+	mux.HandleFunc("POST /api/update/settings", s.updateSettings)
 
 	mux.HandleFunc("GET /api/workspaces", s.workspaceList)
 	mux.HandleFunc("POST /api/workspaces", s.workspaceCreate)
