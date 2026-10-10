@@ -23,9 +23,24 @@ another worker, not changing the control plane.
 
 ## Requirements
 
-- Go 1.27+
+- Go 1.27+ (exact version in `gateway/go.mod`)
 - bun 1.4+
+- make, gcc (builds and the `-race` tests)
 - an API key for a supported provider (or the dev provider below)
+
+## Setup
+
+```bash
+# Go: https://go.dev/dl — match the version in gateway/go.mod
+curl -fsSL https://bun.sh/install | bash  # bun, into ~/.bun/bin
+sudo apt install make gcc                  # Debian/Ubuntu build tools
+
+make deps    # bun install in worker/, ui/, tools/
+make tools   # the linters make lint runs (staticcheck, worker deps)
+```
+
+`bun` must stay on `PATH`: the gateway starts workers with it, and a worker
+fails to start without it.
 
 ## Run
 
