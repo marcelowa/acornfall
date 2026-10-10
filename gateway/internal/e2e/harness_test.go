@@ -555,40 +555,68 @@ func (c *client) watch(workspace, id string) func() {
 // there is no case where an unreachable gateway is the expected outcome of a feature.
 func (c *client) do(method, path string, body any) (int, []byte) {
 	c.t.Helper()
+	status, payload, err := c.doTry(method, path, body)
+	if err != nil {
+		c.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	return status, payload
+}
+
+// doTry is do without the failure: a polling wait treats a slow gateway as a reason to
+// try again, not as the verdict. A single GET that takes the client's whole minute on a
+// loaded -race runner used to fail the test it was polling for, even though the next
+// poll would have answered — PR #37 and main a38c6cc both fell this way, waiting for a
+// peer/child listing while the gateway was busy starting it.
+func (c *client) doTry(method, path string, body any) (int, []byte, error) {
+	c.t.Helper()
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			c.t.Fatal(err)
+			return 0, nil, err
 		}
 		reader = bytes.NewReader(encoded)
 	}
 	request, err := http.NewRequest(method, c.base+path, reader)
 	if err != nil {
-		c.t.Fatal(err)
+		return 0, nil, err
 	}
 	if body != nil {
 		request.Header.Set("content-type", "application/json")
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		c.t.Fatalf("%s %s: %v", method, path, err)
+		return 0, nil, err
 	}
 	defer response.Body.Close()
 	payload, err := io.ReadAll(response.Body)
 	if err != nil {
-		c.t.Fatalf("%s %s: read body: %v", method, path, err)
+		return 0, nil, fmt.Errorf("read body: %w", err)
 	}
-	return response.StatusCode, payload
+	return response.StatusCode, payload, nil
 }
 
 func (c *client) get(path string, out any) {
 	c.t.Helper()
-	status, payload := c.do(http.MethodGet, path, nil)
-	if status != http.StatusOK {
-		c.t.Fatalf("GET %s: %d %s", path, status, payload)
+	if err := c.getTry(path, out); err != nil {
+		c.t.Fatalf("GET %s: %v", path, err)
 	}
-	decodeInto(c.t, path, payload, out)
+}
+
+// getTry is get without the failure, for the same reason as doTry: polling waits retry.
+func (c *client) getTry(path string, out any) error {
+	c.t.Helper()
+	status, payload, err := c.doTry(http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("%d %s", status, truncate(payload, 200))
+	}
+	if err := json.Unmarshal(payload, out); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	return nil
 }
 
 // post accepts 202 as well as 200: sending a message is accepted rather than completed,
@@ -703,9 +731,20 @@ type layerTrace struct {
 
 func (c *client) state(workspace string) state {
 	c.t.Helper()
-	var out state
-	c.get("/api/workspaces/"+workspace+"/state", &out)
+	out, err := c.stateTry(workspace)
+	if err != nil {
+		c.t.Fatalf("GET /api/workspaces/%s/state: %v", workspace, err)
+	}
 	return out
+}
+
+func (c *client) stateTry(workspace string) (state, error) {
+	c.t.Helper()
+	var out state
+	if err := c.getTry("/api/workspaces/"+workspace+"/state", &out); err != nil {
+		return state{}, err
+	}
+	return out, nil
 }
 
 // conversations is the listing the server refreshes before answering, unlike the state, which
@@ -713,18 +752,41 @@ func (c *client) state(workspace string) state {
 // reports only on commit wants this one.
 func (c *client) conversations(workspace string) []conversation {
 	c.t.Helper()
-	var out []conversation
-	c.get("/api/workspaces/"+workspace+"/conversations", &out)
+	out, err := c.conversationsTry(workspace)
+	if err != nil {
+		c.t.Fatalf("GET /api/workspaces/%s/conversations: %v", workspace, err)
+	}
 	return out
 }
 
+func (c *client) conversationsTry(workspace string) ([]conversation, error) {
+	c.t.Helper()
+	var out []conversation
+	if err := c.getTry("/api/workspaces/"+workspace+"/conversations", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *client) conversationIn(workspace, id string) (conversation, bool) {
-	for _, candidate := range c.state(workspace).Conversations {
+	candidate, found, err := c.conversationInTry(workspace, id)
+	if err != nil {
+		c.t.Fatalf("GET /api/workspaces/%s/state: %v", workspace, err)
+	}
+	return candidate, found
+}
+
+func (c *client) conversationInTry(workspace, id string) (conversation, bool, error) {
+	got, err := c.stateTry(workspace)
+	if err != nil {
+		return conversation{}, false, err
+	}
+	for _, candidate := range got.Conversations {
 		if candidate.ID == id {
-			return candidate, true
+			return candidate, true, nil
 		}
 	}
-	return conversation{}, false
+	return conversation{}, false, nil
 }
 
 // conversationPath is the collection, or one conversation when an id is given. The actions on
@@ -787,7 +849,13 @@ func (c *client) waitIdle(workspace, id string, timeout time.Duration) {
 	c.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		for _, candidate := range c.conversations(workspace) {
+		// A slow poll is a retry, not a verdict: see doTry.
+		listed, err := c.conversationsTry(workspace)
+		if err != nil {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		for _, candidate := range listed {
 			if candidate.ID == id && !candidate.Running {
 				return
 			}
@@ -808,7 +876,7 @@ func (c *client) waitForConversation(workspace string) string {
 	// meet is a test that fails for the wrong reason.
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
-		if got := c.state(workspace); got.Conversation != nil {
+		if got, err := c.stateTry(workspace); err == nil && got.Conversation != nil {
 			return got.Conversation.ID
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -827,14 +895,23 @@ func (c *client) waitForConversationMatching(workspace string, predicate func(co
 	c.t.Helper()
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
-		for _, candidate := range c.conversations(workspace) {
+		listed, err := c.conversationsTry(workspace)
+		if err != nil {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		for _, candidate := range listed {
 			if predicate(candidate) {
 				return candidate
 			}
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	c.t.Fatalf("no conversation in %s matched, listing: %+v", workspace, c.conversations(workspace))
+	listed, err := c.conversationsTry(workspace)
+	if err != nil {
+		c.t.Fatalf("no conversation in %s matched: last listing failed: %v", workspace, err)
+	}
+	c.t.Fatalf("no conversation in %s matched, listing: %+v", workspace, listed)
 	return conversation{}
 }
 
@@ -844,12 +921,12 @@ func (c *client) waitForTitle(workspace, id, prefix string) conversation {
 	c.t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if candidate, found := c.conversationIn(workspace, id); found && strings.HasPrefix(candidate.Title, prefix) {
+		if candidate, found, err := c.conversationInTry(workspace, id); err == nil && found && strings.HasPrefix(candidate.Title, prefix) {
 			return candidate
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	candidate, _ := c.conversationIn(workspace, id)
+	candidate, _, _ := c.conversationInTry(workspace, id)
 	c.t.Fatalf("%s/%s was never named %q, it is %q", workspace, id, prefix, candidate.Title)
 	return candidate
 }
@@ -863,7 +940,12 @@ func (c *client) waitRunning(workspace, id string, timeout time.Duration) {
 	c.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		for _, candidate := range c.conversations(workspace) {
+		listed, err := c.conversationsTry(workspace)
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		for _, candidate := range listed {
 			if candidate.ID == id && candidate.Running {
 				return
 			}
