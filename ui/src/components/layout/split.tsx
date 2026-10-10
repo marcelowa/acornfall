@@ -4,8 +4,9 @@ import {
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
-import { PanelLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { PanelLeft, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Dialog as SheetPrimitive } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "cn";
@@ -17,13 +18,16 @@ const MAX_RAIL = 480;
 /**
  * The workbench: a rail and the pane beside it.
  *
- * Below `lg` the rail is a drawer that takes the screen it is on — a 280px rail beside a
- * 390px phone leaves the transcript unusable, and a drawer that only half-opens is a worse
- * version of the same mistake. From `lg` it is a column the app can put away; the default is
- * open, and Split owns the drawer and the resize handle. In topbar mode the bar
- * carries no rail buttons from `lg`: the rail head closes it while the collapsed
- * strip opens it again. Below `lg` the drawer toggle sits beside the brand, because
- * tapping the brand alone opens nothing. The width
+ * Below `lg` the rail is a drawer that drops from under the top bar — the bar stays
+ * mounted, so the brand and the title never leave. The bar is a fixed `h-12`, and the
+ * drawer starts exactly there: full width, dimmed transcript behind it. A 280px rail
+ * beside a 390px phone would leave the transcript a sliver, and a drawer that only
+ * half-opens is a worse version of the same mistake. From `lg` the rail is a column
+ * the app can put away; the default is open, and Split owns the drawer and the resize
+ * handle. In topbar mode the bar carries no rail buttons from `lg`: the rail head
+ * closes it while the collapsed strip opens it again. Below `lg` the drawer toggle
+ * sits beside the brand and swaps hamburger for X, because tapping the brand alone
+ * opens nothing. The width
  * is the token unless the app hands one in.
  */
 const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
@@ -217,13 +221,42 @@ export function Split({
 			{topbar === undefined ? null : (
 				<div
 					data-slot="topbar"
-					className="flex shrink-0 items-center gap-1 border-b border-border px-1 py-0.5"
+					className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-1"
 				>
-					{/* Below `lg` the drawer toggle sits beside the brand: tapping the
-					 * brand alone opens nothing, so the way in must be visible. From `lg`
-					 * the bar carries no rail buttons — the rail head closes it while
-					 * the collapsed strip opens it again. */}
-					<div className="flex shrink-0 items-center lg:hidden">{drawer}</div>
+					{/* Below `lg` the drawer drops from under this bar: the bar stays
+					 * mounted, the toggle swaps hamburger for X, and the transcript dims
+					 * behind the drawer. From `lg` the bar carries no rail buttons. */}
+					<div className="flex shrink-0 items-center lg:hidden">
+						<Sheet open={open} onOpenChange={setOpen}>
+							<SheetTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									aria-label={open ? "Close navigation" : asideLabel}
+									aria-expanded={open}
+								>
+									{open ? <X /> : <PanelLeft />}
+								</Button>
+							</SheetTrigger>
+							<SheetPrimitive.Portal>
+								<SheetPrimitive.Overlay
+									data-slot="sheet-overlay"
+									className="fixed top-12 right-0 bottom-0 left-0 z-50 bg-overlay data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
+								/>
+								<SheetPrimitive.Content
+									data-slot="sheet-content"
+									aria-describedby={undefined}
+									className="fixed top-12 right-0 bottom-0 left-0 z-50 flex flex-col bg-rail transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:slide-out-to-top data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:slide-in-from-top data-[state=open]:duration-300"
+								>
+									<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
+									<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+										{aside}
+									</div>
+								</SheetPrimitive.Content>
+							</SheetPrimitive.Portal>
+						</Sheet>
+					</div>
 					<div className="flex min-w-0 flex-1 items-center gap-2">{topbar}</div>
 				</div>
 			)}
