@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/acornfall/acornfall/gateway/internal/ready"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
 )
@@ -52,6 +53,7 @@ func doctorCommand(argv []string) {
 	checkCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	health := updater.Preflight(checkCtx)
+	requirements := ready.Check(readyInput(resolved, updater, health, report, engineName))
 	if *asJSON {
 		// The report plus what the engine and the machine say about nesting: two answers,
 		// because either half can refuse and the reason is worth reading.
@@ -59,7 +61,8 @@ func doctorCommand(argv []string) {
 			sandbox.Report
 			Nesting sandbox.NestingSupport `json:"nesting"`
 			Update  update.Preflight       `json:"update"`
-		}{Report: report, Nesting: nesting, Update: health}, "", "  ")
+			Ready   []ready.Requirement    `json:"readiness"`
+		}{Report: report, Nesting: nesting, Update: health, Ready: requirements}, "", "  ")
 		if err != nil {
 			log.Fatalf("acornfall doctor: %v", err)
 		}
@@ -102,10 +105,82 @@ func doctorCommand(argv []string) {
 		} else {
 			fmt.Printf("  releases  %s\n", health.Releases)
 		}
+		fmt.Println("readiness")
+		for _, requirement := range requirements {
+			if requirement.OK {
+				fmt.Printf("  %-11s yes %s\n", requirement.Name, requirement.Detail)
+				continue
+			}
+			fmt.Printf("  %-11s NO  %s\n", requirement.Name, requirement.Detail)
+			fmt.Printf("  %-11s     fix: %s\n", "", requirement.Fix)
+		}
 	}
 	if report.Problem != "" {
 		os.Exit(1)
 	}
+}
+
+// readyInput gathers what the readiness list reads from the managers
+// doctor already owns. Report-only where possible: doctor changes nothing.
+func readyInput(home string, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
+	_, bunOK := updater.BunInstalled()
+	return ready.Input{
+		Home:            home,
+		Current:         health.Version,
+		Worker:          updater.WorkerVersion(),
+		BunPath:         updater.BunPath(),
+		BunOK:           bunOK,
+		EngineName:      report.Engine,
+		EngineVersion:   report.Version,
+		EngineInstalled: report.Installed,
+		EngineIsolated:  report.Isolated,
+		EngineProblem:   report.Problem,
+		EngineDisabled:  disabledReason(),
+		Latest:          health.Latest,
+		ReleasesNote:    health.Releases,
+		HasCredential:   ready.HasCredential(home),
+	}
+}
+
+// disabledReason names an engine refusal from the environment, the way the
+// gateway's own startup does: the same switch must mean the same thing.
+func disabledReason() string {
+	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
+		return "ACORNFALL_NO_SANDBOX is set"
+	}
+	return ""
+}
+
+// readyInputForBoot gathers the boot-time readiness list. The engine may
+// be nil (refused tier): that is a stated answer, not a missing one.
+func readyInputForBoot(home string, updates *update.Manager, engine *sandbox.Manager) ready.Input {
+	_, bunOK := updates.BunInstalled()
+	status := updates.Status()
+	input := ready.Input{
+		Home:          home,
+		Current:       status.Current,
+		Worker:        updates.WorkerVersion(),
+		BunPath:       updates.BunPath(),
+		BunOK:         bunOK,
+		HasCredential: ready.HasCredential(home),
+		Latest:        status.Latest,
+	}
+	if engine == nil {
+		input.EngineDisabled = disabledReason()
+		if input.EngineDisabled == "" {
+			input.EngineDisabled = "no engine configured"
+		}
+		return input
+	}
+	report := engine.Report()
+	input.EngineName = report.Engine
+	input.EngineVersion = report.Version
+	input.EngineInstalled = report.Installed
+	input.EngineIsolated = report.Isolated
+	if problem := engine.Problem(); problem != nil {
+		input.EngineProblem = problem.Error()
+	}
+	return input
 }
 
 // reportManager builds the report-only manager doctor describes. It has to name an engine:
