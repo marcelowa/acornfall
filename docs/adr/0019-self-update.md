@@ -100,3 +100,16 @@ covers the common case; clean covers format changes.
   accept): browser URLs 404 on private repos with a Bearer token.
 - Swap and rollback rename instead of overwrite: a running binary answers
   ETXTBSY to a write but renames aside fine (Linux, macOS).
+
+## Self-contained releases
+
+- The worker ships compiled (`bun build --compile`), one binary per
+  OS/arch next to the gateway: no bun, no sources, no `node_modules`
+  at runtime. Dev keeps `bun run src/main.ts`; `--worker` wins, then
+  `--worker-bin`, then the beside-the-binary worker, then bun.
+- Migrate scripts are baked into the gateway (`go:embed`);
+  `--migrate-dir` overrides for script authors.
+- Update downloads and verifies both binaries against one checksum file
+  and swaps worker first, gateway second. Releases before the worker
+  asset skip the worker step.
+- Everything lives under the install folder. The host stays clean.

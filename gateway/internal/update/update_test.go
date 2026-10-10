@@ -147,6 +147,75 @@ func TestBackupKeepsLastThree(t *testing.T) {
 	}
 }
 
+func TestMigrateEmbeddedScriptRuns(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.migrateDir = ""
+	// v0.0.0-test.sh is baked into the binary: the embedded path runs it.
+	// Underscore names do not embed, so the fixture wears a version tag.
+	if err := manager.Migrate(context.Background(), "v0.0.0-test"); err != nil {
+		t.Fatalf("embedded script should pass, got %v", err)
+	}
+}
+
+func TestMigrateEmbeddedMissingIsNothingToDo(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.migrateDir = ""
+	if err := manager.Migrate(context.Background(), "vno-such-tag"); err != nil {
+		t.Fatalf("missing embedded script should pass, got %v", err)
+	}
+}
+
+func TestApplySwapsWorkerToo(t *testing.T) {
+	manager, _ := testManager(t)
+	workerBin := manager.workerBinPath()
+	if err := os.WriteFile(workerBin, []byte("old-worker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("payload-for-" + r.URL.Path))
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: "acornfall-worker-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/worker"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(workerBin)
+	if string(got) != "payload-for-/worker" {
+		t.Fatalf("worker not swapped, got %q", got)
+	}
+	backup, err := os.ReadFile(workerBin + ".bak")
+	if err != nil || string(backup) != "old-worker" {
+		t.Fatalf("worker backup = %q, %v", backup, err)
+	}
+}
+
+func TestApplySkipsWorkerWhenReleasePredatesIt(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("new-gateway"))
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	// No worker asset, no worker beside the binary: nothing to do, no error.
+	if _, err := os.Stat(manager.workerBinPath()); !os.IsNotExist(err) {
+		t.Fatalf("worker must be untouched, stat err = %v", err)
+	}
+}
+
 func TestMigrateMissingScriptIsNothingToDo(t *testing.T) {
 	manager, _ := testManager(t)
 	if err := manager.Migrate(context.Background(), "v0.9.0"); err != nil {

@@ -55,11 +55,12 @@ func serve(argv []string) error {
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor) or host (no isolation)")
-	migrateDir := flags.String("migrate-dir", "", "where release migrate scripts live (default: ./scripts/migrate when present, else <home>/migrate)")
+	migrateDir := flags.String("migrate-dir", "", "release migrate scripts directory (default: the scripts baked into the binary)")
 	disableVMNesting := flags.Bool("disable-vm-nesting", false, "keep a workspace's sandbox from nesting virtual machines; by default a sandbox nests when the engine and the machine can, and a workspace's own setting wins")
 	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: "bun run src/main.ts")`)
 	workerDir := flags.String("worker-dir", "", "worker directory")
+	workerBin := flags.String("worker-bin", "", "compiled worker binary (default: acornfall-worker beside the gateway binary, else bun + --worker-dir)")
 	if err := flags.Parse(argv); err != nil {
 		return err
 	}
@@ -95,14 +96,17 @@ func serve(argv []string) error {
 			general = cwd
 		}
 	}
-	worker, err := resolveWorkerDir(*workerDir)
-	if err != nil {
-		return err
-	}
+	command := resolveWorkerCommand(*workerCommand, *workerBin, os.Getenv("ACORNFALL_WORKER_BIN"))
 
-	command := []string{"bun", "run", "src/main.ts"}
-	if *workerCommand != "" {
-		command = strings.Fields(*workerCommand)
+	// The worker sources are only needed in bun mode: a compiled worker
+	// beside the gateway (what releases ship) needs no directory.
+	worker := ""
+	if *workerCommand != "" || (len(command) > 0 && command[0] == "bun") {
+		var err error
+		worker, err = resolveWorkerDir(*workerDir)
+		if err != nil {
+			return err
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -317,17 +321,39 @@ func writeCredentials(path string, all map[string]credential) error {
 	return os.Rename(temp, path)
 }
 
-// resolveMigrateDir finds the release migrate scripts. An explicit flag wins;
-// otherwise a ./scripts/migrate beside the working directory (a source checkout)
-// wins; otherwise the install's own folder, where a release can ship them.
-func resolveMigrateDir(flagValue, home string) string {
-	if flagValue != "" {
-		return flagValue
+// resolveWorkerCommand picks the worker process. An explicit --worker wins,
+// then --worker-bin, then a compiled acornfall-worker beside the gateway
+// binary (what releases ship: no bun, no sources), then bun over the worker
+// sources (development).
+func resolveWorkerCommand(explicit, binFlag, binEnv string) []string {
+	executable, _ := os.Executable()
+	return resolveWorkerCommandWithExe(explicit, binFlag, binEnv, executable)
+}
+
+func resolveWorkerCommandWithExe(explicit, binFlag, binEnv, executable string) []string {
+	if explicit != "" {
+		return strings.Fields(explicit)
 	}
-	if info, err := os.Stat(filepath.Join("scripts", "migrate")); err == nil && info.IsDir() {
-		return filepath.Join("scripts", "migrate")
+	bin := binFlag
+	if bin == "" {
+		bin = binEnv
 	}
-	return filepath.Join(home, "migrate")
+	if bin == "" && executable != "" {
+		candidate := filepath.Join(filepath.Dir(executable), "acornfall-worker")
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			bin = candidate
+		}
+	}
+	if bin != "" {
+		return []string{bin}
+	}
+	return []string{"bun", "run", "src/main.ts"}
+}
+
+// resolveMigrateDir finds the release migrate scripts. An explicit flag wins
+// (for script authors); otherwise the scripts baked into the binary run.
+func resolveMigrateDir(flagValue, _ string) string {
+	return flagValue
 }
 
 // displayAddr turns a wildcard bind into something clickable.

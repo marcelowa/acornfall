@@ -9,10 +9,13 @@ package update
 import (
 	"context"
 	"crypto/sha256"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -35,6 +38,13 @@ const HealthWindow = 30 * time.Second
 
 // MaxBackups is how many backup sets are kept.
 const MaxBackups = 3
+
+// migrateFS is the release migrate scripts, baked into the binary: an
+// update never depends on a checkout being beside it. --migrate-dir
+// overrides it for script authors.
+//
+//go:embed migrate
+var migrateFS embed.FS
 
 // BuildVersion is the release tag stamped at build time. A fresh install
 // from a release therefore knows its tag without a version file. The file
@@ -153,6 +163,33 @@ func (m *Manager) pendingPath() string       { return filepath.Join(m.home, "upd
 func (m *Manager) failedPath() string        { return filepath.Join(m.home, "update.failed") }
 func (m *Manager) backupBinPath() string     { return m.binPath + ".bak" }
 func (m *Manager) backupVersionPath() string { return m.binPath + ".bak.version" }
+
+// workerBinPath is the compiled worker beside the gateway binary: one
+// folder, two binaries, nothing on the host PATH. Empty when the gateway
+// does not know its own path.
+func (m *Manager) workerBinPath() string {
+	if m.binPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(m.binPath), "acornfall-worker")
+}
+
+// swapFile moves path aside to path+".bak" and writes the payload in its
+// place. Rename, not overwrite: a running worker cannot be overwritten
+// either. When path does not exist it is created and there is nothing
+// to keep.
+func swapFile(path string, payload []byte) error {
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, path+".bak"); err != nil {
+			return fmt.Errorf("update: cannot move %s aside: %w", path, err)
+		}
+	}
+	if err := os.WriteFile(path, payload, 0o755); err != nil {
+		_ = os.Rename(path+".bak", path)
+		return fmt.Errorf("update: cannot write %s: %w", path, err)
+	}
+	return nil
+}
 
 // Open loads settings, version, and the last failure marker.
 func (m *Manager) Open() error {
@@ -329,9 +366,19 @@ func parseRelease(body io.Reader) (Release, error) {
 // AssetFor picks the release file for this platform, or "" when the
 // release publishes none. Names follow `acornfall-<goos>-<goarch>`.
 func AssetFor(release Release) Asset {
-	want := "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH
+	return assetNamed(release, "acornfall-"+runtime.GOOS+"-"+runtime.GOARCH)
+}
+
+// WorkerAsset picks the compiled worker for this platform, or "" when the
+// release predates it (v0.9.0 has none): then the worker step is skipped
+// and the source worker keeps running.
+func WorkerAsset(release Release) Asset {
+	return assetNamed(release, "acornfall-worker-"+runtime.GOOS+"-"+runtime.GOARCH)
+}
+
+func assetNamed(release Release, name string) Asset {
 	for _, asset := range release.Assets {
-		if asset.Name == want {
+		if asset.Name == name {
 			return asset
 		}
 	}
@@ -444,21 +491,49 @@ func copyDir(source, target string) error {
 	return nil
 }
 
-// Migrate runs scripts/migrate/<tag>.sh. Missing script means nothing to
-// do. Non-zero exit is the error the boot refuses on: boot stops and
-// rollback starts. No silent fix-ups live anywhere else.
+// Migrate runs the <tag>.sh release script: from --migrate-dir when set,
+// else from the scripts baked into the binary. Missing script means
+// nothing to do. Non-zero exit is the error the boot refuses on: boot
+// stops and rollback starts. No silent fix-ups live anywhere else.
 func (m *Manager) Migrate(ctx context.Context, tag string) error {
-	if m.migrateDir == "" {
-		return nil
+	if m.migrateDir != "" {
+		script := filepath.Join(m.migrateDir, tag+".sh")
+		if _, err := os.Stat(script); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		return runScript(ctx, script, m.home, tag)
 	}
-	script := filepath.Join(m.migrateDir, tag+".sh")
-	if _, err := os.Stat(script); err != nil {
-		if os.IsNotExist(err) {
+	body, err := migrateFS.ReadFile("migrate/" + tag + ".sh")
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		return err
 	}
-	command := exec.CommandContext(ctx, "sh", script, m.home)
+	temp, err := os.CreateTemp("", "acornfall-migrate-*.sh")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if _, err := temp.Write(body); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tempPath, 0o700); err != nil {
+		return err
+	}
+	return runScript(ctx, tempPath, m.home, tag)
+}
+
+func runScript(ctx context.Context, script, home, tag string) error {
+	command := exec.CommandContext(ctx, "sh", script, home)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("migrate %s: %v: %s", tag, err, strings.TrimSpace(string(output)))
@@ -491,6 +566,7 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if asset.URL == "" {
 		return fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
 	}
+	worker := WorkerAsset(release)
 	if _, err := m.Backup(); err != nil {
 		return fmt.Errorf("backup failed, update stopped: %w", err)
 	}
@@ -498,8 +574,30 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := m.verify(ctx, payload, release); err != nil {
+	// The worker downloads and verifies before anything is swapped: a
+	// failure here leaves both binaries untouched.
+	list, err := m.checksumList(ctx, release)
+	if err != nil {
 		return err
+	}
+	if err := verify(list, payload, release.Tag); err != nil {
+		return err
+	}
+	var workerPayload []byte
+	if worker.URL != "" {
+		workerPayload, err = m.download(ctx, worker)
+		if err != nil {
+			return err
+		}
+		if err := verify(list, workerPayload, release.Tag); err != nil {
+			return err
+		}
+	}
+	// Downloads and verifies first, swaps second: worker, then gateway.
+	if workerPayload != nil {
+		if err := swapFile(m.workerBinPath(), workerPayload); err != nil {
+			return err
+		}
 	}
 	if err := m.swap(payload, release.Tag); err != nil {
 		return err
@@ -549,11 +647,11 @@ func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(response.Body, 256<<20))
 }
 
-// verify checks the payload against the release's checksum file when the
-// release publishes one (sha256sums.txt or checksums.txt). Without one it
-// passes: the transport is TLS to github, and the shape question (cosign
-// vs minisign vs checksum file) is still open — see ADR 0019.
-func (m *Manager) verify(ctx context.Context, payload []byte, release Release) error {
+// checksumList fetches the release's checksum file (sha256sums.txt or
+// checksums.txt), or "" when the release publishes none. One fetch covers
+// every file: the gateway and the worker are both checked against it.
+// Without one it passes: the transport is TLS to github — see ADR 0019.
+func (m *Manager) checksumList(ctx context.Context, release Release) (string, error) {
 	var checksum Asset
 	for _, asset := range release.Assets {
 		if asset.Name == "sha256sums.txt" || asset.Name == "checksums.txt" {
@@ -562,7 +660,7 @@ func (m *Manager) verify(ctx context.Context, payload []byte, release Release) e
 		}
 	}
 	if checksum.URL == "" {
-		return nil
+		return "", nil
 	}
 	checksumURL := checksum.URL
 	accept := ""
@@ -572,7 +670,7 @@ func (m *Manager) verify(ctx context.Context, payload []byte, release Release) e
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if accept != "" {
 		request.Header.Set("Accept", accept)
@@ -582,22 +680,38 @@ func (m *Manager) verify(ctx context.Context, payload []byte, release Release) e
 	}
 	response, err := m.client.Do(request)
 	if err != nil {
-		return fmt.Errorf("releases: cannot fetch checksums: %w", err)
+		return "", fmt.Errorf("releases: cannot fetch checksums: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("releases: cannot fetch checksums: %s", response.Status)
+	}
 	list, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		return err
+		return "", err
 	}
+	return string(list), nil
+}
+
+// verify checks one payload against a fetched checksum list. An empty list
+// passes: no checksum file, TLS only.
+func verify(list string, payload []byte, tag string) error {
+	if list == "" {
+		return nil
+	}
+	return matchChecksum(payload, list, tag)
+}
+
+func matchChecksum(payload []byte, list, tag string) error {
 	sum := sha256.Sum256(payload)
 	want := hex.EncodeToString(sum[:])
-	for _, line := range strings.Split(string(list), "\n") {
+	for _, line := range strings.Split(list, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[0] == want {
 			return nil
 		}
 	}
-	return fmt.Errorf("releases: checksum mismatch for %s", release.Tag)
+	return fmt.Errorf("releases: checksum mismatch for %s", tag)
 }
 
 // swap keeps the last good binary as .bak, writes the new one, records the
@@ -653,6 +767,16 @@ func (m *Manager) Rollback(cause error) error {
 	}
 	if err := os.Rename(m.backupBinPath(), m.binPath); err != nil {
 		return fmt.Errorf("rollback: cannot restore backup: %w", err)
+	}
+	// The worker rolls back with the gateway when it was swapped: a .bak
+	// beside it means this update moved it.
+	if worker := m.workerBinPath(); worker != "" {
+		if _, err := os.Stat(worker + ".bak"); err == nil {
+			_ = os.Rename(worker, worker+".bad")
+			if err := os.Rename(worker+".bak", worker); err != nil {
+				return fmt.Errorf("rollback: cannot restore worker backup: %w", err)
+			}
+		}
 	}
 	previous := "unknown"
 	if payload, err := os.ReadFile(m.backupVersionPath()); err == nil {
