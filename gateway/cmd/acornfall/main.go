@@ -40,6 +40,10 @@ func main() {
 		doctorCommand(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		versionCommand(os.Args[2:])
+		return
+	}
 	if err := serve(os.Args[1:]); err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
@@ -151,8 +155,18 @@ func serve(argv []string) error {
 		WorkspacesDir: *workspacesDir,
 		WorkerCommand: command,
 		WorkerDir:     worker,
-		Model:         *model,
-		Sandbox:       engine,
+		Update: func() control.UpdateSummary {
+			status := updates.Status()
+			return control.UpdateSummary{
+				Current:         status.Current,
+				Latest:          status.Latest,
+				Available:       status.Available,
+				Failed:          status.Failed,
+				RestartRequired: status.RestartRequired,
+			}
+		},
+		Model:   *model,
+		Sandbox: engine,
 		// Nesting is allowed unless refused: a workspace's sandbox nests when the
 		// engine offers it and the machine can grant it, and boots without it otherwise.
 		DisableVMNesting: *disableVMNesting,
@@ -163,6 +177,20 @@ func serve(argv []string) error {
 	defer workspaces.Close()
 
 	updates.RunsActive = workspaces.AnyRunning
+	updates.StopRuns = workspaces.AbortAll
+	updates.CleanVMs = func(ctx context.Context) error {
+		var names []string
+		for _, workspace := range workspaces.List() {
+			names = append(names, workspace.Name)
+		}
+		stateDir := ""
+		remove := func(context.Context, string) error { return nil }
+		if engine != nil {
+			stateDir = engine.Report().StateDir
+			remove = engine.Remove
+		}
+		return update.CleanSandboxes(ctx, names, remove, stateDir)
+	}
 
 	// Readiness, plainly: every unsatisfied requirement is one log line
 	// with its fix. Auto-installable pieces were ensured above; what is
@@ -239,6 +267,34 @@ func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.
 		log.Printf("sandbox: the host engine is not isolated: commands and file tools run with this user's own reach")
 	}
 	return engine, nil
+}
+
+// versionCommand prints the running tag: the version file, the build
+// stamp, or dev. The update tier's exec gate runs it on staged binaries,
+// and scripts check it without starting anything.
+func versionCommand(argv []string) {
+	flags := flag.NewFlagSet("version", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "data directory")
+	if err := flags.Parse(argv); err != nil {
+		return
+	}
+	dir, err := resolveDataDir(*dataDir)
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	version, err := versionString(dir)
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	fmt.Println(version)
+}
+
+func versionString(home string) (string, error) {
+	manager := update.New(home, "", "")
+	if err := manager.Open(); err != nil {
+		return "", err
+	}
+	return manager.Status().Current, nil
 }
 
 func providers(argv []string) {

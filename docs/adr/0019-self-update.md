@@ -33,8 +33,9 @@ list. Last 3 kept. No VM disk backup in v1 (too big); the screen says
 so. Backup failure stops the update.
 
 **Keep VMs by default, clean on ask.** Keep leaves the sandbox root
-alone. Clean wipes the sandbox root only, never files under workspaces.
-Needed when the VM format or the engine changes.
+alone. Clean removes every workspace sandbox and empties the engine
+state dir (images re-pull), never files under workspaces. The engine
+install itself stays. Needed when the VM format or the engine changes.
 
 **Migrate at boot, from scripts.** New binary runs `migrate --to <tag>`
 before serving. One script per release in `scripts/migrate/`, e.g.
@@ -42,8 +43,10 @@ before serving. One script per release in `scripts/migrate/`, e.g.
 fix-ups in app code.
 
 **Last good binary stays.** `acornfall.bak` plus a version file.
-`GET /healthz` must pass for 30s after start. Fail means stop the new
-build, start the old one, show the cause on the update screen.
+Staged binaries must execute (`version` names the tag) before swapping.
+`GET /healthz` names the build; the 30s must-pass window after start is
+the operator's (service restart on failure), not the gateway's. Migrate
+failure still stops boot and rolls back by itself.
 
 **Roles now, enforced later.** Today one user, same rights. The API
 carries the role check now: `POST /api/update/apply` answers 403 for
@@ -54,10 +57,14 @@ non-admin. Default allow.
 - `GET /healthz` -> `{ ok: true, version }`
 - `GET /api/update/status` -> `{ current, latest, notes, pinned, checking }`
 - `POST /api/update/check` -> force a check now
-- `POST /api/update/apply` -> `{ cleanVMs, drain: "wait"|"stop" }`
+- `POST /api/update/apply` -> `{ cleanVMs, drain: "wait"|"stop" }`.
+  Drain stop aborts runs first; clean wipes the sandbox root after
+  verify, before swap. A second apply before restart refuses (409).
 - `POST /api/update/rollback` -> restore the last good build
-- Events over the state stream: `update.available`, `update.progress`,
-  `update.failed`
+- The state stream carries `{ current, latest, available, failed,
+  restartRequired }`: the header dot without fetching. Per-event
+  `update.available/progress/failed` frames were sketched and dropped —
+  the polled status plus the state summary cover every screen.
 
 ## Alternatives
 

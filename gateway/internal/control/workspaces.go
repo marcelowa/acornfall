@@ -126,6 +126,8 @@ type WorkspacesOptions struct {
 	WorkspacesDir string
 	WorkerCommand []string
 	WorkerDir     string
+	// Update reports the self-update summary for the state stream.
+	Update func() UpdateSummary
 	// Model is the install default, from --model.
 	Model string
 	// Sandbox is the machine's sandbox tier, shared by every workspace.
@@ -413,6 +415,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		Sandbox:          w.opts.Sandbox,
 		WorkerCommand:    w.opts.WorkerCommand,
 		WorkerDir:        w.opts.WorkerDir,
+		Update:           w.opts.Update,
 		Model:            w.opts.Model,
 		DisableVMNesting: w.opts.DisableVMNesting,
 	})
@@ -511,6 +514,21 @@ func (w *Workspaces) running() []*Control {
 		controls = append(controls, control)
 	}
 	return controls
+}
+
+// AbortAll stops every running conversation in every started workspace.
+// One failure does not stop the rest: an update that asked for drain-stop
+// wants everything quiet, and the joined error says what stayed loud.
+func (w *Workspaces) AbortAll(ctx context.Context) error {
+	var errs []error
+	for _, control := range w.running() {
+		for _, id := range control.RunningIDs() {
+			if err := control.Abort(ctx, id); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // AnyRunning reports whether any conversation in any started workspace is running.

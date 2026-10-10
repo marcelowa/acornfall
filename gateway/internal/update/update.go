@@ -92,6 +92,10 @@ type Status struct {
 	Pinned   string `json:"pinned"`
 	Channel  string `json:"channel"`
 	Checking bool   `json:"checking"`
+	// Download sizes in bytes, for the screen's size line. Zero when the
+	// release names no file for this platform.
+	DownloadSize int64 `json:"downloadSize"`
+	WorkerSize   int64 `json:"workerSize"`
 	// Available is one dot, not a list: a newer tag exists and nothing pins it.
 	Available bool `json:"available"`
 	// Failed carries the last rollback cause, so the screen can say it.
@@ -187,6 +191,12 @@ type Manager struct {
 	// RunsActive reports whether any conversation is running. Injected so
 	// tests need no control plane.
 	RunsActive func() bool
+	// StopRuns aborts every running conversation. Apply calls it when
+	// drain is "stop": the dialog promises it, so the gateway does it.
+	StopRuns func(ctx context.Context) error
+	// CleanVMs wipes the sandbox tier for a Start-clean update. Injected
+	// for the same reason as RunsActive.
+	CleanVMs func(ctx context.Context) error
 	// IsAdmin decides POST /api/update/apply. Default allow: single user
 	// now, admin later. Return false to get the 403 path today.
 	IsAdmin func(r *http.Request) bool
@@ -345,6 +355,8 @@ func (m *Manager) Status() Status {
 		Available:       available,
 		Failed:          m.failed,
 		RestartRequired: m.restart,
+		DownloadSize:    AssetFor(m.latest).Size,
+		WorkerSize:      WorkerTarballAsset(m.latest).Size,
 	}
 }
 
@@ -626,7 +638,8 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if options.Drain == "" {
 		options.Drain = "wait"
 	}
-	if m.RunsActive != nil && m.RunsActive() && options.Drain != "stop" {
+	active := m.RunsActive != nil && m.RunsActive()
+	if active && options.Drain != "stop" {
 		return ErrRunsActive{}
 	}
 	m.mu.Lock()
@@ -652,6 +665,15 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 		return fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
 	}
 	worker := WorkerTarballAsset(release)
+	// Drain stop means it: runs end before anything else moves.
+	if active {
+		if m.StopRuns == nil {
+			return fmt.Errorf("update: runs are active and nothing can stop them")
+		}
+		if err := m.StopRuns(ctx); err != nil {
+			return fmt.Errorf("update: cannot stop runs: %w", err)
+		}
+	}
 	if _, err := m.Backup(); err != nil {
 		return fmt.Errorf("backup failed, update stopped: %w", err)
 	}
@@ -671,6 +693,12 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if err := verify(list, payload, release.Tag); err != nil {
 		return err
 	}
+	// The staged binary must execute and name its tag before it may
+	// replace the running one: checksums prove intact, execution proves
+	// runnable. A failure aborts with everything untouched.
+	if err := checkExec(ctx, payload, release.Tag); err != nil {
+		return err
+	}
 	if worker.URL != "" {
 		tarball, err := m.download(ctx, worker)
 		if err != nil {
@@ -683,8 +711,78 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 			return err
 		}
 	}
+	// Start-clean wipes last, after everything verified: a failed download
+	// must never cost the sandboxes. The screen warns that images and the
+	// engine reinstall on next use.
+	if options.CleanVMs {
+		if m.CleanVMs == nil {
+			return fmt.Errorf("update: clean VMs asked and nothing can wipe them")
+		}
+		if err := m.CleanVMs(ctx); err != nil {
+			return fmt.Errorf("update: cannot wipe sandboxes: %w", err)
+		}
+	}
 	if err := m.swap(payload, release.Tag); err != nil {
 		return err
+	}
+	return nil
+}
+
+// checkExec proves a staged binary runs and names its tag: `version` is
+// pure Go with no flags, so this works on every platform the binary does.
+// It runs from a temp copy, never the live path: a failure leaves the
+// running build and its backup exactly alone.
+func checkExec(ctx context.Context, payload []byte, tag string) error {
+	temp, err := os.CreateTemp("", "acornfall-check-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if _, err := temp.Write(payload); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tempPath, 0o755); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, tempPath, "version").Output()
+	if err != nil {
+		return fmt.Errorf("update: staged %s does not run: %w", tag, err)
+	}
+	if got := strings.TrimSpace(string(output)); got != tag {
+		return fmt.Errorf("update: staged binary says %q, want %q", got, tag)
+	}
+	return nil
+}
+
+// CleanSandboxes removes every workspace sandbox through the engine and
+// then empties the engine's state dir (images, snapshots). The engine
+// install itself stays: reinstalling it is slow and never required by a
+// format change. Names and remove come from the caller so tests need no
+// engine; stateDir missing is clean already.
+func CleanSandboxes(ctx context.Context, names []string, remove func(context.Context, string) error, stateDir string) error {
+	for _, name := range names {
+		if err := remove(ctx, name); err != nil {
+			return fmt.Errorf("update: cannot remove sandbox %q: %w", name, err)
+		}
+	}
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(stateDir, entry.Name())); err != nil {
+			return err
+		}
 	}
 	return nil
 }

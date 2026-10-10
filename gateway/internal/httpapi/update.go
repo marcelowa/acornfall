@@ -34,6 +34,8 @@ func (s *Server) updateStatus(w http.ResponseWriter, _ *http.Request) {
 		"channel":         status.Channel,
 		"autoCheck":       s.update.Settings().AutoCheck,
 		"checking":        status.Checking,
+		"downloadSize":    status.DownloadSize,
+		"workerSize":      status.WorkerSize,
 		"available":       status.Available,
 		"failed":          status.Failed,
 		"restartRequired": status.RestartRequired,
@@ -129,8 +131,10 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := s.update.Settings()
 	if body.Channel != nil {
-		if *body.Channel != "releases" && *body.Channel != "main" {
-			http.Error(w, `channel is "releases" or "main"`, http.StatusBadRequest)
+		// Releases only: the tree-build channel is designed, not built.
+		// A toggle for it would be a control that does nothing.
+		if *body.Channel != "releases" {
+			http.Error(w, `channel is "releases": tree builds are not available yet`, http.StatusBadRequest)
 			return
 		}
 		settings.Channel = *body.Channel
