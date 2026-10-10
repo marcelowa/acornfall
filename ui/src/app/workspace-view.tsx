@@ -418,6 +418,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				defaults={defaults}
 				providers={providers}
 				updates={updates}
+				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}
 			/>
 		) : undefined;

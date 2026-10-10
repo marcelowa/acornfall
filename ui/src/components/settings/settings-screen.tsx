@@ -28,6 +28,8 @@ export interface SettingsScreenProps {
 	providers: ReactNode;
 	/** The update screen: release card on top, prefs below. */
 	updates: ReactNode;
+	/** The running build, when the gateway answered: shown under the title. */
+	version?: string | undefined;
 	/** Back to the conversation that was in view. */
 	onClose: () => void;
 }
@@ -52,6 +54,7 @@ export function SettingsScreen({
 	defaults,
 	providers,
 	updates,
+	version,
 	onClose,
 }: SettingsScreenProps) {
 	const [image, setImage] = useState(workspace?.image ?? "");
@@ -89,6 +92,11 @@ export function SettingsScreen({
 						<Text as="h1" size="xl" weight="semibold">
 							Settings
 						</Text>
+						{version === undefined || version === "" ? null : (
+							<Text size="2xs" tone="muted">
+								acornfall {version}
+							</Text>
+						)}
 					</Stack>
 
 					<Tabs
