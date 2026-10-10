@@ -41,6 +41,11 @@ export interface ComposerProps {
 	 * Never on a coarse pointer — focusing the field would pop the keyboard uninvited.
 	 */
 	focusConversation?: string | undefined;
+	/**
+	 * A new conversation the person asked for: the caret moves home even on a coarse
+	 * pointer, where an arrival alone must not pop the keyboard.
+	 */
+	focusToken?: number | undefined;
 	/** Slash keyboard navigation: how many rows are open and which is highlighted. */
 	slashCount?: number | undefined;
 	slashIndex?: number | undefined;
@@ -72,6 +77,7 @@ export function Composer({
 	controls,
 	above,
 	focusConversation,
+	focusToken,
 	slashCount = 0,
 	slashIndex = 0,
 	onSlashIndexChange,
@@ -87,6 +93,10 @@ export function Composer({
 		if (isCoarsePointer()) return;
 		field.current?.focus({ preventScroll: true });
 	}, [focusConversation]);
+	useEffect(() => {
+		if (focusToken === undefined || focusToken === 0) return;
+		field.current?.focus({ preventScroll: true });
+	}, [focusToken]);
 
 	const submit = (): void => {
 		if (!canSend) return;

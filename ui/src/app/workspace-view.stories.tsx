@@ -200,6 +200,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		screen: "conversation",
 		showScreen: noop,
 		newConversation: noop,
+		composerFocusToken: 0,
 		renameWorkspace: noop,
 		defaults: {
 			workspace: { model: "opencode-go/deepseek-v4.1-flash", thinking: "max", agent: "" },

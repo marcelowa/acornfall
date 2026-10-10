@@ -212,6 +212,9 @@ export interface Platform {
 	selectWorkspace: (name: string) => void;
 	/** A new conversation in the workspace in view, created and opened. */
 	newConversation: () => void;
+	/** Each new conversation bumps it, so the composer can claim focus even where an
+	 * arrival alone must not pop the keyboard. */
+	composerFocusToken: number;
 	/** Where the active workspace's tools actually run. */
 	sandbox?: SandboxSummary | undefined;
 	/** What each scope says, before resolution: one tab per scope in the settings screen. */
@@ -312,6 +315,7 @@ export function usePlatform(): Platform {
 		() => read<number | null>(RAIL_WIDTH_KEY, null) ?? undefined,
 	);
 	const [railOpen, setRailOpen] = useState(false);
+	const [composerFocusToken, setComposerFocusToken] = useState(0);
 	const [railCollapsed, setRailCollapsed] = useState<boolean>(() =>
 		read(RAIL_COLLAPSED_KEY, false),
 	);
@@ -917,6 +921,9 @@ export function usePlatform(): Platform {
 	);
 
 	const newConversation = useCallback(() => {
+		// The drawer covers the conversation on a phone, and the new room is for typing:
+		// close it now so it never lingers over the request, and again on arrival.
+		setRailOpen(false);
 		void createConversationRequest(workspace)
 			.then((created) => {
 				setFailure(undefined);
@@ -927,6 +934,8 @@ export function usePlatform(): Platform {
 					`/c/${encodeURIComponent(workspace)}/${encodeURIComponent(id)}`,
 				);
 				setView(undefined);
+				setRailOpen(false);
+				setComposerFocusToken((token) => token + 1);
 				setRoute({
 					screen: "conversation",
 					workspace,
@@ -1022,6 +1031,7 @@ export function usePlatform(): Platform {
 		settingsTab: route.settingsTab,
 		showSettingsTab,
 		newConversation,
+		composerFocusToken,
 		select,
 		rename,
 		hide,

@@ -500,6 +500,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							running={busy}
 							aborting={aborting}
 							focusConversation={platform.active?.id}
+							focusToken={platform.composerFocusToken}
 							steerable={platform.steerable}
 							onSteer={() => sendText("steer")}
 							onQueue={() => sendText("followUp")}
