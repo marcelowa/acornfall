@@ -104,3 +104,108 @@ func TestConversationsCarryLastActivity(t *testing.T) {
 		t.Errorf("a conversation that never moved has no activity to report, got %d", state.Conversations[1].UpdatedAt)
 	}
 }
+
+// The signature is what decides whether attached clients are told the state moved, so it has
+// to follow the rule the state publishes — the gated busy flag — and not the worker's raw
+// record. Two inputs move that flag with nothing else changing: the prompt grace expiring,
+// and a stuck record aging past the freshness window. A signature that read the raw record
+// would stay quiet through both, and a client that read the flag in between would keep a busy
+// sign that nothing would ever take down.
+func TestTheSignatureFollowsTheBusyRule(t *testing.T) {
+	now := time.Now().UnixMilli()
+	cases := []struct {
+		name  string
+		first protocol.ConversationInfo
+		last  protocol.ConversationInfo
+		// Prompt stamps in Unix ms; zero means this case moves the record instead.
+		firstStamp int64
+		lastStamp  int64
+	}{
+		{
+			name:       "the prompt grace expiring",
+			first:      protocol.ConversationInfo{ID: "1"},
+			last:       protocol.ConversationInfo{ID: "1"},
+			firstStamp: now - 9_000,
+			lastStamp:  now - 11_000,
+		},
+		{
+			name:  "a record aging past the freshness window",
+			first: protocol.ConversationInfo{ID: "1", Running: true, UpdatedAt: now - 29*60*1000},
+			last:  protocol.ConversationInfo{ID: "1", Running: true, UpdatedAt: now - 31*60*1000},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+			control.conversations = []protocol.ConversationInfo{testCase.first}
+			if testCase.firstStamp != 0 {
+				control.promptedAt["1"] = testCase.firstStamp
+			}
+			before := control.conversationSignature()
+			control.conversations = []protocol.ConversationInfo{testCase.last}
+			if testCase.lastStamp != 0 {
+				control.promptedAt["1"] = testCase.lastStamp
+			}
+			if after := control.conversationSignature(); after == before {
+				t.Error("a busy flag that moved with time is still a change to announce")
+			}
+		})
+	}
+}
+
+// A state change wakes attached clients through their own signal, never through the frame
+// channel: that channel drops what it cannot hold, and a client that never hears the state
+// moved keeps showing the state it read before — a busy sign outliving its run. The signal
+// also stays out of the frames a client has not read yet, so a slow write loses neither.
+func TestAStateChangeWakesSubscribersWithoutTouchingTheirFrames(t *testing.T) {
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	frames := make(chan protocol.Frame, 1)
+	stale := make(chan struct{}, 1)
+	control.subscribers[1] = frames
+	control.staleSignals[1] = stale
+
+	control.publish(protocol.Frame{Type: "state"})
+	// A second change while the first signal is still waiting is not a second wakeup: the
+	// waiting signal already says the state moved.
+	control.publish(protocol.Frame{Type: "state"})
+
+	wakes := 0
+	for {
+		select {
+		case <-stale:
+			wakes++
+			continue
+		default:
+		}
+		break
+	}
+	if wakes != 1 {
+		t.Errorf("a waiting signal already says the state moved, got %d wakeups", wakes)
+	}
+	select {
+	case frame := <-frames:
+		t.Fatalf("a state change is not a frame, got %q", frame.Type)
+	default:
+	}
+}
+
+// A state that moved with time alone is still news: the same record, the same entry, only the
+// prompt grace expired. The poll asks whether the state differs from what clients were last
+// told, because nothing refreshes when only time passes — comparing two signatures taken
+// milliseconds apart would never see it, and the busy sign would stay up.
+func TestATimeOnlyChangeIsAnnounced(t *testing.T) {
+	now := time.Now().UnixMilli()
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	control.conversations = []protocol.ConversationInfo{{ID: "1"}}
+	control.promptedAt["1"] = now - 9_000
+	control.notifyState()
+
+	control.promptedAt["1"] = now - 11_000
+	if !control.stateStale() {
+		t.Error("the grace expiring is a change attached clients have to hear about")
+	}
+	control.notifyState()
+	if control.stateStale() {
+		t.Error("a state that was just announced is not news again")
+	}
+}

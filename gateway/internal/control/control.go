@@ -239,14 +239,23 @@ type Control struct {
 	// worker's run record lags behind the click and outlives dead runs; the stamp covers
 	// both directions: just-prompted counts as busy before the record exists, and only a
 	// record with recent activity counts after.
-	promptedAt  map[string]int64
+	promptedAt map[string]int64
+	// announced is the signature of the state attached clients were last told about. The poll
+	// compares the state against it, because a change only time can make has no data behind
+	// it: nothing refreshes, and only the comparison across ticks can see it.
+	announced   string
 	resolved    map[string]*protocol.ResolvedAgent
 	catalog     protocol.AgentsData
 	providers   []protocol.ProviderInfo
 	policies    map[string]json.RawMessage
 	views       map[string]cachedView
 	subscribers map[int]chan protocol.Frame
-	nextSub     int
+	// staleSignals wakes one client per state change. It is a channel of its own because a
+	// state frame is a signal, not a transcript: on the frame channel a slow write would drop
+	// it, or the signal would evict a view frame the client has not read yet, and a client
+	// that never hears the state moved keeps the state it read before — busy sign and all.
+	staleSignals map[int]chan struct{}
+	nextSub      int
 	// Which conversation each subscriber watches, and how many watch each. Several
 	// clients watching different conversations is what makes browser tabs work.
 	subscriberConversation map[int]string
@@ -271,6 +280,7 @@ func New(opts Options) *Control {
 		resolved:               map[string]*protocol.ResolvedAgent{},
 		views:                  map[string]cachedView{},
 		subscribers:            map[int]chan protocol.Frame{},
+		staleSignals:           map[int]chan struct{}{},
 		subscriberConversation: map[int]string{},
 		attachments:            map[string]int{},
 		policies:               map[string]json.RawMessage{},
@@ -579,11 +589,10 @@ func (c *Control) watchConversations(ctx context.Context) {
 			if !c.Watching() {
 				continue
 			}
-			before := c.conversationSignature()
 			if _, err := c.listConversations(ctx); err != nil {
 				continue
 			}
-			if c.conversationSignature() != before {
+			if c.stateStale() {
 				c.publish(protocol.Frame{Type: "state"})
 			}
 		}
@@ -608,12 +617,31 @@ func (c *Control) watchedConversations() []string {
 	return list
 }
 
-func (c *Control) conversationSignature() string {
+// stateStale reports whether the state has moved since attached clients were last told.
+// Against the announcement, not against the previous tick's data: a change only time can
+// make — the prompt grace expiring — happens between ticks, and two signatures taken
+// milliseconds apart would never see it. The signature is read first and the announcement
+// after, so a signal raised in between can only cause an announcement that says the same
+// thing twice, never a missed one.
+func (c *Control) stateStale() bool {
+	signature := c.conversationSignature()
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	return signature != c.announced
+}
+
+// conversationSignature is what the interface sees, not the worker's raw record: the busy
+// rule gates a record with a prompt stamp and a freshness window, so a flag that moved only
+// because time passed is still a change the rail has to hear about — otherwise a client that
+// read the state inside the grace keeps a busy sign nothing will ever take down.
+func (c *Control) conversationSignature() string {
+	c.mu.RLock()
+	infos := append([]protocol.ConversationInfo(nil), c.conversations...)
+	c.mu.RUnlock()
+	now := time.Now().UnixMilli()
 	var builder strings.Builder
-	for _, info := range c.conversations {
-		fmt.Fprintf(&builder, "%s:%t:%s:%.0f|", info.ID, info.Running, info.LastEntryID, info.Tokens)
+	for _, info := range infos {
+		fmt.Fprintf(&builder, "%s:%t:%s:%.0f|", info.ID, c.runActive(info, now), info.LastEntryID, info.Tokens)
 	}
 	return builder.String()
 }
@@ -1934,8 +1962,9 @@ func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
 
 // Subscribe attaches one client to one conversation. The view it returns is that
 // conversation's, if any, so a late joiner starts from committed state. An empty id means the
-// conversation this install last used, which is what a fresh tab lands on.
-func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-chan protocol.Frame, *protocol.Frame, error) {
+// conversation this install last used, which is what a fresh tab lands on. The second channel
+// is the state signal: a value on it means the state the client holds is stale.
+func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-chan protocol.Frame, <-chan struct{}, *protocol.Frame, error) {
 	c.mu.Lock()
 	if conversationID == "" {
 		conversationID = c.active
@@ -1945,7 +1974,9 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 	id := c.nextSub
 	c.nextSub++
 	channel := make(chan protocol.Frame, 1)
+	stale := make(chan struct{}, 1)
 	c.subscribers[id] = channel
+	c.staleSignals[id] = stale
 	c.subscriberConversation[id] = conversationID
 	cached, hasCache := c.views[conversationID]
 	c.mu.Unlock()
@@ -1954,7 +1985,7 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 	if first && conversationID != "" {
 		if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 			c.Unsubscribe(id)
-			return 0, nil, nil, err
+			return 0, nil, nil, nil, err
 		}
 		// Fetch its policy now rather than leaving a client to see state without one until
 		// the next refresh tick, which reads as a broken inspector for a few seconds.
@@ -1985,7 +2016,7 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 		}
 		initial = &frame
 	}
-	return id, channel, initial, nil
+	return id, channel, stale, initial, nil
 }
 
 // Unsubscribe releases one client. The worker is told to stop watching only when the last
@@ -1994,6 +2025,7 @@ func (c *Control) Unsubscribe(id int) {
 	c.mu.Lock()
 	conversationID := c.subscriberConversation[id]
 	delete(c.subscribers, id)
+	delete(c.staleSignals, id)
 	delete(c.subscriberConversation, id)
 	if conversationID != "" {
 		c.attachments[conversationID] -= 1
@@ -2030,10 +2062,39 @@ func (c *Control) onFrame(frame protocol.Frame) {
 	}
 }
 
+// notifyState wakes every attached client: the state it holds is stale, and the HTTP layer
+// answers each one with a fresh state for its own conversation. A signal already waiting
+// says the same thing, so a second one is not a second wakeup. What was announced is
+// remembered here, so the poll can tell a change it has already announced from one only time
+// has made.
+func (c *Control) notifyState() {
+	signature := c.conversationSignature()
+	c.mu.Lock()
+	c.announced = signature
+	signals := make([]chan struct{}, 0, len(c.staleSignals))
+	for _, signal := range c.staleSignals {
+		signals = append(signals, signal)
+	}
+	c.mu.Unlock()
+	for _, signal := range signals {
+		select {
+		case signal <- struct{}{}:
+		default:
+		}
+	}
+}
+
 // publish fans one frame out to attached clients. A view frame is a complete
 // value, so the newest supersedes any undelivered older one; a slow client loses
 // frames, never state.
 func (c *Control) publish(frame protocol.Frame) {
+	// A state frame is a signal and takes the other road: the frame channel would let a slow
+	// write drop it, and a client that never hears the state moved keeps the state it read
+	// before — the busy sign outliving the run is exactly that.
+	if frame.Type == "state" {
+		c.notifyState()
+		return
+	}
 	c.mu.Lock()
 	if frame.Type == "view" {
 		c.views[frame.ConversationID] = cachedView{

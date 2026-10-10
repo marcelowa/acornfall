@@ -281,7 +281,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	// Each client names the conversation it wants, so two tabs can watch two
 	// conversations without agreeing on an active one.
 	conversationID := r.URL.Query().Get("conversation")
-	id, frames, initial, err := ctl.Subscribe(r.Context(), conversationID)
+	id, frames, stale, initial, err := ctl.Subscribe(r.Context(), conversationID)
 	if err != nil {
 		// The stream is already open, so a status line here would be a second header that no
 		// client reads. Say it on the stream and close: the client reconnects, which is what
@@ -319,6 +319,14 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case frame := <-frames:
 			if err := writeEvent(w, "frame", frame); err != nil {
+				return
+			}
+			flusher.Flush()
+		// The state moved, and the client's copy is stale. It is answered with the state
+		// itself, built now rather than when the signal was raised: the signal can wait,
+		// the state cannot be old.
+		case <-stale:
+			if err := writeEvent(w, "state", ctl.StateFor(conversationID)); err != nil {
 				return
 			}
 			flusher.Flush()

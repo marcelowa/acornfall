@@ -127,7 +127,7 @@ The chain is **conversation → its definition → this workspace → the instal
 |---|---|---|
 | L1 | A dead harness is restarted on its own, and the conversation, its history, and its spend survive. | `TestTheHarnessRestartsAndKeepsItsHistory` |
 | L2 | A run interrupted by a crash finishes afterwards. | `TestAnInterruptedRunFinishesAfterARestart` |
-| L3 | The stream carries a full state on attach, whole transcripts as view frames, and a keepalive that arrives while nothing is happening. | `TestTheStreamSendsStateViewsAndKeepalives` |
+| L3 | The stream carries a full state on attach and whenever it moves, whole transcripts as view frames, and a keepalive that arrives while nothing is happening. | `TestTheStreamSendsStateViewsAndKeepalives`, `TestTheStreamAnnouncesStateChanges` |
 | L4 | A failure says what the harness said, not only that it exited. | `workerpool.TestLastWordsPrefersTheLineThatExplains` |
 | L5 | A death is announced once, and only for the worker that is running: a notification from one that was already replaced changes nothing and starts nothing. | `TestOnlyTheCurrentWorkersDeathCounts`, `TestTheHarnessRestartsAndKeepsItsHistory` | `TestABrokenWorkspaceFileIsReportedAndHeals` (a failed start restarts exactly once), `TestTheHarnessRestartsAndKeepsItsHistory` |
 

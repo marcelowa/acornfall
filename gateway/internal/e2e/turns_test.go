@@ -209,6 +209,27 @@ func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 	}
 }
 
+// The state is what the rail reads — titles, spend, and the busy flag — so a client that is
+// already attached has to hear when it moves. Announced, not left to the next attach: a
+// client that is never told keeps showing the state it read before, which is how a busy sign
+// outlived the run that raised it.
+func TestTheStreamAnnouncesStateChanges(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(scriptRule{Match: "hello state", Reply: "stated"}))
+	c := s.client()
+	root := c.waitForConversation("general")
+	defer c.watch("general", root)()
+
+	// The run starts and settles inside the window, so the attach state is one event and
+	// the change is the second.
+	c.prompt("general", root, "hello state")
+	counts := c.streamEvents("general", root, 4*time.Second)
+	if counts["state"] < 2 {
+		t.Errorf("a state change should be announced to an attached client: %v", counts)
+	}
+}
+
 // The conversation listing and the usage report are what a client shows beside the transcript.
 func TestUsageIsReportedForAWorkspace(t *testing.T) {
 	t.Parallel()
