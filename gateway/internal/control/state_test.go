@@ -61,7 +61,7 @@ func TestRunningMeansLiveOrJustPrompted(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	control.conversations = []protocol.ConversationInfo{
 		{ID: "live", Running: true, UpdatedAt: now - 60_000},
-		{ID: "stuck", Running: true, UpdatedAt: now - 60*60_1000},
+		{ID: "stuck", Running: true, UpdatedAt: now - 60*60*1000},
 		{ID: "fresh", Running: true},
 		{ID: "prompted", Running: false},
 	}

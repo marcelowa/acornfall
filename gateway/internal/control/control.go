@@ -2279,7 +2279,7 @@ func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	if !info.Running || info.UpdatedAt <= 0 {
 		return false
 	}
-	return now-info.UpdatedAt < 30*60_1000
+	return now-info.UpdatedAt < 30*60*1000
 }
 
 func (c *Control) toConversations(infos []protocol.ConversationInfo) []Conversation {
