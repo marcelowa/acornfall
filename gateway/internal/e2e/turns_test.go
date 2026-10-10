@@ -1,6 +1,10 @@
 package e2e
 
 import (
+	"bufio"
+	"context"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -227,6 +231,66 @@ func TestTheStreamAnnouncesStateChanges(t *testing.T) {
 	counts := c.streamEvents("general", root, 4*time.Second)
 	if counts["state"] < 2 {
 		t.Errorf("a state change should be announced to an attached client: %v", counts)
+	}
+}
+
+// A prompt is announced to every attached tab, not just the sender: the busy flag is
+// state, and state moves are pushed. The sender used to fetch it explicitly while other
+// tabs waited for the poll, up to three seconds behind the click.
+//
+// Timing, stated plainly: the poll delivers within three seconds either way, so only a
+// deadline under it discriminates — and only while the run is still in flight, because
+// the settlement is announced either way. The slow model keeps the turn running past
+// the deadline. Two seconds leaves the push — already queued when the send returns —
+// orders of magnitude of margin on loopback, while the poll remainder is uniformly
+// behind it. If this flakes, the margin is what shrank, not the behavior.
+func TestAPromptIsAnnouncedToEveryAttachedTab(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t,
+		withSlowModel(),
+		withScript(scriptRule{Match: "hello tabs", Reply: "hi tabs and take your time saying it again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again"}))
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	// The second tab, attached before the prompt. Its attach state is old news.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/api/stream?workspace=%s&conversation=%s", c.base, "general", root), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := c.stream.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	states := make(chan struct{}, 16)
+	go func() {
+		defer close(states)
+		scanner := bufio.NewScanner(response.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+		for scanner.Scan() {
+			if after, ok := strings.CutPrefix(scanner.Text(), "event: "); ok && after == "state" {
+				select {
+				case states <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	select {
+	case <-states:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second tab never got its attach state")
+	}
+
+	c.prompt("general", root, "hello tabs")
+	select {
+	case <-states:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a prompt should be announced to attached tabs, not wait for the poll")
 	}
 }
 

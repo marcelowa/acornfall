@@ -1928,6 +1928,10 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 	c.mu.Lock()
 	c.promptedAt[conversationID] = time.Now().UnixMilli()
 	c.mu.Unlock()
+	// The grace starts now, and attached tabs hear state moves as signals, not on the
+	// next poll: without this a second tab keeps a stale rail for up to three seconds
+	// behind the click. Like every other mutation here, the prompt announces.
+	c.publish(protocol.Frame{Type: "state"})
 	return nil
 }
 
