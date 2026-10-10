@@ -791,6 +791,14 @@ try {
 		parts[0] === wire.agent && parts[2] === wire.thinking,
 		`"${summary}" for ${wire.agent} … ${wire.thinking}`,
 	);
+	// Long names truncate inside a fixed line: the control never outgrows the screen.
+	const pastEdge = await page.evaluate(() => {
+		const box = document
+			.querySelector("[data-slot=composer] [data-slot=choice-control]")
+			?.getBoundingClientRect();
+		return box === undefined ? 0 : box.right - window.innerWidth;
+	});
+	check("the choice line stays inside the screen", pastEdge <= 1, `${pastEdge}px past`);
 
 	const opened = await press(page, "[data-slot=composer] [data-slot=choice-control]");
 	const panel = await page

@@ -25,8 +25,10 @@ export interface ChoiceControlProps {
  * deepseek-v4.1-flash · max`, and the square above it is the three pickers and nothing
  * else — no title, no explanation, and no label repeated above the label the picker
  * already has. One long menu did not scale: a dozen models buried thinking below the
- * fold, so each dimension narrows on its own, and a long one grows a filter. A tap
- * outside closes the square, and picking keeps it open so all three can change in one go.
+ * fold, so each dimension narrows on its own, and a long one grows a filter. The
+ * square and the line are both fixed sizes: long names truncate with the full text on
+ * hover, so a model never moves the composer. A tap outside closes the square, and
+ * picking keeps it open so all three can change in one go.
  */
 export function ChoiceControl({
 	agent,
@@ -54,7 +56,8 @@ export function ChoiceControl({
 					disabled={disabled}
 					data-slot="choice-control"
 					aria-label="What runs this conversation"
-					className={cn("w-full sm:w-auto", className)}
+					title={choices.map((choice) => choice.picker.value).join(" · ")}
+					className={cn("w-full max-w-full sm:w-auto", className)}
 				>
 					{choices.map((choice, index) => (
 						<span key={choice.key} className="flex min-w-0 items-baseline gap-1">
@@ -65,9 +68,8 @@ export function ChoiceControl({
 							) : null}
 							<span
 								className={cn(
-									choice.key === "model"
-										? "min-w-0 truncate font-medium"
-										: "shrink-0",
+									"min-w-0 truncate",
+									choice.key === "model" && "font-medium",
 									choice.picker.invalid === true && "text-destructive",
 								)}
 							>
@@ -80,7 +82,7 @@ export function ChoiceControl({
 							<span
 								key={`${choice.key}-note`}
 								className={cn(
-									"shrink-0",
+									"min-w-0 truncate",
 									choice.picker.invalid === true
 										? "text-destructive"
 										: "text-muted-foreground",
