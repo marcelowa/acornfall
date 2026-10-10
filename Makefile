@@ -12,7 +12,7 @@ URL ?= http://$(ADDR)
 INSECURE ?= 1
 OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 
-.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui ui-build run dev fmt clean
+.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui ui-build run dev fmt clean release
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -145,6 +145,21 @@ ui-dev: ## serve the interface from source with vite, proxying /api to the gatew
 
 fmt: ## format Go sources
 	cd gateway && gofmt -w .
+
+# usage: make release V=v0.9.5 [NOTES="..."]
+# Tags origin/main itself, never a local ref: the two stale-tag incidents
+# both came from tagging before fetching. Fails clean rather than tagging
+# the wrong commit, and proves the tag before pushing it.
+release: ## tag origin/main as V and push the tag (NOTES=release notes)
+	@test -n "$(V)" || (echo "usage: make release V=vX.Y.Z [NOTES=...]"; exit 2)
+	@echo "$(V)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$' || (echo "V is vX.Y.Z, got $(V)"; exit 2)
+	@test -z "$$(git status --porcelain)" || (echo "tree not clean"; exit 2)
+	git fetch origin main 'refs/tags/$(V):refs/tags/$(V)-remote' 2>/dev/null || true
+	@if git rev-parse --verify --quiet 'refs/tags/$(V)-remote' >/dev/null; then echo "$(V) already on origin"; exit 2; fi
+	git fetch origin main
+	git tag -a $(V) origin/main -m "$${NOTES:-Release $(V).}"
+	@test "$$(git rev-parse '$(V)^{commit}')" = "$$(git rev-parse origin/main)" || (echo "tag missed main"; exit 2)
+	git push origin $(V)
 
 clean:
 	rm -rf bin
