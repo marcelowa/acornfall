@@ -58,9 +58,15 @@ const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
 
 export interface SplitProps extends VariantProps<typeof splitVariants> {
 	aside: ReactNode;
-	/** Sits in the small-screen bar beside the rail toggle. The conversation title, usually. */
+	/** Full-width row above everything: the brand, the title, the pane controls. It stays
+	 * put on mobile and desktop, rail open or not. When set, `bar` and `header` are
+	 * ignored so the title lives in one place. */
+	topbar?: ReactNode | undefined;
+	/** Sits in the small-screen bar beside the rail toggle. The conversation title, usually.
+	 * Kept for stories; the app uses `topbar` now. */
 	bar?: ReactNode | undefined;
-	/** The desktop row above the transcript: the title again, beside pane controls. */
+	/** The desktop row above the transcript: the title again, beside pane controls.
+	 * Kept for stories; the app uses `topbar` now. */
 	header?: ReactNode | undefined;
 	/** A third column where the screen has room (2xl): the docked inspector, usually. */
 	inspector?: ReactNode | undefined;
@@ -87,6 +93,7 @@ export interface SplitProps extends VariantProps<typeof splitVariants> {
 
 export function Split({
 	aside,
+	topbar,
 	bar,
 	header,
 	inspector,
@@ -156,116 +163,137 @@ export function Split({
 		handle.addEventListener("pointercancel", stop);
 	};
 
-	return (
-		<div
-			className={cn(
-				splitVariants({ gap, collapsed: asideCollapsed, docked: inspector !== undefined }),
-				className,
-			)}
-			style={width}
-		>
-			<aside className="relative hidden min-h-0 min-w-0 flex-col lg:flex">
-				{asideCollapsed ? (
-					// Collapsed, the rail is the toggle and nothing else: a strip that keeps the
-					// way back where the rail was, instead of a button floating over the transcript.
-					<div className="flex min-h-0 flex-1 flex-col items-center overflow-hidden border-r border-border bg-rail py-1">
-						{toggle}
-					</div>
-				) : (
-					<>
-						{/* The pane clips; its content owns its scroll. The handle stays outside the clip
-						 * so a drag does not lose the half that sits on the border. */}
-						<div className="flex min-h-0 flex-1 flex-col overflow-hidden">{aside}</div>
-						{inlineAsideToggle ? null : (
-							<div className="absolute top-1 right-1 z-10">{toggle}</div>
-						)}
-						{onAsideWidthChange === undefined ? null : (
-							<div
-								role="separator"
-								data-slot="splitter"
-								aria-orientation="vertical"
-								aria-label="Resize the rail"
-								aria-valuenow={asideWidth ?? 280}
-								aria-valuemin={MIN_RAIL}
-								aria-valuemax={MAX_RAIL}
-								tabIndex={0}
-								onPointerDown={startDrag}
-								onKeyDown={(event) => {
-									if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
-										return;
-									event.preventDefault();
-									resizeTo(
-										(asideWidth ?? 280) +
-											(event.key === "ArrowLeft" ? -16 : 16),
-									);
-								}}
-								className={cn(
-									"absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none bg-transparent",
-									"hover:bg-ring/40 focus-visible:bg-ring/40 focus-visible:outline-none",
-									dragging && "bg-ring/40",
-								)}
-							/>
-						)}
-					</>
-				)}
-			</aside>
-			<div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
-				<div className="flex items-center gap-1 border-b border-border px-1 py-0.5 lg:hidden">
-					<Sheet open={open} onOpenChange={setOpen}>
-						<SheetTrigger asChild>
+	const drawer = (
+		<Sheet open={open} onOpenChange={setOpen}>
+			<SheetTrigger asChild>
+				<Button type="button" variant="ghost" size="icon-sm" aria-label={asideLabel}>
+					<PanelLeft />
+				</Button>
+			</SheetTrigger>
+			{/* Full width: the drawer is the navigation, and half a screen of it is
+			 * neither the rail nor the transcript. Its close is the rail's own icon in the
+			 * rail's own corner, so the gesture is the same on both screens. */}
+			<SheetContent
+				side="left"
+				showCloseButton={false}
+				className="w-full p-2 sm:max-w-none"
+				aria-describedby={undefined}
+			>
+				<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
+				<div className="flex min-h-0 flex-1 flex-col">
+					{/* The close gets its own row: absolutely positioned over the rail
+					 * it would land on the head's own icon buttons, which is exactly
+					 * the overlap the floating toggle used to be. */}
+					<div className="flex shrink-0 items-center justify-end">
+						<SheetClose asChild>
 							<Button
 								type="button"
 								variant="ghost"
 								size="icon-sm"
-								aria-label={asideLabel}
+								aria-label="Hide the rail"
 							>
-								<PanelLeft />
+								<PanelLeftClose />
 							</Button>
-						</SheetTrigger>
-						{/* Full width: the drawer is the navigation, and half a screen of it is
-						 * neither the rail nor the transcript. Its close is the rail's own icon in the
-						 * rail's own corner, so the gesture is the same on both screens. */}
-						<SheetContent
-							side="left"
-							showCloseButton={false}
-							className="w-full p-2 sm:max-w-none"
-							aria-describedby={undefined}
-						>
-							<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
-							<div className="flex min-h-0 flex-1 flex-col">
-								{/* The close gets its own row: absolutely positioned over the rail
-								 * it would land on the head's own icon buttons, which is exactly
-								 * the overlap the floating toggle used to be. */}
-								<div className="flex shrink-0 items-center justify-end">
-									<SheetClose asChild>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon-sm"
-											aria-label="Hide the rail"
-										>
-											<PanelLeftClose />
-										</Button>
-									</SheetClose>
-								</div>
+						</SheetClose>
+					</div>
+					{aside}
+				</div>
+			</SheetContent>
+		</Sheet>
+	);
+
+	return (
+		<div className={cn("flex min-h-0 w-full flex-1 flex-col", className)} style={width}>
+			{topbar === undefined ? null : (
+				<div
+					data-slot="topbar"
+					className="flex shrink-0 items-center gap-1 border-b border-border px-1 py-0.5"
+				>
+					<div className="flex shrink-0 items-center lg:hidden">{drawer}</div>
+					{toggle === null ? null : (
+						<div className="hidden shrink-0 items-center lg:flex">{toggle}</div>
+					)}
+					<div className="flex min-w-0 flex-1 items-center gap-2">{topbar}</div>
+				</div>
+			)}
+			<div
+				className={cn(
+					splitVariants({
+						gap,
+						collapsed: asideCollapsed,
+						docked: inspector !== undefined,
+					}),
+				)}
+			>
+				<aside className="relative hidden min-h-0 min-w-0 flex-col lg:flex">
+					{asideCollapsed ? (
+						// Collapsed, the rail is the toggle and nothing else: a strip that keeps the
+						// way back where the rail was, instead of a button floating over the transcript.
+						<div className="flex min-h-0 flex-1 flex-col items-center overflow-hidden border-r border-border bg-rail py-1">
+							{toggle}
+						</div>
+					) : (
+						<>
+							{/* The pane clips; its content owns its scroll. The handle stays outside the clip
+							 * so a drag does not lose the half that sits on the border. */}
+							<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 								{aside}
 							</div>
-						</SheetContent>
-					</Sheet>
-					{bar === undefined ? null : (
-						<div className="flex min-w-0 flex-1 items-center">{bar}</div>
+							{inlineAsideToggle ? null : (
+								<div className="absolute top-1 right-1 z-10">{toggle}</div>
+							)}
+							{onAsideWidthChange === undefined ? null : (
+								<div
+									role="separator"
+									data-slot="splitter"
+									aria-orientation="vertical"
+									aria-label="Resize the rail"
+									aria-valuenow={asideWidth ?? 280}
+									aria-valuemin={MIN_RAIL}
+									aria-valuemax={MAX_RAIL}
+									tabIndex={0}
+									onPointerDown={startDrag}
+									onKeyDown={(event) => {
+										if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+											return;
+										event.preventDefault();
+										resizeTo(
+											(asideWidth ?? 280) +
+												(event.key === "ArrowLeft" ? -16 : 16),
+										);
+									}}
+									className={cn(
+										"absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none bg-transparent",
+										"hover:bg-ring/40 focus-visible:bg-ring/40 focus-visible:outline-none",
+										dragging && "bg-ring/40",
+									)}
+								/>
+							)}
+						</>
 					)}
+				</aside>
+				<div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+					{topbar !== undefined ? null : (
+						<>
+							<div className="flex items-center gap-1 border-b border-border px-1 py-0.5 lg:hidden">
+								{drawer}
+								{bar === undefined ? null : (
+									<div className="flex min-w-0 flex-1 items-center">{bar}</div>
+								)}
+							</div>
+							{header === undefined ? null : (
+								<div className="hidden shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 lg:flex">
+									{header}
+								</div>
+							)}
+						</>
+					)}
+					{children}
 				</div>
-				{header === undefined ? null : (
-					<div className="hidden shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 lg:flex">
-						{header}
-					</div>
+				{inspector === undefined ? null : (
+					<div className="hidden min-h-0 min-w-0 flex-col 2xl:flex">{inspector}</div>
 				)}
-				{children}
 			</div>
-			{inspector === undefined ? null : (
-				<div className="hidden min-h-0 min-w-0 flex-col 2xl:flex">{inspector}</div>
-			)}
 		</div>
 	);
 }

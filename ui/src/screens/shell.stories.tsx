@@ -28,7 +28,24 @@ const pane = (title: string, note: string) => (
 
 export const Slots: Story = {
 	args: {
-		header: <Text size="sm">conversation title</Text>,
+		topbar: (
+			<>
+				<span className="flex shrink-0 items-center gap-2">
+					<img
+						src="/logo.svg"
+						alt=""
+						aria-hidden
+						className="size-6 shrink-0 rounded-md"
+					/>
+					<Text as="span" size="sm" weight="semibold">
+						Acornfall
+					</Text>
+				</span>
+				<Text size="sm" className="truncate">
+					conversation title
+				</Text>
+			</>
+		),
 		inspector: (
 			<div className="border-l border-border bg-card p-2">
 				<Text size="sm" weight="semibold">
@@ -43,7 +60,6 @@ export const Slots: Story = {
 				</Text>
 			</div>
 		),
-		bar: <Text size="sm">conversation title</Text>,
 		transcript: pane("transcript", "A scroll region that owns its own height."),
 		composer: (
 			<div className="w-full border-t border-border">

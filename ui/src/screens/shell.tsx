@@ -15,6 +15,9 @@ import { Stack } from "@/components/layout/stack";
 export interface ShellProps {
 	rail: ReactNode;
 	transcript: ReactNode;
+	/** Full-width row above everything: brand plus title. Stays put on mobile and
+	 * desktop, rail open or not. When set, `bar` and `header` are ignored. */
+	topbar?: ReactNode | undefined;
 	/** Below the transcript. A screen that is not a conversation has no composer, so this is
 	 * the one slot that can be absent. */
 	composer?: ReactNode | undefined;
@@ -42,6 +45,7 @@ export function Shell({
 	rail,
 	transcript,
 	composer,
+	topbar,
 	bar,
 	header,
 	inspector,
@@ -58,6 +62,7 @@ export function Shell({
 		<Page>
 			<Split
 				aside={rail}
+				topbar={topbar}
 				bar={bar}
 				header={header}
 				inspector={inspector}

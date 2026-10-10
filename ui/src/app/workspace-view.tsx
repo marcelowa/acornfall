@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
+import { ChevronsUpDown, PanelRight, Plus, Settings } from "lucide-react";
 import type { DefaultScope, ProviderAuthType } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
@@ -132,14 +132,11 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 
 	const activeWorkspace = platform.workspaces.find((workspace) => workspace.active);
 
-	// Three zones, one quiet idiom: the workspace as a title row with its icon buttons, the
-	// conversations scrolling in the middle, and two sibling rows pinned at the bottom. Nothing
-	// in the chrome is saturated or outlined — the rail is navigation, and the active
-	// conversation carries the column's only emphasis.
-	// The brand is the acorn mark and the name: a mark, not a second accent. It opens
-	// nothing — the workspace switcher below it is the navigation.
+	// The brand lives in the top bar, not the rail: the bar spans the full width on
+	// mobile and desktop, so the mark stays put whether the rail is open or not.
+	// It opens nothing — the workspace switcher in the rail head is the navigation.
 	const brand = (
-		<span className="flex items-center gap-2">
+		<span className="flex shrink-0 items-center gap-2">
 			<img src="/logo.svg" alt="" aria-hidden className="size-6 shrink-0 rounded-md" />
 			<Text as="span" size="sm" weight="semibold">
 				Acornfall
@@ -148,34 +145,21 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	);
 	const rail = (
 		<Rail
-			brand={brand}
 			head={
 				<Text size="sm" weight="semibold" className="truncate">
 					{activeWorkspace?.title ?? "Workspaces"}
 				</Text>
 			}
 			headActions={
-				<>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-sm"
-						aria-label="Workspaces"
-						onClick={() => platform.showScreen("workspaces")}
-					>
-						<ChevronsUpDown />
-					</Button>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-sm"
-						className="hidden lg:flex"
-						aria-label="Hide the rail"
-						onClick={platform.toggleRail}
-					>
-						<PanelLeftClose />
-					</Button>
-				</>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					aria-label="Workspaces"
+					onClick={() => platform.showScreen("workspaces")}
+				>
+					<ChevronsUpDown />
+				</Button>
 			}
 			list={
 				<ConversationList
@@ -223,11 +207,17 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	// prompt the record has not caught up to — so the interface reads it instead of
 	// re-deriving it from transcript evidence.
 	const busy = running;
+	const topbarTitle =
+		platform.screen === "workspaces"
+			? "Workspaces"
+			: platform.screen === "settings"
+				? "Settings"
+				: (platform.active?.title ?? "Acornfall");
 	const barTitle = (
 		<span className="flex min-w-0 items-center gap-2">
-			{busy ? <StatusDot state="running" /> : null}
+			{busy && platform.screen === "conversation" ? <StatusDot state="running" /> : null}
 			<Text as="span" size="sm" weight="medium" className="truncate">
-				{platform.active?.title ?? "Acornfall"}
+				{topbarTitle}
 			</Text>
 		</span>
 	);
@@ -288,10 +278,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			),
 		},
 	];
-	// The toggle exists twice — the desktop header and the small-screen bar, one hidden at
-	// any width — because below `lg` the header is not in the DOM at all, and without the bar
-	// twin the inspector (and the spend it answers) would be unreachable on a phone.
-	const inspectorToggle = (className?: string) => (
+	// One toggle in the top bar: the bar is in the DOM on every width, so the
+	// inspector stays in reach on a phone without a second twin in a header.
+	const inspectorToggle = (
 		<Button
 			type="button"
 			variant="ghost"
@@ -299,23 +288,10 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			aria-label="Inspector"
 			aria-expanded={inspectorOpen}
 			data-slot="inspector-toggle"
-			className={className}
 			onClick={() => setInspectorOpen((open) => !open)}
 		>
 			<PanelRight />
 		</Button>
-	);
-	const header = (
-		<>
-			<div className="flex min-w-0 flex-1 items-center">{barTitle}</div>
-			{inspectorToggle()}
-		</>
-	);
-	const bar = (
-		<>
-			<div className="flex min-w-0 flex-1 items-center">{barTitle}</div>
-			{inspectorToggle("lg:hidden")}
-		</>
 	);
 	const inspectorDialog = (
 		<Inspector
@@ -416,12 +392,21 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			/>
 		) : undefined;
 
+	// The full-width bar: the brand, then the active name, then the pane control.
+	// The rail toggle lives in Split beside it, so the mark stays put rail open or not.
+	const topbar = (
+		<>
+			{brand}
+			<div className="flex min-w-0 flex-1 items-center">{barTitle}</div>
+			{screen === undefined ? inspectorToggle : null}
+		</>
+	);
+
 	return (
 		<>
 			<Shell
 				rail={rail}
-				bar={bar}
-				header={screen === undefined ? header : undefined}
+				topbar={topbar}
 				inspector={screen === undefined ? dockedInspector : undefined}
 				railOpen={platform.railOpen}
 				onRailOpenChange={platform.setRailOpen}

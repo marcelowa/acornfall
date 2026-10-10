@@ -44,6 +44,61 @@ export const Desktop: Story = {
 	globals: { viewport: { value: "laptop" } },
 };
 
+/** Full-width bar: the brand stays put on mobile and desktop, rail open or not. */
+export const Topbar: Story = {
+	args: {
+		aside,
+		topbar: (
+			<>
+				<span className="flex shrink-0 items-center gap-2">
+					<img
+						src="/logo.svg"
+						alt=""
+						aria-hidden
+						className="size-6 shrink-0 rounded-md"
+					/>
+					<Text as="span" size="sm" weight="semibold">
+						Acornfall
+					</Text>
+				</span>
+				<Text size="sm" className="truncate">
+					Conversation title
+				</Text>
+			</>
+		),
+		children: main,
+		onAsideCollapsedChange: () => undefined,
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** Same bar on a phone: the drawer toggle sits beside the brand. */
+export const TopbarPhone: Story = {
+	args: {
+		aside,
+		topbar: (
+			<>
+				<span className="flex shrink-0 items-center gap-2">
+					<img
+						src="/logo.svg"
+						alt=""
+						aria-hidden
+						className="size-6 shrink-0 rounded-md"
+					/>
+					<Text as="span" size="sm" weight="semibold">
+						Acornfall
+					</Text>
+				</span>
+				<Text size="sm" className="truncate">
+					Conversation title
+				</Text>
+			</>
+		),
+		children: main,
+	},
+	globals: { viewport: { value: "phone" } },
+};
+
 /** Wide: a third column for the docked inspector, only where the screen has it. */
 export const Docked: Story = {
 	args: {
