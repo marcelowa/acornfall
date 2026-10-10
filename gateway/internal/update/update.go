@@ -118,6 +118,7 @@ type Manager struct {
 	binPath    string
 	migrateDir string
 	latestURL  string
+	bunBaseURL string
 	client     *http.Client
 
 	mu       sync.Mutex
@@ -164,31 +165,26 @@ func (m *Manager) failedPath() string        { return filepath.Join(m.home, "upd
 func (m *Manager) backupBinPath() string     { return m.binPath + ".bak" }
 func (m *Manager) backupVersionPath() string { return m.binPath + ".bak.version" }
 
-// workerBinPath is the compiled worker beside the gateway binary: one
-// folder, two binaries, nothing on the host PATH. Empty when the gateway
-// does not know its own path.
-func (m *Manager) workerBinPath() string {
-	if m.binPath == "" {
-		return ""
+// writeData publishes a data file (never executed): temp plus rename,
+// so a reader never sees a half-written one.
+func writeData(path string, payload []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), ".data-*")
+	if err != nil {
+		return fmt.Errorf("update: cannot stage %s: %w", path, err)
 	}
-	return filepath.Join(filepath.Dir(m.binPath), "acornfall-worker")
-}
-
-// swapFile moves path aside to path+".bak" and writes the payload in its
-// place. Rename, not overwrite: a running worker cannot be overwritten
-// either. When path does not exist it is created and there is nothing
-// to keep.
-func swapFile(path string, payload []byte) error {
-	if _, err := os.Stat(path); err == nil {
-		if err := os.Rename(path, path+".bak"); err != nil {
-			return fmt.Errorf("update: cannot move %s aside: %w", path, err)
-		}
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if _, err := temp.Write(payload); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("update: cannot write %s: %w", path, err)
 	}
-	if err := writeAtomic(path, payload); err != nil {
-		_ = os.Rename(path+".bak", path)
-		return err
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("update: cannot write %s: %w", path, err)
 	}
-	return nil
+	if err := os.Chmod(tempPath, 0o600); err != nil {
+		return fmt.Errorf("update: cannot write %s: %w", path, err)
+	}
+	return os.Rename(tempPath, path)
 }
 
 // writeAtomic publishes payload at path through a temp file and a rename:
@@ -395,11 +391,11 @@ func AssetFor(release Release) Asset {
 	return assetNamed(release, "acornfall-"+runtime.GOOS+"-"+runtime.GOARCH)
 }
 
-// WorkerAsset picks the compiled worker for this platform, or "" when the
-// release predates it (v0.9.0 has none): then the worker step is skipped
-// and the source worker keeps running.
-func WorkerAsset(release Release) Asset {
-	return assetNamed(release, "acornfall-worker-"+runtime.GOOS+"-"+runtime.GOARCH)
+// WorkerTarballAsset picks the worker sources tarball, or "" when the
+// release predates it: then the worker step is skipped and the live
+// sources keep running.
+func WorkerTarballAsset(release Release) Asset {
+	return assetNamed(release, WorkerTarball)
 }
 
 func assetNamed(release Release, name string) Asset {
@@ -592,7 +588,7 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if asset.URL == "" {
 		return fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
 	}
-	worker := WorkerAsset(release)
+	worker := WorkerTarballAsset(release)
 	if _, err := m.Backup(); err != nil {
 		return fmt.Errorf("backup failed, update stopped: %w", err)
 	}
@@ -600,8 +596,11 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if err != nil {
 		return err
 	}
-	// The worker downloads and verifies before anything is swapped: a
-	// failure here leaves both binaries untouched.
+	// The worker tarball downloads and verifies before anything is staged:
+	// a failure here leaves the gateway and the live sources untouched.
+	// It stages, not activates: the new gateway unpacks and installs at
+	// boot, when bun is ensured and failures refuse loudly instead of
+	// bricking.
 	list, err := m.checksumList(ctx, release)
 	if err != nil {
 		return err
@@ -609,19 +608,15 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if err := verify(list, payload, release.Tag); err != nil {
 		return err
 	}
-	var workerPayload []byte
 	if worker.URL != "" {
-		workerPayload, err = m.download(ctx, worker)
+		tarball, err := m.download(ctx, worker)
 		if err != nil {
 			return err
 		}
-		if err := verify(list, workerPayload, release.Tag); err != nil {
+		if err := verify(list, tarball, release.Tag); err != nil {
 			return err
 		}
-	}
-	// Downloads and verifies first, swaps second: worker, then gateway.
-	if workerPayload != nil {
-		if err := swapFile(m.workerBinPath(), workerPayload); err != nil {
+		if err := writeData(m.workerPending(), tarball); err != nil {
 			return err
 		}
 	}
@@ -794,15 +789,11 @@ func (m *Manager) Rollback(cause error) error {
 	if err := os.Rename(m.backupBinPath(), m.binPath); err != nil {
 		return fmt.Errorf("rollback: cannot restore backup: %w", err)
 	}
-	// The worker rolls back with the gateway when it was swapped: a .bak
-	// beside it means this update moved it.
-	if worker := m.workerBinPath(); worker != "" {
-		if _, err := os.Stat(worker + ".bak"); err == nil {
-			_ = os.Rename(worker, worker+".bad")
-			if err := os.Rename(worker+".bak", worker); err != nil {
-				return fmt.Errorf("rollback: cannot restore worker backup: %w", err)
-			}
-		}
+	// The worker sources roll back with the gateway, and a staged tarball
+	// from the failed update is dropped so boot does not activate it.
+	_ = os.Remove(m.workerPending())
+	if err := m.rollbackWorker(); err != nil {
+		return err
 	}
 	previous := "unknown"
 	if payload, err := os.ReadFile(m.backupVersionPath()); err == nil {
