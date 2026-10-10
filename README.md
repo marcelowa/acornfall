@@ -69,17 +69,35 @@ wget -qO- --header="Authorization: Bearer $ACORNFALL_GITHUB_TOKEN" \
   https://raw.githubusercontent.com/marcelowa/acornfall/main/scripts/install.sh | sh
 ```
 
-By hand:
+By hand (same token header while private):
 
 ```bash
 mkdir -p ~/acornfall/release && cd ~/acornfall/release
-curl -sL -o acornfall https://github.com/marcelowa/acornfall/releases/download/v0.9.5/acornfall-linux-amd64
-curl -sL -o sha256sums.txt https://github.com/marcelowa/acornfall/releases/download/v0.9.5/sha256sums.txt
+export ACORNFALL_GITHUB_TOKEN='...'
+AUTH="Authorization: Bearer $ACORNFALL_GITHUB_TOKEN"
+curl -sL -H "$AUTH" -o acornfall https://github.com/marcelowa/acornfall/releases/download/v0.9.5/acornfall-linux-amd64
+curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornfall/releases/download/v0.9.5/sha256sums.txt
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
 chmod +x acornfall
 ./acornfall provider add opencode-go "$OPENCODE_API_KEY"
 ./acornfall --workspace ~/acornfall/workspaces
 ```
+
+### Token (while the repo is private)
+
+Releases are readable with a fine-grained token and nothing else:
+
+1. GitHub → Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token.
+2. Resource owner: your account. Repository access: Only select
+   repositories → `acornfall`.
+3. Permissions → Contents: Read-only (Metadata comes along).
+4. `export ACORNFALL_GITHUB_TOKEN='...'` where the gateway runs. The
+   gateway reads it on every check, download, and checksum fetch.
+
+Use ends when releases go public: unset the variable and the same
+commands work without it. A token that was ever pasted into chat
+should be rotated afterwards under the token's own settings.
 
 First boot downloads a pinned bun once and the worker sources for its
 tag, then installs dependencies — all under `~/.acornfall`, nothing on
