@@ -133,7 +133,10 @@ func TestSelectingLandsWithNoProvider(t *testing.T) {
 func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
 	t.Parallel()
 	notSandbox(t)
-	s := start(t, withScript(scriptRule{Match: "what is the capital", Reply: "Paris."}))
+	s := start(t, withScript(
+		scriptRule{Match: "what is the capital", Reply: "Paris."},
+		scriptRule{Match: "in detail", Reply: "Paris, in detail."},
+	))
 	c := s.client()
 
 	created := c.create("general")
@@ -148,6 +151,14 @@ func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
 	}
 	if len(titled.Title) > 80 {
 		t.Errorf("the title should be truncated, got %d characters", len(titled.Title))
+	}
+
+	// A later message must not rename the row: the name froze on the first prompt.
+	c.prompt("general", created.ID, "and now in detail")
+	c.waitForText("general", created.ID, "Paris, in detail.")
+	still := c.waitForTitle("general", created.ID, "what is the capital")
+	if still.Title != titled.Title {
+		t.Errorf("the title moved from %q to %q", titled.Title, still.Title)
 	}
 }
 
