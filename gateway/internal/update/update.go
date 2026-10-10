@@ -34,9 +34,6 @@ const LatestURL = "https://api.github.com/repos/marcelowa/acornfall/releases/lat
 // CheckInterval is how often the gateway checks on its own.
 const CheckInterval = time.Hour
 
-// HealthWindow is how long /healthz must pass after a switch.
-const HealthWindow = 30 * time.Second
-
 // MaxBackups is how many backup sets are kept.
 const MaxBackups = 3
 
@@ -1052,30 +1049,4 @@ func (m *Manager) RunPending(ctx context.Context) error {
 	}
 	m.ClearPending()
 	return nil
-}
-
-// WaitHealthy polls url until it answers 200 or the window ends.
-func WaitHealthy(ctx context.Context, url string, window time.Duration) error {
-	deadline := time.Now().Add(window)
-	client := &http.Client{Timeout: 5 * time.Second}
-	for time.Now().Before(deadline) {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return err
-		}
-		response, err := client.Do(request)
-		if err == nil {
-			_, _ = io.Copy(io.Discard, response.Body)
-			_ = response.Body.Close()
-			if response.StatusCode == http.StatusOK {
-				return nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-	}
-	return fmt.Errorf("healthy check: %s never answered 200 in %s", url, window)
 }
