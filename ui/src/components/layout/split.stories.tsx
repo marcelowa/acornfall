@@ -99,6 +99,44 @@ export const TopbarPhone: Story = {
 	globals: { viewport: { value: "phone" } },
 };
 
+/** Drawer open: the bar stays mounted, the toggle shows X, the rail drops below. */
+function TopbarPhoneRailOpenFrame() {
+	const [open, setOpen] = useState(true);
+	return (
+		<Split
+			aside={aside}
+			asideOpen={open}
+			onAsideOpenChange={setOpen}
+			topbar={
+				<>
+					<span className="flex shrink-0 items-center gap-2">
+						<img
+							src="/logo.svg"
+							alt=""
+							aria-hidden
+							className="size-6 shrink-0 rounded-md"
+						/>
+						<Text as="span" size="sm" weight="semibold">
+							Acornfall
+						</Text>
+					</span>
+					<Text size="sm" className="truncate">
+						Conversation title
+					</Text>
+				</>
+			}
+		>
+			{main}
+		</Split>
+	);
+}
+
+export const TopbarPhoneRailOpen: Story = {
+	args: { aside, children: main },
+	render: () => <TopbarPhoneRailOpenFrame />,
+	globals: { viewport: { value: "phone" } },
+};
+
 /** Wide: a third column for the docked inspector, only where the screen has it. */
 export const Docked: Story = {
 	args: {
