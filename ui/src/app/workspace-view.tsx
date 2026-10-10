@@ -411,6 +411,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			/>
 		) : platform.screen === "settings" ? (
 			<SettingsScreen
+				tab={platform.settingsTab}
+				onTabChange={platform.showSettingsTab}
 				theme={platform.themeChoice}
 				onThemeChange={platform.setThemeChoice}
 				workspace={activeWorkspace}

@@ -117,6 +117,8 @@ const providers: ProviderSummary[] = [
 
 export const Default: Story = {
 	args: {
+		tab: "workspace",
+		onTabChange: noop,
 		theme: "system",
 		onThemeChange: noop,
 		workspace,
@@ -130,6 +132,21 @@ export const Default: Story = {
 /** Dark is a token swap, not a second screen: the same settings with the other theme chosen. */
 export const Dark: Story = {
 	args: { ...Default.args, theme: "dark" },
+};
+
+/** Each page has its own URL: the providers page. */
+export const Providers: Story = {
+	args: { ...Default.args, tab: "providers" },
+};
+
+/** The defaults page. */
+export const Defaults: Story = {
+	args: { ...Default.args, tab: "defaults" },
+};
+
+/** The appearance page. */
+export const Appearance: Story = {
+	args: { ...Default.args, tab: "appearance" },
 };
 
 /** A workspace that is not loaded yet: the form is there, and Save knows it has nothing. */

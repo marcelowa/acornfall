@@ -242,6 +242,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		setRailWidth: noop,
 		setRailOpen: noop,
 		toggleRail: noop,
+		settingsTab: "workspace",
+		showSettingsTab: noop,
 		providers: [
 			{
 				id: "opencode-go",

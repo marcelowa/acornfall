@@ -70,10 +70,21 @@ interface Route {
 	screen: Screen;
 	workspace: string;
 	conversation: string;
+	/** Which settings page is open. Only the settings screen reads it. */
+	settingsTab: SettingsTab;
 }
 
 /** The screens the URL can name. A conversation is one of them, because it has a URL too. */
 export type Screen = "conversation" | "workspaces" | "settings";
+
+/** The settings pages, each with its own URL under /settings. */
+export type SettingsTab = "workspace" | "defaults" | "providers" | "appearance";
+
+const SETTINGS_TABS: SettingsTab[] = ["workspace", "defaults", "providers", "appearance"];
+
+function settingsTabFrom(segment: string | undefined): SettingsTab {
+	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "workspace";
+}
 
 /**
  * The theme someone chose. `system` is the default and a choice like any other: picking it
@@ -93,20 +104,22 @@ function systemTheme(): "light" | "dark" {
 	return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-/** The URL scheme the gateway routes: /c/<workspace>/<conversation>, /w/<workspace>, and the
- * two screens. Settings remembers the workspace in a query so a reload shows the one it was
- * about; the workspace list is about all of them. */
+/** The URL scheme the gateway routes: /c/<workspace>/<conversation>, /w/<workspace>, the
+ * two screens, and one page per settings tab. Settings remembers the workspace in a query
+ * so a reload shows the one it was about; the workspace list is about all of them. */
 function fromUrl(): Route {
 	const path = window.location.pathname;
-	if (path === "/settings" || path === "/settings/") {
+	const settings = /^\/settings(?:\/([^/]+))?\/?$/.exec(path);
+	if (settings !== null) {
 		return {
 			screen: "settings",
 			workspace: new URLSearchParams(window.location.search).get("workspace") ?? "",
 			conversation: "",
+			settingsTab: settingsTabFrom(settings[1]),
 		};
 	}
 	if (path === "/workspaces" || path === "/workspaces/") {
-		return { screen: "workspaces", workspace: "", conversation: "" };
+		return { screen: "workspaces", workspace: "", conversation: "", settingsTab: "workspace" };
 	}
 	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(path);
 	if (conversation !== null) {
@@ -114,6 +127,7 @@ function fromUrl(): Route {
 			screen: "conversation",
 			workspace: decodeURIComponent(conversation[1] ?? ""),
 			conversation: decodeURIComponent(conversation[2] ?? ""),
+			settingsTab: "workspace",
 		};
 	}
 	const workspace = /^\/w\/([^/]+)\/?$/.exec(path);
@@ -122,9 +136,10 @@ function fromUrl(): Route {
 			screen: "conversation",
 			workspace: decodeURIComponent(workspace[1] ?? ""),
 			conversation: "",
+			settingsTab: "workspace",
 		};
 	}
-	return { screen: "conversation", workspace: "", conversation: "" };
+	return { screen: "conversation", workspace: "", conversation: "", settingsTab: "workspace" };
 }
 
 /** Preferences are ours and local; a corrupt value is a fresh start, not a crash. */
@@ -176,6 +191,9 @@ export interface Platform {
 	/** The screen in view: a conversation, the workspace list, or settings. */
 	screen: Screen;
 	showScreen: (screen: Screen) => void;
+	/** The settings page in view, with its own URL. */
+	settingsTab: SettingsTab;
+	showSettingsTab: (tab: SettingsTab) => void;
 	/** A conversation belongs to a workspace for life, so switching means starting over: the
 	 * transcript is cleared and the next one arrives with the workspace. */
 	selectWorkspace: (name: string) => void;
@@ -555,7 +573,12 @@ export function usePlatform(): Platform {
 				`/c/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
 			);
 			setRailOpen(false);
-			setRoute({ screen: "conversation", workspace: name, conversation: id });
+			setRoute({
+				screen: "conversation",
+				workspace: name,
+				conversation: id,
+				settingsTab: "workspace",
+			});
 		},
 		[state, workspace],
 	);
@@ -574,11 +597,22 @@ export function usePlatform(): Platform {
 						? `/w/${encodeURIComponent(name)}`
 						: `/c/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
 				);
+			} else if (screen === "settings") {
+				// Settings are about a workspace, and each page has its own URL;
+				// coming back lands on the page that was open.
+				setRoute((current) => {
+					window.history.pushState(
+						null,
+						"",
+						`/settings/${current.settingsTab}?workspace=${encodeURIComponent(workspace)}`,
+					);
+					return { ...current, screen };
+				});
+				setRailOpen(false);
+				return;
 			} else {
-				// Settings are about a workspace; the list is about all of them.
-				const query =
-					screen === "settings" ? `?workspace=${encodeURIComponent(workspace)}` : "";
-				window.history.pushState(null, "", `/${screen}${query}`);
+				// The list is about all workspaces, so it carries no query.
+				window.history.pushState(null, "", `/${screen}`);
 			}
 			setRailOpen(false);
 			// The conversation stays the one behind the screen: the stream keeps following it, so
@@ -586,6 +620,19 @@ export function usePlatform(): Platform {
 			setRoute((current) => ({ ...current, screen }));
 		},
 		[state, workspace, activeId],
+	);
+
+	/** One settings page to another: the URL moves so a reload stays where someone was. */
+	const showSettingsTab = useCallback(
+		(tab: SettingsTab) => {
+			window.history.pushState(
+				null,
+				"",
+				`/settings/${tab}?workspace=${encodeURIComponent(workspace)}`,
+			);
+			setRoute((current) => ({ ...current, screen: "settings", settingsTab: tab }));
+		},
+		[workspace],
 	);
 
 	/** Every command goes through here: a success clears the last refusal, a failure is it. */
@@ -658,7 +705,12 @@ export function usePlatform(): Platform {
 		window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
 		setRailOpen(false);
 		setView(undefined);
-		setRoute({ screen: "conversation", workspace: name, conversation: "" });
+		setRoute({
+			screen: "conversation",
+			workspace: name,
+			conversation: "",
+			settingsTab: "workspace",
+		});
 	}, []);
 
 	const setWorkspace = useCallback(
@@ -676,7 +728,12 @@ export function usePlatform(): Platform {
 				// would leave the new workspace with two.
 				window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
 				setView(undefined);
-				setRoute({ screen: "conversation", workspace: name, conversation: "" });
+				setRoute({
+					screen: "conversation",
+					workspace: name,
+					conversation: "",
+					settingsTab: "workspace",
+				});
 			});
 		},
 		[act],
@@ -690,7 +747,12 @@ export function usePlatform(): Platform {
 				if (name === workspace) {
 					window.history.pushState(null, "", "/w/general");
 					setView(undefined);
-					setRoute({ screen: "conversation", workspace: "general", conversation: "" });
+					setRoute({
+						screen: "conversation",
+						workspace: "general",
+						conversation: "",
+						settingsTab: "workspace",
+					});
 					return;
 				}
 				void reload();
@@ -770,7 +832,12 @@ export function usePlatform(): Platform {
 					`/c/${encodeURIComponent(workspace)}/${encodeURIComponent(id)}`,
 				);
 				setView(undefined);
-				setRoute({ screen: "conversation", workspace, conversation: id });
+				setRoute({
+					screen: "conversation",
+					workspace,
+					conversation: id,
+					settingsTab: "workspace",
+				});
 			})
 			.catch(reportError);
 	}, [workspace, reportError]);
@@ -857,6 +924,8 @@ export function usePlatform(): Platform {
 		setThemeChoice: setChoice,
 		screen: route.screen,
 		showScreen,
+		settingsTab: route.settingsTab,
+		showSettingsTab,
 		newConversation,
 		select,
 		rename,
