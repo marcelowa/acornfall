@@ -136,18 +136,11 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	// conversations scrolling in the middle, and two sibling rows pinned at the bottom. Nothing
 	// in the chrome is saturated or outlined — the rail is navigation, and the active
 	// conversation carries the column's only emphasis.
-	// The brand is a neutral tile and the name: a mark, not a second accent. It opens
+	// The brand is the acorn mark and the name: a mark, not a second accent. It opens
 	// nothing — the workspace switcher below it is the navigation.
 	const brand = (
 		<span className="flex items-center gap-2">
-			<span
-				aria-hidden
-				className="flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground"
-			>
-				<Text as="span" size="xs" weight="semibold" className="text-background">
-					A
-				</Text>
-			</span>
+			<img src="/logo.svg" alt="" aria-hidden className="size-6 shrink-0 rounded-md" />
 			<Text as="span" size="sm" weight="semibold">
 				Acornfall
 			</Text>

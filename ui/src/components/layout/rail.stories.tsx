@@ -22,14 +22,7 @@ type Story = StoryObj<typeof meta>;
 
 const brand = (
 	<span className="flex items-center gap-2">
-		<span
-			aria-hidden
-			className="flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground"
-		>
-			<Text as="span" size="xs" weight="semibold" className="text-background">
-				A
-			</Text>
-		</span>
+		<img src="/logo.svg" alt="" aria-hidden className="size-6 shrink-0 rounded-md" />
 		<Text as="span" size="sm" weight="semibold">
 			Acornfall
 		</Text>
