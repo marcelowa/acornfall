@@ -33,22 +33,29 @@ function daysAgo(date: Date, now: Date): number {
 	return Math.round((startOfDay(now).getTime() - startOfDay(date).getTime()) / 86_400_000);
 }
 
+/** Sort key: dated rows by time, undated rows last. */
+function timeOf(conversation: ConversationSummary): number {
+	return conversation.updatedAt instanceof Date
+		? conversation.updatedAt.getTime()
+		: Number.NEGATIVE_INFINITY;
+}
+
 /**
- * Date groups for the rail. Conversations without `updatedAt` — which is all of them until
- * the gateway provides timestamps — render flat, exactly as before. Once dates exist, the
- * groups lead and undated rows fall to the tail, so a straggler never displaces Today.
+ * Date groups for the rail, newest first. Conversations without `updatedAt` — which is all
+ * of them until the gateway provides timestamps — render flat, exactly as before. Once
+ * dates exist, the groups lead and undated rows fall to the tail, so a straggler never
+ * displaces Today. Within each group the most recently updated comes first.
  */
 export function groupConversations(
 	conversations: ConversationSummary[],
 	now = new Date(),
 ): { groups: Group[]; undated: ConversationSummary[] } {
-	const dated = conversations.filter(
+	const sorted = [...conversations].sort((a, b) => timeOf(b) - timeOf(a));
+	const dated = sorted.filter(
 		(conversation): conversation is ConversationSummary & { updatedAt: Date } =>
 			conversation.updatedAt instanceof Date,
 	);
-	const undated = conversations.filter(
-		(conversation) => !(conversation.updatedAt instanceof Date),
-	);
+	const undated = sorted.filter((conversation) => !(conversation.updatedAt instanceof Date));
 	if (dated.length === 0) return { groups: [], undated };
 
 	const buckets: Record<"today" | "yesterday" | "week" | "older", ConversationSummary[]> = {

@@ -121,6 +121,11 @@ function read<T>(key: string, fallback: T): T {
 	}
 }
 
+/** Sort key for the rail: newest first, undated last. */
+function timeOf(updatedAt: Date | undefined): number {
+	return updatedAt instanceof Date ? updatedAt.getTime() : Number.NEGATIVE_INFINITY;
+}
+
 export interface Platform {
 	ready: boolean;
 	/** The stream is following, or trying to be. */
@@ -354,7 +359,8 @@ export function usePlatform(): Platform {
 				.filter((conversation) => !conversation.hidden)
 				.map((conversation) =>
 					toConversation(conversation, activeId, seen[conversation.id]),
-				),
+				)
+				.sort((a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt)),
 		[state, activeId, seen],
 	);
 
@@ -374,7 +380,8 @@ export function usePlatform(): Platform {
 				.filter((conversation) => conversation.hidden)
 				.map((conversation) =>
 					toConversation(conversation, activeId, seen[conversation.id]),
-				),
+				)
+				.sort((a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt)),
 		[state, activeId, seen],
 	);
 	const runningNow =
