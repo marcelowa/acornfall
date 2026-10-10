@@ -240,6 +240,12 @@ type Control struct {
 	// both directions: just-prompted counts as busy before the record exists, and only a
 	// record with recent activity counts after.
 	promptedAt map[string]int64
+	// settledAt remembers the last settled submission per conversation, in Unix
+	// milliseconds. A settlement ends the grace: the run is over because the worker
+	// said so, not because ten seconds passed, so the busy sign comes down with the
+	// answer instead of lingering after it. A prompt newer than the settlement starts
+	// a new grace, which is what a queued follow-up is.
+	settledAt map[string]int64
 	// announced is the signature of the state attached clients were last told about. The poll
 	// compares the state against it, because a change only time can make has no data behind
 	// it: nothing refreshes, and only the comparison across ticks can see it.
@@ -285,6 +291,7 @@ func New(opts Options) *Control {
 		attachments:            map[string]int{},
 		policies:               map[string]json.RawMessage{},
 		promptedAt:             map[string]int64{},
+		settledAt:              map[string]int64{},
 	}
 }
 
@@ -2049,8 +2056,13 @@ func (c *Control) Unsubscribe(id int) {
 func (c *Control) onFrame(frame protocol.Frame) {
 	c.publish(frame)
 	// Titles are derived from the first user message, so a settled run is the
-	// moment a conversation's name can change.
+	// moment a conversation's name can change. The settlement also ends the prompt
+	// grace: the run is over because the worker said so, and the busy sign should come
+	// down with the answer rather than lingering for the rest of the ten seconds.
 	if frame.Type == "submission" {
+		c.mu.Lock()
+		c.settledAt[frame.ConversationID] = time.Now().UnixMilli()
+		c.mu.Unlock()
 		go func() {
 			ctx := context.Background()
 			if _, err := c.listConversations(ctx); err != nil {
@@ -2327,14 +2339,17 @@ func (c *Control) persist() {
 // runActive is the one busy rule the interface reads. The worker's run record is the
 // signal, but it lags behind the click and outlives dead runs, so both directions are
 // gated: a prompt accepted in the last ten seconds counts before the record exists, and a
-// record only counts while the activity is fresh. Thirty minutes of silence with no new
+// record only counts while the activity is fresh. The grace ends early when the run does:
+// a settled submission is the worker saying it finished, so the sign comes down with the
+// answer rather than outliving it by seconds. Thirty minutes of silence with no new
 // prompt is a residue, not a run — a legitimately quiet hour-long tool call is the known
 // cost, and its tool cards still say it is working.
 func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	c.mu.RLock()
 	prompted := c.promptedAt[info.ID]
+	settled := c.settledAt[info.ID]
 	c.mu.RUnlock()
-	if now-prompted < 10_000 {
+	if now-prompted < 10_000 && prompted > settled {
 		return true
 	}
 	if !info.Running || info.UpdatedAt <= 0 {

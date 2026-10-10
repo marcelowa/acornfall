@@ -86,6 +86,42 @@ func TestRunningMeansLiveOrJustPrompted(t *testing.T) {
 	}
 }
 
+// A settlement ends the prompt grace: the run is over because the worker said so, and the
+// busy sign should come down with the answer. Before, the grace ran its ten seconds no
+// matter what, so a fast run left the thinking dots up after the answer arrived — the flag
+// visibly lagging the transcript. A prompt newer than the settlement starts a new grace,
+// which is what a queued follow-up is, and a record that is still live outranks both.
+func TestASettlementEndsThePromptGrace(t *testing.T) {
+	now := time.Now().UnixMilli()
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	control.conversations = []protocol.ConversationInfo{
+		{ID: "settled", Running: false},
+		{ID: "queued", Running: false},
+		{ID: "overtaken", Running: true, UpdatedAt: now - 60_000},
+	}
+	control.promptedAt["settled"] = now - 2_000
+	control.settledAt["settled"] = now - 1_000
+	control.settledAt["queued"] = now - 3_000
+	control.promptedAt["queued"] = now - 2_000
+	control.promptedAt["overtaken"] = now - 2_000
+	control.settledAt["overtaken"] = now - 1_000
+
+	state := control.State()
+	byID := map[string]Conversation{}
+	for _, conversation := range state.Conversations {
+		byID[conversation.ID] = conversation
+	}
+	if byID["settled"].Running {
+		t.Error("a settled run is idle even inside the prompt grace")
+	}
+	if !byID["queued"].Running {
+		t.Error("a prompt after the settlement starts a new grace")
+	}
+	if !byID["overtaken"].Running {
+		t.Error("a record that is still live outranks the settlement")
+	}
+}
+
 func TestConversationsCarryLastActivity(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	control.conversations = []protocol.ConversationInfo{

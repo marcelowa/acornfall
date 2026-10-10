@@ -549,13 +549,16 @@ export function usePlatform(): Platform {
 			try {
 				await sendMessage(workspace, activeId, text, whenBusy);
 				setFailure(undefined);
+				// The send answers 202 with no state, so the busy sign would wait for the
+				// next poll. Read it now: the prompt grace is already counting.
+				void reload();
 			} catch (cause) {
 				// The caller restores the draft; the failure is also the strip's to show.
 				reportError(cause);
 				throw cause;
 			}
 		},
-		[workspace, activeId, reportError],
+		[workspace, activeId, reload, reportError],
 	);
 	const abort = useCallback(() => {
 		act(abortConversation(workspace, activeId));
