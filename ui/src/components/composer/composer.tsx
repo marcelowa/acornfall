@@ -6,6 +6,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "cn";
 import { stepSlashIndex } from "./slash-menu";
 
+/** True on touch devices: Enter must not send there. */
+function isCoarsePointer(): boolean {
+	try {
+		return window.matchMedia("(pointer: coarse)").matches;
+	} catch {
+		return false;
+	}
+}
+
 export interface ComposerProps {
 	value: string;
 	onChange: (value: string) => void;
@@ -43,10 +52,10 @@ export interface ComposerProps {
 
 /**
  * The composer: one card holding the draft and everything it can do. It owns the keyboard
- * contract — Enter is always a newline, and sending happens only through the Send, Steer,
- * or Queue button, so a multiline draft can never escape early. While the slash menu is
- * open the arrows move its highlight, Enter picks it, and Escape dismisses it. What the
- * message means is the server's business.
+ * contract — Enter sends on a fine pointer, Shift+Enter is always a newline, and on a
+ * coarse pointer Enter is always a newline too, so a phone never sends by accident.
+ * While the slash menu is open the arrows move its highlight, Enter picks it, and Escape
+ * dismisses it. What the message means is the server's business.
  */
 export function Composer({
 	value,
@@ -75,7 +84,7 @@ export function Composer({
 	const field = useRef<HTMLTextAreaElement>(null);
 	useEffect(() => {
 		if (focusConversation === undefined) return;
-		if (window.matchMedia("(pointer: coarse)").matches) return;
+		if (isCoarsePointer()) return;
 		field.current?.focus({ preventScroll: true });
 	}, [focusConversation]);
 
@@ -85,12 +94,17 @@ export function Composer({
 	};
 
 	const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-		// Enter never sends: it is always a newline, and the buttons are the only way a
-		// message leaves. The one exception is the slash menu, where Enter completes the
-		// highlighted command instead of sending anything.
+		// Enter sends on a fine pointer only: Shift+Enter is always a newline, and on a
+		// coarse pointer Enter is a newline too. The one exception is the slash menu,
+		// where Enter completes the highlighted command instead of sending anything.
 		if (event.key === "Enter" && !event.shiftKey && slashOpen) {
 			event.preventDefault();
 			onSlashPick?.(slashIndex);
+			return;
+		}
+		if (event.key === "Enter" && !event.shiftKey && !slashOpen && !isCoarsePointer()) {
+			event.preventDefault();
+			submit();
 			return;
 		}
 		if (!slashOpen) return;
