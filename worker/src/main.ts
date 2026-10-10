@@ -294,10 +294,16 @@ async function nameOf(
 ): Promise<{ title: string; hidden: boolean }> {
 	const meta = await harness.snapshot(ConversationMetaDoc, conversationIdOf(id), CONTEXT);
 	const given = meta?.title?.trim() ?? "";
-	return {
-		title: given.length > 0 ? given : await deriveTitle(conversation),
-		hidden: meta?.hidden === true,
-	};
+	if (given.length > 0) return { title: given, hidden: meta?.hidden === true };
+	const derived = await deriveTitle(conversation);
+	if (derived !== "New conversation") {
+		// Freeze the first prompt as the name. The scan below is newest-first, so
+		// without this the title would follow the latest message instead of the
+		// first, renaming the rail row under its reader. A failed freeze is not a
+		// failed listing: the derived name still answers this one.
+		await setMeta(id, { title: derived }).catch(() => undefined);
+	}
+	return { title: derived, hidden: meta?.hidden === true };
 }
 
 async function deriveTitle(conversation: Conversation): Promise<string> {
