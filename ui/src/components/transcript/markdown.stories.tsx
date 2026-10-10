@@ -66,3 +66,12 @@ export const Plain: Story = {
 		</div>
 	),
 };
+
+/** Right-to-left text reads right: the direction follows the first strong character. */
+export const RightToLeft: Story = {
+	render: () => (
+		<div className="w-full max-w-2xl bg-background p-6">
+			<Markdown>{"שלום, איך מריצים בדיקות?"}</Markdown>
+		</div>
+	),
+};

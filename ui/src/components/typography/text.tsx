@@ -29,8 +29,15 @@ export type TextProps = VariantProps<typeof textVariants> & {
 	as?: ElementType;
 	className?: string;
 	children: ReactNode;
+	/** Text direction. `auto` reads it from the first strong character,
+	 * so Hebrew starts right and English starts left. */
+	dir?: "auto" | "ltr" | "rtl" | undefined;
 };
 
-export function Text({ as: Comp = "p", className, children, size, tone, weight }: TextProps) {
-	return <Comp className={cn(textVariants({ size, tone, weight }), className)}>{children}</Comp>;
+export function Text({ as: Comp = "p", className, children, size, tone, weight, dir }: TextProps) {
+	return (
+		<Comp dir={dir} className={cn(textVariants({ size, tone, weight }), className)}>
+			{children}
+		</Comp>
+	);
 }
