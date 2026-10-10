@@ -131,6 +131,7 @@ const updates = (
 		}}
 		runsActive={false}
 		onCheck={noop}
+		onRefresh={noop}
 		onApply={noop}
 		onRollback={noop}
 		onSavePrefs={noop}

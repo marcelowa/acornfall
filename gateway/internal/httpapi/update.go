@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"errors"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/update"
 )
@@ -76,7 +78,7 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.update.Apply(r.Context(), update.ApplyOptions{CleanVMs: body.CleanVMs, Drain: body.Drain}); err != nil {
-		if errors.As(err, &update.ErrRunsActive{}) {
+		if errors.As(err, &update.ErrRunsActive{}) || errors.As(err, &update.ErrRestartPending{}) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -84,6 +86,16 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.updateStatus(w, r)
+	// One click finishes the job: the answer is on its way, then this
+	// process becomes the new binary with the same args and environment.
+	// The stream drops and the client reconnects on its own; an Exec
+	// failure keeps the old process and the screen still says restart.
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		if err := s.update.Restart(); err != nil {
+			log.Printf("update: self-restart failed: %v", err)
+		}
+	}()
 }
 
 func (s *Server) updateRollback(w http.ResponseWriter, r *http.Request) {

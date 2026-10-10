@@ -21,6 +21,8 @@ export interface UpdateSectionProps {
 	/** True while any conversation runs: Update now asks first. */
 	runsActive: boolean;
 	onCheck: () => void;
+	/** Re-read the update state without forcing a release check. */
+	onRefresh: () => void;
 	onApply: (cleanVMs: boolean, drain: "wait" | "stop") => void;
 	onRollback: () => void;
 	onSavePrefs: (prefs: UpdatePrefs) => void;
@@ -37,6 +39,7 @@ export function UpdateSection({
 	status,
 	runsActive,
 	onCheck,
+	onRefresh,
 	onApply,
 	onRollback,
 	onSavePrefs,
@@ -101,15 +104,7 @@ export function UpdateSection({
 			) : null}
 
 			{status !== undefined && (status.restartRequired ?? false) ? (
-				<Stack gap="2xs" data-slot="update-restart">
-					<Badge variant="soft" tone="warning" size="sm">
-						Restart needed
-					</Badge>
-					<Text size="xs">
-						{status.latest} is on disk. Restart the gateway to run it; the new binary
-						migrates at boot before serving.
-					</Text>
-				</Stack>
+				<Restarting onRefresh={onRefresh} />
 			) : null}
 
 			{status !== undefined && status.available ? (
@@ -308,6 +303,30 @@ export function UpdateSection({
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+		</Stack>
+	);
+}
+
+/**
+ * The restart watch: the gateway becomes the new binary on its own after
+ * an apply, so this re-reads the state a few times and the screen lands
+ * on the new version without a reload. The stream drops and reconnects
+ * by itself meanwhile.
+ */
+function Restarting({ onRefresh }: { onRefresh: () => void }) {
+	useEffect(() => {
+		const timers = [5000, 12000, 25000].map((after) => window.setTimeout(onRefresh, after));
+		return () => {
+			for (const timer of timers) window.clearTimeout(timer);
+		};
+	}, [onRefresh]);
+
+	return (
+		<Stack gap="2xs" data-slot="update-restart">
+			<Badge variant="soft" tone="warning" size="sm">
+				Restarting
+			</Badge>
+			<Text size="xs">The new build is taking over; this screen follows it on its own.</Text>
 		</Stack>
 	);
 }

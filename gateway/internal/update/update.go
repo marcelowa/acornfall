@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -110,6 +111,14 @@ type ErrRunsActive struct{}
 
 func (ErrRunsActive) Error() string {
 	return "runs are active: wait for drain, stop runs and update, or cancel"
+}
+
+// ErrRestartPending is the refusal when files are swapped but the process
+// is still the old build: restart first, update after.
+type ErrRestartPending struct{}
+
+func (ErrRestartPending) Error() string {
+	return "restart pending: restart the gateway to finish the update, then update again"
 }
 
 // Manager owns the update state for one install.
@@ -575,6 +584,14 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 		return ErrRunsActive{}
 	}
 	m.mu.Lock()
+	pending := m.restart
+	m.mu.Unlock()
+	// A second apply would move the new build aside as .bak and strand
+	// the rollback: one update per restart.
+	if pending {
+		return ErrRestartPending{}
+	}
+	m.mu.Lock()
 	release := m.latest
 	m.mu.Unlock()
 	if release.Tag == "" {
@@ -811,6 +828,20 @@ func (m *Manager) Rollback(cause error) error {
 	m.mu.Unlock()
 	_ = os.WriteFile(m.failedPath(), []byte(message+"\n"), 0o644)
 	return nil
+}
+
+// Restart replaces the running process with the binary on disk: same
+// args, same environment, new build. The caller just swapped it there.
+// Only the apply path calls this, right after answering, so the client
+// learns restartRequired and then the stream drops and reconnects on
+// its own. A failure keeps the old process: the screen still says
+// restartRequired and a human restarts instead.
+func (m *Manager) Restart() error {
+	bin, err := filepath.Abs(m.binPath)
+	if err != nil {
+		return err
+	}
+	return syscall.Exec(bin, os.Args, os.Environ())
 }
 
 // PendingMigrate reports the staged tag, if any.
