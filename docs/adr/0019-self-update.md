@@ -88,7 +88,15 @@ covers the common case; clean covers format changes.
 
 ## Open (asked, not decided)
 
-- Release asset shape: one binary per OS, or `git pull + make build`
-  on the host?
-- Checksum verify: cosign, minisign, or the gh checksum file?
-- Private repo auth for the check: PAT or public releases?
+- Release asset shape: decided binary per OS (`acornfall-<goos>-<goarch>`).
+- Checksum verify: checksum file (`sha256sums.txt`) for v1; minisign later
+  when releases are public and scripted. Cosign rejected: heavy for one file.
+- Private repo auth: `ACORNFALL_GITHUB_TOKEN` (fine-grained, read-only,
+  this repo) while the repo is private; dropped when releases go public.
+
+## Live drill (v0.9.0, 2026-10-10)
+
+- Downloads go through the asset API (`/releases/assets/<id>` + octet
+  accept): browser URLs 404 on private repos with a Bearer token.
+- Swap and rollback rename instead of overwrite: a running binary answers
+  ETXTBSY to a write but renames aside fine (Linux, macOS).

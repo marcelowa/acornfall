@@ -50,8 +50,11 @@ type Release struct {
 	Assets      []Asset
 }
 
-// Asset is one release file.
+// Asset is one release file. ID is the API asset id: downloads go through
+// the asset API, not the browser URL, because browser URLs 404 on private
+// repos with a Bearer token while the asset API answers with a signed redirect.
 type Asset struct {
+	ID   int64
 	Name string
 	URL  string
 	Size int64
@@ -299,6 +302,7 @@ func parseRelease(body io.Reader) (Release, error) {
 		Body        string `json:"body"`
 		PublishedAt string `json:"published_at"`
 		Assets      []struct {
+			ID   int64  `json:"id"`
 			Name string `json:"name"`
 			URL  string `json:"browser_download_url"`
 			Size int64  `json:"size"`
@@ -317,7 +321,7 @@ func parseRelease(body io.Reader) (Release, error) {
 		PublishedAt: payload.PublishedAt,
 	}
 	for _, asset := range payload.Assets {
-		release.Assets = append(release.Assets, Asset{Name: asset.Name, URL: asset.URL, Size: asset.Size})
+		release.Assets = append(release.Assets, Asset{ID: asset.ID, Name: asset.Name, URL: asset.URL, Size: asset.Size})
 	}
 	return release, nil
 }
@@ -490,7 +494,7 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if _, err := m.Backup(); err != nil {
 		return fmt.Errorf("backup failed, update stopped: %w", err)
 	}
-	payload, err := m.download(ctx, asset.URL)
+	payload, err := m.download(ctx, asset)
 	if err != nil {
 		return err
 	}
@@ -503,10 +507,33 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	return nil
 }
 
-func (m *Manager) download(ctx context.Context, url string) ([]byte, error) {
+// apiBase is scheme://host/repos/owner/repo, derived from the check URL.
+const defaultAPIBase = "https://api.github.com/repos/marcelowa/acornfall"
+
+func (m *Manager) apiBase() string {
+	url := m.latestURL
+	if url == "" {
+		url = LatestURL
+	}
+	if before, _, ok := strings.Cut(url, "/releases/"); ok {
+		return before
+	}
+	return defaultAPIBase
+}
+
+func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
+	url := asset.URL
+	accept := ""
+	if asset.ID != 0 {
+		url = m.apiBase() + fmt.Sprintf("/releases/assets/%d", asset.ID)
+		accept = "application/octet-stream"
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if accept != "" {
+		request.Header.Set("Accept", accept)
 	}
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
@@ -527,19 +554,28 @@ func (m *Manager) download(ctx context.Context, url string) ([]byte, error) {
 // passes: the transport is TLS to github, and the shape question (cosign
 // vs minisign vs checksum file) is still open — see ADR 0019.
 func (m *Manager) verify(ctx context.Context, payload []byte, release Release) error {
-	var checksumURL string
+	var checksum Asset
 	for _, asset := range release.Assets {
 		if asset.Name == "sha256sums.txt" || asset.Name == "checksums.txt" {
-			checksumURL = asset.URL
+			checksum = asset
 			break
 		}
 	}
-	if checksumURL == "" {
+	if checksum.URL == "" {
 		return nil
+	}
+	checksumURL := checksum.URL
+	accept := ""
+	if checksum.ID != 0 {
+		checksumURL = m.apiBase() + fmt.Sprintf("/releases/assets/%d", checksum.ID)
+		accept = "application/octet-stream"
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
 	if err != nil {
 		return err
+	}
+	if accept != "" {
+		request.Header.Set("Accept", accept)
 	}
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
@@ -565,26 +601,28 @@ func (m *Manager) verify(ctx context.Context, payload []byte, release Release) e
 }
 
 // swap keeps the last good binary as .bak, writes the new one, records the
-// version, and stages the pending migrate.
+// version, and stages the pending migrate. The swap renames rather than
+// overwrites: a running binary cannot be overwritten (ETXTBSY) but it can
+// be renamed aside — the process keeps its inode — and the new file takes
+// its path. Linux and macOS allow this; Windows does not, and this product
+// does not run there.
 func (m *Manager) swap(payload []byte, tag string) error {
 	if m.binPath == "" {
 		return fmt.Errorf("update: no binary path")
 	}
-	current, err := os.ReadFile(m.binPath)
-	if err != nil {
-		return fmt.Errorf("update: cannot read running binary: %w", err)
+	if err := os.Rename(m.binPath, m.backupBinPath()); err != nil {
+		return fmt.Errorf("update: cannot move running binary aside: %w", err)
 	}
-	if err := os.WriteFile(m.backupBinPath(), current, 0o755); err != nil {
-		return err
+	if err := os.WriteFile(m.binPath, payload, 0o755); err != nil {
+		// The new file failed: put the old one back, so the path still runs.
+		_ = os.Rename(m.backupBinPath(), m.binPath)
+		return fmt.Errorf("update: cannot write new binary: %w", err)
 	}
 	m.mu.Lock()
 	previous := m.current
 	m.mu.Unlock()
 	if err := os.WriteFile(m.backupVersionPath(), []byte(previous+"\n"), 0o644); err != nil {
 		return err
-	}
-	if err := os.WriteFile(m.binPath, payload, 0o755); err != nil {
-		return fmt.Errorf("update: cannot write new binary: %w", err)
 	}
 	if err := os.WriteFile(m.pendingPath(), []byte(tag+"\n"), 0o644); err != nil {
 		return err
@@ -601,16 +639,20 @@ func (m *Manager) swap(payload []byte, tag string) error {
 }
 
 // Rollback restores the last good binary and version. The caller restarts.
+// Rename-based like the swap: the failed binary may still be running, and a
+// running binary cannot be overwritten, only moved aside.
 func (m *Manager) Rollback(cause error) error {
-	backup, err := os.ReadFile(m.backupBinPath())
-	if err != nil {
-		return fmt.Errorf("rollback: no backup binary: %w", err)
-	}
 	if m.binPath == "" {
 		return fmt.Errorf("rollback: no binary path")
 	}
-	if err := os.WriteFile(m.binPath, backup, 0o755); err != nil {
-		return err
+	if _, err := os.Stat(m.backupBinPath()); err != nil {
+		return fmt.Errorf("rollback: no backup binary: %w", err)
+	}
+	if err := os.Rename(m.binPath, m.binPath+".bad"); err != nil {
+		return fmt.Errorf("rollback: cannot move failed binary aside: %w", err)
+	}
+	if err := os.Rename(m.backupBinPath(), m.binPath); err != nil {
+		return fmt.Errorf("rollback: cannot restore backup: %w", err)
 	}
 	previous := "unknown"
 	if payload, err := os.ReadFile(m.backupVersionPath()); err == nil {

@@ -241,6 +241,43 @@ func TestVerifyRefusesMismatch(t *testing.T) {
 	}
 }
 
+func TestDownloadUsesAssetAPI(t *testing.T) {
+	manager, _ := testManager(t)
+	binary := []byte("new-binary")
+	var gotAccept string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		name := "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH
+		assets := fmt.Sprintf(`{"id":7,"name":%q,"browser_download_url":%q,"size":10}`,
+			name, "http://"+r.Host+"/o/r/download/x.bin")
+		_, _ = w.Write([]byte(releaseJSON("v0.9.0", assets)))
+	})
+	mux.HandleFunc("/o/r/download/x.bin", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "browser URLs 404 on private repos with a token", http.StatusNotFound)
+	})
+	mux.HandleFunc("/o/r/releases/assets/7", func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		_, _ = w.Write(binary)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+	if _, err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotAccept != "application/octet-stream" {
+		t.Fatalf("asset API needs the octet accept, got %q", gotAccept)
+	}
+	got, _ := os.ReadFile(manager.binPath)
+	if string(got) != "new-binary" {
+		t.Fatalf("binary not swapped, got %q", got)
+	}
+}
+
 func TestApplySwapsAndRollbackRestores(t *testing.T) {
 	manager, _ := testManager(t)
 	binary := []byte("new-binary")
