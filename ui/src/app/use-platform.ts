@@ -846,19 +846,39 @@ export function usePlatform(): Platform {
 		act(refreshProviders(workspace), () => void reload());
 	}, [act, workspace, reload]);
 
-	// The self-update state: once at load, then every 15 minutes. The gateway
-	// checks releases hourly itself; this keeps the header dot honest. A failed
-	// poll clears to unknown rather than failing the whole screen: the update
+	// The self-update state: the stream carries the summary (dot data) on
+	// every state event; a fetch fills the details (notes, prefs, sizes)
+	// once at load and every 15 minutes. A failed poll falls back to the
+	// stream summary rather than failing the whole screen: the update
 	// screen is advisory, the conversation is not.
-	const [update, setUpdate] = useState<UpdateStatus | undefined>(undefined);
+	const [fetchedUpdate, setFetchedUpdate] = useState<UpdateStatus | undefined>(undefined);
+	const updateFromState: UpdateStatus | undefined =
+		state?.update === undefined
+			? undefined
+			: {
+					current: state.update.current,
+					latest: state.update.latest ?? "",
+					notes: "",
+					pinned: "",
+					channel: "",
+					autoCheck: false,
+					checking: false,
+					available: state.update.available,
+					failed: state.update.failed,
+					restartRequired: state.update.restartRequired,
+					backups: [],
+					downloadSize: 0,
+					workerSize: 0,
+				};
+	const update = fetchedUpdate ?? updateFromState;
 	useEffect(() => {
 		let cancelled = false;
 		const load = async (): Promise<void> => {
 			try {
 				const next = await fetchUpdateStatus();
-				if (!cancelled) setUpdate(next);
+				if (!cancelled) setFetchedUpdate(next);
 			} catch {
-				if (!cancelled) setUpdate(undefined);
+				if (!cancelled) setFetchedUpdate(undefined);
 			}
 		};
 		void load();
@@ -875,23 +895,23 @@ export function usePlatform(): Platform {
 	}, []);
 
 	const refreshUpdate = useCallback((): void => {
-		void fetchUpdateStatus().then(setUpdate, reportError);
+		void fetchUpdateStatus().then(setFetchedUpdate, reportError);
 	}, [reportError]);
 	const checkUpdateNow = useCallback((): void => {
-		act(checkUpdate().then(setUpdate));
+		act(checkUpdate().then(setFetchedUpdate));
 	}, [act]);
 	const applyUpdateNow = useCallback(
 		(cleanVMs: boolean, drain: "wait" | "stop"): void => {
-			act(applyUpdate(cleanVMs, drain).then(setUpdate));
+			act(applyUpdate(cleanVMs, drain).then(setFetchedUpdate));
 		},
 		[act],
 	);
 	const rollbackUpdateNow = useCallback((): void => {
-		act(rollbackUpdate().then(setUpdate));
+		act(rollbackUpdate().then(setFetchedUpdate));
 	}, [act]);
 	const setUpdatePrefs = useCallback(
 		(prefs: UpdatePrefs): void => {
-			act(saveUpdatePrefs(prefs).then(setUpdate));
+			act(saveUpdatePrefs(prefs).then(setFetchedUpdate));
 		},
 		[act],
 	);

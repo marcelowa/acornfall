@@ -37,6 +37,15 @@ export interface WireConversation {
 	createdBy?: string | undefined;
 }
 
+/** The self-update summary, as the state stream carries it. */
+export interface WireUpdateSummary {
+	current: string;
+	latest?: string | undefined;
+	available: boolean;
+	failed?: string | undefined;
+	restartRequired?: boolean | undefined;
+}
+
 export interface WireSandbox {
 	engine?: string | undefined;
 	version?: string | undefined;
@@ -160,6 +169,8 @@ export interface WireState {
 	workerUp: boolean;
 	workerError?: string | undefined;
 	sandbox: WireSandbox;
+	/** The self-update summary: the header dot without fetching. */
+	update: WireUpdateSummary;
 	capabilities: WireCapabilities;
 	harness: string;
 	/** The effective binding: what will actually run, resolved across the layers. */

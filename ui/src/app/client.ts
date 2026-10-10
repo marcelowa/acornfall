@@ -278,6 +278,9 @@ export interface UpdateStatus {
 	channel: string;
 	autoCheck: boolean;
 	checking: boolean;
+	/** Download sizes in bytes, for the size line. Zero when unknown. */
+	downloadSize: number;
+	workerSize: number;
 	available: boolean;
 	failed?: string | undefined;
 	restartRequired?: boolean | undefined;
