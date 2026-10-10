@@ -100,3 +100,14 @@ func TestCredentialsReadTheFile(t *testing.T) {
 		t.Fatal("a stored key must count")
 	}
 }
+
+func TestWorkerSkewAgainstBinarySatisfies(t *testing.T) {
+	home := t.TempDir()
+	input := testInput(home)
+	input.Current = "v0.9.8"
+	input.RuntimeTag = "v0.9.9"
+	input.Worker = "v0.9.9"
+	if requirement := byName(Check(input), "worker"); !requirement.OK {
+		t.Fatalf("sources matching the binary must satisfy: %+v", requirement)
+	}
+}

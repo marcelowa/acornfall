@@ -127,6 +127,7 @@ func readyInput(home string, updater *update.Manager, health update.Preflight, r
 	return ready.Input{
 		Home:            home,
 		Current:         health.Version,
+		RuntimeTag:      updater.RuntimeTag(),
 		Worker:          updater.WorkerVersion(),
 		BunPath:         updater.BunPath(),
 		BunOK:           bunOK,
@@ -159,6 +160,7 @@ func readyInputForBoot(home string, updates *update.Manager, engine *sandbox.Man
 	input := ready.Input{
 		Home:          home,
 		Current:       status.Current,
+		RuntimeTag:    updates.RuntimeTag(),
 		Worker:        updates.WorkerVersion(),
 		BunPath:       updates.BunPath(),
 		BunOK:         bunOK,
