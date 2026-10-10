@@ -225,25 +225,30 @@ func (m *Manager) EnsureWorker(ctx context.Context, tag string) error {
 	return m.installWorker(ctx)
 }
 
-// stageWorker downloads the release's worker tarball for tag. Only the
-// matching tag is accepted: a tarball is that release's sources.
-func (m *Manager) stageWorker(ctx context.Context, tag string) error {
-	m.mu.Lock()
-	release := m.latest
-	m.mu.Unlock()
-	if release.Tag != tag {
-		fetched, err := m.Check(ctx)
-		if err != nil {
-			return err
-		}
-		release = fetched
+// RuntimeTag is the tag the running binary was built from: the stamp
+// when present, else the version file. Execution must match the binary,
+// not the record — a hand-swapped binary with a stale file still needs
+// its own sources.
+func (m *Manager) RuntimeTag() string {
+	if BuildVersion != "" {
+		return BuildVersion
 	}
-	if release.Tag != tag {
-		return fmt.Errorf("update: latest is %s, not %s", release.Tag, tag)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.current
+}
+
+// stageWorker downloads the release's worker tarball for tag, addressed
+// directly: the wanted tag need not be latest. Only the matching tag is
+// accepted: a tarball is that release's sources.
+func (m *Manager) stageWorker(ctx context.Context, tag string) error {
+	release, err := m.releaseFor(ctx, tag)
+	if err != nil {
+		return err
 	}
 	asset := WorkerTarballAsset(release)
 	if asset.URL == "" {
-		return fmt.Errorf("update: release %s has no %s", tag, WorkerTarball)
+		return fmt.Errorf("update: release %s has no %s", release.Tag, WorkerTarball)
 	}
 	tarball, err := m.download(ctx, asset)
 	if err != nil {
@@ -257,6 +262,36 @@ func (m *Manager) stageWorker(ctx context.Context, tag string) error {
 		return err
 	}
 	return writeData(m.workerPending(), tarball)
+}
+
+// releaseFor fetches one release by tag, reusing the cached latest when
+// it already answers. A missing tag names itself: typos fail plainly.
+func (m *Manager) releaseFor(ctx context.Context, tag string) (Release, error) {
+	m.mu.Lock()
+	cached := m.latest
+	m.mu.Unlock()
+	if cached.Tag == tag {
+		return cached, nil
+	}
+	url := m.apiBase() + "/releases/tags/" + tag
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return Release{}, err
+	}
+	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	response, err := m.client.Do(request)
+	if err != nil {
+		return Release{}, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return Release{}, fmt.Errorf("releases: no release %s (%s)", tag, response.Status)
+	}
+	// Never cached: latest stays what the check found, or the dot lies.
+	return parseRelease(response.Body)
 }
 
 // activateWorker rotates the staged tarball into place: live aside to

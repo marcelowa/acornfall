@@ -48,6 +48,12 @@ Staged binaries must execute (`version` names the tag) before swapping.
 the operator's (service restart on failure), not the gateway's. Migrate
 failure still stops boot and rolls back by itself.
 
+**One click finishes.** Apply answers, then the process becomes the new
+binary itself (same PID, args, environment): no manual restart step.
+Workers stop first — an orphan would serve old code past the exec and
+resurrect wiped sandboxes — and warm sandboxes stay for reattach.
+Exec failure keeps the old process and the manual path.
+
 **Roles now, enforced later.** Today one user, same rights. The API
 carries the role check now: `POST /api/update/apply` answers 403 for
 non-admin. Default allow.

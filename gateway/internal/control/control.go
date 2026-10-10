@@ -722,6 +722,22 @@ func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMe
 	return c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 }
 
+// stopWorker terminates the worker process and leaves everything else:
+// the sandbox stays warm for whoever boots next, and the storage keeps
+// its record. The update tier calls it before wiping sandboxes (so no
+// orphan resurrects them) and before self-restart (so no orphan keeps
+// serving old code). The next open starts a fresh worker.
+func (c *Control) stopWorker() {
+	c.mu.Lock()
+	worker := c.worker
+	c.worker = nil
+	c.workerUp = false
+	c.mu.Unlock()
+	if worker != nil {
+		worker.Close()
+	}
+}
+
 func (c *Control) Close() {
 	// The loops stop first. A supervisor that sees its worker close takes that for a crash and
 	// restarts it from the settings this control was built from, so closing in the other order

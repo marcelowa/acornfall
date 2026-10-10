@@ -122,7 +122,7 @@ func serve(argv []string) error {
 		if _, err := updates.EnsureBun(ctx); err != nil {
 			log.Printf("worker: %v", err)
 		}
-		if err := updates.EnsureWorker(ctx, updates.Status().Current); err != nil {
+		if err := updates.EnsureWorker(ctx, updates.RuntimeTag()); err != nil {
 			log.Printf("worker: %v", err)
 		}
 	}
@@ -178,6 +178,7 @@ func serve(argv []string) error {
 
 	updates.RunsActive = workspaces.AnyRunning
 	updates.StopRuns = workspaces.AbortAll
+	updates.StopWorkers = workspaces.StopWorkers
 	updates.CleanVMs = func(ctx context.Context) error {
 		var names []string
 		for _, workspace := range workspaces.List() {
