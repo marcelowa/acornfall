@@ -255,17 +255,18 @@ export function refreshProviders(workspace: string): Promise<void> {
 
 /** Answer one login prompt. A blank answer with cancelled rejects it. */
 export function answerAuthPrompt(
+	workspace: string,
 	authId: string,
 	promptId: string,
 	value: string,
 	cancelled = false,
 ): Promise<void> {
-	return post("/api/auth/answer", { authId, promptId, value, cancelled });
+	return post(workspacePath(workspace, "/auth/answer"), { authId, promptId, value, cancelled });
 }
 
 /** Abort a running login flow. */
-export function cancelAuthFlow(authId: string): Promise<void> {
-	return post("/api/auth/cancel", { authId });
+export function cancelAuthFlow(workspace: string, authId: string): Promise<void> {
+	return post(workspacePath(workspace, "/auth/cancel"), { authId });
 }
 
 /** The update screen, as the gateway reports it. `available` is one dot, not a list. */

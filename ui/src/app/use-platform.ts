@@ -819,7 +819,7 @@ export function usePlatform(): Platform {
 			if (authFlow?.prompt === undefined) return;
 			const { authId, prompt } = { authId: authFlow.authId, prompt: authFlow.prompt };
 			setAuthFlow({ ...authFlow, answering: true });
-			void answerAuthPrompt(authId, prompt.promptId, value)
+			void answerAuthPrompt(workspace, authId, prompt.promptId, value)
 				.then(() => setFailure(undefined))
 				.catch((cause: unknown) => {
 					reportError(cause);
@@ -828,13 +828,13 @@ export function usePlatform(): Platform {
 					);
 				});
 		},
-		[authFlow, reportError],
+		[authFlow, reportError, workspace],
 	);
 	const cancelLogin = useCallback(() => {
 		const authId = authFlow?.authId;
 		setAuthFlow(undefined);
-		if (authId !== undefined) void cancelAuthFlow(authId).catch(reportError);
-	}, [authFlow, reportError]);
+		if (authId !== undefined) void cancelAuthFlow(workspace, authId).catch(reportError);
+	}, [authFlow, reportError, workspace]);
 	const closeLogin = useCallback(() => setAuthFlow(undefined), []);
 	const logoutProviderById = useCallback(
 		(id: string) => {
