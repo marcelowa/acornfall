@@ -61,6 +61,8 @@ export function RenameDialog({ open, title, initial, onSave, onCancel }: RenameD
 					value={name}
 					autoFocus
 					aria-label="Name"
+					// Titles can be Hebrew: the direction follows the text.
+					dir="auto"
 					onChange={(event) => setName(event.target.value)}
 					onKeyDown={(event) => {
 						if (event.key !== "Enter") return;

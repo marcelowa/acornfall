@@ -111,7 +111,7 @@ export function ConversationRow({
 				onClick={() => onSelect?.(conversation.id)}
 				aria-current={active ? "true" : undefined}
 				title={title === "" ? undefined : title}
-				className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-2 text-left"
+				className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-2 text-start"
 			>
 				<span className="flex w-4 shrink-0 items-center justify-center">
 					{conversation.running ? (
@@ -121,6 +121,7 @@ export function ConversationRow({
 					) : null}
 				</span>
 				<span
+					dir="auto"
 					className={cn(
 						"truncate text-sm",
 						conversation.hidden

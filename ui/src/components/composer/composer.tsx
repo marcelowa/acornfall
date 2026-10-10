@@ -133,6 +133,9 @@ export function Composer({
 						disabled={disabled}
 						placeholder={placeholder}
 						aria-label="Message"
+						// The direction follows the draft: Hebrew starts right,
+						// English starts left. The card around it stays put.
+						dir="auto"
 						role="combobox"
 						aria-expanded={slashOpen}
 						aria-controls="slash-menu-listbox"

@@ -48,7 +48,7 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 					collapsible && !expanded && "max-h-(--thinking-card-collapsed-height)",
 				)}
 			>
-				<Text as="div" size="sm" className="whitespace-pre-wrap">
+				<Text as="div" size="sm" dir="auto" className="whitespace-pre-wrap">
 					{entry.text}
 				</Text>
 			</div>

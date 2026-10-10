@@ -15,10 +15,12 @@ type Story = StoryObj<typeof meta>;
 
 function Frame({
 	children,
+	initial = "",
 }: {
 	children: (draft: [string, (value: string) => void]) => ReactNode;
+	initial?: string | undefined;
 }) {
-	const [value, setValue] = useState("");
+	const [value, setValue] = useState(initial);
 	return <div className="flex h-full flex-col justify-end">{children([value, setValue])}</div>;
 }
 
@@ -201,4 +203,16 @@ export const RunningOnPhone: Story = {
 export const SlashKeyboard: Story = {
 	args: { ...Idle.args, value: "/r" },
 	render: () => <SlashKeyboardDemo />,
+};
+
+/** A Hebrew draft starts from the right: the field follows the first strong character. */
+export const RtlDraft: Story = {
+	args: {
+		...Idle.args,
+	},
+	render: (args) => (
+		<Frame initial="שלום, תסביר לי את השינוי האחרון">
+			{([value, setValue]) => <Composer {...args} value={value} onChange={setValue} />}
+		</Frame>
+	),
 };
