@@ -242,3 +242,33 @@ func TestATimeOnlyChangeIsAnnounced(t *testing.T) {
 		t.Error("a state that was just announced is not news again")
 	}
 }
+
+// A view frame is one conversation's transcript, so it reaches only the clients watching
+// that conversation. It used to reach every attached client, so switching away mid-run
+// showed the run writing into the room just opened — the stream moved the conversation
+// the client was looking at.
+func TestAViewFrameReachesOnlyItsConversation(t *testing.T) {
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	running := make(chan protocol.Frame, 1)
+	other := make(chan protocol.Frame, 1)
+	control.subscribers[1] = running
+	control.subscribers[2] = other
+	control.subscriberConversation[1] = "a"
+	control.subscriberConversation[2] = "b"
+
+	control.publish(protocol.Frame{Type: "view", ConversationID: "a", Seq: 7})
+
+	select {
+	case frame := <-running:
+		if frame.ConversationID != "a" {
+			t.Errorf("the watcher of a run hears its frames, got %q", frame.ConversationID)
+		}
+	default:
+		t.Error("the watcher of a run hears its frames")
+	}
+	select {
+	case frame := <-other:
+		t.Fatalf("the room just opened is not the run's, got %q", frame.ConversationID)
+	default:
+	}
+}

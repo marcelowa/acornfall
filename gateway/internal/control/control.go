@@ -2092,7 +2092,16 @@ func (c *Control) publish(frame protocol.Frame) {
 		}
 	}
 	subscribers := make([]chan protocol.Frame, 0, len(c.subscribers))
-	for _, channel := range c.subscribers {
+	for id, channel := range c.subscribers {
+		// A view frame is one conversation's transcript: a client watching another
+		// conversation must never see it, or switching away mid-run shows the run
+		// writing into the room just opened. Frames with no conversation are for
+		// everyone: a login prompt belongs to no transcript.
+		if (frame.Type == "view" || frame.Type == "submission") && frame.ConversationID != "" {
+			if c.subscriberConversation[id] != frame.ConversationID {
+				continue
+			}
+		}
 		subscribers = append(subscribers, channel)
 	}
 	coalesce := frame.Type == "view"
