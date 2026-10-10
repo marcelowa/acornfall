@@ -56,6 +56,27 @@ make build                     # go build -> ./bin/acornfall
 ./bin/acornfall                 # http://127.0.0.1:7777 in a workspace directory
 ```
 
+### Install from a release (one binary, no toolchain)
+
+```bash
+mkdir -p ~/acornfall/release && cd ~/acornfall/release
+# From the release page take acornfall-<os>-<arch> and sha256sums.txt:
+curl -sL -o acornfall https://github.com/marcelowa/acornfall/releases/download/v0.9.5/acornfall-linux-amd64
+curl -sL -o sha256sums.txt https://github.com/marcelowa/acornfall/releases/download/v0.9.5/sha256sums.txt
+sha256sum -c sha256sums.txt --ignore-missing   # must say OK
+chmod +x acornfall
+
+# While the repo is private, the release check needs a token:
+export ACORNFALL_GITHUB_TOKEN='...'   # fine-grained, read-only, this repo
+./acornfall provider add opencode-go "$OPENCODE_API_KEY"
+./acornfall --workspace ~/acornfall/workspaces
+```
+
+First boot downloads a pinned bun once and the worker sources for its
+tag, then installs dependencies — all under `~/.acornfall`, nothing on
+the host. After that it self-updates from Settings > Updates: one
+click, it restarts itself.
+
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
 `--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
 `--token <secret>`, `--worker-dir <dir>` (development: system bun over these
