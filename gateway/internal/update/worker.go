@@ -53,6 +53,10 @@ func (m *Manager) workerPending() string { return filepath.Join(m.home, "worker.
 // downloads it, and a missing one with no network is a refusal, not a guess.
 func (m *Manager) BunPath() string { return filepath.Join(m.bunDir(), "bun") }
 
+// BunInstalled reports whether the pinned runtime answers, and where.
+// Exported for doctor: diagnosis reads, never installs.
+func (m *Manager) BunInstalled() (string, bool) { return m.bunReady() }
+
 // WorkerDir is where the ensured worker sources live.
 func (m *Manager) WorkerDir() string { return m.workerDir() }
 

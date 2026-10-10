@@ -18,6 +18,7 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/httpapi"
+	"github.com/acornfall/acornfall/gateway/internal/ready"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
 	"github.com/acornfall/acornfall/gateway/web"
@@ -162,6 +163,15 @@ func serve(argv []string) error {
 	defer workspaces.Close()
 
 	updates.RunsActive = workspaces.AnyRunning
+
+	// Readiness, plainly: every unsatisfied requirement is one log line
+	// with its fix. Auto-installable pieces were ensured above; what is
+	// still missing refuses loudly at use, never silently.
+	for _, requirement := range ready.Check(readyInputForBoot(dir, updates, engine)) {
+		if !requirement.OK {
+			log.Printf("ready: %s not satisfied: %s (fix: %s)", requirement.Name, requirement.Detail, requirement.Fix)
+		}
+	}
 
 	server := &http.Server{
 		Addr:              *addr,
