@@ -368,6 +368,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			status={platform.update}
 			runsActive={platform.conversations.some((conversation) => conversation.running)}
 			onCheck={platform.checkUpdateNow}
+			onRefresh={platform.refreshUpdate}
 			onApply={platform.applyUpdateNow}
 			onRollback={platform.rollbackUpdateNow}
 			onSavePrefs={platform.setUpdatePrefs}

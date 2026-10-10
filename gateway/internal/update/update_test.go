@@ -590,3 +590,25 @@ func TestEnsureBunDownloads(t *testing.T) {
 		t.Fatalf("installed bun must be reused, downloads = %d", hits)
 	}
 }
+
+func TestApplyRefusesWhileRestartPending(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("new-gateway"))
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err == nil {
+		t.Fatal("a second apply before restart must refuse")
+	} else if _, ok := err.(ErrRestartPending); !ok {
+		t.Fatalf("want ErrRestartPending, got %T %v", err, err)
+	}
+}
