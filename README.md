@@ -39,8 +39,11 @@ make deps    # bun install in worker/, ui/, tools/
 make tools   # the linters make lint runs (staticcheck, worker deps)
 ```
 
-`bun` must stay on `PATH`: the gateway starts workers with it, and a worker
-fails to start without it.
+`bun` must stay on `PATH` for development: the gateway starts workers with it,
+and a worker fails to start without it. Releases need no bun: they ship a
+compiled worker beside the gateway binary, and migrate scripts baked in —
+unpack both binaries into one folder and run. Nothing lives outside the
+install folder (`~/.acornfall` by default).
 
 ## Run
 
@@ -54,7 +57,9 @@ make build                     # go build -> ./bin/acornfall
 
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
 `--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
-`--token <secret>`, `--worker-dir <dir>`, `--workspaces-dir <dir>` (default
+`--token <secret>`, `--worker-dir <dir>`, `--worker-bin <path>` (compiled worker;
+default: `acornfall-worker` beside the gateway binary, else bun + sources),
+`--migrate-dir <dir>` (default: scripts baked into the binary), `--workspaces-dir <dir>` (default
 `~/acornfall/workspaces`), `--sandbox-engine <microsandbox|host>` (default: microsandbox;
 `host` runs the tools on this machine with no isolation — see
 [ADR 0015](docs/adr/0015-host-engine.md)), `--disable-vm-nesting` (default: false;
