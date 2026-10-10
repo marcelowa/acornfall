@@ -20,7 +20,10 @@ const MAX_RAIL = 480;
  * Below `lg` the rail is a drawer that takes the screen it is on — a 280px rail beside a
  * 390px phone leaves the transcript unusable, and a drawer that only half-opens is a worse
  * version of the same mistake. From `lg` it is a column the app can put away; the default is
- * open, and Split owns the aside, so it owns the way to open, close, and resize it. The width
+ * open, and Split owns the drawer and the resize handle. In topbar mode the bar
+ * carries no rail buttons from `lg`: the rail head closes it while the collapsed
+ * strip opens it again. Below `lg` the drawer toggle sits beside the brand, because
+ * tapping the brand alone opens nothing. The width
  * is the token unless the app hands one in.
  */
 const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
@@ -59,8 +62,9 @@ const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
 export interface SplitProps extends VariantProps<typeof splitVariants> {
 	aside: ReactNode;
 	/** Full-width row above everything: the brand, the title, the pane controls. It stays
-	 * put on mobile and desktop, rail open or not. When set, `bar` and `header` are
-	 * ignored so the title lives in one place. */
+	 * put on mobile and desktop, rail open or not. Below `lg` the drawer toggle sits
+	 * beside the brand; from `lg` there are no rail buttons. When set, `bar` and
+	 * `header` are ignored so the title lives in one place. */
 	topbar?: ReactNode | undefined;
 	/** Sits in the small-screen bar beside the rail toggle. The conversation title, usually.
 	 * Kept for stories; the app uses `topbar` now. */
@@ -163,6 +167,37 @@ export function Split({
 		handle.addEventListener("pointercancel", stop);
 	};
 
+	/** The drawer body, shared with the small-screen bar below: the toggle opens it,
+	 * the drawer's own close row shuts it. */
+	const drawerContent = (
+		<SheetContent
+			side="left"
+			showCloseButton={false}
+			className="w-full p-2 sm:max-w-none"
+			aria-describedby={undefined}
+		>
+			<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
+			<div className="flex min-h-0 flex-1 flex-col">
+				{/* The close gets its own row: absolutely positioned over the rail
+				 * it would land on the head's own icon buttons, which is exactly
+				 * the overlap the floating toggle used to be. */}
+				<div className="flex shrink-0 items-center justify-end">
+					<SheetClose asChild>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							aria-label="Hide the rail"
+						>
+							<PanelLeftClose />
+						</Button>
+					</SheetClose>
+				</div>
+				{aside}
+			</div>
+		</SheetContent>
+	);
+
 	const drawer = (
 		<Sheet open={open} onOpenChange={setOpen}>
 			<SheetTrigger asChild>
@@ -173,32 +208,7 @@ export function Split({
 			{/* Full width: the drawer is the navigation, and half a screen of it is
 			 * neither the rail nor the transcript. Its close is the rail's own icon in the
 			 * rail's own corner, so the gesture is the same on both screens. */}
-			<SheetContent
-				side="left"
-				showCloseButton={false}
-				className="w-full p-2 sm:max-w-none"
-				aria-describedby={undefined}
-			>
-				<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
-				<div className="flex min-h-0 flex-1 flex-col">
-					{/* The close gets its own row: absolutely positioned over the rail
-					 * it would land on the head's own icon buttons, which is exactly
-					 * the overlap the floating toggle used to be. */}
-					<div className="flex shrink-0 items-center justify-end">
-						<SheetClose asChild>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								aria-label="Hide the rail"
-							>
-								<PanelLeftClose />
-							</Button>
-						</SheetClose>
-					</div>
-					{aside}
-				</div>
-			</SheetContent>
+			{drawerContent}
 		</Sheet>
 	);
 
@@ -209,10 +219,11 @@ export function Split({
 					data-slot="topbar"
 					className="flex shrink-0 items-center gap-1 border-b border-border px-1 py-0.5"
 				>
+					{/* Below `lg` the drawer toggle sits beside the brand: tapping the
+					 * brand alone opens nothing, so the way in must be visible. From `lg`
+					 * the bar carries no rail buttons — the rail head closes it while
+					 * the collapsed strip opens it again. */}
 					<div className="flex shrink-0 items-center lg:hidden">{drawer}</div>
-					{toggle === null ? null : (
-						<div className="hidden shrink-0 items-center lg:flex">{toggle}</div>
-					)}
 					<div className="flex min-w-0 flex-1 items-center gap-2">{topbar}</div>
 				</div>
 			)}
