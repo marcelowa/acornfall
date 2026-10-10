@@ -34,6 +34,10 @@ type Input struct {
 	Home string
 	// Current is the running tag ("dev" for source builds).
 	Current string
+	// RuntimeTag is the binary's own stamp when it has one: execution
+	// must match the binary, so sources matching the stamp satisfy even
+	// when the version file lags behind it.
+	RuntimeTag string
 	// Worker is the ensured sources' tag, "" when none.
 	Worker string
 	// BunPath and BunOK say whether the pinned runtime answers.
@@ -108,6 +112,9 @@ func worker(input Input) Requirement {
 	if input.Worker != "" {
 		if input.Worker == input.Current || input.Current == "" {
 			return Requirement{"worker", true, "sources " + input.Worker, ""}
+		}
+		if input.RuntimeTag != "" && input.Worker == input.RuntimeTag {
+			return Requirement{"worker", true, "sources " + input.Worker + " match the running binary", ""}
 		}
 		return Requirement{"worker", false, "sources " + input.Worker + " do not match " + input.Current, "restart: boot activates the staged sources"}
 	}

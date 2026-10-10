@@ -737,7 +737,8 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 
 // checkExec proves a staged binary runs and names its tag: `version` is
 // pure Go with no flags, so this works on every platform the binary does.
-// It runs from a temp copy, never the live path: a failure leaves the
+// It runs from a temp copy under an empty home, never the live path: the
+// version file would answer for the binary, and a failure must leave the
 // running build and its backup exactly alone.
 func checkExec(ctx context.Context, payload []byte, tag string) error {
 	temp, err := os.CreateTemp("", "acornfall-check-*")
@@ -756,9 +757,16 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	if err := os.Chmod(tempPath, 0o755); err != nil {
 		return err
 	}
+	emptyHome, err := os.MkdirTemp("", "acornfall-check-home-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(emptyHome) }()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, tempPath, "version").Output()
+	command := exec.CommandContext(ctx, tempPath, "version")
+	command.Env = append(os.Environ(), "ACORNFALL_HOME="+emptyHome, "ACORNFALL_DATA="+emptyHome)
+	output, err := command.Output()
 	if err != nil {
 		return fmt.Errorf("update: staged %s does not run: %w", tag, err)
 	}
