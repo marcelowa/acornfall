@@ -54,6 +54,12 @@ export function UpdateSection({
 		setPinned(status?.pinned ?? "");
 	}, [status?.pinned]);
 
+	// Details ride a fetch: the stream summary carries no notes, prefs,
+	// or sizes, so the screen fills them on open.
+	useEffect(() => {
+		onRefresh();
+	}, [onRefresh]);
+
 	const commitPinned = (): void => {
 		onSavePrefs({ pinned });
 	};
@@ -121,6 +127,12 @@ export function UpdateSection({
 						<Text size="xs">
 							{status.current} → {status.latest}
 						</Text>
+						{status.downloadSize > 0 ? (
+							<Text size="2xs" tone="muted">
+								Download {formatSize(status.downloadSize + status.workerSize)}.
+								Restart after; the screen follows on its own.
+							</Text>
+						) : null}
 					</Stack>
 					{status.notes === "" ? null : (
 						<Stack gap="2xs">
@@ -160,7 +172,8 @@ export function UpdateSection({
 							<ToggleGroupItem value="clean">Start clean</ToggleGroupItem>
 						</ToggleGroup>
 						<Text size="2xs" tone="muted">
-							Clean wipes the sandbox root only — never files under workspaces.
+							Clean wipes the sandbox root only — never files under workspaces. The
+							engine and images reinstall on next use.
 						</Text>
 					</Stack>
 					<div className="flex gap-2">
@@ -203,24 +216,9 @@ export function UpdateSection({
 						<Text size="2xs" tone="muted">
 							channel
 						</Text>
-						<ToggleGroup
-							type="single"
-							value={status.channel === "main" ? "main" : "releases"}
-							onValueChange={(next) => {
-								if (next === "releases" || next === "main")
-									onSavePrefs({ channel: next });
-							}}
-							variant="outline"
-							size="sm"
-							spacing={0}
-							aria-label="Update channel"
-						>
-							<ToggleGroupItem value="releases">Releases</ToggleGroupItem>
-							<ToggleGroupItem value="main">Main</ToggleGroupItem>
-						</ToggleGroup>
+						<Text size="xs">Releases — the only channel.</Text>
 						<Text size="2xs" tone="muted">
-							Releases are tested and rollback-safe. Main builds from the local tree,
-							dev hosts only.
+							Tested and rollback-safe. Tree builds are a later channel for dev hosts.
 						</Text>
 					</Stack>
 					<Stack gap="2xs">
@@ -313,6 +311,13 @@ export function UpdateSection({
  * on the new version without a reload. The stream drops and reconnects
  * by itself meanwhile.
  */
+/** Bytes as the screen says them: 13 MB, not 13062137. */
+function formatSize(bytes: number): string {
+	if (bytes < 1000) return `${bytes} B`;
+	if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
+	return `${Math.round((bytes / 1_000_000) * 10) / 10} MB`;
+}
+
 function Restarting({ onRefresh }: { onRefresh: () => void }) {
 	useEffect(() => {
 		const timers = [5000, 12000, 25000].map((after) => window.setTimeout(onRefresh, after));

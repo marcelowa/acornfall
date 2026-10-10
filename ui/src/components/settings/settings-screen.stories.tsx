@@ -128,6 +128,8 @@ const updates = (
 			checking: false,
 			available: true,
 			backups: [],
+			downloadSize: 13000000,
+			workerSize: 70000,
 		}}
 		runsActive={false}
 		onCheck={noop}
