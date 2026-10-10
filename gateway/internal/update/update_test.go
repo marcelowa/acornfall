@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func releaseJSON(tag string, assets string) string {
@@ -610,5 +611,38 @@ func TestApplyRefusesWhileRestartPending(t *testing.T) {
 		t.Fatal("a second apply before restart must refuse")
 	} else if _, ok := err.(ErrRestartPending); !ok {
 		t.Fatalf("want ErrRestartPending, got %T %v", err, err)
+	}
+}
+
+func TestPreflightNamesRelease(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL
+	manager.client = server.Client()
+	preflight := manager.Preflight(context.Background())
+	if preflight.Version != "v0.8.0" || preflight.Latest != "v0.9.0" {
+		t.Fatalf("preflight = %+v", preflight)
+	}
+	if preflight.Worker == "" || preflight.Bun == "" || preflight.Releases == "" {
+		t.Fatalf("preflight must name every piece: %+v", preflight)
+	}
+}
+
+func TestPreflightDegradesOffline(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.latestURL = "http://127.0.0.1:1/releases/latest"
+	manager.client = &http.Client{Timeout: 2 * time.Second}
+	preflight := manager.Preflight(context.Background())
+	if preflight.Latest != "" {
+		t.Fatal("offline must leave latest empty")
+	}
+	if !strings.Contains(preflight.Releases, "unreachable") {
+		t.Fatalf("offline must say unreachable: %q", preflight.Releases)
+	}
+	if preflight.Version != "v0.8.0" {
+		t.Fatal("local answers survive a dead network")
 	}
 }

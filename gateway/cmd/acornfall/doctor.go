@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/update"
 )
 
 // doctorCommand reports what this machine can do, and changes nothing: the difference
@@ -41,13 +43,23 @@ func doctorCommand(argv []string) {
 	}
 	report := manager.Report()
 	nesting := manager.Nesting(context.Background())
+	updater := update.New(resolved, "", "")
+	if err := updater.Open(); err != nil {
+		log.Fatalf("acornfall doctor: %v", err)
+	}
+	// Preflight never blocks on the network: an offline machine still gets
+	// every local answer, and the release check degrades to a sentence.
+	checkCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	health := updater.Preflight(checkCtx)
 	if *asJSON {
 		// The report plus what the engine and the machine say about nesting: two answers,
 		// because either half can refuse and the reason is worth reading.
 		payload, err := json.MarshalIndent(struct {
 			sandbox.Report
 			Nesting sandbox.NestingSupport `json:"nesting"`
-		}{Report: report, Nesting: nesting}, "", "  ")
+			Update  update.Preflight       `json:"update"`
+		}{Report: report, Nesting: nesting, Update: health}, "", "  ")
 		if err != nil {
 			log.Fatalf("acornfall doctor: %v", err)
 		}
@@ -80,6 +92,15 @@ func doctorCommand(argv []string) {
 			fmt.Println("  ready     commands and file tools run on the host, unconfined")
 		} else {
 			fmt.Println("  ready     commands and file reads run inside the sandbox")
+		}
+		fmt.Println("update")
+		fmt.Printf("  version   %s\n", health.Version)
+		fmt.Printf("  worker    %s\n", health.Worker)
+		fmt.Printf("  bun       %s\n", health.Bun)
+		if health.Latest != "" {
+			fmt.Printf("  releases  %s (latest)\n", health.Latest)
+		} else {
+			fmt.Printf("  releases  %s\n", health.Releases)
 		}
 	}
 	if report.Problem != "" {
