@@ -472,7 +472,7 @@ func fakeBun(t *testing.T, manager *Manager) {
 	if err := os.MkdirAll(filepath.Dir(manager.BunPath()), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo " + BunVersion + "; fi\nexit 0\n"
+	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo " + BunVersion + "; exit 0; fi\ncase \" $* \" in *\" --production \"*) exit 0;; *) exit 3;; esac\n"
 	if err := os.WriteFile(manager.BunPath(), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
