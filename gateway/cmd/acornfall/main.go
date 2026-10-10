@@ -180,9 +180,10 @@ func serve(argv []string) error {
 	updates.StopRuns = workspaces.AbortAll
 	updates.StopWorkers = workspaces.StopWorkers
 	updates.CleanVMs = func(ctx context.Context) error {
+		// Paths, not names: engine sandbox names derive from the folder.
 		var names []string
 		for _, workspace := range workspaces.List() {
-			names = append(names, workspace.Name)
+			names = append(names, workspace.Path)
 		}
 		stateDir := ""
 		remove := func(context.Context, string) error { return nil }
