@@ -86,10 +86,10 @@ func TestRunningMeansLiveOrJustPrompted(t *testing.T) {
 	}
 }
 
-// A settlement ends the prompt grace: the run is over because the worker said so, and the
-// busy sign should come down with the answer. Before, the grace ran its ten seconds no
-// matter what, so a fast run left the thinking dots up after the answer arrived — the flag
-// visibly lagging the transcript. A prompt newer than the settlement starts a new grace,
+// A settlement clears the prompt stamp: the run is over because the worker said so, and
+// the busy sign should come down with the answer. Before, the grace ran its ten seconds
+// no matter what, so a fast run left the thinking dots up after the answer arrived — the
+// flag visibly lagging the transcript. A prompt after the settlement writes a new stamp,
 // which is what a queued follow-up is, and a record that is still live outranks both.
 func TestASettlementEndsThePromptGrace(t *testing.T) {
 	now := time.Now().UnixMilli()
@@ -99,12 +99,9 @@ func TestASettlementEndsThePromptGrace(t *testing.T) {
 		{ID: "queued", Running: false},
 		{ID: "overtaken", Running: true, UpdatedAt: now - 60_000},
 	}
-	control.promptedAt["settled"] = now - 2_000
-	control.settledAt["settled"] = now - 1_000
-	control.settledAt["queued"] = now - 3_000
+	// No stamp for settled and overtaken: their settlement cleared it. Queued prompted
+	// after its settlement, so it holds a fresh stamp.
 	control.promptedAt["queued"] = now - 2_000
-	control.promptedAt["overtaken"] = now - 2_000
-	control.settledAt["overtaken"] = now - 1_000
 
 	state := control.State()
 	byID := map[string]Conversation{}

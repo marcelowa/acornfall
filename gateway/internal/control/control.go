@@ -238,14 +238,9 @@ type Control struct {
 	// promptedAt remembers an accepted prompt per conversation, in Unix milliseconds. The
 	// worker's run record lags behind the click and outlives dead runs; the stamp covers
 	// both directions: just-prompted counts as busy before the record exists, and only a
-	// record with recent activity counts after.
+	// record with recent activity counts after. A settlement clears its stamp, so the
+	// grace ends when the run does rather than running its ten seconds out.
 	promptedAt map[string]int64
-	// settledAt remembers the last settled submission per conversation, in Unix
-	// milliseconds. A settlement ends the grace: the run is over because the worker
-	// said so, not because ten seconds passed, so the busy sign comes down with the
-	// answer instead of lingering after it. A prompt newer than the settlement starts
-	// a new grace, which is what a queued follow-up is.
-	settledAt map[string]int64
 	// announced is the signature of the state attached clients were last told about. The poll
 	// compares the state against it, because a change only time can make has no data behind
 	// it: nothing refreshes, and only the comparison across ticks can see it.
@@ -291,7 +286,6 @@ func New(opts Options) *Control {
 		attachments:            map[string]int{},
 		policies:               map[string]json.RawMessage{},
 		promptedAt:             map[string]int64{},
-		settledAt:              map[string]int64{},
 	}
 }
 
@@ -1379,13 +1373,12 @@ func (c *Control) effectiveDefaults() (Defaults, DefaultOrigins) {
 	case lastResort.Provider != "" && lastResort.ModelID != "":
 		resolved.Model, origins.Model = lastResort, originLastResort
 	}
-	resolved.Thinking = firstNonEmpty(workspace.Thinking, install.Thinking)
-	if resolved.Thinking == "" {
-		origins.Thinking = ""
-	} else if workspace.Thinking != "" {
-		origins.Thinking = originWorkspace
-	} else {
-		origins.Thinking = originInstall
+	resolved.Thinking, origins.Thinking = "", ""
+	switch {
+	case workspace.Thinking != "":
+		resolved.Thinking, origins.Thinking = workspace.Thinking, originWorkspace
+	case install.Thinking != "":
+		resolved.Thinking, origins.Thinking = install.Thinking, originInstall
 	}
 	// A definition that is gone is not usable: pointing every inheriting conversation at it
 	// would fail them all, where the layer below still works.
@@ -1428,15 +1421,6 @@ func definitionExists(agents []protocol.AgentSummary, name string) bool {
 		}
 	}
 	return false
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func (c *Control) inputsFor(conversationID string) resolveInputs {
@@ -1766,7 +1750,7 @@ func parseModelBinding(value string) (protocol.ModelBinding, bool) {
 // validateThinkingLevel refuses a name outside the scale. Control clamps to what a model
 // supports when it applies, so this is only about a level that could never mean anything.
 func validateThinkingLevel(level string) error {
-	if level == "" || contains(thinkingLevels, level) {
+	if level == "" || slices.Contains(thinkingLevels, level) {
 		return nil
 	}
 	return fmt.Errorf("unknown thinking level %q; expected one of %s", level, strings.Join(thinkingLevels, ", "))
@@ -1801,10 +1785,6 @@ func (c *Control) reapply(ctx context.Context, conversationID string) error {
 	c.resolved[conversationID] = &resolved
 	c.mu.Unlock()
 	return nil
-}
-
-func contains(values []string, wanted string) bool {
-	return slices.Contains(values, wanted)
 }
 
 // Agents returns the overlay catalog: every definition and what it resolves to.
@@ -2056,12 +2036,12 @@ func (c *Control) Unsubscribe(id int) {
 func (c *Control) onFrame(frame protocol.Frame) {
 	c.publish(frame)
 	// Titles are derived from the first user message, so a settled run is the
-	// moment a conversation's name can change. The settlement also ends the prompt
-	// grace: the run is over because the worker said so, and the busy sign should come
+	// moment a conversation's name can change. The settlement also clears the prompt
+	// stamp: the run is over because the worker said so, and the busy sign should come
 	// down with the answer rather than lingering for the rest of the ten seconds.
 	if frame.Type == "submission" {
 		c.mu.Lock()
-		c.settledAt[frame.ConversationID] = time.Now().UnixMilli()
+		delete(c.promptedAt, frame.ConversationID)
 		c.mu.Unlock()
 		go func() {
 			ctx := context.Background()
@@ -2339,17 +2319,16 @@ func (c *Control) persist() {
 // runActive is the one busy rule the interface reads. The worker's run record is the
 // signal, but it lags behind the click and outlives dead runs, so both directions are
 // gated: a prompt accepted in the last ten seconds counts before the record exists, and a
-// record only counts while the activity is fresh. The grace ends early when the run does:
-// a settled submission is the worker saying it finished, so the sign comes down with the
-// answer rather than outliving it by seconds. Thirty minutes of silence with no new
+// record only counts while the activity is fresh. A settlement clears its prompt stamp,
+// so the grace ends when the run does: the sign comes down with the answer rather than
+// outliving it by seconds. Thirty minutes of silence with no new
 // prompt is a residue, not a run — a legitimately quiet hour-long tool call is the known
 // cost, and its tool cards still say it is working.
 func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	c.mu.RLock()
 	prompted := c.promptedAt[info.ID]
-	settled := c.settledAt[info.ID]
 	c.mu.RUnlock()
-	if now-prompted < 10_000 && prompted > settled {
+	if now-prompted < 10_000 {
 		return true
 	}
 	if !info.Running || info.UpdatedAt <= 0 {
