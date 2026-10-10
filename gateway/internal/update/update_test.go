@@ -1,0 +1,298 @@
+package update
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func releaseJSON(tag string, assets string) string {
+	return fmt.Sprintf(`{"tag_name":%q,"name":%q,"body":"notes for %s","published_at":"2026-10-10T00:00:00Z","assets":[%s]}`,
+		tag, tag, tag, assets)
+}
+
+func testManager(t *testing.T) (*Manager, string) {
+	t.Helper()
+	home := t.TempDir()
+	bin := filepath.Join(t.TempDir(), "acornfall")
+	if err := os.WriteFile(bin, []byte("old-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	migrate := t.TempDir()
+	manager := New(home, bin, migrate)
+	manager.client = &http.Client{}
+	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
+		t.Fatal(err)
+	}
+	return manager, home
+}
+
+func TestCheckFindsNewRelease(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL
+	manager.client = server.Client()
+
+	release, err := manager.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if release.Tag != "v0.9.0" {
+		t.Fatalf("got tag %q", release.Tag)
+	}
+	status := manager.Status()
+	if !status.Available {
+		t.Fatal("v0.9.0 over v0.8.0 should be available")
+	}
+	if status.Latest != "v0.9.0" || status.Notes != "notes for v0.9.0" {
+		t.Fatalf("bad status %+v", status)
+	}
+}
+
+func TestPinnedTagMeansNoPrompts(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL
+	manager.client = server.Client()
+
+	if err := manager.SaveSettings(Settings{Channel: "releases", AutoCheck: true, Pinned: "v0.8.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if status := manager.Status(); status.Available {
+		t.Fatal("pinned installs must not prompt")
+	}
+}
+
+func TestBuildVersionStampsFreshInstall(t *testing.T) {
+	old := BuildVersion
+	BuildVersion = "v0.9.0"
+	defer func() { BuildVersion = old }()
+	home := t.TempDir()
+	bin := filepath.Join(t.TempDir(), "acornfall")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manager := New(home, bin, "")
+	if err := manager.Open(); err != nil {
+		t.Fatal(err)
+	}
+	// No version file: the stamp names the build, so it is not "dev".
+	if status := manager.Status(); status.Current != "v0.9.0" {
+		t.Fatalf("current = %q, want the stamp", status.Current)
+	}
+}
+
+func TestDevBuildNeverPrompts(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(t.TempDir(), "acornfall")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manager := New(home, bin, "")
+	manager.client = &http.Client{}
+	// No version file: current stays "dev".
+	if err := manager.Open(); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL
+	manager.client = server.Client()
+	if _, err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if status := manager.Status(); status.Available {
+		t.Fatal("a dev build cannot name itself, so it must not prompt")
+	}
+}
+
+func TestBackupKeepsLastThree(t *testing.T) {
+	manager, home := testManager(t)
+	if err := os.WriteFile(filepath.Join(home, "workspaces.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "state", "general"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "state", "general", "session.sqlite"), []byte("db"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		if _, err := manager.Backup(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backups := manager.Backups()
+	if len(backups) != MaxBackups {
+		t.Fatalf("got %d backups, want %d", len(backups), MaxBackups)
+	}
+}
+
+func TestMigrateMissingScriptIsNothingToDo(t *testing.T) {
+	manager, _ := testManager(t)
+	if err := manager.Migrate(context.Background(), "v0.9.0"); err != nil {
+		t.Fatalf("missing script should pass, got %v", err)
+	}
+}
+
+func TestMigrateFailureStopsBoot(t *testing.T) {
+	manager, _ := testManager(t)
+	script := filepath.Join(manager.migrateDir, "v0.9.0.sh")
+	if err := os.WriteFile(script, []byte("echo boom\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Migrate(context.Background(), "v0.9.0"); err == nil {
+		t.Fatal("a failing script must stop boot")
+	}
+}
+
+func TestApplyRefusesWhileRunsActive(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.RunsActive = func() bool { return true }
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL
+	manager.client = server.Client()
+
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "wait"}); err == nil {
+		t.Fatal("active runs with drain=wait must refuse")
+	} else if _, ok := err.(ErrRunsActive); !ok {
+		t.Fatalf("want ErrRunsActive, got %T %v", err, err)
+	}
+}
+
+func TestVerifyChecksChecksumFile(t *testing.T) {
+	manager, _ := testManager(t)
+	binary := []byte("new-binary")
+	sum := sha256.Sum256(binary)
+	good := hex.EncodeToString(sum[:]) + "  acornfall-bin\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/x.bin":
+			_, _ = w.Write(binary)
+		case "/sums.txt":
+			_, _ = w.Write([]byte(good))
+		default:
+			_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
+		}
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin"},
+		{Name: "sha256sums.txt", URL: server.URL + "/sums.txt"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatalf("matching checksum must pass, got %v", err)
+	}
+}
+
+func TestVerifyRefusesMismatch(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/x.bin":
+			_, _ = w.Write([]byte("evil-binary"))
+		case "/sums.txt":
+			_, _ = w.Write([]byte(strings.Repeat("0", 64) + "  acornfall-bin\n"))
+		default:
+			_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
+		}
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin"},
+		{Name: "sha256sums.txt", URL: server.URL + "/sums.txt"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err == nil {
+		t.Fatal("mismatched checksum must stop the update")
+	} else if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("want checksum mismatch, got %v", err)
+	}
+	got, _ := os.ReadFile(manager.binPath)
+	if string(got) != "old-binary" {
+		t.Fatalf("failed verify must not touch the binary, got %q", got)
+	}
+}
+
+func TestApplySwapsAndRollbackRestores(t *testing.T) {
+	manager, _ := testManager(t)
+	binary := []byte("new-binary")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".bin") {
+			_, _ = w.Write(binary)
+			return
+		}
+		assets := fmt.Sprintf(`{"name":"acornfall-test-test","browser_download_url":%q,"size":10}`,
+			"http://"+r.Host+"/x.bin")
+		_, _ = w.Write([]byte(releaseJSON("v0.9.0", assets)))
+	}))
+	defer server.Close()
+	// Point the platform-named asset at this test: AssetFor uses runtime
+	// GOOS/GOARCH, so serve the release through a rewrite instead. The
+	// manager downloads whatever AssetFor picks, so seed latest directly.
+	manager.latestURL = server.URL
+	manager.client = server.Client()
+	release, err := manager.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = release
+	// Seed a matching asset by hand: the test server names it per platform.
+	manager.mu.Lock()
+	manager.latest.Assets = []Asset{{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin", Size: 10}}
+	manager.mu.Unlock()
+
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(manager.binPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new-binary" {
+		t.Fatalf("binary not swapped, got %q", got)
+	}
+	if status := manager.Status(); !status.RestartRequired {
+		t.Fatal("swapped files with an old process must ask for restart")
+	}
+	if tag, ok := manager.PendingMigrate(); !ok || tag != "v0.9.0" {
+		t.Fatalf("pending migrate = %q, %v", tag, ok)
+	}
+	if err := manager.Rollback(fmt.Errorf("health never passed")); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(manager.binPath)
+	if string(got) != "old-binary" {
+		t.Fatalf("rollback did not restore, got %q", got)
+	}
+	if status := manager.Status(); status.Failed == "" {
+		t.Fatal("the screen must show the rollback cause")
+	}
+}

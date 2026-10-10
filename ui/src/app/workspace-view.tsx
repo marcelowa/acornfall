@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
+import { ArrowUp, ChevronsUpDown, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
 import type { DefaultScope, ProviderAuthType } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { ConversationList } from "@/components/conversation/conversation-list";
@@ -18,10 +18,12 @@ import { ErrorStrip } from "@/components/ui/error-strip";
 import { ChoiceControl } from "@/components/composer/choice-control";
 import { Picker } from "@/components/composer/picker";
 import { SettingsScreen } from "@/components/settings/settings-screen";
+import { UpdateSection } from "@/components/settings/update-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesScreen } from "@/components/workspace/workspaces-screen";
 import { Transcript } from "@/components/transcript/transcript";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -359,6 +361,20 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		</Stack>
 	);
 
+	// The update screen: one dot, one screen, one click. Runs block it, and the
+	// dialog asks: wait for drain, stop and update, or cancel.
+	const updates = (
+		<UpdateSection
+			status={platform.update}
+			runsActive={platform.conversations.some((conversation) => conversation.running)}
+			onCheck={platform.checkUpdateNow}
+			onApply={platform.applyUpdateNow}
+			onRollback={platform.rollbackUpdateNow}
+			onSavePrefs={platform.setUpdatePrefs}
+			onLater={() => platform.showScreen("conversation")}
+		/>
+	);
+
 	// Provider keys are global, so their section never sits under the workspace tabs.
 	const providers = (
 		<ProvidersSection
@@ -401,6 +417,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				onUpdateWorkspace={platform.setWorkspace}
 				defaults={defaults}
 				providers={providers}
+				updates={updates}
 				onClose={() => platform.showScreen("conversation")}
 			/>
 		) : undefined;
@@ -408,10 +425,29 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	// The full-width bar: the brand, then the active name, then the pane control.
 	// No rail buttons here from `lg`: the rail head closes it and the collapsed strip
 	// opens it. Below `lg` Split puts the drawer toggle beside the brand.
+	// The update dot: one button, count 1, straight to the Updates tab. It sits
+	// in the top bar so it shows on every screen, conversation or settings.
+	const updateDot =
+		platform.update?.available === true ? (
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon-sm"
+				aria-label="Update ready"
+				onClick={() => platform.showSettingsTab("updates")}
+			>
+				<ArrowUp />
+				<Badge variant="soft" tone="info" size="sm">
+					1
+				</Badge>
+			</Button>
+		) : null;
+
 	const topbar = (
 		<>
 			{brand}
 			<div className="flex min-w-0 flex-1 items-center">{barTitle}</div>
+			{updateDot}
 			{screen === undefined ? inspectorToggle : null}
 		</>
 	);

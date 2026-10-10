@@ -1,0 +1,693 @@
+// Package update is the self-update tier: version file, release check,
+// backup set, migrate runner, health-gated switch, rollback.
+//
+// v1 reads GitHub releases only. The gateway checks once per hour and on
+// demand; the update screen shows one dot, one screen, one click. A failed
+// update returns to the last good build. See docs/adr/0019-self-update.md.
+package update
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+// LatestURL is the v1 release source: GitHub releases only.
+const LatestURL = "https://api.github.com/repos/marcelowa/acornfall/releases/latest"
+
+// CheckInterval is how often the gateway checks on its own.
+const CheckInterval = time.Hour
+
+// HealthWindow is how long /healthz must pass after a switch.
+const HealthWindow = 30 * time.Second
+
+// MaxBackups is how many backup sets are kept.
+const MaxBackups = 3
+
+// BuildVersion is the release tag stamped at build time. A fresh install
+// from a release therefore knows its tag without a version file. The file
+// wins when both exist: an update writes it, and what ran is what it says.
+var BuildVersion string
+
+// Release is one GitHub release, kept to the fields the screen reads.
+type Release struct {
+	Tag         string
+	Name        string
+	Notes       string
+	PublishedAt string
+	Assets      []Asset
+}
+
+// Asset is one release file.
+type Asset struct {
+	Name string
+	URL  string
+	Size int64
+}
+
+// Settings are the Updates tab: channel, auto-check, pinned tag.
+// Pinned means no prompts.
+type Settings struct {
+	Channel   string `json:"channel"`
+	AutoCheck bool   `json:"autoCheck"`
+	Pinned    string `json:"pinned"`
+}
+
+// DefaultSettings is what a fresh install gets.
+func DefaultSettings() Settings {
+	return Settings{Channel: "releases", AutoCheck: true}
+}
+
+// Status is what GET /api/update/status answers.
+type Status struct {
+	Current  string `json:"current"`
+	Latest   string `json:"latest"`
+	Notes    string `json:"notes"`
+	Pinned   string `json:"pinned"`
+	Channel  string `json:"channel"`
+	Checking bool   `json:"checking"`
+	// Available is one dot, not a list: a newer tag exists and nothing pins it.
+	Available bool `json:"available"`
+	// Failed carries the last rollback cause, so the screen can say it.
+	Failed string `json:"failed,omitempty"`
+	// RestartRequired is set after files are swapped but the process is old.
+	RestartRequired bool `json:"restartRequired,omitempty"`
+}
+
+// ApplyOptions are POST /api/update/apply.
+type ApplyOptions struct {
+	CleanVMs bool
+	Drain    string
+}
+
+// ErrRunsActive is the refusal when runs are active and drain is "wait".
+type ErrRunsActive struct{}
+
+func (ErrRunsActive) Error() string {
+	return "runs are active: wait for drain, stop runs and update, or cancel"
+}
+
+// Manager owns the update state for one install.
+type Manager struct {
+	home       string
+	binPath    string
+	migrateDir string
+	latestURL  string
+	client     *http.Client
+
+	mu       sync.Mutex
+	settings Settings
+	current  string
+	latest   Release
+	checking bool
+	failed   string
+	restart  bool
+
+	// RunsActive reports whether any conversation is running. Injected so
+	// tests need no control plane.
+	RunsActive func() bool
+	// IsAdmin decides POST /api/update/apply. Default allow: single user
+	// now, admin later. Return false to get the 403 path today.
+	IsAdmin func(r *http.Request) bool
+}
+
+// New builds a Manager. Empty binPath means the current executable.
+// Empty migrateDir means <repo>/scripts/migrate beside nothing: pass it
+// explicitly in production; empty disables the migrate step in tests.
+func New(home, binPath, migrateDir string) *Manager {
+	if binPath == "" {
+		if executable, err := os.Executable(); err == nil {
+			binPath = executable
+		}
+	}
+	return &Manager{
+		home:       home,
+		binPath:    binPath,
+		migrateDir: migrateDir,
+		latestURL:  LatestURL,
+		client:     &http.Client{Timeout: 30 * time.Second},
+		settings:   DefaultSettings(),
+		IsAdmin:    func(*http.Request) bool { return true },
+	}
+}
+
+func (m *Manager) versionPath() string       { return filepath.Join(m.home, "version") }
+func (m *Manager) settingsPath() string      { return filepath.Join(m.home, "update.json") }
+func (m *Manager) backupsDir() string        { return filepath.Join(m.home, "backups") }
+func (m *Manager) pendingPath() string       { return filepath.Join(m.home, "update.pending") }
+func (m *Manager) failedPath() string        { return filepath.Join(m.home, "update.failed") }
+func (m *Manager) backupBinPath() string     { return m.binPath + ".bak" }
+func (m *Manager) backupVersionPath() string { return m.binPath + ".bak.version" }
+
+// Open loads settings, version, and the last failure marker.
+func (m *Manager) Open() error {
+	if payload, err := os.ReadFile(m.settingsPath()); err == nil {
+		var settings Settings
+		if err := json.Unmarshal(payload, &settings); err == nil {
+			if settings.Channel == "" {
+				settings.Channel = "releases"
+			}
+			m.settings = settings
+		}
+	}
+	if payload, err := os.ReadFile(m.versionPath()); err == nil {
+		m.current = strings.TrimSpace(string(payload))
+	}
+	if m.current == "" {
+		m.current = BuildVersion
+	}
+	if m.current == "" {
+		m.current = "dev"
+	}
+	if payload, err := os.ReadFile(m.failedPath()); err == nil {
+		m.failed = strings.TrimSpace(string(payload))
+	}
+	return nil
+}
+
+// SaveSettings writes the Updates tab.
+func (m *Manager) SaveSettings(settings Settings) error {
+	if settings.Channel == "" {
+		settings.Channel = "releases"
+	}
+	m.mu.Lock()
+	m.settings = settings
+	m.mu.Unlock()
+	payload, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.settingsPath(), append(payload, '\n'), 0o600)
+}
+
+// Settings reads the Updates tab.
+func (m *Manager) Settings() Settings {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.settings
+}
+
+// SetCurrentVersion records the running tag.
+func (m *Manager) SetCurrentVersion(tag string) error {
+	m.mu.Lock()
+	m.current = tag
+	m.mu.Unlock()
+	return os.WriteFile(m.versionPath(), []byte(tag+"\n"), 0o644)
+}
+
+// Status builds the screen's answer.
+func (m *Manager) Status() Status {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	available := m.latest.Tag != "" && m.latest.Tag != m.current &&
+		m.current != "dev" && m.settings.Pinned == ""
+	// A dev build never knows its tag, so it never prompts: showing a dot
+	// for a build that cannot name itself would be a lie.
+	if m.current == "dev" {
+		available = false
+	}
+	return Status{
+		Current:         m.current,
+		Latest:          m.latest.Tag,
+		Notes:           m.latest.Notes,
+		Pinned:          m.settings.Pinned,
+		Channel:         m.settings.Channel,
+		Checking:        m.checking,
+		Available:       available,
+		Failed:          m.failed,
+		RestartRequired: m.restart,
+	}
+}
+
+// Check forces a release check now. Pinned tags still fetch (so the screen
+// can name the release) but never prompt.
+func (m *Manager) Check(ctx context.Context) (Release, error) {
+	m.mu.Lock()
+	m.checking = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.checking = false
+		m.mu.Unlock()
+	}()
+	release, err := m.fetch(ctx)
+	if err != nil {
+		return Release{}, err
+	}
+	m.mu.Lock()
+	m.latest = release
+	m.mu.Unlock()
+	return release, nil
+}
+
+// StartLoop checks on demand plus once per hour when auto-check is on.
+func (m *Manager) StartLoop(ctx context.Context) {
+	ticker := time.NewTicker(CheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if m.Settings().AutoCheck {
+				_, _ = m.Check(ctx)
+			}
+		}
+	}
+}
+
+func (m *Manager) fetch(ctx context.Context) (Release, error) {
+	url := m.latestURL
+	if url == "" {
+		url = LatestURL
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return Release{}, err
+	}
+	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	response, err := m.client.Do(request)
+	if err != nil {
+		return Release{}, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return Release{}, fmt.Errorf("releases: github answered %s", response.Status)
+	}
+	return parseRelease(response.Body)
+}
+
+func parseRelease(body io.Reader) (Release, error) {
+	var payload struct {
+		TagName     string `json:"tag_name"`
+		Name        string `json:"name"`
+		Body        string `json:"body"`
+		PublishedAt string `json:"published_at"`
+		Assets      []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+			Size int64  `json:"size"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return Release{}, fmt.Errorf("releases: cannot read answer: %w", err)
+	}
+	if payload.TagName == "" {
+		return Release{}, fmt.Errorf("releases: answer has no tag_name")
+	}
+	release := Release{
+		Tag:         payload.TagName,
+		Name:        payload.Name,
+		Notes:       payload.Body,
+		PublishedAt: payload.PublishedAt,
+	}
+	for _, asset := range payload.Assets {
+		release.Assets = append(release.Assets, Asset{Name: asset.Name, URL: asset.URL, Size: asset.Size})
+	}
+	return release, nil
+}
+
+// AssetFor picks the release file for this platform, or "" when the
+// release publishes none. Names follow `acornfall-<goos>-<goarch>`.
+func AssetFor(release Release) Asset {
+	want := "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH
+	for _, asset := range release.Assets {
+		if asset.Name == want {
+			return asset
+		}
+	}
+	return Asset{}
+}
+
+// Backup copies config, state DB, and workspace list into
+// <home>/backups/<timestamp>/ and keeps the last 3. Update stops when
+// backup fails.
+func (m *Manager) Backup() (string, error) {
+	stamp := time.Now().UTC().Format("20060102-150405.000000000")
+	dir := filepath.Join(m.backupsDir(), stamp)
+	// Same-nanosecond backups must not share a folder: rotation counts
+	// folders, and two backups in one would silently be one.
+	for i := 1; ; i++ {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			break
+		}
+		dir = filepath.Join(m.backupsDir(), fmt.Sprintf("%s-%d", stamp, i))
+	}
+	files := []string{"config.json", "credentials.json", "settings.json", "workspaces.json", "version", "update.json"}
+	for _, name := range files {
+		source := filepath.Join(m.home, name)
+		payload, err := os.ReadFile(source)
+		if err != nil {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), payload, 0o600); err != nil {
+			return "", err
+		}
+	}
+	if err := copyDir(filepath.Join(m.home, "state"), filepath.Join(dir, "state")); err != nil {
+		return "", err
+	}
+	if err := m.pruneBackups(); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// Backups lists kept backup sets, newest last.
+func (m *Manager) Backups() []string {
+	entries, err := os.ReadDir(m.backupsDir())
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (m *Manager) pruneBackups() error {
+	names := m.Backups()
+	for len(names) > MaxBackups {
+		oldest := filepath.Join(m.backupsDir(), names[0])
+		if err := os.RemoveAll(oldest); err != nil {
+			return err
+		}
+		names = names[1:]
+	}
+	return nil
+}
+
+func copyDir(source, target string) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		from := filepath.Join(source, entry.Name())
+		to := filepath.Join(target, entry.Name())
+		if entry.IsDir() {
+			if err := copyDir(from, to); err != nil {
+				return err
+			}
+			continue
+		}
+		payload, err := os.ReadFile(from)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(to, payload, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Migrate runs scripts/migrate/<tag>.sh. Missing script means nothing to
+// do. Non-zero exit is the error the boot refuses on: boot stops and
+// rollback starts. No silent fix-ups live anywhere else.
+func (m *Manager) Migrate(ctx context.Context, tag string) error {
+	if m.migrateDir == "" {
+		return nil
+	}
+	script := filepath.Join(m.migrateDir, tag+".sh")
+	if _, err := os.Stat(script); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	command := exec.CommandContext(ctx, "sh", script, m.home)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("migrate %s: %v: %s", tag, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// Apply backs up, downloads, verifies, swaps, and stages the migrate.
+// It answers ErrRunsActive when runs are active and drain is not "stop".
+// The process is still the old build when Apply returns: restart it, and
+// the new binary migrates at boot before serving.
+func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
+	if options.Drain == "" {
+		options.Drain = "wait"
+	}
+	if m.RunsActive != nil && m.RunsActive() && options.Drain != "stop" {
+		return ErrRunsActive{}
+	}
+	m.mu.Lock()
+	release := m.latest
+	m.mu.Unlock()
+	if release.Tag == "" {
+		fetched, err := m.Check(ctx)
+		if err != nil {
+			return err
+		}
+		release = fetched
+	}
+	asset := AssetFor(release)
+	if asset.URL == "" {
+		return fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
+	}
+	if _, err := m.Backup(); err != nil {
+		return fmt.Errorf("backup failed, update stopped: %w", err)
+	}
+	payload, err := m.download(ctx, asset.URL)
+	if err != nil {
+		return err
+	}
+	if err := m.verify(ctx, payload, release); err != nil {
+		return err
+	}
+	if err := m.swap(payload, release.Tag); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) download(ctx context.Context, url string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := m.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("releases: download answered %s", response.Status)
+	}
+	return io.ReadAll(io.LimitReader(response.Body, 256<<20))
+}
+
+// verify checks the payload against the release's checksum file when the
+// release publishes one (sha256sums.txt or checksums.txt). Without one it
+// passes: the transport is TLS to github, and the shape question (cosign
+// vs minisign vs checksum file) is still open — see ADR 0019.
+func (m *Manager) verify(ctx context.Context, payload []byte, release Release) error {
+	var checksumURL string
+	for _, asset := range release.Assets {
+		if asset.Name == "sha256sums.txt" || asset.Name == "checksums.txt" {
+			checksumURL = asset.URL
+			break
+		}
+	}
+	if checksumURL == "" {
+		return nil
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
+	if err != nil {
+		return err
+	}
+	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := m.client.Do(request)
+	if err != nil {
+		return fmt.Errorf("releases: cannot fetch checksums: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	list, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(payload)
+	want := hex.EncodeToString(sum[:])
+	for _, line := range strings.Split(string(list), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("releases: checksum mismatch for %s", release.Tag)
+}
+
+// swap keeps the last good binary as .bak, writes the new one, records the
+// version, and stages the pending migrate.
+func (m *Manager) swap(payload []byte, tag string) error {
+	if m.binPath == "" {
+		return fmt.Errorf("update: no binary path")
+	}
+	current, err := os.ReadFile(m.binPath)
+	if err != nil {
+		return fmt.Errorf("update: cannot read running binary: %w", err)
+	}
+	if err := os.WriteFile(m.backupBinPath(), current, 0o755); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	previous := m.current
+	m.mu.Unlock()
+	if err := os.WriteFile(m.backupVersionPath(), []byte(previous+"\n"), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(m.binPath, payload, 0o755); err != nil {
+		return fmt.Errorf("update: cannot write new binary: %w", err)
+	}
+	if err := os.WriteFile(m.pendingPath(), []byte(tag+"\n"), 0o644); err != nil {
+		return err
+	}
+	if err := m.SetCurrentVersion(tag); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.restart = true
+	m.failed = ""
+	m.mu.Unlock()
+	_ = os.Remove(m.failedPath())
+	return nil
+}
+
+// Rollback restores the last good binary and version. The caller restarts.
+func (m *Manager) Rollback(cause error) error {
+	backup, err := os.ReadFile(m.backupBinPath())
+	if err != nil {
+		return fmt.Errorf("rollback: no backup binary: %w", err)
+	}
+	if m.binPath == "" {
+		return fmt.Errorf("rollback: no binary path")
+	}
+	if err := os.WriteFile(m.binPath, backup, 0o755); err != nil {
+		return err
+	}
+	previous := "unknown"
+	if payload, err := os.ReadFile(m.backupVersionPath()); err == nil {
+		previous = strings.TrimSpace(string(payload))
+	}
+	_ = m.SetCurrentVersion(previous)
+	_ = os.Remove(m.pendingPath())
+	message := "unknown cause"
+	if cause != nil {
+		message = cause.Error()
+	}
+	m.mu.Lock()
+	m.failed = message
+	m.restart = false
+	m.mu.Unlock()
+	_ = os.WriteFile(m.failedPath(), []byte(message+"\n"), 0o644)
+	return nil
+}
+
+// PendingMigrate reports the staged tag, if any.
+func (m *Manager) PendingMigrate() (string, bool) {
+	payload, err := os.ReadFile(m.pendingPath())
+	if err != nil {
+		return "", false
+	}
+	if tag := strings.TrimSpace(string(payload)); tag != "" {
+		return tag, true
+	}
+	return "", false
+}
+
+// ClearPending drops the staged migrate after it passes.
+func (m *Manager) ClearPending() {
+	_ = os.Remove(m.pendingPath())
+}
+
+// RunPending runs the staged migrate at boot, before serving. A failing
+// script restores the backup and reports the error: boot stops, rollback
+// starts, the user never lands on a dead UI.
+func (m *Manager) RunPending(ctx context.Context) error {
+	tag, ok := m.PendingMigrate()
+	if !ok {
+		return nil
+	}
+	if err := m.Migrate(ctx, tag); err != nil {
+		rollbackErr := m.Rollback(err)
+		if rollbackErr != nil {
+			return fmt.Errorf("migrate failed and rollback failed: %v (rollback: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("migrate failed, rolled back: %w", err)
+	}
+	m.ClearPending()
+	return nil
+}
+
+// WaitHealthy polls url until it answers 200 or the window ends.
+func WaitHealthy(ctx context.Context, url string, window time.Duration) error {
+	deadline := time.Now().Add(window)
+	client := &http.Client{Timeout: 5 * time.Second}
+	for time.Now().Before(deadline) {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		response, err := client.Do(request)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return fmt.Errorf("healthy check: %s never answered 200 in %s", url, window)
+}

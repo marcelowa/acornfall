@@ -5,6 +5,7 @@ import { Picker } from "@/components/composer/picker";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProvidersSection } from "./providers-section";
 import { SettingsScreen } from "./settings-screen";
+import { UpdateSection } from "./update-section";
 
 const meta = {
 	title: "Screens/Settings",
@@ -115,6 +116,28 @@ const providers: ProviderSummary[] = [
 	},
 ];
 
+const updates = (
+	<UpdateSection
+		status={{
+			current: "v0.8.0",
+			latest: "v0.9.0",
+			notes: "Faster sandbox boot.",
+			pinned: "",
+			channel: "releases",
+			autoCheck: true,
+			checking: false,
+			available: true,
+			backups: [],
+		}}
+		runsActive={false}
+		onCheck={noop}
+		onApply={noop}
+		onRollback={noop}
+		onSavePrefs={noop}
+		onLater={noop}
+	/>
+);
+
 export const Default: Story = {
 	args: {
 		tab: "workspace",
@@ -125,6 +148,7 @@ export const Default: Story = {
 		onUpdateWorkspace: noop,
 		defaults,
 		providers: <ProvidersSection providers={providers} />,
+		updates,
 		onClose: noop,
 	},
 };
@@ -147,6 +171,11 @@ export const Defaults: Story = {
 /** The appearance page. */
 export const Appearance: Story = {
 	args: { ...Default.args, tab: "appearance" },
+};
+
+/** The updates page: one release, one click. */
+export const Updates: Story = {
+	args: { ...Default.args, tab: "updates" },
 };
 
 /** A workspace that is not loaded yet: the form is there, and Save knows it has nothing. */

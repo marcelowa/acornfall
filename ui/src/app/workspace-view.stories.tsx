@@ -261,6 +261,12 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		closeLogin: noop,
 		logoutProvider: noop,
 		refreshProviders: noop,
+		update: undefined,
+		refreshUpdate: noop,
+		checkUpdateNow: noop,
+		applyUpdateNow: noop,
+		rollbackUpdateNow: noop,
+		setUpdatePrefs: noop,
 		...overrides,
 	};
 }

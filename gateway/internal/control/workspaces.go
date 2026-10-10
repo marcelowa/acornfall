@@ -513,6 +513,18 @@ func (w *Workspaces) running() []*Control {
 	return controls
 }
 
+// AnyRunning reports whether any conversation in any started workspace is running.
+// Only started workspaces are asked: an unstarted worker has no runs. The update
+// tier reads this before swapping binaries, so an update never lands mid-run.
+func (w *Workspaces) AnyRunning() bool {
+	for _, control := range w.running() {
+		if control.AnyRunning() {
+			return true
+		}
+	}
+	return false
+}
+
 // noneOffer reports whether no started workspace offers this model. With none started there
 // is nothing to check against, and refusing would make the first thing anyone does fail.
 func (w *Workspaces) noneOffer(provider, modelID string) bool {

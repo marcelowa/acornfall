@@ -267,3 +267,60 @@ export function answerAuthPrompt(
 export function cancelAuthFlow(authId: string): Promise<void> {
 	return post("/api/auth/cancel", { authId });
 }
+
+/** The update screen, as the gateway reports it. `available` is one dot, not a list. */
+export interface UpdateStatus {
+	current: string;
+	latest: string;
+	notes: string;
+	pinned: string;
+	channel: string;
+	autoCheck: boolean;
+	checking: boolean;
+	available: boolean;
+	failed?: string | undefined;
+	restartRequired?: boolean | undefined;
+	backups: string[];
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+	const response = await fetch(path, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body ?? {}),
+	});
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as T;
+}
+
+export async function fetchUpdateStatus(): Promise<UpdateStatus> {
+	const response = await fetch("/api/update/status");
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as UpdateStatus;
+}
+
+/** Force a release check now. */
+export function checkUpdate(): Promise<UpdateStatus> {
+	return postJson<UpdateStatus>("/api/update/check", {});
+}
+
+/** Back up, download, verify, swap. The process stays old until it restarts. */
+export function applyUpdate(cleanVMs: boolean, drain: "wait" | "stop"): Promise<UpdateStatus> {
+	return postJson<UpdateStatus>("/api/update/apply", { cleanVMs, drain });
+}
+
+/** Restore the last good build. */
+export function rollbackUpdate(): Promise<UpdateStatus> {
+	return postJson<UpdateStatus>("/api/update/rollback", {});
+}
+
+export interface UpdatePrefs {
+	channel?: string;
+	autoCheck?: boolean;
+	pinned?: string;
+}
+
+/** The Updates tab: channel, auto-check, pinned tag. Pinned means no prompts. */
+export function setUpdatePrefs(prefs: UpdatePrefs): Promise<UpdateStatus> {
+	return postJson<UpdateStatus>("/api/update/settings", prefs);
+}
