@@ -19,6 +19,12 @@ import (
 	"time"
 )
 
+// versionScript is a runnable stand-in for a staged binary: the exec gate
+// runs it and it names its tag. Real binaries are proven in the drills.
+func versionScript(tag string) string {
+	return "#!/bin/sh\necho " + tag + "\n"
+}
+
 func releaseJSON(tag string, assets string) string {
 	return fmt.Sprintf(`{"tag_name":%q,"name":%q,"body":"notes for %s","published_at":"2026-10-10T00:00:00Z","assets":[%s]}`,
 		tag, tag, tag, assets)
@@ -229,7 +235,7 @@ func TestApplyStagesWorkerTarball(t *testing.T) {
 			_, _ = w.Write(tarball)
 			return
 		}
-		_, _ = w.Write([]byte("new-gateway"))
+		_, _ = w.Write([]byte(versionScript("v0.9.0")))
 	}))
 	defer server.Close()
 	manager.client = server.Client()
@@ -255,7 +261,7 @@ func TestApplyStagesWorkerTarball(t *testing.T) {
 func TestApplySkipsWorkerWhenReleasePredatesIt(t *testing.T) {
 	manager, _ := testManager(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("new-gateway"))
+		_, _ = w.Write([]byte(versionScript("v0.9.0")))
 	}))
 	defer server.Close()
 	manager.client = server.Client()
@@ -310,7 +316,7 @@ func TestApplyRefusesWhileRunsActive(t *testing.T) {
 
 func TestVerifyChecksChecksumFile(t *testing.T) {
 	manager, _ := testManager(t)
-	binary := []byte("new-binary")
+	binary := []byte(versionScript("v0.9.0"))
 	sum := sha256.Sum256(binary)
 	good := hex.EncodeToString(sum[:]) + "  acornfall-bin\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -369,7 +375,7 @@ func TestVerifyRefusesMismatch(t *testing.T) {
 
 func TestDownloadUsesAssetAPI(t *testing.T) {
 	manager, _ := testManager(t)
-	binary := []byte("new-binary")
+	binary := []byte(versionScript("v0.9.0"))
 	var gotAccept string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
@@ -399,14 +405,14 @@ func TestDownloadUsesAssetAPI(t *testing.T) {
 		t.Fatalf("asset API needs the octet accept, got %q", gotAccept)
 	}
 	got, _ := os.ReadFile(manager.binPath)
-	if string(got) != "new-binary" {
+	if string(got) != versionScript("v0.9.0") {
 		t.Fatalf("binary not swapped, got %q", got)
 	}
 }
 
 func TestApplySwapsAndRollbackRestores(t *testing.T) {
 	manager, _ := testManager(t)
-	binary := []byte("new-binary")
+	binary := []byte(versionScript("v0.9.0"))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, ".bin") {
 			_, _ = w.Write(binary)
@@ -439,7 +445,7 @@ func TestApplySwapsAndRollbackRestores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "new-binary" {
+	if string(got) != versionScript("v0.9.0") {
 		t.Fatalf("binary not swapped, got %q", got)
 	}
 	if status := manager.Status(); !status.RestartRequired {
@@ -595,7 +601,7 @@ func TestEnsureBunDownloads(t *testing.T) {
 func TestApplyRefusesWhileRestartPending(t *testing.T) {
 	manager, _ := testManager(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("new-gateway"))
+		_, _ = w.Write([]byte(versionScript("v0.9.0")))
 	}))
 	defer server.Close()
 	manager.client = server.Client()
@@ -644,5 +650,132 @@ func TestPreflightDegradesOffline(t *testing.T) {
 	}
 	if preflight.Version != "v0.8.0" {
 		t.Fatal("local answers survive a dead network")
+	}
+}
+
+func TestApplyStopsRunsOnDrainStop(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.RunsActive = func() bool { return true }
+	var stopped int
+	manager.StopRuns = func(context.Context) error { stopped++; return nil }
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(versionScript("v0.9.0")))
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	if stopped != 1 {
+		t.Fatal("drain stop must stop runs before anything moves")
+	}
+}
+
+func TestApplyNeedsStopperOnDrainStop(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.RunsActive = func() bool { return true }
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err == nil {
+		t.Fatal("active runs with no stopper must refuse")
+	}
+}
+
+func TestApplyWipesSandboxesOnClean(t *testing.T) {
+	manager, _ := testManager(t)
+	var wiped []string
+	manager.CleanVMs = func(ctx context.Context) error {
+		wiped = append(wiped, "cleaned")
+		return nil
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(versionScript("v0.9.0")))
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{CleanVMs: true, Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(wiped) != 1 {
+		t.Fatal("clean VMs must wipe")
+	}
+}
+
+func TestApplyKeepsSandboxesByDefault(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.CleanVMs = func(context.Context) error {
+		t.Fatal("keep must not wipe")
+		return nil
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(versionScript("v0.9.0")))
+	}))
+	defer server.Close()
+	manager.client = server.Client()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+	}}
+	manager.mu.Unlock()
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCleanSandboxesRemovesAndEmpties(t *testing.T) {
+	state := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(state, "ws1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "img.bin"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	called := map[string]bool{}
+	err := CleanSandboxes(context.Background(), []string{"a", "b"}, func(_ context.Context, name string) error {
+		called[name] = true
+		return nil
+	}, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called["a"] || !called["b"] {
+		t.Fatal("every named sandbox must be removed through the engine")
+	}
+	if entries, _ := os.ReadDir(state); len(entries) != 0 {
+		t.Fatal("state dir must be emptied, not deleted")
+	}
+}
+
+func TestCleanSandboxesMissingStateIsClean(t *testing.T) {
+	if err := CleanSandboxes(context.Background(), nil, nil, filepath.Join(t.TempDir(), "absent")); err != nil {
+		t.Fatalf("missing state dir must pass: %v", err)
+	}
+}
+
+func TestCheckExecRunsStagedBinary(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "fakebin")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho v0.9.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkExec(context.Background(), payload, "v0.9.0"); err != nil {
+		t.Fatalf("runnable staged binary must pass: %v", err)
+	}
+	if err := checkExec(context.Background(), payload, "v9.9.9"); err == nil {
+		t.Fatal("wrong tag must fail")
+	}
+	if err := checkExec(context.Background(), []byte("not-a-binary"), "v0.9.0"); err == nil {
+		t.Fatal("garbage must fail")
 	}
 }

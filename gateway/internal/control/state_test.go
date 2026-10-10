@@ -272,3 +272,23 @@ func TestAViewFrameReachesOnlyItsConversation(t *testing.T) {
 	default:
 	}
 }
+
+func TestStateCarriesUpdateSummary(t *testing.T) {
+	control := New(Options{
+		Workspace: Workspace{Name: "w", Path: t.TempDir()},
+		Update: func() UpdateSummary {
+			return UpdateSummary{Current: "v0.9.0", Latest: "v0.9.1", Available: true}
+		},
+	})
+	state := control.State()
+	if !state.Update.Available || state.Update.Current != "v0.9.0" || state.Update.Latest != "v0.9.1" {
+		t.Fatalf("state must carry the summary: %+v", state.Update)
+	}
+}
+
+func TestStateWithoutUpdateIsEmpty(t *testing.T) {
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	if state := control.State(); state.Update != (UpdateSummary{}) {
+		t.Fatalf("no update tier must read empty, got %+v", state.Update)
+	}
+}

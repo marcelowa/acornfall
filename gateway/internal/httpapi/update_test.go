@@ -111,6 +111,15 @@ func TestUpdateSettingsValidatesChannel(t *testing.T) {
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("bad channel = %d, want 400", recorder.Code)
 	}
+	// The tree-build channel is designed, not built: asking for it by
+	// name refuses rather than silently keeping releases.
+	second := httptest.NewRequest(http.MethodPost, "/api/update/settings",
+		strings.NewReader(`{"channel":"main"}`))
+	secondRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(secondRecorder, second)
+	if secondRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("main channel = %d, want 400", secondRecorder.Code)
+	}
 }
 
 func TestHealthNamesVersion(t *testing.T) {

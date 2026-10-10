@@ -61,3 +61,21 @@ func TestResolveWorkerDefaultsToManaged(t *testing.T) {
 		t.Fatalf("managed dir must be ensured sources, got %q", dir)
 	}
 }
+
+func TestVersionStringReadsFile(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(home+"/version", []byte("v0.9.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	version, err := versionString(home)
+	if err != nil || version != "v0.9.0" {
+		t.Fatalf("version = %q, %v", version, err)
+	}
+}
+
+func TestVersionStringFallsBackToDev(t *testing.T) {
+	version, err := versionString(t.TempDir())
+	if err != nil || version != "dev" {
+		t.Fatalf("fresh home must read dev, got %q, %v", version, err)
+	}
+}

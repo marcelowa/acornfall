@@ -43,7 +43,10 @@ type Options struct {
 	// WorkerCommand is the base command; the per-workspace flags are appended in here.
 	WorkerCommand []string
 	WorkerDir     string
-	Credentials   string
+	// Update reports the self-update summary for the state stream. Nil
+	// means unknown: the interface falls back to fetching.
+	Update      func() UpdateSummary
+	Credentials string
 	// Model is the "provider/modelId" to use as the workspace default. It wins over a
 	// persisted default, and every conversation that never chose a model follows it.
 	Model string
@@ -61,6 +64,18 @@ type Options struct {
 	// workspace's own setting wins over it, and the engine and the machine have the last
 	// word: see docs/adr/0018-disable-vm-nesting.md.
 	DisableVMNesting bool
+}
+
+// UpdateSummary is the self-update state as the stream carries it: enough
+// for the header dot and the failure line, without a second round trip.
+// The full screen still reads GET /api/update/status. It rides the state
+// because the state stream is the one channel every client already holds.
+type UpdateSummary struct {
+	Current         string `json:"current"`
+	Latest          string `json:"latest,omitempty"`
+	Available       bool   `json:"available"`
+	Failed          string `json:"failed,omitempty"`
+	RestartRequired bool   `json:"restartRequired,omitempty"`
 }
 
 // SandboxState says what the agent's tools can reach here. When Tools is false the tools
@@ -164,7 +179,9 @@ type State struct {
 	WorkerUp    bool   `json:"workerUp"`
 	WorkerError string `json:"workerError,omitempty"`
 	// Sandbox is where this workspace's commands and file reads actually happen.
-	Sandbox   SandboxState            `json:"sandbox"`
+	Sandbox SandboxState `json:"sandbox"`
+	// Update is the self-update summary: the header dot without fetching.
+	Update    UpdateSummary           `json:"update"`
 	Agents    []protocol.AgentSummary `json:"agents"`
 	Skills    []protocol.SkillSummary `json:"skills"`
 	Defaults  []protocol.LayerTrace   `json:"defaults"`
@@ -858,6 +875,7 @@ func (c *Control) StateFor(conversationID string) State {
 		WorkerUp:    c.workerUp,
 		WorkerError: c.workerError,
 		Sandbox:     c.sandbox,
+		Update:      c.updateSummary(),
 		Inherited: Inherited{
 			Model:    c.bindings[active].Provider == "",
 			Thinking: c.bindings[active].ThinkingLevel == "",
@@ -2342,10 +2360,25 @@ func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	return now-info.UpdatedAt < 30*60*1000
 }
 
+// updateSummary reads the install's update tier without importing it: the
+// entry point wires the function, and a nil one answers the zero summary.
+func (c *Control) updateSummary() UpdateSummary {
+	if c.opts.Update == nil {
+		return UpdateSummary{}
+	}
+	return c.opts.Update()
+}
+
 // AnyRunning is the update gate: true while any conversation runs. It mirrors
 // runActive without calling it, because runActive takes the lock itself and
 // this scan already holds a copy made under it.
 func (c *Control) AnyRunning() bool {
+	return len(c.RunningIDs()) > 0
+}
+
+// RunningIDs names the conversations running now, for the update tier's
+// drain-stop: the dialog promises runs stop, so they must be enumerable.
+func (c *Control) RunningIDs() []string {
 	now := time.Now().UnixMilli()
 	c.mu.RLock()
 	infos := make([]protocol.ConversationInfo, len(c.conversations))
@@ -2355,15 +2388,17 @@ func (c *Control) AnyRunning() bool {
 		prompted[id] = at
 	}
 	c.mu.RUnlock()
+	var ids []string
 	for _, info := range infos {
 		if now-prompted[info.ID] < 10_000 {
-			return true
+			ids = append(ids, info.ID)
+			continue
 		}
 		if info.Running && info.UpdatedAt > 0 && now-info.UpdatedAt < 30*60*1000 {
-			return true
+			ids = append(ids, info.ID)
 		}
 	}
-	return false
+	return ids
 }
 
 func (c *Control) toConversations(infos []protocol.ConversationInfo) []Conversation {
