@@ -8,8 +8,16 @@
 # has KVM).
 name: ci
 
+# Branches only: a pull request is tested on its branch, and a rebase-merge
+# keeps that tree, so testing main again after merge repeats the same run.
+# Tags skip too: the release job ships artifacts, it needs no second suite.
+# A direct push to main is the one gap, and nobody works that way.
 on:
   push:
+    branches-ignore:
+      - main
+    tags-ignore:
+      - "v*"
   workflow_dispatch:
     inputs:
       runner:
