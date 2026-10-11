@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { SandboxNotRunningError, SandboxReplacedError } from "microsandbox";
 import {
+	ENGINE_VERSION,
 	MicrosandboxClient,
+	checkEngineVersion,
 	isStoppedError,
 	type MicrosandboxHandle,
 	type MicrosandboxSession,
@@ -297,6 +299,19 @@ test("a failed wake reports the wake's error", async () => {
 	} as unknown as MicrosandboxHandle;
 	const client = new MicrosandboxClient("acornfall-fake-0000", handle, fakeSession(deadFs()));
 	expect(client.read("/work/notes.txt")).rejects.toThrow(/engine unavailable/);
+});
+
+test("a loaded SDK that is not the pinned engine refuses before touching the store", async () => {
+	// The pin's value is checked against the gateway's by scripts/check-house-rules.mjs:
+	// the two share the store, so one value in two languages must stay one value.
+	await checkEngineVersion(async () => ({ version: ENGINE_VERSION }));
+	expect(checkEngineVersion(async () => ({ version: "0.7.7" }))).rejects.toThrow(/want 0\.7\.6/);
+	expect(checkEngineVersion(async () => ({}))).rejects.toThrow(/want 0\.7\.6/);
+	expect(
+		checkEngineVersion(async () => {
+			throw new Error("unreadable");
+		}),
+	).rejects.toThrow(/want 0\.7\.6/);
 });
 
 test("isStoppedError tells a dead session from a missing file", () => {

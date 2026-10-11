@@ -49,8 +49,28 @@ for (const rule of rules) {
 	}
 }
 
+// The engine pin lives in two languages and must stay one value: the CLI and the
+// SDK share the store, including its migrations, so a drift migrates the catalog
+// past what the other side reads (2026-10-11: 0.7.7 rowed it forward, 0.7.6 blind).
+const pinFiles = [
+	["gateway/internal/sandbox/microsandbox.go", /const Version = "(\d+\.\d+\.\d+)"/],
+	["worker/src/microsandbox.ts", /export const ENGINE_VERSION = "(\d+\.\d+\.\d+)"/],
+];
+const pins = new Map();
+for (const [file, pattern] of pinFiles) {
+	const text = await readFile(join(root, file), "utf8");
+	const match = text.match(pattern);
+	if (match !== null) pins.set(file, match[1]);
+}
+const distinct = new Set(pins.values());
+if (pins.size !== pinFiles.length || distinct.size !== 1) {
+	failures.push(
+		`engine pin drifted: ${[...pins].map(([file, version]) => `${file}=${version}`).join(", ") || "unreadable"}\n    the gateway and the worker share the engine store; pin both to one release`,
+	);
+}
+
 if (failures.length > 0) {
 	console.error(`house rules:\n  - ${failures.join("\n  - ")}`);
 	process.exit(1);
 }
-console.log(`house rules: ${rules.length} checked, clean`);
+console.log(`house rules: ${rules.length + 1} checked, clean`);

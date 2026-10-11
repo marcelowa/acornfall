@@ -179,6 +179,37 @@ func (m *Manager) Problem() error {
 	return m.problem
 }
 
+// Verify asks the pinned engine to read its own store, and records the answer as the
+// manager's problem. `list` is the read: a catalog migrated forward by a newer binary
+// refuses it, and doctor must say so rather than report ready while every workspace
+// fails (2026-10-11: a 0.7.7 row left 0.7.6 unable to read the store, and doctor
+// still said ready because it never read the store).
+//
+// Report-only: it installs nothing and changes nothing, so doctor can call it. It
+// does not replace ensure: first use still installs and checks usability there.
+func (m *Manager) Verify(ctx context.Context) {
+	// The lock guards the problem, never the engine call: two concurrent reads
+	// are harmless, and holding a lock across a process call is how this
+	// package deadlocked before (see the registry lock order in control).
+	m.mu.Lock()
+	if m.problem != nil {
+		m.mu.Unlock()
+		return
+	}
+	driver := m.driver
+	m.mu.Unlock()
+	if driver == nil || !driver.Installed() {
+		return
+	}
+	if _, err := driver.List(ctx); err != nil {
+		m.mu.Lock()
+		if m.problem == nil {
+			m.problem = err
+		}
+		m.mu.Unlock()
+	}
+}
+
 // Report describes the sandbox tier for doctor: what is installed, where it keeps its
 // state, and what is wrong if anything is.
 type Report struct {
