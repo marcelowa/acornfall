@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -215,6 +216,48 @@ func TestReportOnlyDescribesWithoutChangingAnything(t *testing.T) {
 	}
 	if driver.ran("install") || driver.ran("create") {
 		t.Errorf("a report must change nothing, got %v", driver.calls)
+	}
+}
+
+// A store migrated forward by a newer binary must show as a problem, not as ready:
+// doctor said ready while every workspace failed, because it never read the store.
+func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
+	ctx := context.Background()
+
+	readable, err := Open(ctx, Options{Home: t.TempDir(), Driver: &fakeDriver{installed: true}, ReportOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readable.Verify(ctx)
+	if report := readable.Report(); report.Problem != "" {
+		t.Errorf("a readable store is no problem, got %q", report.Problem)
+	}
+
+	skewed, err := Open(ctx, Options{
+		Home:       t.TempDir(),
+		Driver:     &fakeDriver{installed: true, err: errors.New("database schema is newer than this msb binary")},
+		ReportOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skewed.Verify(ctx)
+	report := skewed.Report()
+	if report.Problem == "" {
+		t.Error("a store the pinned engine cannot read must be the reported problem")
+	}
+	if !strings.Contains(report.Problem, "newer than this msb binary") {
+		t.Errorf("the problem should name the cause, got %q", report.Problem)
+	}
+
+	// Report-only still changes nothing: verify is a read, not an install.
+	missing, err := Open(ctx, Options{Home: t.TempDir(), Driver: &fakeDriver{}, ReportOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing.Verify(ctx)
+	if report := missing.Report(); report.Problem == "" {
+		t.Errorf("a missing engine is still the problem, got %+v", report)
 	}
 }
 

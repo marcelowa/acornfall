@@ -87,6 +87,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | W6 | Idle workers are evicted; a watched or busy one is not. | `TestEvictionStopsOnlyIdleUnwatchedWorkspaces` |
 | W7 | The tools can run on the host engine, chosen explicitly, and the state says it is not isolated. It is never selected by a missing hypervisor, and an unknown engine is refused with the list. | `TestWorkspaceRulesReachThePrompt`, `TestTheHostEngineNeedsNothing`, `TestIsolationSaysWhichEngineSeparatesFromTheHost`, `TestEngineRefusesANameItDoesNotImplement`, `worker/test/host.test.ts` |
 | W8 | A tool call against a sandbox the engine stopped for being idle wakes it and runs, instead of failing or reporting files as missing. | `worker/test/microsandbox.test.ts` + `worker/test/sandbox.integration.test.ts` (real stop under a live client) |
+| W9 | The worker refuses a loaded SDK that is not the pinned engine, and doctor reports a store the pinned engine cannot read — so no side migrates the shared catalog past the other. | `worker/test/microsandbox.test.ts` + `TestVerifyReadsTheStoreThroughThePinnedEngine` + house-rules pin check |
 
 ## Resources: rules, agents, skills
 

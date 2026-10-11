@@ -42,6 +42,9 @@ func doctorCommand(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
+	// Read the store through the pinned engine, so a catalog migrated forward by a
+	// newer binary shows as a problem instead of a ready tier that refuses work.
+	manager.Verify(context.Background())
 	report := manager.Report()
 	nesting := manager.Nesting(context.Background())
 	updater := update.New(resolved, "", "")

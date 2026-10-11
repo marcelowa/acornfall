@@ -24,6 +24,42 @@ export function engineName(): string {
 }
 
 /**
+ * The engine release this build is pinned to, matching the gateway's own pin
+ * (gateway/internal/sandbox: `Version`). The CLI and the SDK share their on-disk
+ * state, including the catalog's migrations — so a worker whose SDK is newer or
+ * older than the gateway's engine must refuse rather than migrate the live store
+ * out from under the pinned binary (2026-10-11: a 0.7.7 SDK rowed the catalog
+ * forward and 0.7.6 could no longer read it).
+ */
+export const ENGINE_VERSION = "0.7.6";
+
+/**
+ * Refuse a loaded SDK that is not the pinned engine: its first write would migrate
+ * the shared catalog, and the gateway's pinned binary would then refuse the store.
+ *
+ * The version is read from the resolved package, not asserted from our own
+ * package.json: what matters is the module that actually loaded, including its
+ * native parts. Injected for tests, which must not read this install's packages.
+ */
+export async function checkEngineVersion(
+	readPackage: () => Promise<{ version?: unknown }> = defaultReadPackage,
+): Promise<void> {
+	const pkg = await readPackage().catch(() => null);
+	const version = typeof pkg?.version === "string" ? pkg.version : "";
+	if (version !== ENGINE_VERSION) {
+		throw new Error(
+			`the loaded microsandbox SDK is ${version === "" ? "unknown" : version}, want ${ENGINE_VERSION}: refusing, so it cannot migrate the engine store`,
+		);
+	}
+}
+
+async function defaultReadPackage(): Promise<{ version?: unknown }> {
+	const resolved = Bun.resolveSync("microsandbox/package.json", import.meta.dir);
+	const file = Bun.file(resolved);
+	return (await file.json()) as { version?: unknown };
+}
+
+/**
  * Open a workspace's sandbox, waking it when the engine stopped it for being idle.
  *
  * `connect()` attaches to a running sandbox only; a stopped one answers with
@@ -35,6 +71,9 @@ export function engineName(): string {
  * from the command line, and the worker must not. See issue #58.
  */
 export async function openSandbox(name: string, _workspace: string): Promise<SandboxClient> {
+	// First, so a wrong SDK never touches the shared store: its first write would
+	// migrate the catalog past what the gateway's pinned engine can read.
+	await checkEngineVersion();
 	const handle = await Sandbox.get(name);
 	return new MicrosandboxClient(name, handle, await handle.connectOrStart({ detached: true }));
 }
