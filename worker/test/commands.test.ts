@@ -6,6 +6,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import {
 	expandCommand,
+	foldNotice,
 	loadCommands,
 	parseCommandInvocation,
 	unshadowedBuiltins,
@@ -194,5 +195,31 @@ describe("loading", () => {
 
 	test("a directory that does not exist is not an error", async () => {
 		expect(await loadCommands(["/nope/not/here"], hostFiles)).toEqual([]);
+	});
+});
+
+describe("foldNotice", () => {
+	test("counts entries and turns", () => {
+		expect(foldNotice(40, 12, undefined, undefined)).toBe(
+			"Folded 40 entries (12 turns) into one note.",
+		);
+	});
+
+	test("uses the singular", () => {
+		expect(foldNotice(1, 1, undefined, undefined)).toBe(
+			"Folded 1 entry (1 turn) into one note.",
+		);
+	});
+
+	test("reports provider tokens with a percent of the window", () => {
+		expect(foldNotice(40, 12, 82400, 100000)).toBe(
+			"Folded 40 entries (12 turns) into one note. The last reply read 82,400 tokens (82% of 100,000).",
+		);
+	});
+
+	test("reports tokens with no percent when the window is unknown", () => {
+		expect(foldNotice(40, 12, 82400, undefined)).toBe(
+			"Folded 40 entries (12 turns) into one note. The last reply read 82,400 tokens.",
+		);
 	});
 });

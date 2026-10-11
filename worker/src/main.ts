@@ -63,6 +63,7 @@ import { refusedSandbox, type SandboxClient, type SandboxEngine } from "./sandbo
 import { SandboxExecutionEnv } from "./sandbox-env.ts";
 import {
 	expandCommand,
+	foldNotice,
 	loadCommands,
 	parseCommandInvocation,
 	unshadowedBuiltins,
@@ -278,6 +279,47 @@ function nextSeq(conversationId: string): number {
 	const next = (seqs.get(conversationId) ?? 0) + 1;
 	seqs.set(conversationId, next);
 	return next;
+}
+
+/**
+ * The active context: which entries the next request would see, and what the
+ * last reply read, in provider tokens. Read before a fold, so the note can say
+ * what left: the fold buries exactly the entries missing afterwards.
+ */
+async function activeScope(conversation: Conversation): Promise<{
+	entries: { id: EntryId; kind: string }[];
+	used: number | undefined;
+}> {
+	const view = await conversation.context(CONTEXT);
+	const entries = view.entries.map((entry) => ({ id: entry.id, kind: entry.kind }));
+	let used: number | undefined;
+	let usedId = -1;
+	for (const entry of view.entries) {
+		if (entry.kind !== "pi.assistant") continue;
+		const message = entry.model?.[0];
+		if (message?.role !== "assistant") continue;
+		const tokens = message.usage.input + message.usage.cacheRead;
+		if (tokens > 0 && entry.id > usedId) {
+			used = tokens;
+			usedId = entry.id;
+		}
+	}
+	return { entries, used };
+}
+
+/**
+ * The model's window, when the conversation named one the catalog knows. Absent
+ * otherwise, and the note then reports tokens without a percent.
+ */
+async function windowOf(conversation: Conversation): Promise<number | undefined> {
+	try {
+		const agent = await conversation.agent(CONTEXT);
+		const ref = agent.model;
+		if (ref === undefined) return undefined;
+		return models.getModel(ref.provider, ref.modelId)?.contextWindow;
+	} catch {
+		return undefined;
+	}
 }
 
 async function conversationFor(id: string): Promise<Conversation> {
@@ -784,6 +826,8 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			const conversation = await conversationFor(command.conversationId);
 			let notice: string | undefined;
 			if (command.action === "compact") {
+				const before = await activeScope(conversation);
+				const contextWindow = await windowOf(conversation);
 				const taskId = await conversation.compact(undefined, CONTEXT);
 				const settled = await harness.waitForTask(taskId, CONTEXT);
 				const outcome = settled.state.outcome;
@@ -797,6 +841,17 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 				const result = outcome.result;
 				if (result.entryId === undefined && result.submissionId === undefined) {
 					notice = "Nothing to compact — the talk is short.";
+				} else {
+					// The fold buries exactly the entries missing afterwards: the
+					// record and this note land later, so they cannot pollute it.
+					const after = await conversation.context(CONTEXT);
+					const kept = new Set(after.entries.map((entry) => entry.id));
+					const folded = before.entries.filter((entry) => !kept.has(entry.id));
+					const foldedTurns = folded.filter((entry) => entry.kind === "pi.user").length;
+					notice =
+						folded.length === 0
+							? "Context compacted into one note."
+							: foldNotice(folded.length, foldedTurns, before.used, contextWindow);
 				}
 			} else {
 				await conversation.reset(undefined, CONTEXT);

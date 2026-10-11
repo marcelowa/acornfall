@@ -3,6 +3,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -308,6 +309,39 @@ func TestSlashCompactIsAccepted(t *testing.T) {
 	if len(after.Entries) != len(before.Entries)+2 {
 		t.Errorf("/compact on a short talk should record itself and say so: %d entries then, %d now", len(before.Entries), len(after.Entries))
 	}
+}
+
+// A real fold reports itself: /compact on a long talk leaves a note saying how
+// much folded, in entries and turns, and the summary card lands with it. The
+// bulk comes from user texts, so no sandbox is needed and nothing streams it.
+func TestSlashCompactReportsTheFold(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(scriptRule{Match: "fill the context", Reply: "filled"}))
+	c := s.client()
+
+	created := c.create("general")
+	bulk := strings.Repeat("abcdefghij ", 2500)
+	for i := 0; i < 4; i++ {
+		c.prompt("general", created.ID, "fill the context "+bulk)
+		// Count replies, not text: every reply says the same word, so waiting
+		// for the word matches the last turn's leftover and fires the next
+		// prompt early — and a /compact sent mid-turn folds a short prefix.
+		c.waitView("general", created.ID, func(v view) bool {
+			return len(v.entriesOf("pi.assistant")) == i+1
+		}, 2*time.Minute)
+	}
+
+	c.prompt("general", created.ID, "/compact")
+	after := c.waitForText("general", created.ID, "Folded")
+	matched, err := regexp.MatchString(`Folded [0-9]+ entr(y|ies) \([0-9]+ turns?\) into one note\.`, after.all())
+	if err != nil || !matched {
+		t.Errorf("the fold should report entries and turns, got transcript start:\n%s", truncate([]byte(after.all()), 600))
+	}
+	if len(after.entriesOf("pi.compaction")) == 0 {
+		t.Errorf("the fold should land its summary card, got %s", strings.Join(after.kinds(), ","))
+	}
+
 }
 
 // A prompt produces a transcript the client can read: the user's message, the prompt that
