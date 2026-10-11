@@ -31,12 +31,7 @@ export const Slots: Story = {
 		topbar: (
 			<>
 				<span className="flex shrink-0 items-center gap-2">
-					<img
-						src="/logo.svg"
-						alt=""
-						aria-hidden
-						className="size-6 shrink-0 rounded-md"
-					/>
+					<img src="/logo.svg" alt="" aria-hidden className="h-6 w-auto shrink-0" />
 					<Text as="span" size="sm" weight="semibold">
 						Acornfall
 					</Text>
