@@ -10,6 +10,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { groupTurns } from "@/lib/turns";
 import { AssistantMessage } from "./assistant-message";
 import { NoticeLine } from "./notice-line";
+import { SummaryCard } from "./summary-card";
 import { PendingMessage } from "./pending-message";
 import { ToolCard } from "./tool-card";
 import { ThinkingCard } from "./thinking-card";
@@ -53,6 +54,8 @@ function Entry({
 			return <ThinkingCard key={entry.id} entry={entry} />;
 		case "notice":
 			return <NoticeLine key={entry.id} entry={entry} />;
+		case "summary":
+			return <SummaryCard key={entry.id} entry={entry} />;
 		case "pending":
 			return <PendingMessage key={entry.id} entry={entry} />;
 	}
@@ -86,7 +89,9 @@ export function Transcript({ entries, ready = true, onOpenConversation, onFork }
 					? last.text
 					: last.kind === "tool"
 						? last.output
-						: last.text;
+						: last.kind === "summary"
+							? last.markdown
+							: last.text;
 	const dependency = `${entries.length}:${last?.id ?? ""}:${lastText.length}`;
 
 	useLayoutEffect(() => {

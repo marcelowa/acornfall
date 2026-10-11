@@ -7,6 +7,7 @@ import {
 	checkUpdate,
 	compactConversation,
 	createConversation as createConversationRequest,
+	fetchCompactPreview,
 	fetchUpdateStatus,
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
@@ -28,6 +29,7 @@ import {
 	startProviderLogin,
 	updateWorkspace,
 	type AgentChange,
+	type CompactPreview,
 	type DefaultScope,
 	type ProviderAuthType,
 	type UpdatePrefs,
@@ -300,6 +302,11 @@ export interface Platform {
 	fork: (at: string) => void;
 	/** Start a manual compaction of the conversation in view. */
 	compact: () => void;
+	/** The compact dialog: open flag plus the counted scope. */
+	compactOpen: boolean;
+	compactPreview?: CompactPreview | undefined;
+	openCompactDialog: () => void;
+	closeCompactDialog: () => void;
 	send: (text: string, whenBusy: BusyAction) => Promise<void>;
 	abort: () => void;
 	setRailWidth: (width: number) => void;
@@ -708,6 +715,23 @@ export function usePlatform(): Platform {
 	const compact = useCallback(() => {
 		act(compactConversation(workspace, activeId), () => void reload());
 	}, [act, workspace, activeId, reload]);
+	const [compactOpen, setCompactOpen] = useState(false);
+	const [compactPreview, setCompactPreview] = useState<CompactPreview | undefined>(undefined);
+	const openCompactDialog = useCallback(() => {
+		setCompactOpen(true);
+		setCompactPreview(undefined);
+		fetchCompactPreview(workspace, activeId).then(
+			(preview) => setCompactPreview(preview),
+			(cause: unknown) => {
+				setCompactOpen(false);
+				reportError(cause);
+			},
+		);
+	}, [workspace, activeId, reportError]);
+	const closeCompactDialog = useCallback(() => {
+		setCompactOpen(false);
+		setCompactPreview(undefined);
+	}, []);
 	const send = useCallback(
 		async (text: string, whenBusy: BusyAction): Promise<void> => {
 			try {
@@ -1051,6 +1075,10 @@ export function usePlatform(): Platform {
 		hide,
 		fork,
 		compact,
+		compactOpen,
+		compactPreview,
+		openCompactDialog,
+		closeCompactDialog,
 		send,
 		abort,
 		setRailWidth,

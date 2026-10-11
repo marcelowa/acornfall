@@ -61,6 +61,7 @@ reply quoting the request. `make dev` uses it.
 | T7 | Spend is reported per conversation. | `TestUsageIsReportedForAWorkspace` |
 | T8 | A model with no credentials, or a definition that does not exist, is refused where it was chosen. | `TestUnusableChoicesAreRefused` |
 | T9 | A manual compaction is accepted; on a short talk the transcript stands, and the summary mark lands only when there was something worth summarizing. | `TestCompactKeepsAShortTranscript` |
+| T10 | The compact dialog states the scope before anything folds: turn and entry counts for the talk in view. | `TestCompactPreviewCountsTheTalk` |
 
 ## Defaults
 

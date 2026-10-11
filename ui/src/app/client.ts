@@ -129,6 +129,26 @@ export function compactConversation(workspace: string, conversation: string): Pr
 	);
 }
 
+export interface CompactPreview {
+	conversationId: string;
+	entries: number;
+	turns: number;
+}
+
+/** What a manual compaction would fold, so the dialog states the scope. */
+export function fetchCompactPreview(
+	workspace: string,
+	conversation: string,
+): Promise<CompactPreview> {
+	return postJson<CompactPreview>(
+		workspacePath(
+			workspace,
+			`/conversations/${encodeURIComponent(conversation)}/compact-preview`,
+		),
+		{},
+	);
+}
+
 export function abortConversation(workspace: string, conversation: string): Promise<void> {
 	return post(
 		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/abort`),

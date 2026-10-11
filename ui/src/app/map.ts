@@ -91,6 +91,22 @@ function toolCalls(
 	return calls;
 }
 
+/**
+ * The note inside a compaction entry, without its wrapper. The harness stores the
+ * summary as model text around a `<summary>` block; anything else is not a note
+ * this card can show, so the transcript falls back to the bare line.
+ */
+export function summaryOf(
+	messages: { content?: string | WireContentBlock[] | undefined }[],
+): string | undefined {
+	const text = messages.map((message) => textOf(message.content)).join("\n");
+	const start = text.indexOf("<summary>");
+	const end = text.indexOf("</summary>");
+	if (start === -1 || end === -1 || end <= start) return undefined;
+	const note = text.slice(start + "<summary>".length, end).trim();
+	return note === "" ? undefined : note;
+}
+
 function at(message: WireMessage | undefined): Date | undefined {
 	if (message?.timestamp === undefined) return undefined;
 	return new Date(message.timestamp);
@@ -329,12 +345,25 @@ export function toTranscript(
 				});
 				break;
 			}
-			case "pi.compaction":
+			case "pi.compaction": {
+				const markdown = summaryOf(messages);
+				if (markdown === undefined) {
+					transcript.push({
+						kind: "notice",
+						id,
+						text: "context compacted",
+						at: at(first),
+					});
+				} else {
+					transcript.push({ kind: "summary", id, markdown, at: at(first) });
+				}
+				break;
+			}
 			case "pi.reset": {
 				transcript.push({
 					kind: "notice",
 					id,
-					text: entry.kind === "pi.compaction" ? "context compacted" : "context reset",
+					text: "context reset",
 					at: at(first),
 				});
 				break;

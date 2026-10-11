@@ -16,6 +16,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
 import {
 	AgentDoc,
 	type Conversation,
+	type Cursor,
 	type EntryId,
 	createRegistry,
 	defineExtension,
@@ -748,6 +749,24 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			const conversation = await conversationFor(command.conversationId);
 			await conversation.compact(undefined, CONTEXT);
 			return { conversationId: command.conversationId };
+		}
+		case "compact_preview": {
+			// What a manual compaction would fold: entry and turn counts, so the
+			// dialog states the scope. The cut itself stays the harness's call.
+			const conversation = await conversationFor(command.conversationId);
+			let entries = 0;
+			let turns = 0;
+			let cursor: Cursor | undefined = undefined;
+			for (;;) {
+				const page = await conversation.entries({}, 200, cursor, CONTEXT);
+				for (const entry of page.items) {
+					entries += 1;
+					if (entry.kind === "pi.user") turns += 1;
+				}
+				if (page.next === undefined) break;
+				cursor = page.next;
+			}
+			return { conversationId: command.conversationId, entries, turns };
 		}
 		case "attach":
 			await attach(command.conversationId);

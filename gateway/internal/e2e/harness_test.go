@@ -839,6 +839,14 @@ func (c *client) compact(workspace, id string) {
 	}
 }
 
+// compactPreview asks what a manual compaction would fold: turn and entry counts.
+func (c *client) compactPreview(workspace, id string) map[string]any {
+	c.t.Helper()
+	out := map[string]any{}
+	c.post(c.conversationPath(workspace, id)+"/compact-preview", map[string]any{}, &out)
+	return out
+}
+
 // fork branches before the turn the entry begins, and hands back the conversation it made.
 func (c *client) fork(workspace, id, at string) conversation {
 	c.t.Helper()

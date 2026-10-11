@@ -4,7 +4,7 @@ import { Measure } from "@/components/layout/measure";
 import { Text } from "@/components/typography/text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { formatTokens } from "@/lib/format";
+import { formatContext } from "@/lib/format";
 import { cn } from "cn";
 import { stepSlashIndex } from "./slash-menu";
 
@@ -218,9 +218,7 @@ export function Composer({
 				{contextUsed === undefined ? null : (
 					<div className="flex items-center gap-2 px-2 pt-1">
 						<Text size="2xs" tone="muted" data-slot="composer-context">
-							{contextWindow === undefined
-								? `${formatTokens(contextUsed)} in`
-								: `${formatTokens(contextUsed)} of ${formatTokens(contextWindow)} (${Math.round((contextUsed / contextWindow) * 100)}%)`}
+							{formatContext(contextUsed, contextWindow)}
 						</Text>
 						{onCompact === undefined ||
 						contextWindow === undefined ||

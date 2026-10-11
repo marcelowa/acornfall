@@ -70,6 +70,7 @@ export type TranscriptEntry =
 	| ToolEntry
 	| ThinkingEntry
 	| NoticeEntry
+	| SummaryEntry
 	| PendingEntry;
 
 /**
@@ -122,6 +123,17 @@ export interface NoticeEntry {
 	kind: "notice";
 	id: string;
 	text: string;
+	at?: Date | undefined;
+}
+
+/**
+ * The note a compaction left behind: what the folded turns said, in the
+ * summarizer's own words. Starts put away — the talk moved on.
+ */
+export interface SummaryEntry {
+	kind: "summary";
+	id: string;
+	markdown: string;
 	at?: Date | undefined;
 }
 

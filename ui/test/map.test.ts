@@ -3,6 +3,7 @@ import {
 	contextWindowFor,
 	failureOf,
 	stalePins,
+	summaryOf,
 	textOf,
 	toAgentGroups,
 	toConversation,
@@ -115,6 +116,33 @@ describe("the wire mapping", () => {
 		};
 		const entry = toTranscript(view, {})[0];
 		expect(entry?.kind === "assistant" ? entry.failure : undefined).toBe("p/m: 429");
+	});
+
+	test("a compaction entry becomes a summary card with the note inside", () => {
+		const view: WireView = {
+			entries: [
+				{
+					id: 7,
+					kind: "pi.compaction",
+					model: [
+						{
+							content:
+								"The conversation history before this point was compacted into the following summary:\n\n<summary>\nFixed the announcement.\n</summary>",
+						},
+					],
+				},
+			],
+		};
+		const entry = toTranscript(view, {})[0];
+		if (entry?.kind !== "summary") throw new Error("expected a summary card");
+		expect(entry.markdown).toBe("Fixed the announcement.");
+	});
+
+	test("a compaction entry without a note falls back to the bare line", () => {
+		const view: WireView = { entries: [{ id: 7, kind: "pi.compaction" }] };
+		const entry = toTranscript(view, {})[0];
+		expect(entry?.kind === "notice" ? entry.text : undefined).toBe("context compacted");
+		expect(summaryOf([])).toBeUndefined();
 	});
 
 	test("live text has no controls until it settles", () => {

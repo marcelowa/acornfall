@@ -240,6 +240,33 @@ func TestCompactKeepsAShortTranscript(t *testing.T) {
 	}
 }
 
+// A compaction preview counts the talk it would fold: two user turns here, and more
+// entries than turns, since a turn is messages plus answers plus tool calls.
+func TestCompactPreviewCountsTheTalk(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(
+		scriptRule{Match: "first question", Reply: "first answer"},
+		scriptRule{Match: "second question", Reply: "second answer"},
+	))
+	c := s.client()
+
+	created := c.create("general")
+	c.prompt("general", created.ID, "first question")
+	c.waitForText("general", created.ID, "first answer")
+	c.prompt("general", created.ID, "second question")
+	c.waitForText("general", created.ID, "second answer")
+
+	preview := c.compactPreview("general", created.ID)
+	if preview["turns"] != 2.0 {
+		t.Errorf("two user turns should preview as two, got %v", preview["turns"])
+	}
+	entries, ok := preview["entries"].(float64)
+	if !ok || entries < 4 {
+		t.Errorf("two turns hold at least four entries, got %v", preview["entries"])
+	}
+}
+
 // A prompt produces a transcript the client can read: the user's message, the prompt that
 // was sent, the assistant's answer, and spend that is attributed to this conversation.
 func TestPromptRoundTrip(t *testing.T) {
