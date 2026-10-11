@@ -47,6 +47,14 @@ type Command struct {
 	Value      string `json:"value,omitempty"`
 	Cancelled  bool   `json:"cancelled,omitempty"`
 	Action     string `json:"action,omitempty"`
+	// Stored attachment ids riding with a prompt.
+	Attachments []string `json:"attachments,omitempty"`
+	// Host file an upload staged; the worker only reads it. Tag names match
+	// the worker protocol, which says name, mime, and size.
+	TempPath string `json:"tempPath,omitempty"`
+	FileName string `json:"name,omitempty"`
+	MIME     string `json:"mime,omitempty"`
+	FileSize int64  `json:"size,omitempty"`
 }
 
 func (c Command) Marshal() ([]byte, error) { return json.Marshal(c) }

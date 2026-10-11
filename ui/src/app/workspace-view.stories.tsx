@@ -243,6 +243,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		openCompactDialog: noop,
 		closeCompactDialog: noop,
 		send: () => Promise.resolve(),
+		upload: () =>
+			Promise.resolve({ id: "a-1", name: "shot.png", size: 12000, mime: "image/png" }),
 		abort: noop,
 		setRailWidth: noop,
 		setRailOpen: noop,

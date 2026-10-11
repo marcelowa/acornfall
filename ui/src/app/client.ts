@@ -75,12 +75,14 @@ export function sendMessage(
 	conversation: string,
 	text: string,
 	whenBusy: "steer" | "followUp",
+	attachments?: string[] | undefined,
 ): Promise<void> {
 	return post(
 		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/messages`),
 		{
 			text,
 			whenBusy,
+			attachments,
 		},
 	);
 }
@@ -254,6 +256,26 @@ export async function fetchCommands(workspace: string): Promise<SlashCommand[]> 
 
 /** The login methods a provider offers. Empty is ambient-only: nothing to type. */
 export type ProviderAuthType = "api_key" | "oauth";
+
+/** One stored file, answered with the id messages carry. */
+export interface UploadedAttachment {
+	id: string;
+	name: string;
+	size: number;
+	mime: string;
+}
+
+/** Stage one file under the workspace's hidden folder. */
+export async function uploadAttachment(workspace: string, file: File): Promise<UploadedAttachment> {
+	const body = new FormData();
+	body.append("file", file, file.name);
+	const response = await fetch(workspacePath(workspace, "/attachments"), {
+		method: "POST",
+		body,
+	});
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as UploadedAttachment;
+}
 
 /** Start a login flow. Prompts arrive as auth frames on the stream. Answers with the flow id. */
 export async function startProviderLogin(

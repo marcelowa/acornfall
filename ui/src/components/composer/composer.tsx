@@ -1,9 +1,10 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowUp } from "lucide-react";
+import { useEffect, useRef, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowUp, Paperclip, X } from "lucide-react";
 import { Measure } from "@/components/layout/measure";
 import { Text } from "@/components/typography/text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { formatFileSize } from "@/lib/attachments";
 import { formatContext } from "@/lib/format";
 import { cn } from "cn";
 import { stepSlashIndex } from "./slash-menu";
@@ -17,10 +18,25 @@ function isCoarsePointer(): boolean {
 	}
 }
 
+/** A file picked for the draft: staging, staged, or refused with its reason. */
+export interface ComposerAttachment {
+	key: string;
+	name: string;
+	size: number;
+	status: "uploading" | "ready" | "failed";
+	error?: string | undefined;
+}
+
 export interface ComposerProps {
 	value: string;
 	onChange: (value: string) => void;
 	onSend: () => void;
+	/** Files riding the draft, staged under the workspace's hidden folder. */
+	attachments?: ComposerAttachment[] | undefined;
+	/** Stage picked files; refusals arrive as failed chips. */
+	onAttachFiles?: ((files: File[]) => void) | undefined;
+	/** Drop a chip; an upload landing later finds nothing to update. */
+	onRemoveAttachment?: ((key: string) => void) | undefined;
 	onAbort: () => void;
 	/** A run is underway: the send button says how the message will land, and Stop appears. */
 	running: boolean;
@@ -74,6 +90,9 @@ export function Composer({
 	value,
 	onChange,
 	onSend,
+	attachments = [],
+	onAttachFiles,
+	onRemoveAttachment,
 	onAbort,
 	running,
 	steerable,
@@ -96,9 +115,18 @@ export function Composer({
 	onSlashDismiss,
 	className,
 }: ComposerProps) {
-	const canSend = !disabled && value.trim() !== "";
+	const readyCount = attachments.filter((entry) => entry.status === "ready").length;
+	const uploadingCount = attachments.filter((entry) => entry.status === "uploading").length;
+	// Files may ride alone, but never half-staged: the send waits for uploads.
+	const canSend = !disabled && (value.trim() !== "" || readyCount > 0) && uploadingCount === 0;
 	const slashOpen = slashCount > 0;
 	const field = useRef<HTMLTextAreaElement>(null);
+	const fileInput = useRef<HTMLInputElement>(null);
+	const pickFiles = (event: ChangeEvent<HTMLInputElement>): void => {
+		const files = Array.from(event.target.files ?? []);
+		event.target.value = "";
+		if (files.length > 0) onAttachFiles?.(files);
+	};
 	useEffect(() => {
 		if (focusConversation === undefined) return;
 		if (isCoarsePointer()) return;
@@ -164,11 +192,69 @@ export function Composer({
 						aria-activedescendant={slashOpen ? `slash-option-${slashIndex}` : undefined}
 						className="max-h-(--composer-max-height) rounded-t-xl border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-base dark:bg-transparent"
 					/>
+					{attachments.length === 0 ? null : (
+						<div
+							data-slot="composer-attachments"
+							className="flex flex-wrap gap-1 px-3 pb-1"
+						>
+							{attachments.map((entry) => (
+								<span
+									key={entry.key}
+									className="inline-flex max-w-48 items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5"
+									title={
+										entry.status === "failed"
+											? (entry.error ?? "refused")
+											: entry.name
+									}
+								>
+									<Text size="2xs" tone="muted" className="truncate">
+										{entry.status === "uploading"
+											? `Uploading ${entry.name}…`
+											: entry.name}
+									</Text>
+									<Text size="2xs" tone="muted" className="shrink-0">
+										{formatFileSize(entry.size)}
+									</Text>
+									<button
+										type="button"
+										aria-label={`Remove ${entry.name}`}
+										onClick={() => onRemoveAttachment?.(entry.key)}
+										className="shrink-0 text-muted-foreground hover:text-foreground"
+									>
+										<X className="size-3" aria-hidden />
+									</button>
+								</span>
+							))}
+						</div>
+					)}
 					<div className="flex flex-col gap-2 px-2 pb-2 sm:flex-row sm:items-end">
 						<div className="order-2 flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:order-1">
 							{controls}
 						</div>
 						<div className="order-1 flex shrink-0 items-center gap-1 self-end sm:order-2 sm:self-auto">
+							{onAttachFiles === undefined ? null : (
+								<>
+									<input
+										ref={fileInput}
+										type="file"
+										multiple
+										onChange={pickFiles}
+										className="hidden"
+										aria-hidden
+										tabIndex={-1}
+									/>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										aria-label="Attach files"
+										onClick={() => fileInput.current?.click()}
+										disabled={disabled}
+									>
+										<Paperclip />
+									</Button>
+								</>
+							)}
 							{running ? (
 								<>
 									<Button

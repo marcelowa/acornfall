@@ -21,12 +21,14 @@ import {
 	renameConversation,
 	rollbackUpdate,
 	sendMessage,
+	uploadAttachment,
 	setAgent,
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultThinking,
 	setUpdatePrefs as saveUpdatePrefs,
 	startProviderLogin,
+	type UploadedAttachment,
 	updateWorkspace,
 	type AgentChange,
 	type CompactPreview,
@@ -310,7 +312,9 @@ export interface Platform {
 	compactPreview?: CompactPreview | undefined;
 	openCompactDialog: () => void;
 	closeCompactDialog: () => void;
-	send: (text: string, whenBusy: BusyAction) => Promise<void>;
+	send: (text: string, whenBusy: BusyAction, attachments?: string[] | undefined) => Promise<void>;
+	/** Stage files picked in the composer; ids ride with the next send. */
+	upload: (file: File) => Promise<UploadedAttachment>;
 	abort: () => void;
 	setRailWidth: (width: number) => void;
 	setRailOpen: (open: boolean) => void;
@@ -736,9 +740,13 @@ export function usePlatform(): Platform {
 		setCompactPreview(undefined);
 	}, []);
 	const send = useCallback(
-		async (text: string, whenBusy: BusyAction): Promise<void> => {
+		async (
+			text: string,
+			whenBusy: BusyAction,
+			attachments?: string[] | undefined,
+		): Promise<void> => {
 			try {
-				await sendMessage(workspace, activeId, text, whenBusy);
+				await sendMessage(workspace, activeId, text, whenBusy, attachments);
 				setFailure(undefined);
 				// The send answers 202 with no state, so the busy sign would wait for the
 				// next poll. Read it now: the prompt grace is already counting.
@@ -750,6 +758,10 @@ export function usePlatform(): Platform {
 			}
 		},
 		[workspace, activeId, reload, reportError],
+	);
+	const upload = useCallback(
+		(file: File): Promise<UploadedAttachment> => uploadAttachment(workspace, file),
+		[workspace],
 	);
 	const abort = useCallback(() => {
 		act(abortConversation(workspace, activeId));
@@ -1103,6 +1115,7 @@ export function usePlatform(): Platform {
 		openCompactDialog,
 		closeCompactDialog,
 		send,
+		upload,
 		abort,
 		setRailWidth,
 		setRailOpen,
