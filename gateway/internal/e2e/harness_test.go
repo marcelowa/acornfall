@@ -829,6 +829,16 @@ func (c *client) hide(workspace, id string, hidden bool) {
 	c.post(c.conversationPath(workspace, id)+"/hide", map[string]any{"hidden": hidden}, nil)
 }
 
+// compact starts a manual compaction and hands back the state it left.
+func (c *client) compact(workspace, id string) {
+	c.t.Helper()
+	var out state
+	c.post(c.conversationPath(workspace, id)+"/compact", map[string]any{}, &out)
+	if out.Conversation == nil {
+		c.t.Fatalf("compact of %s/%s returned no conversation", workspace, id)
+	}
+}
+
 // fork branches before the turn the entry begins, and hands back the conversation it made.
 func (c *client) fork(workspace, id, at string) conversation {
 	c.t.Helper()

@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST "+base+"/conversations/{id}/rename", s.renameConversation)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/hide", s.hideConversation)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/fork", s.forkConversation)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.compactConversation)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.messages)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.abort)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.agent)
@@ -685,6 +686,19 @@ func (s *Server) forkConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ctl.Fork(r.Context(), r.PathValue("id"), body.At); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, ctl.State())
+}
+
+func (s *Server) compactConversation(w http.ResponseWriter, r *http.Request) {
+	ctl, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if err := ctl.Compact(r.Context(), r.PathValue("id")); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

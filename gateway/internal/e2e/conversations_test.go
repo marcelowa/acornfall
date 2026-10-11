@@ -217,6 +217,29 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 	}
 }
 
+// A manual compaction is accepted and leaves a short transcript alone: the wire path is
+// ours, the summary is the harness's, and on a talk this short it has nothing worth
+// summarizing, so no notice lands.
+func TestCompactKeepsAShortTranscript(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
+	c := s.client()
+
+	created := c.create("general")
+	c.prompt("general", created.ID, "remember this")
+	before := c.waitForText("general", created.ID, "I will remember.")
+
+	c.compact("general", created.ID)
+	after := c.view("general", created.ID)
+	if len(before.Entries) != len(after.Entries) {
+		t.Errorf("compacting a short talk should change nothing: %d entries then, %d now", len(before.Entries), len(after.Entries))
+	}
+	if !strings.Contains(after.all(), "remember this") || !strings.Contains(after.all(), "I will remember.") {
+		t.Errorf("the transcript did not survive compaction:\n%s", after.all())
+	}
+}
+
 // A prompt produces a transcript the client can read: the user's message, the prompt that
 // was sent, the assistant's answer, and spend that is attributed to this conversation.
 func TestPromptRoundTrip(t *testing.T) {

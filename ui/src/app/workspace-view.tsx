@@ -508,6 +508,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 									: platform.usage.input + (platform.usage.cacheRead ?? 0)
 							}
 							contextWindow={platform.contextWindow}
+							onCompact={platform.compact}
 							onSteer={() => sendText("steer")}
 							onQueue={() => sendText("followUp")}
 							disabled={platform.active === undefined || !platform.workerUp}

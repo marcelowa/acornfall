@@ -52,6 +52,8 @@ export interface ComposerProps {
 	contextUsed?: number | undefined;
 	/** The running model's window, when the providers name it. */
 	contextWindow?: number | undefined;
+	/** Start a manual compaction. Shown once the context is mostly full. */
+	onCompact?: (() => void) | undefined;
 	/** Slash keyboard navigation: how many rows are open and which is highlighted. */
 	slashCount?: number | undefined;
 	slashIndex?: number | undefined;
@@ -86,6 +88,7 @@ export function Composer({
 	focusToken,
 	contextUsed,
 	contextWindow,
+	onCompact,
 	slashCount = 0,
 	slashIndex = 0,
 	onSlashIndexChange,
@@ -213,12 +216,19 @@ export function Composer({
 					</div>
 				</div>
 				{contextUsed === undefined ? null : (
-					<div className="px-2 pt-1">
+					<div className="flex items-center gap-2 px-2 pt-1">
 						<Text size="2xs" tone="muted" data-slot="composer-context">
 							{contextWindow === undefined
 								? `${formatTokens(contextUsed)} in`
 								: `${formatTokens(contextUsed)} of ${formatTokens(contextWindow)} (${Math.round((contextUsed / contextWindow) * 100)}%)`}
 						</Text>
+						{onCompact === undefined ||
+						contextWindow === undefined ||
+						contextUsed / contextWindow < 0.7 ? null : (
+							<Button type="button" variant="outline" size="xs" onClick={onCompact}>
+								Compact
+							</Button>
+						)}
 					</div>
 				)}
 			</Measure>

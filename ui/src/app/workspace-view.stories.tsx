@@ -238,6 +238,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		rename: noop,
 		hide: noop,
 		fork: noop,
+		compact: noop,
 		send: () => Promise.resolve(),
 		abort: noop,
 		setRailWidth: noop,

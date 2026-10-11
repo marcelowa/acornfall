@@ -60,6 +60,7 @@ reply quoting the request. `make dev` uses it.
 | T6 | A level the model cannot express is clamped, and what was asked for is kept and reported. | `TestThinkingIsClampedButTheRequestIsRemembered` + `gateway/internal/control/thinking_test.go` |
 | T7 | Spend is reported per conversation. | `TestUsageIsReportedForAWorkspace` |
 | T8 | A model with no credentials, or a definition that does not exist, is refused where it was chosen. | `TestUnusableChoicesAreRefused` |
+| T9 | A manual compaction is accepted; on a short talk the transcript stands, and the summary mark lands only when there was something worth summarizing. | `TestCompactKeepsAShortTranscript` |
 
 ## Defaults
 

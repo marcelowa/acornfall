@@ -122,6 +122,13 @@ export function forkConversation(
 	);
 }
 
+export function compactConversation(workspace: string, conversation: string): Promise<void> {
+	return post(
+		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/compact`),
+		{},
+	);
+}
+
 export function abortConversation(workspace: string, conversation: string): Promise<void> {
 	return post(
 		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/abort`),

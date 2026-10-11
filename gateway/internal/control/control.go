@@ -1050,6 +1050,26 @@ func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
 	return nil
 }
 
+// Compact starts a manual compaction of a conversation. The summary replaces
+// the old prefix while the conversation keeps working, and the transcript
+// keeps a notice where the cut was.
+func (c *Control) Compact(ctx context.Context, conversationID string) error {
+	var response struct {
+		ConversationID string `json:"conversationId"`
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{
+		Type:           "compact",
+		ConversationID: conversationID,
+	}, &response); err != nil {
+		return err
+	}
+	if response.ConversationID == "" {
+		return errors.New("worker returned no conversation id")
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
 // Create makes a new conversation and selects it.
 func (c *Control) Create(ctx context.Context) error {
 	var response struct {

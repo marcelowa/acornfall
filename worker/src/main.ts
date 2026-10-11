@@ -742,6 +742,13 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			await setMeta(String(forked.id), { title: `Fork of ${parent.title}` });
 			return { conversationId: String(forked.id) };
 		}
+		case "compact": {
+			// Manual compaction: the summary replaces the old prefix while the
+			// conversation keeps working, and the transcript keeps a notice.
+			const conversation = await conversationFor(command.conversationId);
+			await conversation.compact(undefined, CONTEXT);
+			return { conversationId: command.conversationId };
+		}
 		case "attach":
 			await attach(command.conversationId);
 			return {

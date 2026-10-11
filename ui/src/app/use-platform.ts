@@ -5,6 +5,7 @@ import {
 	applyUpdate,
 	cancelAuthFlow,
 	checkUpdate,
+	compactConversation,
 	createConversation as createConversationRequest,
 	fetchUpdateStatus,
 	createWorkspace as createWorkspaceRequest,
@@ -297,6 +298,8 @@ export interface Platform {
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
 	fork: (at: string) => void;
+	/** Start a manual compaction of the conversation in view. */
+	compact: () => void;
 	send: (text: string, whenBusy: BusyAction) => Promise<void>;
 	abort: () => void;
 	setRailWidth: (width: number) => void;
@@ -702,6 +705,9 @@ export function usePlatform(): Platform {
 		},
 		[act, workspace, activeId, reload],
 	);
+	const compact = useCallback(() => {
+		act(compactConversation(workspace, activeId), () => void reload());
+	}, [act, workspace, activeId, reload]);
 	const send = useCallback(
 		async (text: string, whenBusy: BusyAction): Promise<void> => {
 			try {
@@ -1044,6 +1050,7 @@ export function usePlatform(): Platform {
 		rename,
 		hide,
 		fork,
+		compact,
 		send,
 		abort,
 		setRailWidth,

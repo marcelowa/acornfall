@@ -219,6 +219,21 @@ export const ContextUsage: Story = {
 	),
 };
 
+/** Past 70% the line grows a Compact button that starts a manual compaction. */
+export const ContextUsageFull: Story = {
+	args: {
+		...Idle.args,
+		contextUsed: 160000,
+		contextWindow: 200000,
+		onCompact: noop,
+	},
+	render: (args) => (
+		<Frame>
+			{([value, setValue]) => <Composer {...args} value={value} onChange={setValue} />}
+		</Frame>
+	),
+};
+
 /** The window is unknown: the count stands alone, with no percent. */
 export const ContextUsageWithoutWindow: Story = {
 	args: {
