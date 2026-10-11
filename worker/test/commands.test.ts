@@ -4,7 +4,12 @@
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { expandCommand, loadCommands, parseCommandInvocation } from "../src/commands.ts";
+import {
+	expandCommand,
+	loadCommands,
+	parseCommandInvocation,
+	unshadowedBuiltins,
+} from "../src/commands.ts";
 import { COMMAND_DIRS, layerRoots, resourceFolders } from "../src/config.ts";
 import { cleanupScratch, tempDir, write } from "./scratch.ts";
 import { hostFiles } from "../src/files.ts";
@@ -56,6 +61,25 @@ describe("expansion", () => {
 
 	test("with a placeholder and no arguments, the hole is empty rather than literal", () => {
 		expect(expandCommand(command, "")).toBe("Summarize  in one line.");
+	});
+});
+
+describe("builtins", () => {
+	test("compact and clear are on offer with no files", () => {
+		const offered = unshadowedBuiltins([]);
+		expect(offered.map((command) => command.name)).toEqual(["compact", "clear"]);
+		expect(offered[0]?.action).toBe("compact");
+		expect(offered[1]?.action).toBe("reset");
+	});
+
+	test("a file of the same name shadows its builtin", () => {
+		const file = {
+			name: "compact",
+			description: "ours",
+			source: "/ws/commands/compact.md",
+			body: "Compact loudly.",
+		};
+		expect(unshadowedBuiltins([file]).map((command) => command.name)).toEqual(["clear"]);
 	});
 });
 

@@ -101,11 +101,20 @@ func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
 	c.get("/api/workspaces/general/commands", &listing)
 
 	byName := map[string]string{}
+	files, builtins := 0, 0
 	for _, command := range listing.Commands {
 		byName[command.Name] = command.Description + "|" + command.Source
+		if command.Source == "builtin" {
+			builtins++
+		} else {
+			files++
+		}
 	}
-	if len(listing.Commands) != 2 {
-		t.Fatalf("expected two commands, got %+v", listing.Commands)
+	if files != 2 {
+		t.Fatalf("expected two file commands, got %+v", listing.Commands)
+	}
+	if builtins != 2 || byName["compact"] == "" || byName["clear"] == "" {
+		t.Fatalf("expected the two builtin commands beside the files, got %+v", listing.Commands)
 	}
 	if !strings.Contains(byName["deploy"], "this workspace's way") || !strings.Contains(byName["deploy"], ".acornfall/commands") {
 		t.Errorf("the workspace's command should win, got %q", byName["deploy"])

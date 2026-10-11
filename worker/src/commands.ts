@@ -84,6 +84,30 @@ export function expandCommand(command: Command, args: string): string {
 	return trimmed === "" ? command.body : `${command.body}\n\n${trimmed}`;
 }
 
+export type BuiltinAction = "compact" | "reset";
+
+export interface BuiltinCommand {
+	name: string;
+	description: string;
+	action: BuiltinAction;
+}
+
+/**
+ * Commands with no file: always on offer, so a bare `/` lists something on a
+ * fresh install. A file of the same name shadows its builtin, like any layer.
+ */
+export const builtinCommands: BuiltinCommand[] = [
+	{ name: "compact", description: "Compact the context now", action: "compact" },
+	{ name: "clear", description: "Start a fresh context", action: "reset" },
+];
+
+/** The builtins no file shadows: these are the ones the menu lists as builtin. */
+export function unshadowedBuiltins(loaded: Command[]): BuiltinCommand[] {
+	return builtinCommands.filter(
+		(builtin) => !loaded.some((command) => command.name === builtin.name),
+	);
+}
+
 /** Matches `/name rest` at the start of a message. */
 export function parseCommandInvocation(text: string): { name: string; args: string } | undefined {
 	const match = /^\/([a-z0-9][a-z0-9-]{0,63})(?:\s+([\s\S]*))?$/.exec(text.trim());
