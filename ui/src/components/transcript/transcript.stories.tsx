@@ -125,6 +125,20 @@ export const NothingToCompact: Story = {
 	},
 };
 
+export const FoldReport: Story = {
+	args: {
+		entries: [
+			{ kind: "user", id: "1", at, text: "/compact" },
+			{
+				kind: "notice",
+				id: "2",
+				at,
+				text: "Folded 3 entries (1 turn) into one note. The last reply read 28,948 tokens (23% of 128,000).",
+			},
+		],
+	},
+};
+
 export const CompactionSummary: Story = {
 	args: {
 		entries: [

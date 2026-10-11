@@ -101,6 +101,30 @@ export const builtinCommands: BuiltinCommand[] = [
 	{ name: "clear", description: "Start a fresh context", action: "reset" },
 ];
 
+/**
+ * The answer a real fold leaves: how much it folded, in entries and turns,
+ * plus what the context held, in provider tokens — never a guess. The token
+ * line needs the last reply's own usage; without it the counts stand alone.
+ */
+export function foldNotice(
+	foldedEntries: number,
+	foldedTurns: number,
+	used: number | undefined,
+	contextWindow: number | undefined,
+): string {
+	const entryWord = foldedEntries === 1 ? "entry" : "entries";
+	const turnWord = foldedTurns === 1 ? "turn" : "turns";
+	let text = `Folded ${foldedEntries} ${entryWord} (${foldedTurns} ${turnWord}) into one note.`;
+	if (used !== undefined) {
+		text += ` The last reply read ${used.toLocaleString("en-US")} tokens`;
+		if (contextWindow !== undefined && contextWindow > 0) {
+			text += ` (${Math.round((used / contextWindow) * 100)}% of ${contextWindow.toLocaleString("en-US")})`;
+		}
+		text += ".";
+	}
+	return text;
+}
+
 /** The builtins no file shadows: these are the ones the menu lists as builtin. */
 export function unshadowedBuiltins(loaded: Command[]): BuiltinCommand[] {
 	return builtinCommands.filter(
