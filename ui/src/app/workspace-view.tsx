@@ -4,6 +4,7 @@ import type { DefaultScope, ProviderAuthType, UploadedAttachment } from "./clien
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { MAX_ATTACHMENT_BYTES, refuseAttachments } from "@/lib/attachments";
 import { ConversationList } from "@/components/conversation/conversation-list";
+import { BrandMark } from "@/components/layout/brand-mark";
 import { Composer } from "@/components/composer/composer";
 import { SlashMenu } from "@/components/composer/slash-menu";
 import { AgentPanel } from "@/components/inspector/agent-panel";
@@ -38,6 +39,8 @@ import type { Platform } from "./use-platform";
 
 export interface WorkspaceViewProps {
 	platform: Platform;
+	/** The draft to start with; stories use it to show the composer mid-thought. */
+	initialDraft?: string | undefined;
 }
 
 /** True at 2xl, where the inspector docks beside the transcript instead of overlaying it. */
@@ -74,8 +77,8 @@ export interface DraftAttachment {
 	error?: string | undefined;
 }
 
-export function WorkspaceView({ platform }: WorkspaceViewProps) {
-	const [draft, setDraft] = useState("");
+export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProps) {
+	const [draft, setDraft] = useState(initialDraft);
 	const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
 	const attachmentKey = useRef(0);
 	const [scope, setScope] = useState<DefaultScope>("workspace");
@@ -238,7 +241,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	// and the workspace switcher in the rail head is the navigation.
 	const brand = (
 		<span className="flex shrink-0 items-center gap-2">
-			<img src="/logo.svg" alt="" aria-hidden className="h-6 w-auto shrink-0" />
+			<BrandMark />
 			<Text as="span" size="sm" weight="semibold">
 				Acornfall
 			</Text>

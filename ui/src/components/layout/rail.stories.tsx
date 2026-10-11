@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ChevronsUpDown, PanelLeftClose, Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/typography/text";
+import { BrandMark } from "./brand-mark";
 import { Rail } from "./rail";
 
 const meta = {
@@ -22,7 +23,7 @@ type Story = StoryObj<typeof meta>;
 
 const brand = (
 	<span className="flex items-center gap-2">
-		<img src="/logo.svg" alt="" aria-hidden className="h-6 w-auto shrink-0" />
+		<BrandMark />
 		<Text as="span" size="sm" weight="semibold">
 			Acornfall
 		</Text>

@@ -110,6 +110,29 @@ function Tiles({ swatches }: { swatches: Swatch[] }) {
 	);
 }
 
+const steps = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+
+/**
+ * The raw ramps behind the roles: brand carries primary, secondary carries
+ * the quiet support. Inline styles, not classes — no utility resolves to a
+ * primitive, and the palette page is the only place that reads them.
+ */
+function Ramps({ scale }: { scale: "brand" | "secondary" }) {
+	return (
+		<div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-11">
+			{steps.map((step) => (
+				<Stack key={step} gap="2xs">
+					<div
+						className="h-16 rounded-md border border-border"
+						style={{ background: `var(--base-${scale}-${step})` }}
+					/>
+					<Code>{`${scale}-${step}`}</Code>
+				</Stack>
+			))}
+		</div>
+	);
+}
+
 export const Colour: Story = {
 	render: () => (
 		<div className="mx-auto w-full max-w-4xl p-8">
@@ -147,6 +170,10 @@ export const Colour: Story = {
 				</Section>
 				<Section title="Lines and scrim">
 					<Tiles swatches={lines} />
+				</Section>
+				<Section title="Ramps: brand carries primary, secondary carries support">
+					<Ramps scale="brand" />
+					<Ramps scale="secondary" />
 				</Section>
 			</Stack>
 		</div>
