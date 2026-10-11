@@ -265,6 +265,11 @@ type Control struct {
 	// record with recent activity counts after. A settlement clears its stamp, so the
 	// grace ends when the run does rather than running its ten seconds out.
 	promptedAt map[string]int64
+	// actionAt remembers an accepted builtin per conversation, in Unix
+	// milliseconds. A compaction is one bounded model task, not a turn, so no
+	// run record ever marks it: the stamp keeps the busy sign up for up to five
+	// minutes, and the worker's answer clears it sooner.
+	actionAt map[string]int64
 	// announced is the signature of the state attached clients were last told about. The poll
 	// compares the state against it, because a change only time can make has no data behind
 	// it: nothing refreshes, and only the comparison across ticks can see it.
@@ -310,6 +315,7 @@ func New(opts Options) *Control {
 		attachments:            map[string]int{},
 		policies:               map[string]json.RawMessage{},
 		promptedAt:             map[string]int64{},
+		actionAt:               map[string]int64{},
 	}
 }
 
@@ -1991,18 +1997,30 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 		if err := c.worker.CallInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
 			workerpool.Log("expanding %q: %v", text, err)
 		} else if expanded.Action == "compact" || expanded.Action == "reset" {
-			// A builtin is an action, not a turn: the worker records the
-			// invocation as a user message, then runs it. Nothing is sent to
-			// the model.
+			// A builtin is an action, not a turn: the worker runs it, then records
+			// the invocation as a user message. Nothing is sent to the model.
+			now := time.Now().UnixMilli()
+			c.mu.Lock()
+			c.promptedAt[conversationID] = now
+			c.actionAt[conversationID] = now
+			c.mu.Unlock()
+			// The busy sign goes up with the click, not with the answer: the worker
+			// answers this call only once the act and its record are in.
+			c.publish(protocol.Frame{Type: "state"})
 			var response struct {
 				ConversationID string `json:"conversationId"`
 			}
-			if err := c.worker.CallInto(ctx, protocol.Command{
+			err := c.worker.CallInto(ctx, protocol.Command{
 				Type:           "action",
 				ConversationID: conversationID,
 				Text:           strings.TrimSpace(text),
 				Action:         expanded.Action,
-			}, &response); err != nil {
+			}, &response)
+			c.mu.Lock()
+			delete(c.promptedAt, conversationID)
+			delete(c.actionAt, conversationID)
+			c.mu.Unlock()
+			if err != nil {
 				return err
 			}
 			c.publish(protocol.Frame{Type: "state"})
@@ -2426,8 +2444,12 @@ func (c *Control) persist() {
 func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	c.mu.RLock()
 	prompted := c.promptedAt[info.ID]
+	action := c.actionAt[info.ID]
 	c.mu.RUnlock()
 	if now-prompted < 10_000 {
+		return true
+	}
+	if now-action < 5*60_000 {
 		return true
 	}
 	if !info.Running || info.UpdatedAt <= 0 {

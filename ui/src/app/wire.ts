@@ -242,6 +242,8 @@ export interface WireEntry {
 	id: number;
 	kind: string;
 	model?: WireMessage[] | undefined;
+	/** Display-only payload, never model context: the notice text lives here. */
+	data?: { text?: string | undefined } | undefined;
 }
 
 export interface WireToolSlot {

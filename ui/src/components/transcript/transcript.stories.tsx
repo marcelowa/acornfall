@@ -111,6 +111,20 @@ export const Notice: Story = {
 	},
 };
 
+export const NothingToCompact: Story = {
+	args: {
+		entries: [
+			{ kind: "user", id: "1", at, text: "/compact" },
+			{
+				kind: "notice",
+				id: "2",
+				at,
+				text: "Nothing to compact — the talk is short.",
+			},
+		],
+	},
+};
+
 export const CompactionSummary: Story = {
 	args: {
 		entries: [

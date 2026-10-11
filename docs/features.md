@@ -63,6 +63,7 @@ reply quoting the request. `make dev` uses it.
 | T9 | A manual compaction is accepted; on a short talk the transcript stands, and the summary mark lands only when there was something worth summarizing. | `TestCompactKeepsAShortTranscript` |
 | T10 | The compact dialog states the scope before anything folds: turn and entry counts for the talk in view. | `TestCompactPreviewCountsTheTalk` |
 | T11 | `/compact` and `/clear` are always on offer, need no file, and run actions instead of turns; the invocation is recorded as a user message after the act, so a reset cannot bury it. A file of the same name shadows its builtin. | `TestSlashCompactIsAccepted`, `TestSlashClearResetsTheContext` + `worker/test/commands.test.ts` |
+| T12 | A builtin shows busy while it runs and answers when done: the gateway stamps the act like a prompt, a real compaction lands its summary card, and a short talk gets a `Nothing to compact` note that never joins the context. | `TestSlashCompactIsAccepted` (no-op note) |
 
 ## Defaults
 

@@ -368,6 +368,12 @@ export function toTranscript(
 				});
 				break;
 			}
+			case "acornfall.notice": {
+				const text = (entry.data?.text ?? "").trim();
+				if (text === "") break;
+				transcript.push({ kind: "notice", id, text, at: at(first) });
+				break;
+			}
 			default:
 				break;
 		}

@@ -988,9 +988,10 @@ type message struct {
 }
 
 type entry struct {
-	ID    int       `json:"id"`
-	Kind  string    `json:"kind"`
-	Model []message `json:"model"`
+	ID    int            `json:"id"`
+	Kind  string         `json:"kind"`
+	Model []message      `json:"model"`
+	Data  map[string]any `json:"data"`
 }
 
 type view struct {
@@ -1003,6 +1004,10 @@ func (e entry) text() string {
 	var parts []string
 	for _, m := range e.Model {
 		parts = append(parts, contentText(m.Content)...)
+	}
+	// Display-only entries carry no model messages: their text lives in data.
+	if notice, ok := e.Data["text"].(string); ok {
+		parts = append(parts, notice)
 	}
 	return strings.Join(parts, "\n")
 }

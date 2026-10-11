@@ -292,7 +292,7 @@ func TestSlashClearResetsTheContext(t *testing.T) {
 }
 
 // The same path runs a compaction: /compact through the composer is accepted on a
-// short talk and leaves it alone.
+// short talk, records itself, and says there was nothing to fold.
 func TestSlashCompactIsAccepted(t *testing.T) {
 	t.Parallel()
 	notSandbox(t)
@@ -304,9 +304,9 @@ func TestSlashCompactIsAccepted(t *testing.T) {
 	before := c.waitForText("general", created.ID, "I will remember.")
 
 	c.prompt("general", created.ID, "/compact")
-	after := c.waitForText("general", created.ID, "/compact")
-	if len(after.Entries) != len(before.Entries)+1 {
-		t.Errorf("/compact on a short talk should only record itself: %d entries then, %d now", len(before.Entries), len(after.Entries))
+	after := c.waitForText("general", created.ID, "Nothing to compact")
+	if len(after.Entries) != len(before.Entries)+2 {
+		t.Errorf("/compact on a short talk should record itself and say so: %d entries then, %d now", len(before.Entries), len(after.Entries))
 	}
 }
 
