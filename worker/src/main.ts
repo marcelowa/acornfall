@@ -40,7 +40,6 @@ import {
 	MAX_ATTACHMENTS_TOTAL_BYTES,
 	MAX_ATTACHMENT_BYTES,
 	attachmentLine,
-	formatAttachmentSize,
 	metaName,
 	safeName,
 	shapeFor,
