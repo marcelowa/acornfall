@@ -280,6 +280,7 @@ func TestSlashClearResetsTheContext(t *testing.T) {
 	c.waitForText("general", created.ID, "I will remember.")
 
 	c.prompt("general", created.ID, "/clear")
+	c.waitForText("general", created.ID, "/clear")
 	c.waitView("general", created.ID, func(v view) bool {
 		for _, kind := range v.kinds() {
 			if kind == "pi.reset" {
@@ -303,9 +304,9 @@ func TestSlashCompactIsAccepted(t *testing.T) {
 	before := c.waitForText("general", created.ID, "I will remember.")
 
 	c.prompt("general", created.ID, "/compact")
-	after := c.view("general", created.ID)
-	if len(before.Entries) != len(after.Entries) {
-		t.Errorf("/compact on a short talk should change nothing: %d entries then, %d now", len(before.Entries), len(after.Entries))
+	after := c.waitForText("general", created.ID, "/compact")
+	if len(after.Entries) != len(before.Entries)+1 {
+		t.Errorf("/compact on a short talk should only record itself: %d entries then, %d now", len(before.Entries), len(after.Entries))
 	}
 }
 

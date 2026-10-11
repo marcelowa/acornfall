@@ -46,6 +46,7 @@ type Command struct {
 	PromptID   string `json:"promptId,omitempty"`
 	Value      string `json:"value,omitempty"`
 	Cancelled  bool   `json:"cancelled,omitempty"`
+	Action     string `json:"action,omitempty"`
 }
 
 func (c Command) Marshal() ([]byte, error) { return json.Marshal(c) }
