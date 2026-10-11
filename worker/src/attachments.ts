@@ -95,14 +95,52 @@ export function formatAttachmentSize(bytes: number): string {
 }
 
 /**
+ * Image parts the providers take: JPEG, PNG, GIF, WebP, and ICO. Anything
+ * else image-shaped rides another way — SVG is text, the rest is a path.
+ */
+const IMAGE_PART_MIMES = new Set([
+	"image/jpeg",
+	"image/png",
+	"image/gif",
+	"image/webp",
+	"image/x-icon",
+	"image/vnd.microsoft.icon",
+]);
+
+const IMAGE_PART_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "ico"]);
+
+const EXTENSION_MIME: Record<string, string> = {
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	png: "image/png",
+	gif: "image/gif",
+	webp: "image/webp",
+	ico: "image/x-icon",
+	svg: "image/svg+xml",
+};
+
+/**
+ * The mime the image part carries: the stored one, unless it says nothing,
+ * when the suffix speaks instead. A part stamped octet-stream refuses.
+ */
+export function partMime(mime: string, name: string): string {
+	if (IMAGE_PART_MIMES.has(mime)) return mime;
+	return EXTENSION_MIME[extensionOf(name)] ?? mime;
+}
+
+/**
  * How the model gets the file: images as provider image parts, small text
  * inline, everything else as a sandbox path its tools can read. The suffix
  * decides when the mime says nothing useful.
  */
 export function shapeFor(mime: string, name: string): AttachmentShape {
-	if (mime.startsWith("image/")) return "image";
+	const ext = extensionOf(name);
+	if (mime === "image/svg+xml" || ext === "svg") return "text";
+	if (IMAGE_PART_MIMES.has(mime)) return "image";
+	if ((mime === "" || mime === "application/octet-stream") && IMAGE_PART_EXTENSIONS.has(ext))
+		return "image";
 	if (mime.startsWith("text/")) return "text";
-	if (TEXT_EXTENSIONS.has(extensionOf(name))) return "text";
+	if (TEXT_EXTENSIONS.has(ext)) return "text";
 	return "path";
 }
 

@@ -416,13 +416,18 @@ func TestAttachmentsRideAlong(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := c.upload("general", "shot.png", "image/png", shot)
+	// SVG is text: it rides inline, never as an image part the provider refuses.
+	logo := c.upload("general", "logo.svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>`))
 	c.post(c.conversationPath("general", created.ID)+"/messages", map[string]any{
 		"text":        "look at this",
-		"attachments": []string{id},
+		"attachments": []string{id, logo},
 	}, nil)
 	got := c.waitForText("general", created.ID, "seen")
 	if !strings.Contains(got.all(), "Attached: shot.png") {
 		t.Errorf("the sent message should name its file, got transcript:\n%s", truncate([]byte(got.all()), 600))
+	}
+	if !strings.Contains(got.all(), "<circle") {
+		t.Errorf("svg should ride inline as text, got transcript:\n%s", truncate([]byte(got.all()), 600))
 	}
 }
 
