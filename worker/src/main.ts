@@ -777,12 +777,27 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			return { conversationId: command.conversationId };
 		}
 		case "action": {
-			// A builtin is visible: the action runs instead of a model turn, then
-			// the invocation lands as a user message. The record goes last so a
-			// reset cannot bury it before its own cut.
+			// A builtin is visible: the action runs instead of a model turn, then the
+			// invocation lands as a user message. The record goes last so a reset
+			// cannot bury it before its own cut. A compaction that folds nothing
+			// leaves a note, so the send has an answer either way.
 			const conversation = await conversationFor(command.conversationId);
+			let notice: string | undefined;
 			if (command.action === "compact") {
-				await conversation.compact(undefined, CONTEXT);
+				const taskId = await conversation.compact(undefined, CONTEXT);
+				const settled = await harness.waitForTask(taskId, CONTEXT);
+				const outcome = settled.state.outcome;
+				if (outcome.status !== "completed") {
+					throw new Error(
+						outcome.status === "failed" || outcome.status === "faulted"
+							? outcome.error.message
+							: `compaction ${outcome.status}`,
+					);
+				}
+				const result = outcome.result;
+				if (result.entryId === undefined && result.submissionId === undefined) {
+					notice = "Nothing to compact — the talk is short.";
+				}
 			} else {
 				await conversation.reset(undefined, CONTEXT);
 			}
@@ -798,6 +813,19 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 				CONTEXT,
 			);
 			await recorded.wait(CONTEXT);
+			if (notice !== undefined) {
+				// Display only: no model messages, so the note never joins the
+				// context it just described.
+				const noted = await conversation.submit(
+					{
+						type: "write",
+						entry: { kind: "acornfall.notice", data: { text: notice } },
+						requestId: crypto.randomUUID(),
+					},
+					CONTEXT,
+				);
+				await noted.wait(CONTEXT);
+			}
 			return { conversationId: command.conversationId };
 		}
 		case "attach":
