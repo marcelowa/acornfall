@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	attachmentLine,
 	formatAttachmentSize,
+	kindName,
 	partMime,
 	shapeFor,
 	safeName,
@@ -81,5 +82,14 @@ describe("svg and unknown images", () => {
 	test("the part carries a real mime, not octet-stream", () => {
 		expect(partMime("application/octet-stream", "shot.jpg")).toBe("image/jpeg");
 		expect(partMime("image/png", "shot.png")).toBe("image/png");
+	});
+});
+
+describe("kindName", () => {
+	test("names kinds the model can act on", () => {
+		expect(kindName("application/pdf")).toBe("PDF document");
+		expect(kindName("application/zip")).toBe("ZIP archive");
+		expect(kindName("text/csv")).toBe("text file");
+		expect(kindName("application/octet-stream")).toBe("file");
 	});
 });

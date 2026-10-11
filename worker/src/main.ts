@@ -40,6 +40,8 @@ import {
 	MAX_ATTACHMENTS_TOTAL_BYTES,
 	MAX_ATTACHMENT_BYTES,
 	attachmentLine,
+	formatAttachmentSize,
+	kindName,
 	metaName,
 	safeName,
 	partMime,
@@ -393,7 +395,7 @@ function messageContent(
 				...files.flatMap(({ meta }) =>
 					shapeFor(meta.mime, meta.name) === "path"
 						? [
-								`${meta.name} is at ${ATTACHMENTS_DIR}/${storedName(meta.id, meta.name)} — read it with tools.`,
+								`${meta.name} is a ${kindName(meta.mime)} (${formatAttachmentSize(meta.size)}) at ${ATTACHMENTS_DIR}/${storedName(meta.id, meta.name)}.`,
 							]
 						: [],
 				),

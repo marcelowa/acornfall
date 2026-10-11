@@ -148,3 +148,24 @@ export function shapeFor(mime: string, name: string): AttachmentShape {
 export function attachmentLine(meta: AttachmentMeta): string {
 	return `Attached: ${meta.name} (${formatAttachmentSize(meta.size)})`;
 }
+
+/** What the file is, in words the model can act on: kind, size, and place. */
+const KIND_NAMES: Record<string, string> = {
+	"application/pdf": "PDF document",
+	"application/zip": "ZIP archive",
+	"application/x-tar": "tar archive",
+	"application/gzip": "gzip archive",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word document",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "spreadsheet",
+	"application/msword": "Word document",
+	"application/vnd.ms-excel": "spreadsheet",
+};
+
+export function kindName(mime: string): string {
+	if (mime in KIND_NAMES) return KIND_NAMES[mime]!;
+	if (mime.startsWith("text/")) return "text file";
+	if (mime.startsWith("image/")) return "image";
+	if (mime.startsWith("audio/")) return "audio file";
+	if (mime.startsWith("video/")) return "video file";
+	return "file";
+}
