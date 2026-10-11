@@ -377,6 +377,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		<UpdateSection
 			status={platform.update}
 			runsActive={platform.conversations.some((conversation) => conversation.running)}
+			applying={platform.applyingUpdate}
 			onCheck={platform.checkUpdateNow}
 			onRefresh={platform.refreshUpdate}
 			onApply={platform.applyUpdateNow}

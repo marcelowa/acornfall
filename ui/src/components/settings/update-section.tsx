@@ -20,6 +20,8 @@ export interface UpdateSectionProps {
 	status: UpdateStatus | undefined;
 	/** True while any conversation runs: Update now asks first. */
 	runsActive: boolean;
+	/** An apply is in flight: the buttons disable until it settles. */
+	applying: boolean;
 	onCheck: () => void;
 	/** Re-read the update state without forcing a release check. */
 	onRefresh: () => void;
@@ -38,6 +40,7 @@ export interface UpdateSectionProps {
 export function UpdateSection({
 	status,
 	runsActive,
+	applying,
 	onCheck,
 	onRefresh,
 	onApply,
@@ -177,8 +180,8 @@ export function UpdateSection({
 						</Text>
 					</Stack>
 					<div className="flex gap-2">
-						<Button size="sm" onClick={startUpdate}>
-							Update now
+						<Button size="sm" onClick={startUpdate} disabled={applying}>
+							{applying ? "Updating…" : "Update now"}
 						</Button>
 						<Button size="sm" variant="ghost" onClick={onLater}>
 							Later
@@ -291,12 +294,13 @@ export function UpdateSection({
 							Wait for drain
 						</Button>
 						<Button
+							disabled={applying}
 							onClick={() => {
 								setBlockedOpen(false);
 								onApply(cleanVMs, "stop");
 							}}
 						>
-							Stop runs and update
+							{applying ? "Updating…" : "Stop runs and update"}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
