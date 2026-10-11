@@ -268,6 +268,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		refreshProviders: noop,
 		update: undefined,
 		refreshUpdate: noop,
+		applyingUpdate: false,
 		checkUpdateNow: noop,
 		applyUpdateNow: noop,
 		rollbackUpdateNow: noop,

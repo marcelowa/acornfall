@@ -132,6 +132,7 @@ const updates = (
 			workerSize: 70000,
 		}}
 		runsActive={false}
+		applying={false}
 		onCheck={noop}
 		onRefresh={noop}
 		onApply={noop}
@@ -180,6 +181,37 @@ export const Appearance: Story = {
 /** The updates page: one release, one click. */
 export const Updates: Story = {
 	args: { ...Default.args, tab: "updates" },
+};
+
+const updatesApplying = (
+	<UpdateSection
+		status={{
+			current: "v0.8.0",
+			latest: "v0.9.0",
+			notes: "Faster sandbox boot.",
+			pinned: "",
+			channel: "releases",
+			autoCheck: true,
+			checking: false,
+			available: true,
+			backups: [],
+			downloadSize: 13000000,
+			workerSize: 70000,
+		}}
+		runsActive={false}
+		applying
+		onCheck={noop}
+		onRefresh={noop}
+		onApply={noop}
+		onRollback={noop}
+		onSavePrefs={noop}
+		onLater={noop}
+	/>
+);
+
+/** Mid-apply: the button says so and stays pressed-disabled until the call settles. */
+export const UpdatesApplying: Story = {
+	args: { ...Default.args, tab: "updates", updates: updatesApplying },
 };
 
 /** A workspace that is not loaded yet: the form is there, and Save knows it has nothing. */

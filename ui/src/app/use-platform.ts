@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
 	answerAuthPrompt,
@@ -36,6 +36,7 @@ import {
 	type UpdateStatus,
 } from "./client";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
+import { trackBuild } from "./update";
 import {
 	contextWindowFor,
 	stalePins,
@@ -257,6 +258,8 @@ export interface Platform {
 	update?: UpdateStatus | undefined;
 	/** Ask the gateway for the update state again; a success clears the last refusal. */
 	refreshUpdate: () => void;
+	/** An apply is in flight: the update button is disabled until it settles. */
+	applyingUpdate: boolean;
 	/** Force a release check now. */
 	checkUpdateNow: () => void;
 	/** Back up, download, verify, swap. Refusals land in `failure`. */
@@ -912,6 +915,18 @@ export function usePlatform(): Platform {
 					workerSize: 0,
 				};
 	const update = fetchedUpdate ?? updateFromState;
+	// The build this page first saw: an apply or rollback restarts the server
+	// under us, the stream's next state names the new build, and this bundle
+	// is old — reload to fetch the new one. The stream summary is the
+	// freshest sighting; the fetch fills in when the stream has said nothing.
+	const runningBuild = useRef<string | undefined>(undefined);
+	const streamBuild = updateFromState?.current;
+	const fetchedBuild = fetchedUpdate?.current;
+	useEffect(() => {
+		const tracked = trackBuild(runningBuild.current, streamBuild ?? fetchedBuild);
+		runningBuild.current = tracked.seen;
+		if (tracked.reload) window.location.reload();
+	}, [streamBuild, fetchedBuild]);
 	useEffect(() => {
 		let cancelled = false;
 		const load = async (): Promise<void> => {
@@ -941,9 +956,17 @@ export function usePlatform(): Platform {
 	const checkUpdateNow = useCallback((): void => {
 		act(checkUpdate().then(setFetchedUpdate));
 	}, [act]);
+	const [applyingUpdate, setApplyingUpdate] = useState(false);
 	const applyUpdateNow = useCallback(
 		(cleanVMs: boolean, drain: "wait" | "stop"): void => {
-			act(applyUpdate(cleanVMs, drain).then(setFetchedUpdate));
+			const request = applyUpdate(cleanVMs, drain);
+			// Immediate and single: the button disables on this render, so a
+			// second tap has nothing to press. Settles either way, so a
+			// refusal re-enables instead of sticking disabled.
+			setApplyingUpdate(true);
+			const done = (): void => setApplyingUpdate(false);
+			void request.then(done, done);
+			act(request.then(setFetchedUpdate));
 		},
 		[act],
 	);
@@ -1094,6 +1117,7 @@ export function usePlatform(): Platform {
 		refreshProviders: refreshProvidersNow,
 		update,
 		refreshUpdate,
+		applyingUpdate,
 		checkUpdateNow,
 		applyUpdateNow,
 		rollbackUpdateNow,

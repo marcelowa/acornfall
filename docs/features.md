@@ -65,6 +65,7 @@ reply quoting the request. `make dev` uses it.
 | T11 | `/compact` and `/clear` are always on offer, need no file, and run actions instead of turns; the invocation is recorded as a user message after the act, so a reset cannot bury it. A file of the same name shadows its builtin. | `TestSlashCompactIsAccepted`, `TestSlashClearResetsTheContext` + `worker/test/commands.test.ts` |
 | T12 | A builtin shows busy while it runs and answers when done: the gateway stamps the act like a prompt, a real compaction lands its summary card, and a short talk gets a `Nothing to compact` note that never joins the context. | `TestSlashCompactIsAccepted` (no-op note) |
 | T13 | A real fold reports itself: a note with folded entries and turns, plus what the last reply read in provider tokens, with a percent of the window when the model is known. | `TestSlashCompactReportsTheFold` + `worker/test/commands.test.ts` |
+| T14 | After an apply or rollback restarts the server, the client reloads for the new build once the stream names it. The update button disables with an `Updating…` label while the apply call is in flight, so a second tap has nothing to press. | `ui/test/update.test.ts` + `Settings/SettingsScreen/UpdatesApplying` |
 
 ## Defaults
 
