@@ -267,6 +267,48 @@ func TestCompactPreviewCountsTheTalk(t *testing.T) {
 	}
 }
 
+// A builtin is an action, not a turn: /clear resets the context, the transcript keeps
+// the mark, and no model turn runs in between.
+func TestSlashClearResetsTheContext(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
+	c := s.client()
+
+	created := c.create("general")
+	c.prompt("general", created.ID, "remember this")
+	c.waitForText("general", created.ID, "I will remember.")
+
+	c.prompt("general", created.ID, "/clear")
+	c.waitView("general", created.ID, func(v view) bool {
+		for _, kind := range v.kinds() {
+			if kind == "pi.reset" {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Minute)
+}
+
+// The same path runs a compaction: /compact through the composer is accepted on a
+// short talk and leaves it alone.
+func TestSlashCompactIsAccepted(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
+	c := s.client()
+
+	created := c.create("general")
+	c.prompt("general", created.ID, "remember this")
+	before := c.waitForText("general", created.ID, "I will remember.")
+
+	c.prompt("general", created.ID, "/compact")
+	after := c.view("general", created.ID)
+	if len(before.Entries) != len(after.Entries) {
+		t.Errorf("/compact on a short talk should change nothing: %d entries then, %d now", len(before.Entries), len(after.Entries))
+	}
+}
+
 // A prompt produces a transcript the client can read: the user's message, the prompt that
 // was sent, the assistant's answer, and spend that is attributed to this conversation.
 func TestPromptRoundTrip(t *testing.T) {

@@ -193,7 +193,13 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 		} `json:"commands"`
 	}
 	c.get("/api/workspaces/general/commands", &listing)
-	if len(listing.Commands) != 2 {
+	files := 0
+	for _, command := range listing.Commands {
+		if command.Source != "builtin" {
+			files++
+		}
+	}
+	if files != 2 {
 		t.Fatalf("expected the command from both bundle names and the one from prompts, got %+v", listing.Commands)
 	}
 	byCommand := map[string]string{}

@@ -65,6 +65,7 @@ import {
 	expandCommand,
 	loadCommands,
 	parseCommandInvocation,
+	unshadowedBuiltins,
 	type Command as SlashCommand,
 } from "./commands.ts";
 
@@ -768,6 +769,13 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			}
 			return { conversationId: command.conversationId, entries, turns };
 		}
+		case "reset": {
+			// A fresh context: the reset entry lands and the next turn sees nothing
+			// before it. The transcript keeps a notice where the cut was.
+			const conversation = await conversationFor(command.conversationId);
+			await conversation.reset(undefined, CONTEXT);
+			return { conversationId: command.conversationId };
+		}
 		case "attach":
 			await attach(command.conversationId);
 			return {
@@ -830,14 +838,21 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 		}
 		case "commands":
 			return {
-				commands: commands.map((template) => ({
-					name: template.name,
-					description: template.description,
-					...(template.argumentHint === undefined
-						? {}
-						: { argumentHint: template.argumentHint }),
-					source: template.source,
-				})),
+				commands: [
+					...commands.map((template) => ({
+						name: template.name,
+						description: template.description,
+						...(template.argumentHint === undefined
+							? {}
+							: { argumentHint: template.argumentHint }),
+						source: template.source,
+					})),
+					...unshadowedBuiltins(commands).map((builtin) => ({
+						name: builtin.name,
+						description: builtin.description,
+						source: "builtin",
+					})),
+				],
 			};
 		case "expand": {
 			// A message that opens with /name is a command; anything else is itself, so a
@@ -847,8 +862,16 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			const template: SlashCommand | undefined = commands.find(
 				(candidate) => candidate.name === invocation.name,
 			);
-			if (template === undefined) return { text: command.text };
-			return { text: expandCommand(template, invocation.args), command: template.name };
+			if (template !== undefined) {
+				return { text: expandCommand(template, invocation.args), command: template.name };
+			}
+			// No file: a builtin is an action, not a text, and the gateway runs it
+			// instead of sending a turn. A file of the same name wins above.
+			const builtin = unshadowedBuiltins(commands).find(
+				(candidate) => candidate.name === invocation.name,
+			);
+			if (builtin === undefined) return { text: command.text };
+			return { text: command.text, command: builtin.name, action: builtin.action };
 		}
 		case "agents":
 			return {
