@@ -8,11 +8,12 @@
  * A conversation id is pi-durable's own id, stringified. This layer never invents
  * one; control treats it as opaque.
  */
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
+import type { ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	type Conversation,
@@ -32,6 +33,19 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
+import {
+	ATTACHMENTS_DIR,
+	INLINE_TEXT_MAX_BYTES,
+	MAX_ATTACHMENTS_PER_MESSAGE,
+	MAX_ATTACHMENTS_TOTAL_BYTES,
+	MAX_ATTACHMENT_BYTES,
+	attachmentLine,
+	metaName,
+	safeName,
+	shapeFor,
+	storedName,
+	type AttachmentMeta,
+} from "./attachments.ts";
 import { thinkingLevelFor } from "./thinking.ts";
 import { totalCost, totalTokens } from "./usage.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
@@ -320,6 +334,87 @@ async function windowOf(conversation: Conversation): Promise<number | undefined>
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * The stored files for the ids riding with a message. Refuses rather than
+ * skipping: a silently dropped file would answer a question never asked.
+ */
+async function attachmentFiles(
+	ids: readonly string[],
+): Promise<{ meta: AttachmentMeta; bytes: Uint8Array }[]> {
+	if (ids.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+		throw new Error(`one message carries ${MAX_ATTACHMENTS_PER_MESSAGE} files at most`);
+	}
+	const dir = join(args.workspace, ATTACHMENTS_DIR);
+	const found: { meta: AttachmentMeta; bytes: Uint8Array }[] = [];
+	let total = 0;
+	for (const id of ids) {
+		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
+			throw new Error("an attachment id is bad; upload the file again");
+		}
+		const raw = await sandbox.read(join(dir, metaName(id))).catch(() => null);
+		if (raw === null) throw new Error("an attachment is gone; upload it again");
+		const meta = JSON.parse(raw) as AttachmentMeta;
+		const bytes = await sandbox
+			.readBytes(join(dir, storedName(meta.id, meta.name)))
+			.catch(() => null);
+		if (bytes === null) throw new Error("an attachment is gone; upload it again");
+		total += bytes.byteLength;
+		found.push({ meta: { ...meta, size: bytes.byteLength }, bytes });
+	}
+	if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+		throw new Error(
+			`one message carries ${MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB of files at most`,
+		);
+	}
+	return found;
+}
+
+/**
+ * The user message with files: the text names every attachment, images ride
+ * as provider parts, small text rides inline, and the rest rides as a path
+ * the tools can read. The names travel in the text, so the transcript shows
+ * what rode along without a second channel.
+ */
+function messageContent(
+	text: string,
+	files: readonly { meta: AttachmentMeta; bytes: Uint8Array }[],
+): UserMessage["content"] {
+	if (files.length === 0) return text;
+	const header = text.trim() === "" ? [] : [text, ""];
+	const blocks: (TextContent | ImageContent)[] = [
+		{
+			type: "text",
+			text: [
+				...header,
+				...files.map(({ meta }) => attachmentLine(meta)),
+				...files.flatMap(({ meta }) =>
+					shapeFor(meta.mime, meta.name) === "path"
+						? [
+								`${meta.name} is at ${ATTACHMENTS_DIR}/${storedName(meta.id, meta.name)} — read it with tools.`,
+							]
+						: [],
+				),
+			].join("\n"),
+		},
+	];
+	for (const { meta, bytes } of files) {
+		const shape = shapeFor(meta.mime, meta.name);
+		if (shape === "image") {
+			blocks.push({
+				type: "image",
+				data: Buffer.from(bytes).toString("base64"),
+				mimeType: meta.mime,
+			});
+		} else if (shape === "text" && bytes.byteLength <= INLINE_TEXT_MAX_BYTES) {
+			blocks.push({
+				type: "text",
+				text: `--- ${meta.name} ---\n${Buffer.from(bytes).toString("utf8")}`,
+			});
+		}
+	}
+	return blocks;
 }
 
 async function conversationFor(id: string): Promise<Conversation> {
@@ -893,12 +988,47 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			subscriptions.get(command.conversationId)?.dispose();
 			subscriptions.delete(command.conversationId);
 			return undefined;
+		case "attachment": {
+			// Bytes the gateway staged: the claimed size refuses fast, the read
+			// size refuses for real. Stored under the workspace's hidden folder
+			// with a generated name, answered with an id. The temp file stays
+			// the gateway's to remove; this side only reads it.
+			if (command.size > MAX_ATTACHMENT_BYTES) {
+				throw new Error(
+					`one file carries ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB at most`,
+				);
+			}
+			const bytes = await readFile(command.tempPath).catch(() => {
+				throw new Error("the upload did not land; send it again");
+			});
+			if (bytes.byteLength === 0) throw new Error("empty files carry nothing");
+			if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+				throw new Error(
+					`one file carries ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB at most`,
+				);
+			}
+			const meta: AttachmentMeta = {
+				id: crypto.randomUUID(),
+				name: safeName(command.name),
+				size: bytes.byteLength,
+				mime: command.mime === "" ? "application/octet-stream" : command.mime,
+			};
+			const dir = join(args.workspace, ATTACHMENTS_DIR);
+			await sandbox.mkdir(dir).catch(() => undefined);
+			await sandbox.write(join(dir, storedName(meta.id, meta.name)), bytes);
+			await sandbox.write(join(dir, metaName(meta.id)), JSON.stringify(meta));
+			return { attachment: meta };
+		}
 		case "prompt": {
 			const conversation = await conversationFor(command.conversationId);
+			const content = messageContent(
+				command.text,
+				await attachmentFiles(command.attachments ?? []),
+			);
 			const submission = await conversation.submit(
 				{
 					type: "input",
-					content: command.text,
+					content,
 					whenBusy: command.whenBusy ?? "followUp",
 					requestId: crypto.randomUUID(),
 				},

@@ -1,6 +1,13 @@
 package e2e
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -342,6 +349,94 @@ func TestSlashCompactReportsTheFold(t *testing.T) {
 		t.Errorf("the fold should land its summary card, got %s", strings.Join(after.kinds(), ","))
 	}
 
+}
+
+// upload stages one file and answers its id: the bytes land under the workspace's
+// hidden folder, never a host path the client named.
+func (c *client) upload(workspace, name, mime string, content []byte) string {
+	c.t.Helper()
+	status, payload := c.uploadStatus(workspace, name, mime, content)
+	if status != http.StatusCreated {
+		c.t.Fatalf("upload %s: %d %s", name, status, payload)
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(payload, &out); err != nil || out.ID == "" {
+		c.t.Fatalf("upload %s answered no id: %s", name, payload)
+	}
+	return out.ID
+}
+
+func (c *client) uploadStatus(workspace, name, mime string, content []byte) (int, []byte) {
+	c.t.Helper()
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	part, err := form.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": []string{`form-data; name="file"; filename="` + name + `"`},
+		"Content-Type":        []string{mime},
+	})
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	if _, err := part.Write(content); err != nil {
+		c.t.Fatal(err)
+	}
+	if err := form.Close(); err != nil {
+		c.t.Fatal(err)
+	}
+	request, err := http.NewRequest(http.MethodPost, c.base+"/api/workspaces/"+workspace+"/attachments", &body)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	request.Header.Set("content-type", form.FormDataContentType())
+	response, err := c.http.Do(request)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	defer response.Body.Close()
+	payload, err := io.ReadAll(response.Body)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	return response.StatusCode, payload
+}
+
+// Files ride with a message: an upload stages bytes under the workspace's hidden
+// folder, and a send with its id reaches the model, named in the transcript.
+func TestAttachmentsRideAlong(t *testing.T) {
+	t.Parallel()
+	maybeSandbox(t)
+	s := start(t, withScript(scriptRule{Match: "look at this", Reply: "seen"}))
+	c := s.client()
+
+	created := c.create("general")
+	shot, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := c.upload("general", "shot.png", "image/png", shot)
+	c.post(c.conversationPath("general", created.ID)+"/messages", map[string]any{
+		"text":        "look at this",
+		"attachments": []string{id},
+	}, nil)
+	got := c.waitForText("general", created.ID, "seen")
+	if !strings.Contains(got.all(), "Attached: shot.png") {
+		t.Errorf("the sent message should name its file, got transcript:\n%s", truncate([]byte(got.all()), 600))
+	}
+}
+
+// The caps refuse fast: an 11 MB file never reaches the worker.
+func TestAttachmentsRefuseOversize(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t)
+	c := s.client()
+
+	status, payload := c.uploadStatus("general", "big.bin", "application/octet-stream", make([]byte, 11<<20))
+	if status != http.StatusRequestEntityTooLarge {
+		t.Errorf("an 11 MB file should refuse with 413, got %d %s", status, truncate(payload, 200))
+	}
 }
 
 // A prompt produces a transcript the client can read: the user's message, the prompt that

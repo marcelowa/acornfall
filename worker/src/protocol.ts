@@ -38,7 +38,24 @@ export type Command =
 	| { id: string; type: "open"; conversationId: string; agent: ModelBinding }
 	| { id: string; type: "attach"; conversationId: string }
 	| { id: string; type: "detach"; conversationId: string }
-	| { id: string; type: "prompt"; conversationId: string; text: string; whenBusy?: WhenBusy }
+	| {
+			id: string;
+			type: "prompt";
+			conversationId: string;
+			text: string;
+			whenBusy?: WhenBusy;
+			/** Stored attachment ids riding with the text. */
+			attachments?: string[];
+	  }
+	| {
+			id: string;
+			type: "attachment";
+			name: string;
+			mime: string;
+			size: number;
+			/** Host file the gateway staged; it removes it after the answer. */
+			tempPath: string;
+	  }
 	| { id: string; type: "abort"; conversationId: string }
 	| { id: string; type: "agents" }
 	| { id: string; type: "commands" }

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUp, ChevronsUpDown, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
-import type { DefaultScope, ProviderAuthType } from "./client";
+import type { DefaultScope, ProviderAuthType, UploadedAttachment } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
+import { MAX_ATTACHMENT_BYTES, refuseAttachments } from "@/lib/attachments";
 import { ConversationList } from "@/components/conversation/conversation-list";
 import { Composer } from "@/components/composer/composer";
 import { SlashMenu } from "@/components/composer/slash-menu";
@@ -62,8 +63,21 @@ function useWide(): boolean {
  * The draft and the busy-action choice are the composer's own state, not the platform's: they
  * exist for one visit to one conversation and nothing else needs them.
  */
+/** A file picked in the composer: uploading, stored, or refused with its reason. */
+export interface DraftAttachment {
+	key: string;
+	name: string;
+	size: number;
+	mime: string;
+	status: "uploading" | "ready" | "failed";
+	id?: string | undefined;
+	error?: string | undefined;
+}
+
 export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const [draft, setDraft] = useState("");
+	const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+	const attachmentKey = useRef(0);
 	const [scope, setScope] = useState<DefaultScope>("workspace");
 	/** The conversation being renamed, if any: the rail's menu asks, this dialog answers. */
 	const [renaming, setRenaming] = useState<ConversationSummary | undefined>(undefined);
@@ -90,8 +104,78 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const activeId = platform.active?.id;
 	useEffect(() => {
 		setDraft("");
+		setAttachments([]);
 		setSlashIndex(0);
 	}, [activeId]);
+
+	// Files picked in the composer upload at once: valid ones stage in the
+	// workspace's hidden folder, refused ones stay as chips saying why. A chip
+	// removed mid-upload is simply gone when its answer lands.
+	const chooseFiles = (files: File[]): void => {
+		const batchRefusal = refuseAttachments(attachments, files);
+		for (const file of files) {
+			attachmentKey.current += 1;
+			const key = `attachment-${attachmentKey.current}`;
+			const refusal =
+				file.size > MAX_ATTACHMENT_BYTES ? "one file carries 10 MB at most" : batchRefusal;
+			if (refusal !== undefined) {
+				const failed: DraftAttachment = {
+					key,
+					name: file.name === "" ? "file" : file.name,
+					size: file.size,
+					mime: file.type,
+					status: "failed",
+					error: refusal,
+				};
+				setAttachments((current) => [...current, failed]);
+				continue;
+			}
+			const pending: DraftAttachment = {
+				key,
+				name: file.name === "" ? "file" : file.name,
+				size: file.size,
+				mime: file.type,
+				status: "uploading",
+			};
+			setAttachments((current) => [...current, pending]);
+			void platform.upload(file).then(
+				(done: UploadedAttachment) => {
+					setAttachments((current) =>
+						current.map((entry) =>
+							entry.key === key
+								? {
+										...entry,
+										status: "ready" as const,
+										id: done.id,
+										name: done.name,
+										size: done.size,
+										mime: done.mime,
+									}
+								: entry,
+						),
+					);
+				},
+				(cause: unknown) => {
+					setAttachments((current) =>
+						current.map((entry) =>
+							entry.key === key
+								? {
+										...entry,
+										status: "failed" as const,
+										error:
+											cause instanceof Error ? cause.message : String(cause),
+									}
+								: entry,
+						),
+					);
+				},
+			);
+		}
+	};
+
+	const removeAttachment = (key: string): void => {
+		setAttachments((current) => current.filter((entry) => entry.key !== key));
+	};
 	// Stop stays a button and goes quiet while the abort lands: a slow abort invites
 	// repeated clicks, and repeated clicks are repeated abort calls. The run ending, a
 	// different conversation, or ten seconds clears it — whichever answers first.
@@ -112,20 +196,32 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const clampedSlash =
 		visibleSlash.length === 0 ? 0 : Math.min(slashIndex, visibleSlash.length - 1);
 
+	const readyAttachments = attachments.filter(
+		(entry) => entry.status === "ready" && entry.id !== undefined,
+	);
+	const uploadingAttachments = attachments.some((entry) => entry.status === "uploading");
+
 	const sendText = (action: "steer" | "followUp"): void => {
 		const text = draft.trim();
-		if (text === "") return;
+		if (text === "" && readyAttachments.length === 0) return;
+		if (uploadingAttachments) return;
 		if (platform.active === undefined) return;
+		const ids = readyAttachments.map((entry) => entry.id as string);
 		setDraft("");
+		setAttachments([]);
 		// A refused send keeps what was typed: the draft comes back if nothing else does.
-		void platform.send(text, action).catch(() => {
+		// The chips stay either way — staged files survive a refusal to ride the retry.
+		void platform.send(text, action, ids.length === 0 ? undefined : ids).catch(() => {
 			setDraft((current) => (current === "" ? text : current));
+			setAttachments((current) =>
+				current.length === 0 ? readyAttachments.map((entry) => ({ ...entry })) : current,
+			);
 		});
 	};
 
 	const submit = (): void => {
 		const text = draft.trim();
-		if (text === "") return;
+		if (text === "" && readyAttachments.length === 0) return;
 		const first = visibleSlash[clampedSlash];
 		if (first !== undefined) {
 			setDraft(`/${first.name} `);
@@ -504,6 +600,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							value={draft}
 							onChange={setDraft}
 							onSend={submit}
+							attachments={attachments}
+							onAttachFiles={chooseFiles}
+							onRemoveAttachment={removeAttachment}
 							onAbort={() => {
 								setAborting(true);
 								platform.abort();

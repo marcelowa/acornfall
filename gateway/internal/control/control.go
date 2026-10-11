@@ -1976,8 +1976,9 @@ func (c *Control) CancelAuth(ctx context.Context, authID string) error {
 	return c.worker.CallInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
 }
 
-func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy) error {
-	if strings.TrimSpace(text) == "" {
+func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy, attachments []string) error {
+	// Files may ride alone: a screenshot with no words is still a message.
+	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return errors.New("empty message")
 	}
 	// A conversation about to run must be configured first: pinning writes a binding without
@@ -2034,6 +2035,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 		ConversationID: conversationID,
 		Text:           text,
 		WhenBusy:       when,
+		Attachments:    attachments,
 	}, nil); err != nil {
 		return err
 	}
@@ -2053,6 +2055,35 @@ func (c *Control) Abort(ctx context.Context, conversationID string) error {
 
 func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
 	return c.worker.Call(ctx, protocol.Command{Type: "usage"})
+}
+
+// Attachment is one stored file, answered with the id messages carry.
+type Attachment struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	MIME string `json:"mime"`
+}
+
+// UploadAttachment stores staged bytes under the workspace's hidden folder.
+// The temp file stays the caller's to remove; the worker only reads it.
+func (c *Control) UploadAttachment(ctx context.Context, tempPath, name, mime string, size int64) (Attachment, error) {
+	var response struct {
+		Attachment Attachment `json:"attachment"`
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{
+		Type:     "attachment",
+		TempPath: tempPath,
+		FileName: name,
+		MIME:     mime,
+		FileSize: size,
+	}, &response); err != nil {
+		return Attachment{}, err
+	}
+	if response.Attachment.ID == "" {
+		return Attachment{}, errors.New("worker returned no attachment id")
+	}
+	return response.Attachment, nil
 }
 
 // Subscribe attaches one client to one conversation. The view it returns is that

@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.compactConversation)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/compact-preview", s.compactPreview)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.messages)
+		mux.HandleFunc("POST "+base+"/attachments", s.attachments)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.abort)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.agent)
 		mux.HandleFunc("GET "+base+"/conversations/{id}/policy", s.policy)
@@ -395,8 +396,9 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Text     string            `json:"text"`
-		WhenBusy protocol.WhenBusy `json:"whenBusy"`
+		Text        string            `json:"text"`
+		WhenBusy    protocol.WhenBusy `json:"whenBusy"`
+		Attachments []string          `json:"attachments"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -410,7 +412,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "whenBusy must be steer, followUp or reject", http.StatusBadRequest)
 		return
 	}
-	if err := ctl.Prompt(r.Context(), r.PathValue("id"), strings.TrimSpace(body.Text), when); err != nil {
+	if err := ctl.Prompt(r.Context(), r.PathValue("id"), strings.TrimSpace(body.Text), when, body.Attachments); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

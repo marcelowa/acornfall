@@ -219,6 +219,31 @@ export const ContextUsage: Story = {
 	),
 };
 
+/** Files riding the draft: one staged, one still uploading, one refused with its reason. */
+export const WithAttachments: Story = {
+	args: {
+		...Idle.args,
+		onAttachFiles: noop,
+		onRemoveAttachment: noop,
+		attachments: [
+			{ key: "a-1", name: "shot.png", size: 12000, status: "ready" },
+			{ key: "a-2", name: "notes.txt", size: 400, status: "uploading" },
+			{
+				key: "a-3",
+				name: "dump.bin",
+				size: 11 * 1024 * 1024,
+				status: "failed",
+				error: "one file carries 10 MB at most",
+			},
+		],
+	},
+	render: (args) => (
+		<Frame>
+			{([value, setValue]) => <Composer {...args} value={value} onChange={setValue} />}
+		</Frame>
+	),
+};
+
 /** Past 70% the line grows a Compact button that starts a manual compaction. */
 export const ContextUsageFull: Story = {
 	args: {
