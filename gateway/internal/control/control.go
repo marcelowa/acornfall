@@ -1092,20 +1092,6 @@ func (c *Control) CompactPreview(ctx context.Context, conversationID string) (Co
 
 // Reset starts a fresh context: the next turn sees nothing before the cut, and the
 // transcript keeps a notice where it was.
-func (c *Control) Reset(ctx context.Context, conversationID string) error {
-	var response struct {
-		ConversationID string `json:"conversationId"`
-	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
-		Type:           "reset",
-		ConversationID: conversationID,
-	}, &response); err != nil {
-		return err
-	}
-	c.publish(protocol.Frame{Type: "state"})
-	return nil
-}
-
 // Create makes a new conversation and selects it.
 func (c *Control) Create(ctx context.Context) error {
 	var response struct {
@@ -2004,11 +1990,23 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 		}
 		if err := c.worker.CallInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
 			workerpool.Log("expanding %q: %v", text, err)
-		} else if expanded.Action == "compact" {
-			// A builtin is an action, not a turn: nothing is sent to the model.
-			return c.Compact(ctx, conversationID)
-		} else if expanded.Action == "reset" {
-			return c.Reset(ctx, conversationID)
+		} else if expanded.Action == "compact" || expanded.Action == "reset" {
+			// A builtin is an action, not a turn: the worker records the
+			// invocation as a user message, then runs it. Nothing is sent to
+			// the model.
+			var response struct {
+				ConversationID string `json:"conversationId"`
+			}
+			if err := c.worker.CallInto(ctx, protocol.Command{
+				Type:           "action",
+				ConversationID: conversationID,
+				Text:           strings.TrimSpace(text),
+				Action:         expanded.Action,
+			}, &response); err != nil {
+				return err
+			}
+			c.publish(protocol.Frame{Type: "state"})
+			return nil
 		} else if expanded.Command != "" {
 			text = expanded.Text
 		}

@@ -776,6 +776,30 @@ async function handle(command: QueuedCommand): Promise<unknown> {
 			await conversation.reset(undefined, CONTEXT);
 			return { conversationId: command.conversationId };
 		}
+		case "action": {
+			// A builtin is visible: the action runs instead of a model turn, then
+			// the invocation lands as a user message. The record goes last so a
+			// reset cannot bury it before its own cut.
+			const conversation = await conversationFor(command.conversationId);
+			if (command.action === "compact") {
+				await conversation.compact(undefined, CONTEXT);
+			} else {
+				await conversation.reset(undefined, CONTEXT);
+			}
+			const recorded = await conversation.submit(
+				{
+					type: "write",
+					entry: {
+						kind: "pi.user",
+						model: [{ role: "user", content: command.text, timestamp: Date.now() }],
+					},
+					requestId: crypto.randomUUID(),
+				},
+				CONTEXT,
+			);
+			await recorded.wait(CONTEXT);
+			return { conversationId: command.conversationId };
+		}
 		case "attach":
 			await attach(command.conversationId);
 			return {

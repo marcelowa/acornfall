@@ -62,7 +62,7 @@ reply quoting the request. `make dev` uses it.
 | T8 | A model with no credentials, or a definition that does not exist, is refused where it was chosen. | `TestUnusableChoicesAreRefused` |
 | T9 | A manual compaction is accepted; on a short talk the transcript stands, and the summary mark lands only when there was something worth summarizing. | `TestCompactKeepsAShortTranscript` |
 | T10 | The compact dialog states the scope before anything folds: turn and entry counts for the talk in view. | `TestCompactPreviewCountsTheTalk` |
-| T11 | `/compact` and `/clear` are always on offer, need no file, and run actions instead of turns; a file of the same name shadows its builtin. | `TestSlashCompactIsAccepted`, `TestSlashClearResetsTheContext` + `worker/test/commands.test.ts` |
+| T11 | `/compact` and `/clear` are always on offer, need no file, and run actions instead of turns; the invocation is recorded as a user message after the act, so a reset cannot bury it. A file of the same name shadows its builtin. | `TestSlashCompactIsAccepted`, `TestSlashClearResetsTheContext` + `worker/test/commands.test.ts` |
 
 ## Defaults
 
