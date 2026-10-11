@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Stack } from "@/components/layout/stack";
 import { Text } from "@/components/typography/text";
+import { BrandMark } from "@/components/layout/brand-mark";
 import { Shell } from "./shell";
 
 const meta = {
@@ -31,7 +32,7 @@ export const Slots: Story = {
 		topbar: (
 			<>
 				<span className="flex shrink-0 items-center gap-2">
-					<img src="/logo.svg" alt="" aria-hidden className="h-6 w-auto shrink-0" />
+					<BrandMark />
 					<Text as="span" size="sm" weight="semibold">
 						Acornfall
 					</Text>

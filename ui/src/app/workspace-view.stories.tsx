@@ -308,6 +308,8 @@ export const Running: Story = {
 			entries: runningEntries,
 			active: { ...streamConversation, running: true },
 		}),
+		// A draft in progress: steer and queue stay enabled, as in the hand.
+		initialDraft: "and the lock file",
 	},
 };
 

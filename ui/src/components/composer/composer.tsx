@@ -259,7 +259,7 @@ export function Composer({
 								<>
 									<Button
 										type="button"
-										variant="outline"
+										variant="destructive"
 										size="sm"
 										onClick={onAbort}
 										disabled={aborting}

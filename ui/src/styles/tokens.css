@@ -26,34 +26,35 @@
 	 * theme and the layers stopped meaning anything.
 	 * ──────────────────────────────────────────────────────────────────────────────────────── */
 
-	/* Neutral */
+	/* Neutral: warm bark, not cool violet-gray — the ground the amber stands on */
 	--base-neutral-0: oklch(1 0 0);
-	--base-neutral-50: oklch(0.985 0.001 286);
-	--base-neutral-100: oklch(0.967 0.002 286);
-	--base-neutral-200: oklch(0.92 0.004 286);
-	--base-neutral-300: oklch(0.871 0.005 286);
-	--base-neutral-400: oklch(0.705 0.012 286);
-	--base-neutral-500: oklch(0.552 0.014 286);
-	--base-neutral-600: oklch(0.442 0.015 286);
-	--base-neutral-700: oklch(0.37 0.012 286);
-	--base-neutral-800: oklch(0.274 0.007 286);
-	--base-neutral-850: oklch(0.243 0.007 286);
-	--base-neutral-875: oklch(0.257 0.006 286);
-	--base-neutral-900: oklch(0.21 0.006 286);
-	--base-neutral-950: oklch(0.141 0.005 286);
+	--base-neutral-50: oklch(0.985 0.004 75);
+	--base-neutral-100: oklch(0.967 0.006 75);
+	--base-neutral-200: oklch(0.92 0.01 75);
+	--base-neutral-300: oklch(0.871 0.012 75);
+	--base-neutral-400: oklch(0.705 0.016 75);
+	--base-neutral-500: oklch(0.552 0.016 75);
+	--base-neutral-600: oklch(0.442 0.015 75);
+	--base-neutral-700: oklch(0.37 0.014 75);
+	--base-neutral-800: oklch(0.274 0.012 75);
+	--base-neutral-850: oklch(0.243 0.012 75);
+	--base-neutral-875: oklch(0.257 0.011 75);
+	--base-neutral-900: oklch(0.21 0.011 75);
+	--base-neutral-950: oklch(0.145 0.01 70);
 
-	/* Brand: a muted blue, the metricside primary cooled down and rebuilt on the same grid */
-	--base-brand-50: oklch(0.97 0.01 255);
-	--base-brand-100: oklch(0.94 0.025 255);
-	--base-brand-200: oklch(0.89 0.05 255);
-	--base-brand-300: oklch(0.81 0.08 255);
-	--base-brand-400: oklch(0.7 0.11 255);
-	--base-brand-500: oklch(0.62 0.13 255);
-	--base-brand-600: oklch(0.55 0.14 258);
-	--base-brand-700: oklch(0.48 0.13 260);
-	--base-brand-800: oklch(0.42 0.11 262);
-	--base-brand-900: oklch(0.37 0.09 262);
-	--base-brand-950: oklch(0.28 0.06 262);
+	/* Secondary: blue tint, back where it was — the warm gray read olive next
+	 * to moss memories. Queue and Stop ride this role in both themes. */
+	--base-secondary-50: oklch(0.97 0.01 255);
+	--base-secondary-100: oklch(0.94 0.025 255);
+	--base-secondary-200: oklch(0.89 0.05 255);
+	--base-secondary-300: oklch(0.81 0.08 255);
+	--base-secondary-400: oklch(0.7 0.11 255);
+	--base-secondary-500: oklch(0.62 0.13 255);
+	--base-secondary-600: oklch(0.55 0.14 258);
+	--base-secondary-700: oklch(0.48 0.13 260);
+	--base-secondary-800: oklch(0.42 0.11 262);
+	--base-secondary-900: oklch(0.37 0.09 262);
+	--base-secondary-950: oklch(0.28 0.06 262);
 
 	/* Success */
 	--base-success-50: oklch(0.97 0.02 165);
@@ -68,18 +69,30 @@
 	--base-success-900: oklch(0.35 0.08 162);
 	--base-success-950: oklch(0.26 0.06 162);
 
-	/* Warning: the one status whose fill takes dark text; amber is too light for white */
-	--base-warning-50: oklch(0.98 0.02 85);
-	--base-warning-100: oklch(0.96 0.05 85);
-	--base-warning-200: oklch(0.92 0.08 82);
-	--base-warning-300: oklch(0.88 0.1 80);
-	--base-warning-400: oklch(0.81 0.14 75);
-	--base-warning-500: oklch(0.73 0.16 70);
-	--base-warning-600: oklch(0.62 0.15 65);
-	--base-warning-700: oklch(0.52 0.13 60);
-	--base-warning-800: oklch(0.44 0.11 58);
-	--base-warning-900: oklch(0.38 0.09 58);
-	--base-warning-950: oklch(0.28 0.07 58);
+	/* Brand: bronze, deepened past candy amber — the action color and the mark */
+	--base-brand-50: oklch(0.98 0.02 75);
+	--base-brand-100: oklch(0.96 0.05 72);
+	--base-brand-200: oklch(0.92 0.08 70);
+	--base-brand-300: oklch(0.88 0.1 70);
+	--base-brand-400: oklch(0.81 0.14 68);
+	--base-brand-500: oklch(0.75 0.14 68);
+	--base-brand-600: oklch(0.6 0.15 62);
+	--base-brand-700: oklch(0.5 0.13 60);
+	--base-brand-800: oklch(0.43 0.11 60);
+	--base-brand-900: oklch(0.37 0.09 60);
+	--base-brand-950: oklch(0.27 0.07 60);
+	/* Warning: ember, split from bronze — one warm family, two jobs */
+	--base-warning-50: oklch(0.98 0.02 40);
+	--base-warning-100: oklch(0.96 0.05 40);
+	--base-warning-200: oklch(0.92 0.08 40);
+	--base-warning-300: oklch(0.86 0.12 42);
+	--base-warning-400: oklch(0.8 0.15 45);
+	--base-warning-500: oklch(0.68 0.18 38);
+	--base-warning-600: oklch(0.58 0.16 38);
+	--base-warning-700: oklch(0.5 0.14 38);
+	--base-warning-800: oklch(0.42 0.12 38);
+	--base-warning-900: oklch(0.36 0.1 38);
+	--base-warning-950: oklch(0.27 0.08 38);
 
 	/* Danger */
 	--base-danger-50: oklch(0.97 0.015 20);
@@ -94,7 +107,7 @@
 	--base-danger-900: oklch(0.33 0.1 22);
 	--base-danger-950: oklch(0.24 0.08 22);
 
-	/* Info */
+	/* Info: blue is back, and only info wears it — moss read as success. */
 	--base-info-50: oklch(0.97 0.02 215);
 	--base-info-100: oklch(0.94 0.04 215);
 	--base-info-200: oklch(0.885 0.065 215);
@@ -215,18 +228,18 @@
 	--rail: var(--base-neutral-50);
 	--popover: var(--base-neutral-0);
 	--popover-foreground: var(--base-neutral-900);
-	--primary: var(--base-brand-600);
-	--primary-foreground: var(--base-neutral-0);
+	--primary: var(--base-brand-500);
+	--primary-foreground: var(--base-neutral-950);
 	--primary-subtle: color-mix(in oklab, var(--primary) 10%, transparent);
-	--primary-subtle-foreground: var(--base-brand-700);
-	--secondary: var(--base-neutral-100);
-	--secondary-foreground: var(--base-neutral-900);
+	--primary-subtle-foreground: var(--base-brand-800);
+	--secondary: var(--base-secondary-200);
+	--secondary-foreground: var(--base-secondary-800);
 	--muted: var(--base-neutral-100);
 	--muted-foreground: var(--base-neutral-500);
 	--accent: var(--base-neutral-100);
 	--accent-foreground: var(--base-neutral-900);
-	--destructive: var(--base-danger-600);
-	--destructive-foreground: var(--base-neutral-0);
+	--destructive: var(--base-danger-500);
+	--destructive-foreground: var(--base-neutral-950);
 	--border: var(--base-neutral-200);
 	--input: var(--base-neutral-200);
 	--ring: var(--base-brand-500);
@@ -300,16 +313,16 @@
 	--rail: var(--base-neutral-900);
 	--popover: var(--base-neutral-850);
 	--popover-foreground: var(--base-neutral-200);
-	--primary: var(--base-brand-500);
-	--primary-foreground: var(--base-neutral-950);
-	--secondary: var(--base-neutral-800);
-	--secondary-foreground: var(--base-neutral-200);
+	--primary: var(--base-brand-700);
+	--primary-foreground: var(--base-neutral-0);
+	--secondary: var(--base-secondary-800);
+	--secondary-foreground: var(--base-neutral-0);
 	--muted: var(--base-neutral-800);
 	--muted-foreground: var(--base-neutral-400);
 	--accent: color-mix(in oklab, var(--base-neutral-800) 70%, var(--base-neutral-700));
 	--accent-foreground: var(--base-neutral-200);
-	--destructive: var(--base-danger-500);
-	--destructive-foreground: var(--base-neutral-950);
+	--destructive: var(--base-danger-600);
+	--destructive-foreground: var(--base-neutral-0);
 	--border: var(--base-neutral-800);
 	--input: var(--base-neutral-800);
 	--ring: var(--base-brand-400);
