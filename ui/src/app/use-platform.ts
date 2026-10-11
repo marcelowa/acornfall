@@ -5,7 +5,9 @@ import {
 	applyUpdate,
 	cancelAuthFlow,
 	checkUpdate,
+	compactConversation,
 	createConversation as createConversationRequest,
+	fetchCompactPreview,
 	fetchUpdateStatus,
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
@@ -27,6 +29,7 @@ import {
 	startProviderLogin,
 	updateWorkspace,
 	type AgentChange,
+	type CompactPreview,
 	type DefaultScope,
 	type ProviderAuthType,
 	type UpdatePrefs,
@@ -34,6 +37,7 @@ import {
 } from "./client";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
+	contextWindowFor,
 	stalePins,
 	toAgentGroups,
 	toConversation,
@@ -276,6 +280,8 @@ export interface Platform {
 	/** What the model saw, request by request — the inspector's fold. */
 	context: ContextRequest[];
 	usage?: WireUsage | undefined;
+	/** The running model's window, when the providers name it. */
+	contextWindow?: number | undefined;
 	resolved?: WireResolvedAgent | undefined;
 	harness?: string | undefined;
 	/** The level that was asked for when the model could not express it. */
@@ -294,6 +300,13 @@ export interface Platform {
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
 	fork: (at: string) => void;
+	/** Start a manual compaction of the conversation in view. */
+	compact: () => void;
+	/** The compact dialog: open flag plus the counted scope. */
+	compactOpen: boolean;
+	compactPreview?: CompactPreview | undefined;
+	openCompactDialog: () => void;
+	closeCompactDialog: () => void;
 	send: (text: string, whenBusy: BusyAction) => Promise<void>;
 	abort: () => void;
 	setRailWidth: (width: number) => void;
@@ -531,6 +544,10 @@ export function usePlatform(): Platform {
 	const providers = useMemo(() => toProviders(state?.providers ?? []), [state]);
 	const effectiveModel =
 		state === undefined ? "" : `${state.agent.provider}/${state.agent.modelId}`;
+	const contextWindow = useMemo(
+		() => contextWindowFor(state?.providers ?? [], effectiveModel),
+		[state, effectiveModel],
+	);
 	const thinkingLevels =
 		modelChoices.find((choice) => choice.value === effectiveModel)?.thinkingLevels ?? [];
 	const thinkingValue = state?.agent.thinkingLevel ?? "";
@@ -695,6 +712,26 @@ export function usePlatform(): Platform {
 		},
 		[act, workspace, activeId, reload],
 	);
+	const compact = useCallback(() => {
+		act(compactConversation(workspace, activeId), () => void reload());
+	}, [act, workspace, activeId, reload]);
+	const [compactOpen, setCompactOpen] = useState(false);
+	const [compactPreview, setCompactPreview] = useState<CompactPreview | undefined>(undefined);
+	const openCompactDialog = useCallback(() => {
+		setCompactOpen(true);
+		setCompactPreview(undefined);
+		fetchCompactPreview(workspace, activeId).then(
+			(preview) => setCompactPreview(preview),
+			(cause: unknown) => {
+				setCompactOpen(false);
+				reportError(cause);
+			},
+		);
+	}, [workspace, activeId, reportError]);
+	const closeCompactDialog = useCallback(() => {
+		setCompactOpen(false);
+		setCompactPreview(undefined);
+	}, []);
 	const send = useCallback(
 		async (text: string, whenBusy: BusyAction): Promise<void> => {
 			try {
@@ -1016,6 +1053,7 @@ export function usePlatform(): Platform {
 		createWorkspace,
 		removeWorkspace,
 		usage: lastUsage(view?.entries ?? []),
+		contextWindow,
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
 		harness: state?.harness,
@@ -1036,6 +1074,11 @@ export function usePlatform(): Platform {
 		rename,
 		hide,
 		fork,
+		compact,
+		compactOpen,
+		compactPreview,
+		openCompactDialog,
+		closeCompactDialog,
 		send,
 		abort,
 		setRailWidth,

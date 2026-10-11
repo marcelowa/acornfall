@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+	contextWindowFor,
 	failureOf,
 	stalePins,
+	summaryOf,
 	textOf,
 	toAgentGroups,
 	toConversation,
@@ -116,6 +118,33 @@ describe("the wire mapping", () => {
 		expect(entry?.kind === "assistant" ? entry.failure : undefined).toBe("p/m: 429");
 	});
 
+	test("a compaction entry becomes a summary card with the note inside", () => {
+		const view: WireView = {
+			entries: [
+				{
+					id: 7,
+					kind: "pi.compaction",
+					model: [
+						{
+							content:
+								"The conversation history before this point was compacted into the following summary:\n\n<summary>\nFixed the announcement.\n</summary>",
+						},
+					],
+				},
+			],
+		};
+		const entry = toTranscript(view, {})[0];
+		if (entry?.kind !== "summary") throw new Error("expected a summary card");
+		expect(entry.markdown).toBe("Fixed the announcement.");
+	});
+
+	test("a compaction entry without a note falls back to the bare line", () => {
+		const view: WireView = { entries: [{ id: 7, kind: "pi.compaction" }] };
+		const entry = toTranscript(view, {})[0];
+		expect(entry?.kind === "notice" ? entry.text : undefined).toBe("context compacted");
+		expect(summaryOf([])).toBeUndefined();
+	});
+
 	test("live text has no controls until it settles", () => {
 		const view: WireView = {
 			entries: [],
@@ -180,6 +209,25 @@ describe("the wire mapping", () => {
 		expect(choices).toHaveLength(1);
 		expect(choices[0]?.value).toBe("wired/opus-5");
 		expect(choices[0]?.thinkingLevels).toEqual(["low", "high"]);
+	});
+
+	test("the running model's window is found by provider and model id", () => {
+		const providers: WireProvider[] = [
+			{
+				id: "wired",
+				name: "Wired",
+				authenticated: true,
+				models: [
+					{ id: "opus-5", name: "Opus 5", contextWindow: 200000 },
+					{ id: "small", name: "Small" },
+				],
+			},
+		];
+		expect(contextWindowFor(providers, "wired/opus-5")).toBe(200000);
+		expect(contextWindowFor(providers, "wired/small")).toBeUndefined();
+		expect(contextWindowFor(providers, "wired/gone")).toBeUndefined();
+		expect(contextWindowFor(providers, "dead/opus-5")).toBeUndefined();
+		expect(contextWindowFor(providers, "")).toBeUndefined();
 	});
 
 	test("agents are grouped by layer, with the description a name cannot carry", () => {

@@ -111,6 +111,21 @@ export const Notice: Story = {
 	},
 };
 
+export const CompactionSummary: Story = {
+	args: {
+		entries: [
+			{ kind: "assistant", id: "1", at, markdown: "Long reply before the context ran out." },
+			{
+				kind: "summary",
+				id: "2",
+				at,
+				markdown: "Fixed the announcement. Tests green. The rail still sorts by date.",
+			},
+			{ kind: "assistant", id: "3", at, markdown: "And the reply after it." },
+		],
+	},
+};
+
 export const Failure: Story = {
 	args: {
 		entries: [

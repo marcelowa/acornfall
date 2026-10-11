@@ -25,6 +25,8 @@ export type Command =
 	| { id: string; type: "rename"; conversationId: string; title: string }
 	| { id: string; type: "hide"; conversationId: string; hidden: boolean }
 	| { id: string; type: "fork"; conversationId: string; at: string }
+	| { id: string; type: "compact"; conversationId: string }
+	| { id: string; type: "compact_preview"; conversationId: string }
 	| { id: string; type: "open"; conversationId: string; agent: ModelBinding }
 	| { id: string; type: "attach"; conversationId: string }
 	| { id: string; type: "detach"; conversationId: string }

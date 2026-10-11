@@ -1,8 +1,10 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowUp } from "lucide-react";
 import { Measure } from "@/components/layout/measure";
+import { Text } from "@/components/typography/text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { formatContext } from "@/lib/format";
 import { cn } from "cn";
 import { stepSlashIndex } from "./slash-menu";
 
@@ -46,6 +48,12 @@ export interface ComposerProps {
 	 * pointer, where an arrival alone must not pop the keyboard.
 	 */
 	focusToken?: number | undefined;
+	/** The last reply's input tokens, from the provider — absent until one lands. */
+	contextUsed?: number | undefined;
+	/** The running model's window, when the providers name it. */
+	contextWindow?: number | undefined;
+	/** Start a manual compaction. Shown once the context is mostly full. */
+	onCompact?: (() => void) | undefined;
 	/** Slash keyboard navigation: how many rows are open and which is highlighted. */
 	slashCount?: number | undefined;
 	slashIndex?: number | undefined;
@@ -78,6 +86,9 @@ export function Composer({
 	above,
 	focusConversation,
 	focusToken,
+	contextUsed,
+	contextWindow,
+	onCompact,
 	slashCount = 0,
 	slashIndex = 0,
 	onSlashIndexChange,
@@ -204,6 +215,20 @@ export function Composer({
 						</div>
 					</div>
 				</div>
+				{contextUsed === undefined ? null : (
+					<div className="flex items-center gap-2 px-2 pt-1">
+						<Text size="2xs" tone="muted" data-slot="composer-context">
+							{formatContext(contextUsed, contextWindow)}
+						</Text>
+						{onCompact === undefined ||
+						contextWindow === undefined ||
+						contextUsed / contextWindow < 0.7 ? null : (
+							<Button type="button" variant="outline" size="xs" onClick={onCompact}>
+								Compact
+							</Button>
+						)}
+					</div>
+				)}
 			</Measure>
 		</div>
 	);

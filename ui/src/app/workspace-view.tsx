@@ -26,6 +26,8 @@ import { Transcript } from "@/components/transcript/transcript";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RenameDialog } from "@/components/ui/rename-dialog";
+import { CompactDialog } from "@/components/ui/compact-dialog";
+import { formatContext } from "@/lib/format";
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusPill } from "@/components/ui/status-pill";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -321,6 +323,14 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 
 	const scoped = scope === "workspace" ? platform.defaults.workspace : platform.defaults.global;
 
+	// The provider's own count, shared by the composer line and the compact dialog.
+	const contextUsed =
+		platform.usage === undefined
+			? undefined
+			: platform.usage.input + (platform.usage.cacheRead ?? 0);
+	const contextText =
+		contextUsed === undefined ? undefined : formatContext(contextUsed, platform.contextWindow);
+
 	const defaults = (
 		<Stack gap="sm">
 			<ToggleGroup
@@ -502,6 +512,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							focusConversation={platform.active?.id}
 							focusToken={platform.composerFocusToken}
 							steerable={platform.steerable}
+							contextUsed={contextUsed}
+							contextWindow={platform.contextWindow}
+							onCompact={platform.openCompactDialog}
 							onSteer={() => sendText("steer")}
 							onQueue={() => sendText("followUp")}
 							disabled={platform.active === undefined || !platform.workerUp}
@@ -567,6 +580,16 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					setRenaming(undefined);
 				}}
 				onCancel={() => setRenaming(undefined)}
+			/>
+			<CompactDialog
+				open={platform.compactOpen}
+				preview={platform.compactPreview}
+				contextText={contextText}
+				onKeep={() => {
+					platform.closeCompactDialog();
+					platform.compact();
+				}}
+				onCancel={platform.closeCompactDialog}
 			/>
 			<ProviderLoginDialog
 				pending={platform.authFlow === undefined ? connecting : undefined}

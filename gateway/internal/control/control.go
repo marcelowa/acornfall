@@ -214,6 +214,13 @@ type DefaultOrigins struct {
 	Agent    string `json:"agent,omitempty"`
 }
 
+// CompactPreview is what a manual compaction would fold.
+type CompactPreview struct {
+	ConversationID string `json:"conversationId"`
+	Entries        int    `json:"entries"`
+	Turns          int    `json:"turns"`
+}
+
 type Control struct {
 	opts   Options
 	worker *workerpool.Worker
@@ -1048,6 +1055,39 @@ func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
 	}
 	c.publish(protocol.Frame{Type: "state"})
 	return nil
+}
+
+// Compact starts a manual compaction of a conversation. The summary replaces
+// the old prefix while the conversation keeps working, and the transcript
+// keeps a notice where the cut was.
+func (c *Control) Compact(ctx context.Context, conversationID string) error {
+	var response struct {
+		ConversationID string `json:"conversationId"`
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{
+		Type:           "compact",
+		ConversationID: conversationID,
+	}, &response); err != nil {
+		return err
+	}
+	if response.ConversationID == "" {
+		return errors.New("worker returned no conversation id")
+	}
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
+// CompactPreview says what a manual compaction would fold: entry and turn counts,
+// so the dialog states the scope. The cut itself stays the harness's call.
+func (c *Control) CompactPreview(ctx context.Context, conversationID string) (CompactPreview, error) {
+	var response CompactPreview
+	if err := c.worker.CallInto(ctx, protocol.Command{
+		Type:           "compact_preview",
+		ConversationID: conversationID,
+	}, &response); err != nil {
+		return CompactPreview{}, err
+	}
+	return response, nil
 }
 
 // Create makes a new conversation and selects it.
