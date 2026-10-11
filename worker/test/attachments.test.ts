@@ -6,6 +6,8 @@ import { describe, expect, test } from "bun:test";
 import {
 	attachmentLine,
 	formatAttachmentSize,
+	kindName,
+	partMime,
 	shapeFor,
 	safeName,
 	storedName,
@@ -60,5 +62,34 @@ describe("formatAttachmentSize", () => {
 	test("says bytes as the screen does", () => {
 		expect(formatAttachmentSize(512)).toBe("512 B");
 		expect(formatAttachmentSize(10 * 1024 * 1024)).toBe("10.5 MB");
+	});
+});
+
+describe("svg and unknown images", () => {
+	test("svg rides as text, not an image part", () => {
+		expect(shapeFor("image/svg+xml", "logo.svg")).toBe("text");
+		expect(shapeFor("application/octet-stream", "logo.svg")).toBe("text");
+	});
+
+	test("a guessed photo still rides as a part", () => {
+		expect(shapeFor("application/octet-stream", "shot.jpg")).toBe("image");
+	});
+
+	test("an unsupported raster rides as a path", () => {
+		expect(shapeFor("image/tiff", "scan.tiff")).toBe("path");
+	});
+
+	test("the part carries a real mime, not octet-stream", () => {
+		expect(partMime("application/octet-stream", "shot.jpg")).toBe("image/jpeg");
+		expect(partMime("image/png", "shot.png")).toBe("image/png");
+	});
+});
+
+describe("kindName", () => {
+	test("names kinds the model can act on", () => {
+		expect(kindName("application/pdf")).toBe("PDF document");
+		expect(kindName("application/zip")).toBe("ZIP archive");
+		expect(kindName("text/csv")).toBe("text file");
+		expect(kindName("application/octet-stream")).toBe("file");
 	});
 });

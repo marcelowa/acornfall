@@ -40,8 +40,11 @@ import {
 	MAX_ATTACHMENTS_TOTAL_BYTES,
 	MAX_ATTACHMENT_BYTES,
 	attachmentLine,
+	formatAttachmentSize,
+	kindName,
 	metaName,
 	safeName,
+	partMime,
 	shapeFor,
 	storedName,
 	type AttachmentMeta,
@@ -392,7 +395,7 @@ function messageContent(
 				...files.flatMap(({ meta }) =>
 					shapeFor(meta.mime, meta.name) === "path"
 						? [
-								`${meta.name} is at ${ATTACHMENTS_DIR}/${storedName(meta.id, meta.name)} — read it with tools.`,
+								`${meta.name} is a ${kindName(meta.mime)} (${formatAttachmentSize(meta.size)}) at ${ATTACHMENTS_DIR}/${storedName(meta.id, meta.name)}.`,
 							]
 						: [],
 				),
@@ -405,7 +408,7 @@ function messageContent(
 			blocks.push({
 				type: "image",
 				data: Buffer.from(bytes).toString("base64"),
-				mimeType: meta.mime,
+				mimeType: partMime(meta.mime, meta.name),
 			});
 		} else if (shape === "text" && bytes.byteLength <= INLINE_TEXT_MAX_BYTES) {
 			blocks.push({
