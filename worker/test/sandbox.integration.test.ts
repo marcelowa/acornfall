@@ -107,6 +107,17 @@ integration(
 			);
 			await client.remove("/tmp/acornfall-integration/renamed.txt", {});
 			expect(await client.read("/tmp/acornfall-integration/renamed.txt")).toBeNull();
+			// A stopped sandbox is not missing files: stopping it and reading back the
+			// file wakes it and reads the contents, and a command runs on the woken VM.
+			// This is the outage of issue #58 — an idle stop under a live worker — where
+			// reads used to answer null and commands failed with "no agent endpoint".
+			await client.write("/tmp/acornfall-integration/wake.txt", "still here\n");
+			const stopped = await Sandbox.get(name);
+			await stopped.stop();
+			expect((await stopped.refresh()).status).toBe("stopped");
+			expect(await client.read("/tmp/acornfall-integration/wake.txt")).toBe("still here\n");
+			const woken = await client.exec(["/bin/echo", "awake"], {});
+			expect(woken.code).toBe(0);
 		} finally {
 			// Exactly the sandbox this test made: the state directory is shared, and deleting
 			// anything else there would be the isolation bug in another suite.

@@ -1,4 +1,4 @@
-import { Sandbox } from "microsandbox";
+import { Sandbox, SandboxNotRunningError } from "microsandbox";
 import {
 	concatChunks,
 	type DirEntry,
@@ -23,21 +23,120 @@ export function engineName(): string {
 	return "microsandbox";
 }
 
+/**
+ * Open a workspace's sandbox, waking it when the engine stopped it for being idle.
+ *
+ * `connect()` attaches to a running sandbox only; a stopped one answers with
+ * `sandboxNotRunning`. The engine stops idle sandboxes on its own (30m), while the
+ * gateway keeps a watched workspace's worker alive past that, so a worker whose
+ * session died under it is the normal state after half an hour of quiet — not a
+ * failure. `connectOrStart` wakes that sandbox instead of failing, detached so the
+ * worker attaches without taking lifecycle ownership: control owns the lifecycle
+ * from the command line, and the worker must not. See issue #58.
+ */
 export async function openSandbox(name: string, _workspace: string): Promise<SandboxClient> {
 	const handle = await Sandbox.get(name);
-	return new MicrosandboxClient(name, await handle.connect());
+	return new MicrosandboxClient(name, handle, await handle.connectOrStart({ detached: true }));
 }
 
-/** The attached session: the SDK's type, named once so the rest of the class can use it. */
-type Session = Awaited<ReturnType<Awaited<ReturnType<typeof Sandbox.get>>["connect"]>>;
+/**
+ * The engine's handle: stable across stops, and what wakes a stopped sandbox.
+ * Exported for tests, which drive the client over fakes.
+ */
+export type MicrosandboxHandle = Awaited<ReturnType<typeof Sandbox.get>>;
+/**
+ * The attached session: the SDK's type, named once so the rest of the class can use it.
+ * Exported for tests, which drive the client over fakes.
+ */
+export type MicrosandboxSession = Awaited<ReturnType<MicrosandboxHandle["connect"]>>;
 
-class MicrosandboxClient implements SandboxClient {
+/**
+ * Whether an operation failed because its session died under it: the engine stops idle
+ * sandboxes on its own, so this is the normal state after half an hour of quiet.
+ *
+ * Three shapes because the failure crosses a native boundary: the mapped error class, its
+ * code for a copy from another module instance, and the native message itself. A genuine
+ * missing file is `sandboxFsOps` with an os error 2, never this, so the two are told apart.
+ * Anything else — a replacement behind the same name, a real failure — is not a wake.
+ */
+export function isStoppedError(error: unknown): boolean {
+	if (error instanceof SandboxNotRunningError) return true;
+	if (typeof error === "object" && error !== null && "code" in error) {
+		if (error.code === "sandboxNotRunning") return true;
+	}
+	const message = error instanceof Error ? error.message : String(error);
+	return message.includes("has no agent endpoint");
+}
+
+/**
+ * Swallow an SDK failure into its fallback — unless the session died under it, which
+ * rethrows so the session renews and the call retries. Only a genuine absence answers
+ * null or empty; otherwise every outage reads as "no file" (issue #58).
+ */
+function unlessStopped<T>(fallback: T): (error: unknown) => T {
+	return (error: unknown) => {
+		if (isStoppedError(error)) throw error;
+		return fallback;
+	};
+}
+
+/**
+ * One workspace's attached sandbox. Exported for tests, which construct it over
+ * fakes; production uses openSandbox above.
+ */
+export class MicrosandboxClient implements SandboxClient {
 	readonly name: string;
-	private readonly session: Session;
+	private readonly handle: MicrosandboxHandle;
+	private session: MicrosandboxSession;
+	/**
+	 * The in-flight wake, shared by every caller that finds a dead session at once:
+	 * parallel tool calls must join one boot, not start one each.
+	 */
+	private waking: Promise<MicrosandboxSession> | undefined;
 
-	constructor(name: string, session: Session) {
+	constructor(name: string, handle: MicrosandboxHandle, session: MicrosandboxSession) {
 		this.name = name;
+		this.handle = handle;
 		this.session = session;
+	}
+
+	/**
+	 * Run an operation against the session, waking the sandbox and retrying once when
+	 * the session died under a live worker: the engine stops idle sandboxes itself,
+	 * while the gateway keeps a watched workspace's worker alive past that.
+	 *
+	 * One retry, not a loop: a sandbox that stops again between the wake and the call
+	 * is reported, and the next call wakes again. Anything that is not a stopped
+	 * sandbox — a same-name replacement, a real failure — is never retried: running
+	 * the call on a different machine behind the same name would be the wrong answer
+	 * rather than a wake.
+	 */
+	private async withSession<T>(
+		operation: (session: MicrosandboxSession) => Promise<T>,
+	): Promise<T> {
+		try {
+			return await operation(this.session);
+		} catch (error) {
+			if (!isStoppedError(error)) throw error;
+			const woken = await this.wake();
+			return await operation(woken);
+		}
+	}
+
+	/** Wake a stopped sandbox and re-attach, joining an in-flight wake when one exists. */
+	private wake(): Promise<MicrosandboxSession> {
+		this.waking ??= this.doWake();
+		return this.waking;
+	}
+
+	private async doWake(): Promise<MicrosandboxSession> {
+		try {
+			const session = await this.handle.connectOrStart({ detached: true });
+			this.session = session;
+			return session;
+		} finally {
+			this.waking = undefined;
+		}
 	}
 
 	async exec(command: string | readonly string[], options: ExecOptions): Promise<ExecResult> {
@@ -67,13 +166,18 @@ class MicrosandboxClient implements SandboxClient {
 				args = rest;
 			}
 		}
-		const handle = await this.session.execStreamWith(program, (builder) => {
-			let configured = builder.args(args);
-			if (options.cwd !== undefined) configured = configured.cwd(options.cwd);
-			for (const [key, value] of Object.entries(options.env ?? {}))
-				configured = configured.env(key, value);
-			return configured;
-		});
+		// Acquired through the session wrapper: a sandbox the engine stopped for being
+		// idle wakes here, and the command runs on the woken session. Only the
+		// acquisition retries — a command that started is never run twice.
+		const handle = await this.withSession((session) =>
+			session.execStreamWith(program, (builder) => {
+				let configured = builder.args(args);
+				if (options.cwd !== undefined) configured = configured.cwd(options.cwd);
+				for (const [key, value] of Object.entries(options.env ?? {}))
+					configured = configured.env(key, value);
+				return configured;
+			}),
+		);
 		const stdout: Uint8Array[] = [];
 		const stderr: Uint8Array[] = [];
 		let stopped: "aborted" | "timeout" | undefined;
@@ -123,30 +227,28 @@ class MicrosandboxClient implements SandboxClient {
 	}
 
 	async read(path: string): Promise<string | null> {
-		return await this.session
-			.fs()
-			.readToString(path)
-			.catch(() => null);
+		return await this.withSession((session) =>
+			session.fs().readToString(path).catch(unlessStopped(null)),
+		);
 	}
 
 	async readBytes(path: string): Promise<Uint8Array> {
-		return await this.session.fs().read(path);
+		return await this.withSession((session) => session.fs().read(path));
 	}
 
 	async write(path: string, content: string | Uint8Array): Promise<void> {
-		await this.session.fs().write(path, content);
+		await this.withSession((session) => session.fs().write(path, content));
 	}
 
 	async writeStream(path: string): Promise<WriteSink> {
-		const sink = await this.session.fs().writeStream(path);
+		const sink = await this.withSession((session) => session.fs().writeStream(path));
 		return { write: (data) => sink.write(data), close: () => sink.close() };
 	}
 
 	async list(path: string): Promise<DirEntry[]> {
-		const entries = await this.session
-			.fs()
-			.list(path)
-			.catch(() => []);
+		const entries = await this.withSession((session) =>
+			session.fs().list(path).catch(unlessStopped([])),
+		);
 		return entries.map((entry) => ({
 			name: baseName(entry.path),
 			directory: entry.kind === "directory",
@@ -158,10 +260,9 @@ class MicrosandboxClient implements SandboxClient {
 	async stat(
 		path: string,
 	): Promise<{ directory: boolean; size: number; mtimeMs: number } | null> {
-		const info = await this.session
-			.fs()
-			.stat(path)
-			.catch(() => null);
+		const info = await this.withSession((session) =>
+			session.fs().stat(path).catch(unlessStopped(null)),
+		);
 		if (info === null) return null;
 		return {
 			directory: info.kind === "directory",
@@ -171,19 +272,24 @@ class MicrosandboxClient implements SandboxClient {
 	}
 
 	async mkdir(path: string): Promise<void> {
-		await this.session
-			.fs()
-			.mkdir(path)
-			.catch(() => {});
+		// Best-effort, as before: making a write's parents must not fail a write.
+		// A stopped sandbox still wakes — the write that follows needs it alive.
+		await this.withSession((session) =>
+			session.fs().mkdir(path).catch(unlessStopped(undefined)),
+		);
 	}
 
 	async remove(path: string, options: { recursive?: boolean; force?: boolean }): Promise<void> {
-		const fs = this.session.fs();
-		await (options.recursive === true ? fs.removeDir(path) : fs.remove(path)).catch(() => {});
+		await this.withSession((session) => {
+			const fs = session.fs();
+			return (options.recursive === true ? fs.removeDir(path) : fs.remove(path)).catch(
+				unlessStopped(undefined),
+			);
+		});
 	}
 
 	async rename(from: string, to: string): Promise<void> {
-		await this.session.fs().rename(from, to);
+		await this.withSession((session) => session.fs().rename(from, to));
 	}
 }
 
