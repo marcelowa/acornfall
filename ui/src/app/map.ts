@@ -204,6 +204,18 @@ export function toModelChoices(providers: WireProvider[]): ModelChoice[] {
 		);
 }
 
+/** The context window of the running model, found by `provider/modelId`. */
+export function contextWindowFor(
+	providers: WireProvider[],
+	modelValue: string,
+): number | undefined {
+	const slash = modelValue.indexOf("/");
+	if (slash < 0) return undefined;
+	const provider = providers.find((entry) => entry.id === modelValue.slice(0, slash));
+	return provider?.models.find((model) => model.id === modelValue.slice(slash + 1))
+		?.contextWindow;
+}
+
 export function toModelGroups(providers: WireProvider[]): PickerGroup[] {
 	return providers
 		.filter((provider) => provider.authenticated && provider.models.length > 0)

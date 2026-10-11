@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	contextWindowFor,
 	failureOf,
 	stalePins,
 	textOf,
@@ -180,6 +181,25 @@ describe("the wire mapping", () => {
 		expect(choices).toHaveLength(1);
 		expect(choices[0]?.value).toBe("wired/opus-5");
 		expect(choices[0]?.thinkingLevels).toEqual(["low", "high"]);
+	});
+
+	test("the running model's window is found by provider and model id", () => {
+		const providers: WireProvider[] = [
+			{
+				id: "wired",
+				name: "Wired",
+				authenticated: true,
+				models: [
+					{ id: "opus-5", name: "Opus 5", contextWindow: 200000 },
+					{ id: "small", name: "Small" },
+				],
+			},
+		];
+		expect(contextWindowFor(providers, "wired/opus-5")).toBe(200000);
+		expect(contextWindowFor(providers, "wired/small")).toBeUndefined();
+		expect(contextWindowFor(providers, "wired/gone")).toBeUndefined();
+		expect(contextWindowFor(providers, "dead/opus-5")).toBeUndefined();
+		expect(contextWindowFor(providers, "")).toBeUndefined();
 	});
 
 	test("agents are grouped by layer, with the description a name cannot carry", () => {

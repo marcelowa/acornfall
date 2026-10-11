@@ -502,6 +502,12 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							focusConversation={platform.active?.id}
 							focusToken={platform.composerFocusToken}
 							steerable={platform.steerable}
+							contextUsed={
+								platform.usage === undefined
+									? undefined
+									: platform.usage.input + (platform.usage.cacheRead ?? 0)
+							}
+							contextWindow={platform.contextWindow}
 							onSteer={() => sendText("steer")}
 							onQueue={() => sendText("followUp")}
 							disabled={platform.active === undefined || !platform.workerUp}

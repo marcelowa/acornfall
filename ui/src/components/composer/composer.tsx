@@ -1,8 +1,10 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowUp } from "lucide-react";
 import { Measure } from "@/components/layout/measure";
+import { Text } from "@/components/typography/text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { formatTokens } from "@/lib/format";
 import { cn } from "cn";
 import { stepSlashIndex } from "./slash-menu";
 
@@ -46,6 +48,10 @@ export interface ComposerProps {
 	 * pointer, where an arrival alone must not pop the keyboard.
 	 */
 	focusToken?: number | undefined;
+	/** The last reply's input tokens, from the provider — absent until one lands. */
+	contextUsed?: number | undefined;
+	/** The running model's window, when the providers name it. */
+	contextWindow?: number | undefined;
 	/** Slash keyboard navigation: how many rows are open and which is highlighted. */
 	slashCount?: number | undefined;
 	slashIndex?: number | undefined;
@@ -78,6 +84,8 @@ export function Composer({
 	above,
 	focusConversation,
 	focusToken,
+	contextUsed,
+	contextWindow,
 	slashCount = 0,
 	slashIndex = 0,
 	onSlashIndexChange,
@@ -204,6 +212,15 @@ export function Composer({
 						</div>
 					</div>
 				</div>
+				{contextUsed === undefined ? null : (
+					<div className="px-2 pt-1">
+						<Text size="2xs" tone="muted" data-slot="composer-context">
+							{contextWindow === undefined
+								? `${formatTokens(contextUsed)} in`
+								: `${formatTokens(contextUsed)} of ${formatTokens(contextWindow)} (${Math.round((contextUsed / contextWindow) * 100)}%)`}
+						</Text>
+					</div>
+				)}
 			</Measure>
 		</div>
 	);

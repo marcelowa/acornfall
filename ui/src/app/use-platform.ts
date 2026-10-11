@@ -34,6 +34,7 @@ import {
 } from "./client";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
+	contextWindowFor,
 	stalePins,
 	toAgentGroups,
 	toConversation,
@@ -276,6 +277,8 @@ export interface Platform {
 	/** What the model saw, request by request — the inspector's fold. */
 	context: ContextRequest[];
 	usage?: WireUsage | undefined;
+	/** The running model's window, when the providers name it. */
+	contextWindow?: number | undefined;
 	resolved?: WireResolvedAgent | undefined;
 	harness?: string | undefined;
 	/** The level that was asked for when the model could not express it. */
@@ -531,6 +534,10 @@ export function usePlatform(): Platform {
 	const providers = useMemo(() => toProviders(state?.providers ?? []), [state]);
 	const effectiveModel =
 		state === undefined ? "" : `${state.agent.provider}/${state.agent.modelId}`;
+	const contextWindow = useMemo(
+		() => contextWindowFor(state?.providers ?? [], effectiveModel),
+		[state, effectiveModel],
+	);
 	const thinkingLevels =
 		modelChoices.find((choice) => choice.value === effectiveModel)?.thinkingLevels ?? [];
 	const thinkingValue = state?.agent.thinkingLevel ?? "";
@@ -1016,6 +1023,7 @@ export function usePlatform(): Platform {
 		createWorkspace,
 		removeWorkspace,
 		usage: lastUsage(view?.entries ?? []),
+		contextWindow,
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
 		harness: state?.harness,

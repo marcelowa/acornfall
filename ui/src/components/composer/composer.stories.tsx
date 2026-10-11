@@ -205,6 +205,33 @@ export const SlashKeyboard: Story = {
 	render: () => <SlashKeyboardDemo />,
 };
 
+/** After a reply lands, the composer says what that reply cost in context. */
+export const ContextUsage: Story = {
+	args: {
+		...Idle.args,
+		contextUsed: 12480,
+		contextWindow: 200000,
+	},
+	render: (args) => (
+		<Frame>
+			{([value, setValue]) => <Composer {...args} value={value} onChange={setValue} />}
+		</Frame>
+	),
+};
+
+/** The window is unknown: the count stands alone, with no percent. */
+export const ContextUsageWithoutWindow: Story = {
+	args: {
+		...Idle.args,
+		contextUsed: 12480,
+	},
+	render: (args) => (
+		<Frame>
+			{([value, setValue]) => <Composer {...args} value={value} onChange={setValue} />}
+		</Frame>
+	),
+};
+
 /** A Hebrew draft starts from the right: the field follows the first strong character. */
 export const RtlDraft: Story = {
 	args: {
