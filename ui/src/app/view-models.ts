@@ -91,6 +91,13 @@ export interface UserEntry {
 	id: string;
 	text: string;
 	at?: Date | undefined;
+	/**
+	 * How this message was sent while a turn was running: it joined the turn, or waited behind
+	 * it. It is claimed by the interface as the message lands — the wire keeps no link between
+	 * an inbox item and the entry it becomes — because a mark that dies with the pending card
+	 * leaves the reader unable to say afterwards whether the model got it now or later.
+	 */
+	action?: BusyAction | undefined;
 	/** Set when another conversation's words arrived here. */
 	sender?: AgentSender | undefined;
 	/** Set when this message can be branched from. */
@@ -111,6 +118,12 @@ export interface AssistantEntry {
 export interface ToolEntry {
 	kind: "tool";
 	id: string;
+	/**
+	 * The provider's id for this call, when there is one. It is the same while the call runs and
+	 * after it settles — the entry id is not: a live card is `live-<callId>` on the wire and the
+	 * settled one is the transcript entry's id — so the fold a reader opened survives the settle.
+	 */
+	callId?: string | undefined;
 	name: string;
 	status: "running" | "done";
 	isError: boolean;

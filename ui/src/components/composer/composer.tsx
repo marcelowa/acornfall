@@ -82,9 +82,11 @@ export interface ComposerProps {
 /**
  * The composer: one card holding the draft and everything it can do. It owns the keyboard
  * contract — Enter sends on a fine pointer, Shift+Enter is always a newline, and on a
- * coarse pointer Enter is always a newline too, so a phone never sends by accident.
- * While the slash menu is open the arrows move its highlight, Enter picks it, and Escape
- * dismisses it. What the message means is the server's business.
+ * coarse pointer Enter is always a newline too, so a phone never sends by accident. While a
+ * run is live, sending with Enter is a steer, and the composer says so on a line above the
+ * controls: an action nobody can see is a trap, however deliberate it is. While the slash menu
+ * is open the arrows move its highlight, Enter picks it, and Escape dismisses it. What the
+ * message means is the server's business.
  */
 export function Composer({
 	value,
@@ -227,6 +229,13 @@ export function Composer({
 							))}
 						</div>
 					)}
+					{running ? (
+						<div className="px-3 pb-1">
+							<Text size="2xs" tone="muted">
+								Enter steers this turn · Shift+Enter is a newline
+							</Text>
+						</div>
+					) : null}
 					<div className="flex flex-col gap-2 px-2 pb-2 sm:flex-row sm:items-end">
 						<div className="order-2 flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:order-1">
 							{controls}

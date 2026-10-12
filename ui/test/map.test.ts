@@ -267,6 +267,30 @@ describe("the wire mapping", () => {
 		expect(followUp?.id).toBe("pending-b");
 	});
 
+	test("a landed message keeps the mark it was sent with", () => {
+		// The wire keeps no link between an inbox item and the entry it becomes, so the app claims
+		// the mark by the message's own words and passes it in by entry id.
+		const view: WireView = {
+			entries: [
+				{
+					id: 7,
+					kind: "pi.user",
+					model: [{ content: "wait, check the lock order" }],
+				},
+			],
+		};
+		const entries = toTranscript(view, {}, false, { "7": "steer" });
+		expect(entries[0]?.kind === "user" ? entries[0].action : undefined).toBe("steer");
+	});
+
+	test("a message with no claimed mark shows none", () => {
+		const view: WireView = {
+			entries: [{ id: 8, kind: "pi.user", model: [{ content: "an ordinary turn" }] }],
+		};
+		const entries = toTranscript(view, {});
+		expect(entries[0]?.kind === "user" ? entries[0].action : undefined).toBeUndefined();
+	});
+
 	test("workspaces are listed with the one in view marked", () => {
 		const workspaces = toWorkspaces(
 			[
