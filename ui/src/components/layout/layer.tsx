@@ -53,7 +53,7 @@ export function Layer({
 					 * not, so an accidental tap cannot close a layer mid-read. */
 					onInteractOutside={(event) => event.preventDefault()}
 					className={cn(
-						"fixed inset-x-0 z-50 flex flex-col overflow-hidden bg-rail transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:slide-in-from-left data-[state=open]:duration-300",
+						"fixed inset-x-0 z-50 flex flex-col overflow-hidden bg-rail transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=closed]:duration-200 data-[state=open]:animate-in data-[state=open]:slide-in-from-left data-[state=open]:duration-200",
 						belowBar ? "top-[var(--bar-height)] bottom-0" : "inset-y-0",
 						className,
 					)}

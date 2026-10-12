@@ -390,15 +390,11 @@ export function usePlatform(): Platform {
 
 	useEffect(() => {
 		const back = (): void => {
-			// The layer has no address, so Back is its own gesture: it closes the layer and puts
-			// the entry straight back, and the conversation behind it never moves.
+			// The layer has no address of its own, so Back is its own gesture: the entry it consumed
+			// is the one the layer pushed when it opened, which carried the same address. Closing it
+			// is all that is left — the address and the conversation are already where they were.
 			if (workspacesOpenRef.current) {
 				setWorkspacesOpen(false);
-				window.history.pushState(
-					null,
-					"",
-					window.location.pathname + window.location.search,
-				);
 				return;
 			}
 			setRoute(fromUrl());
@@ -752,9 +748,14 @@ export function usePlatform(): Platform {
 	);
 
 	/** The workspace list, as a layer: opening it closes the rail, because one layer at a time is
-	 * what the one-close rule needs, and because two left layers would put two X's in one corner. */
+	 * what the one-close rule needs, and because two left layers would put two X's in one corner.
+	 *
+	 * It pushes its own history entry, with the address it already has, so a press of Back has
+	 * something to consume: consuming it leaves the address unchanged and the conversation behind
+	 * it never moves (J10). Without that entry Back would leave the console on a fresh tab. */
 	const openWorkspaces = useCallback(() => {
 		setRailOpen(false);
+		window.history.pushState(null, "", window.location.pathname + window.location.search);
 		setWorkspacesOpen(true);
 	}, []);
 

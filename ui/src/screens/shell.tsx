@@ -33,6 +33,10 @@ export interface ShellProps {
 	railOpen?: boolean | undefined;
 	inlineRailToggle?: boolean | undefined;
 	onRailOpenChange?: ((open: boolean) => void) | undefined;
+	/** A layer the app opens of its own (the workspaces list) beside the rail's: the bar's toggle
+	 * is the one close, so it has to know that something other than the rail is in front. */
+	appLayerOpen?: boolean | undefined;
+	onAppLayerClose?: (() => void) | undefined;
 	/** The desktop column: false keeps it open, which is the default. */
 	railCollapsed?: boolean | undefined;
 	onRailCollapsedChange?: ((collapsed: boolean) => void) | undefined;
@@ -53,6 +57,8 @@ export function Shell({
 	railOpen,
 	inlineRailToggle,
 	onRailOpenChange,
+	appLayerOpen,
+	onAppLayerClose,
 	railCollapsed,
 	onRailCollapsedChange,
 	railWidth,
@@ -68,6 +74,8 @@ export function Shell({
 				inspector={inspector}
 				asideOpen={railOpen}
 				onAsideOpenChange={onRailOpenChange}
+				appLayerOpen={appLayerOpen}
+				onAppLayerClose={onAppLayerClose}
 				inlineAsideToggle={inlineRailToggle}
 				asideCollapsed={railCollapsed}
 				onAsideCollapsedChange={onRailCollapsedChange}

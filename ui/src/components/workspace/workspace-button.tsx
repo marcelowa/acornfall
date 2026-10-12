@@ -17,18 +17,20 @@ export interface WorkspaceButtonProps {
 }
 
 export function WorkspaceButton({ title, expanded = false, onClick }: WorkspaceButtonProps) {
+	/** The workspace's own name as the button that opens its list: 44px with a 20px chevron on a
+	 * phone, the rail's own compact row from `sm` up, where nothing is tapped with a thumb. */
 	return (
 		<button
 			type="button"
 			data-slot="workspace-button"
 			aria-expanded={expanded}
 			onClick={onClick}
-			className="flex min-h-11 w-full items-center gap-1.5 rounded-md px-1 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50"
+			className="flex h-11 w-full items-center gap-1.5 rounded-md px-1 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 sm:h-8"
 		>
 			<Text as="span" size="sm" weight="semibold" className="min-w-0 flex-1 truncate">
 				{title}
 			</Text>
-			<ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+			<ChevronDown className="size-5 shrink-0 text-muted-foreground sm:size-4" aria-hidden />
 		</button>
 	);
 }

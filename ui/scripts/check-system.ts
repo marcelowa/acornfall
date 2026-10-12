@@ -103,8 +103,10 @@ const tokenClasses = [
 	 * ladder is no longer real and every story that shows it is a picture of nothing. */
 	"size-11",
 	"max-sm:size-11",
-	"max-sm:size-5",
+	"max-sm:[&_svg:not([class='size-'])]:size-5",
 	"max-sm:text-lg",
+	"min-h-8",
+	"max-sm:min-h-11",
 	"h-[var(--bar-height)]",
 	"pb-[var(--keyboard-inset)]",
 	"min-w-32",

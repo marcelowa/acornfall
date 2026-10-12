@@ -27,6 +27,11 @@ function isCoarsePointer(): boolean {
 	}
 }
 
+/** `1 file`, `2 files`: a count line that reads like a sentence on the one it is wrong on. */
+function count(n: number, noun: string): string {
+	return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 /** A file picked for the draft: staging, staged, or refused with its reason. */
 export interface ComposerAttachment {
 	key: string;
@@ -336,21 +341,17 @@ export function Composer({
 				{above}
 				{ambient}
 				{collapsed ? (
-					/* The folded row: the pill says the card is a sheet, the draft's own first line
-					 * says what is in it, and every action stays. */
+					/* The folded row: the draft's own first line says what is in it, and every action
+					 * stays. No grabber: there is no band here and nothing to drag, and a pill would
+					 * promise a gesture that does not exist (step 10 panel). */
 					<div className="relative rounded-xl border border-border bg-card shadow-sm">
-						<span
-							aria-hidden
-							data-slot="composer-handle-pill"
-							className="absolute -top-0.5 left-1/2 block h-1 w-10 -translate-x-1/2 rounded-full bg-muted-foreground/40"
-						/>
 						<div className="flex items-center gap-2 p-1.5 pl-3">
 							<button
 								type="button"
 								data-slot="composer-open"
 								aria-label="Write a message"
 								onClick={open}
-								className="min-w-0 flex-1 truncate rounded-md py-2 text-left text-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+								className="min-h-11 min-w-0 flex-1 truncate rounded-md py-2 pr-1 text-left text-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 							>
 								{draftLine === undefined ? (
 									<span className="text-muted-foreground">{placeholder}</span>
@@ -364,8 +365,8 @@ export function Composer({
 							<div className="px-3 pb-2">
 								<Text size="2xs" tone="muted">
 									{uploadingCount > 0
-										? `${attachments.length} files · ${uploadingCount} uploading · send is off until they land`
-										: `${attachments.length} files attached`}
+										? `${count(attachments.length, "file")} · ${uploadingCount} uploading · send is off until they land`
+										: `${count(attachments.length, "file")} attached`}
 								</Text>
 							</div>
 						)}

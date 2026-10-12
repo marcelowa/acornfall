@@ -81,6 +81,10 @@ export interface SplitProps extends VariantProps<typeof splitVariants> {
 	/** The layer, below `lg`. */
 	asideOpen?: boolean | undefined;
 	onAsideOpenChange?: ((open: boolean) => void) | undefined;
+	/** A layer the app opens of its own (the workspaces list): the bar's toggle is the one close,
+	 * so it shows the X for it too, and closes it before the rail. */
+	appLayerOpen?: boolean | undefined;
+	onAppLayerClose?: (() => void) | undefined;
 	/**
 	 * The app carries the collapse toggle itself — in the rail head, beside the workspace
 	 * title — instead of Split floating one over the rail. The collapsed strip keeps its
@@ -107,6 +111,8 @@ export function Split({
 	asideLabel = "Conversations",
 	asideOpen,
 	onAsideOpenChange,
+	appLayerOpen = false,
+	onAppLayerClose,
 	inlineAsideToggle = false,
 	asideCollapsed = false,
 	onAsideCollapsedChange,
@@ -149,17 +155,24 @@ export function Split({
 		);
 
 	/** The one control that opens a layer and the one that closes it: a hamburger that becomes
-	 * an X while the layer is open, in the bar's own corner. */
+	 * an X while a layer is open, in the bar's own corner. It closes whatever is in front: the
+	 * app's own layer first (the workspaces list), then the rail. */
 	const layerToggle = (
 		<Button
 			type="button"
 			variant="ghost"
 			size="icon-sm"
-			aria-label={open ? "Close navigation" : asideLabel}
-			aria-expanded={open}
-			onClick={() => setOpen(!open)}
+			aria-label={open || appLayerOpen ? "Close navigation" : asideLabel}
+			aria-expanded={open || appLayerOpen}
+			onClick={() => {
+				if (appLayerOpen) {
+					onAppLayerClose?.();
+					return;
+				}
+				setOpen(!open);
+			}}
 		>
-			{open ? <X /> : <PanelLeft />}
+			{open || appLayerOpen ? <X /> : <PanelLeft />}
 		</Button>
 	);
 
