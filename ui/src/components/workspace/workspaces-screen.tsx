@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Text } from "@/components/typography/text";
+import { SandboxDialog } from "./sandbox-dialog";
 
 export interface WorkspacesScreenProps {
 	/** Every workspace, with the one in view marked. */
@@ -23,6 +24,10 @@ export interface WorkspacesScreenProps {
 	onCreate: (name: string) => void;
 	onRename: (name: string, title: string) => void;
 	onForget: (name: string) => void;
+	/** A row's sandbox, changed from the row's own menu. */
+	onUpdateSandbox: (name: string, change: { image: string; network: string }) => void;
+	/** The last refusal, in the server's words: the sandbox dialog shows its own. */
+	failure?: string | undefined;
 	/** Back to the conversation that was in view. */
 	onClose: () => void;
 }
@@ -53,11 +58,15 @@ export function WorkspacesScreen({
 	onCreate,
 	onRename,
 	onForget,
+	onUpdateSandbox,
+	failure,
 	onClose,
 }: WorkspacesScreenProps) {
 	const [name, setName] = useState("");
 	/** The workspace being renamed, if any: the dialog is about one row at a time. */
 	const [renaming, setRenaming] = useState<WorkspaceSummary | undefined>(undefined);
+	/** The workspace whose sandbox is being changed, if any. */
+	const [sandboxFor, setSandboxFor] = useState<WorkspaceSummary | undefined>(undefined);
 	const create = (): void => {
 		if (name.trim() === "") return;
 		onCreate(name.trim());
@@ -138,6 +147,11 @@ export function WorkspacesScreen({
 										</DropdownMenuTrigger>
 										<DropdownMenuContent align="end">
 											<DropdownMenuItem
+												onSelect={() => setSandboxFor(workspace)}
+											>
+												Sandbox…
+											</DropdownMenuItem>
+											<DropdownMenuItem
 												onSelect={() => setRenaming(workspace)}
 											>
 												Rename
@@ -199,6 +213,12 @@ export function WorkspacesScreen({
 					setRenaming(undefined);
 				}}
 				onCancel={() => setRenaming(undefined)}
+			/>
+			<SandboxDialog
+				workspace={sandboxFor}
+				failure={failure}
+				onSave={onUpdateSandbox}
+				onClose={() => setSandboxFor(undefined)}
 			/>
 		</div>
 	);

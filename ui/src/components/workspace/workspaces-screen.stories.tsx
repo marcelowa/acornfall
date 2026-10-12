@@ -47,6 +47,7 @@ export const Default: Story = {
 		onCreate: noop,
 		onRename: noop,
 		onForget: noop,
+		onUpdateSandbox: noop,
 		onClose: noop,
 	},
 };

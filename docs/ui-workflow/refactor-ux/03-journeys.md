@@ -104,7 +104,9 @@ controls drop to their own line instead of the row running off a phone.
 
 **J5.** One commit moment per settings page: the sandbox image drops its blur exception, and a
 refused commit reads as refused where the field sits, instead of a strip at the top while the
-typed text stays looking applied.
+typed text stays looking applied. **Revised in the owner's pass:** the sandbox fields moved out of
+Settings entirely — the image and network are set from the workspaces screen's row menu
+(`SandboxDialog`), and Appearance folded into Defaults, leaving three tabs. See `11-final-pass.md`.
 
 **J6.** The phone check-in answers done / cost / last-moved without a hover, and the phone type
 ladder stops colliding (step 05).

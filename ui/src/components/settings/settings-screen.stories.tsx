@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type { ProviderSummary, WorkspaceSummary } from "@/app/view-models";
+import type { ProviderSummary } from "@/app/view-models";
 import { Stack } from "@/components/layout/stack";
 import { Picker } from "@/components/composer/picker";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -17,15 +17,6 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const noop = (): void => undefined;
-
-const workspace: WorkspaceSummary = {
-	name: "general",
-	title: "acornfall",
-	path: "/home/marcelo/workspace/acornfall",
-	general: true,
-	running: true,
-	active: true,
-};
 
 /**
  * The app builds the defaults section from the pickers it already has, so the story does the
@@ -144,12 +135,10 @@ const updates = (
 
 export const Default: Story = {
 	args: {
-		tab: "workspace",
+		tab: "defaults",
 		onTabChange: noop,
 		theme: "system",
 		onThemeChange: noop,
-		workspace,
-		onUpdateWorkspace: noop,
 		defaults,
 		providers: <ProvidersSection providers={providers} />,
 		updates,
@@ -168,33 +157,10 @@ export const Providers: Story = {
 	args: { ...Default.args, tab: "providers" },
 };
 
-/**
- * The image field refused, in the server's own words, next to the value that was refused. A
- * refusal used to show only in the strip at the top of the pane while the field went on looking
- * applied. Type in the field to see it dirty with the Apply button live; press Apply to see it
- * say what happened. The three outcomes have their own story: `UI/SettingsOutcome`.
- */
-export const WorkspaceImageRefused: Story = {
-	args: {
-		...Default.args,
-		failure: "no image by that name on this host",
-	},
-};
-
 /** A phone: the tab bar, the fields and the controls at 390px. */
 export const Phone: Story = {
 	args: Default.args,
 	globals: { viewport: { value: "phone" } },
-};
-
-/** The defaults page. */
-export const Defaults: Story = {
-	args: { ...Default.args, tab: "defaults" },
-};
-
-/** The appearance page. */
-export const Appearance: Story = {
-	args: { ...Default.args, tab: "appearance" },
 };
 
 /** The updates page: one release, one click. */
@@ -231,9 +197,4 @@ const updatesApplying = (
 /** Mid-apply: the button says so and stays pressed-disabled until the call settles. */
 export const UpdatesApplying: Story = {
 	args: { ...Default.args, tab: "updates", updates: updatesApplying },
-};
-
-/** A workspace that is not loaded yet: the form is there, and Save knows it has nothing. */
-export const NoWorkspace: Story = {
-	args: { ...Default.args, workspace: undefined },
 };

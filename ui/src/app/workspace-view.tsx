@@ -522,6 +522,8 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 				onCreate={platform.createWorkspace}
 				onRename={platform.renameWorkspace}
 				onForget={platform.removeWorkspace}
+				onUpdateSandbox={platform.setWorkspaceSandbox}
+				failure={platform.failure}
 				onClose={() => platform.showScreen("conversation")}
 			/>
 		) : platform.screen === "settings" ? (
@@ -530,12 +532,9 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 				onTabChange={platform.showSettingsTab}
 				theme={platform.themeChoice}
 				onThemeChange={platform.setThemeChoice}
-				workspace={activeWorkspace}
-				onUpdateWorkspace={platform.setWorkspace}
 				defaults={defaults}
 				providers={providers}
 				updates={updates}
-				failure={platform.failure}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}
 			/>
