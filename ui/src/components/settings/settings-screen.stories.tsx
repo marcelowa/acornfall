@@ -168,6 +168,19 @@ export const Providers: Story = {
 	args: { ...Default.args, tab: "providers" },
 };
 
+/**
+ * The image field refused, in the server's own words, next to the value that was refused. A
+ * refusal used to show only in the strip at the top of the pane while the field went on looking
+ * applied. Type in the field to see it dirty with the Apply button live; press Apply to see it
+ * say what happened.
+ */
+export const WorkspaceImageRefused: Story = {
+	args: {
+		...Default.args,
+		failure: "no image by that name on this host",
+	},
+};
+
 /** The defaults page. */
 export const Defaults: Story = {
 	args: { ...Default.args, tab: "defaults" },

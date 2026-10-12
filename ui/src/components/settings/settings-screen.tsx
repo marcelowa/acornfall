@@ -29,6 +29,8 @@ export interface SettingsScreenProps {
 	providers: ReactNode;
 	/** The update screen: release card on top, prefs below. */
 	updates: ReactNode;
+	/** The last thing the server refused, in its own words: the image field shows its own. */
+	failure?: string | undefined;
 	/** The running build, when the gateway answered: shown under the title. */
 	version?: string | undefined;
 	/** Back to the conversation that was in view. */
@@ -55,25 +57,35 @@ export function SettingsScreen({
 	defaults,
 	providers,
 	updates,
+	failure,
 	version,
 	onClose,
 }: SettingsScreenProps) {
 	const [image, setImage] = useState(workspace?.image ?? "");
 	const [network, setNetwork] = useState(workspace?.network ?? "on");
+	/**
+	 * The image field commits from its own button (the approved change): a value saved on blur
+	 * and a value typed look the same, and a refusal used to appear at the top of the pane while
+	 * the field went on looking fine. This remembers that a commit was asked for, so the field can
+	 * say what happened to it.
+	 */
+	const [applied, setApplied] = useState(false);
 
 	// The form belongs to the workspace in view; a different one is a different form.
 	useEffect(() => {
 		setImage(workspace?.image ?? "");
 		setNetwork(workspace?.network ?? "on");
+		setApplied(false);
 	}, [workspace?.name, workspace?.image, workspace?.network]);
 
-	// One model: everything applies as it is chosen. The image commits when the field is
-	// left rather than per keystroke, and the caption below says when anything here takes
-	// effect — so there is no save button teaching a second model.
+	// One model, with one exception removed: the network applies as it is chosen, and the image
+	// commits from its own button and says where it landed. Nothing here waits for a blur.
 	const commit = (next: { image: string; network: string }): void => {
 		if (workspace === undefined) return;
 		onUpdateWorkspace(next);
 	};
+	const committedImage = workspace?.image ?? "";
+	const imageDirty = image !== committedImage;
 
 	return (
 		<div data-slot="settings-screen" className="min-h-0 flex-1 overflow-y-auto">
@@ -160,19 +172,42 @@ export function SettingsScreen({
 							}
 						>
 							<SettingsField label="image">
-								<Input
-									inputSize="sm"
-									value={image}
-									placeholder="the engine's default image"
-									aria-label="Sandbox image"
-									onChange={(event) => setImage(event.target.value)}
-									onBlur={() => commit({ image, network })}
-									onKeyDown={(event) => {
-										if (event.key !== "Enter") return;
-										event.preventDefault();
-										commit({ image, network });
-									}}
-								/>
+								<div className="flex items-center gap-2">
+									<Input
+										inputSize="sm"
+										value={image}
+										placeholder="the engine's default image"
+										aria-label="Sandbox image"
+										onChange={(event) => {
+											setImage(event.target.value);
+											setApplied(false);
+										}}
+									/>
+									<Button
+										type="button"
+										size="sm"
+										disabled={!imageDirty}
+										onClick={() => {
+											setApplied(true);
+											commit({ image, network });
+										}}
+									>
+										Apply
+									</Button>
+								</div>
+								{imageDirty && failure !== undefined ? (
+									<Text as="p" size="2xs" className="text-destructive">
+										Refused: {failure}
+									</Text>
+								) : applied && !imageDirty && failure === undefined ? (
+									<Text
+										as="p"
+										size="2xs"
+										className="text-success-subtle-foreground"
+									>
+										Applied — takes effect at the next sandbox
+									</Text>
+								) : null}
 							</SettingsField>
 							<SettingsField label="network">
 								<ToggleGroup
@@ -193,8 +228,8 @@ export function SettingsScreen({
 								</ToggleGroup>
 							</SettingsField>
 							<Text size="2xs" tone="muted">
-								Applies as chosen — the image when you leave the field — and takes
-								effect at the next sandbox.
+								Applies as chosen; the image on Apply. Either way it takes effect at
+								the next sandbox.
 							</Text>
 						</SettingsGroup>
 					) : null}
