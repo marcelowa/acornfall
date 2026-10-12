@@ -5,6 +5,7 @@ import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -88,53 +89,71 @@ export function WorkspacesScreen({
 								data-slot="workspace-row"
 								data-name={workspace.name}
 								data-active={workspace.active}
-								className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
+								className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border bg-card px-3 py-2"
 							>
-								<div className="flex min-w-0 flex-1 flex-col">
-									<Text size="sm" weight="medium" className="truncate">
-										{workspace.title}
-									</Text>
-									<Text size="2xs" tone="muted" className="truncate font-mono">
-										{workspace.path}
-									</Text>
-								</div>
-								{workspace.active ? (
-									<Badge variant="soft">in view</Badge>
-								) : (
-									<Button
-										size="xs"
-										variant="outline"
-										aria-label={`Open ${workspace.title}`}
-										onClick={() => onSelect(workspace.name)}
-									>
-										Open
-									</Button>
-								)}
-								<DropdownMenu>
-									<DropdownMenuTrigger asChild>
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon-xs"
-											aria-label={`Actions for ${workspace.title}`}
+								<div className="flex min-w-0 flex-1 items-center gap-2">
+									{workspace.running ? (
+										<StatusDot state="running" size="sm" />
+									) : null}
+									<div className="min-w-0 flex-1">
+										<Text size="sm" weight="medium" className="truncate">
+											{workspace.title}
+										</Text>
+										<Text
+											size="2xs"
+											tone="muted"
+											className="truncate font-mono"
 										>
-											<Ellipsis />
+											{workspace.path}
+										</Text>
+									</div>
+								</div>
+								<div className="flex shrink-0 items-center gap-2">
+									{workspace.running ? (
+										<Text as="span" size="2xs" tone="muted">
+											running
+										</Text>
+									) : null}
+									{workspace.active ? (
+										<Badge variant="soft">in view</Badge>
+									) : (
+										<Button
+											size="xs"
+											variant="outline"
+											aria-label={`Open ${workspace.title}`}
+											onClick={() => onSelect(workspace.name)}
+										>
+											Open
 										</Button>
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="end">
-										<DropdownMenuItem onSelect={() => setRenaming(workspace)}>
-											Rename
-										</DropdownMenuItem>
-										{workspace.general ? null : (
-											<DropdownMenuItem
-												variant="destructive"
-												onSelect={() => onForget(workspace.name)}
+									)}
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon-xs"
+												aria-label={`Actions for ${workspace.title}`}
 											>
-												Forget
+												<Ellipsis />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end">
+											<DropdownMenuItem
+												onSelect={() => setRenaming(workspace)}
+											>
+												Rename
 											</DropdownMenuItem>
-										)}
-									</DropdownMenuContent>
-								</DropdownMenu>
+											{workspace.general ? null : (
+												<DropdownMenuItem
+													variant="destructive"
+													onSelect={() => onForget(workspace.name)}
+												>
+													Forget
+												</DropdownMenuItem>
+											)}
+										</DropdownMenuContent>
+									</DropdownMenu>
+								</div>
 							</div>
 						))}
 					</Stack>
