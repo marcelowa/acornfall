@@ -529,6 +529,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 				defaults={defaults}
 				providers={providers}
 				updates={updates}
+				failure={platform.failure}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}
 			/>
