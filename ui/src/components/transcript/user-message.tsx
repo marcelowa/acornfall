@@ -52,12 +52,18 @@ export function UserMessage({ entry, onOpenConversation, onFork }: UserMessagePr
 			<Text as="div" size="lg" dir="auto" className="whitespace-pre-wrap">
 				{entry.text}
 			</Text>
-			<PaneFooter at={entry.at}>
-				{entry.action === undefined ? null : (
-					<Text as="span" size="2xs" tone="muted">
-						{entry.action === "steer" ? "steered this turn" : "queued behind the turn"}
-					</Text>
-				)}
+			<PaneFooter
+				at={entry.at}
+				note={
+					entry.action === undefined ? undefined : (
+						<Text as="span" size="2xs" tone="muted">
+							{entry.action === "steer"
+								? "steered this turn"
+								: "queued behind the turn"}
+						</Text>
+					)
+				}
+			>
 				{forkAt === undefined ? null : (
 					<Button
 						type="button"

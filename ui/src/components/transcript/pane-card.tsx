@@ -94,14 +94,19 @@ export function PaneCard({
 			className="rounded-lg border border-border bg-card"
 		>
 			<div className="flex items-center gap-2 border-b border-border px-3 py-2">
-				{leading}
-				{title}
+				<span className="flex min-w-0 items-center gap-2">
+					{leading}
+					{title}
+				</span>
 				<span className="ml-auto flex shrink-0 items-center gap-2">
 					{fold === undefined ? null : (
 						<Button
 							type="button"
 							variant="ghost"
 							size="xs"
+							// A finger is not a pointer: on a coarse one the fold is the only way back into
+							// a long output, so it gets a size a thumb can hit.
+							className="pointer-coarse:h-8 pointer-coarse:px-3"
 							onClick={() => setExpanded((value) => !value)}
 						>
 							{fold.label(expanded)}

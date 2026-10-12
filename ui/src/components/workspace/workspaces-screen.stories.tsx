@@ -55,3 +55,12 @@ export const Default: Story = {
 export const GeneralOnly: Story = {
 	args: { ...Default.args, workspaces: workspaces.slice(0, 1) },
 };
+
+/**
+ * A phone: the rows wrap instead of running off the screen, and the running mark has to earn its
+ * place next to the title. This is the state the reviewer asked to see and nothing showed.
+ */
+export const Phone: Story = {
+	args: Default.args,
+	globals: { viewport: { value: "phone" } },
+};

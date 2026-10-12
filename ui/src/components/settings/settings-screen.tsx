@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
 import { SettingsField, SettingsGroup } from "./settings-group";
+import { SettingsOutcome, type SettingsOutcomeProps } from "./settings-outcome";
 
 /** The theme as someone chooses it: following the system is a choice, not the absence of one. */
 export type ThemeChoice = "light" | "dark" | "system";
@@ -64,18 +65,16 @@ export function SettingsScreen({
 	const [image, setImage] = useState(workspace?.image ?? "");
 	const [network, setNetwork] = useState(workspace?.network ?? "on");
 	/**
-	 * The image field commits from its own button (the approved change): a value saved on blur
-	 * and a value typed look the same, and a refusal used to appear at the top of the pane while
-	 * the field went on looking fine. This remembers that a commit was asked for, so the field can
-	 * say what happened to it.
+	 * The image field's own commit: the value it sent, and whether that landed. It used to read
+	 * the app's last failure, which meant any refusal anywhere printed itself as this field's.
 	 */
-	const [applied, setApplied] = useState(false);
+	const [attempt, setAttempt] = useState<string | undefined>(undefined);
 
 	// The form belongs to the workspace in view; a different one is a different form.
 	useEffect(() => {
 		setImage(workspace?.image ?? "");
 		setNetwork(workspace?.network ?? "on");
-		setApplied(false);
+		setAttempt(undefined);
 	}, [workspace?.name, workspace?.image, workspace?.network]);
 
 	// One model, with one exception removed: the network applies as it is chosen, and the image
@@ -86,6 +85,18 @@ export function SettingsScreen({
 	};
 	const committedImage = workspace?.image ?? "";
 	const imageDirty = image !== committedImage;
+	// The field's own outcome, derived from what it sent: applied when the committed value is
+	// what it asked for, refused when the server said no, and pending while neither is true yet.
+	// "Applied" therefore survives the reload that confirms it, which is exactly when the old
+	// flag was cleared.
+	const outcome: SettingsOutcomeProps["state"] =
+		attempt === undefined
+			? undefined
+			: committedImage === attempt
+				? "applied"
+				: failure !== undefined
+					? "refused"
+					: "pending";
 
 	return (
 		<div data-slot="settings-screen" className="min-h-0 flex-1 overflow-y-auto">
@@ -180,7 +191,7 @@ export function SettingsScreen({
 										aria-label="Sandbox image"
 										onChange={(event) => {
 											setImage(event.target.value);
-											setApplied(false);
+											setAttempt(undefined);
 										}}
 									/>
 									<Button
@@ -188,26 +199,14 @@ export function SettingsScreen({
 										size="sm"
 										disabled={!imageDirty}
 										onClick={() => {
-											setApplied(true);
+											setAttempt(image);
 											commit({ image, network });
 										}}
 									>
 										Apply
 									</Button>
 								</div>
-								{imageDirty && failure !== undefined ? (
-									<Text as="p" size="2xs" className="text-destructive">
-										Refused: {failure}
-									</Text>
-								) : applied && !imageDirty && failure === undefined ? (
-									<Text
-										as="p"
-										size="2xs"
-										className="text-success-subtle-foreground"
-									>
-										Applied — takes effect at the next sandbox
-									</Text>
-								) : null}
+								<SettingsOutcome state={outcome} message={failure} />
 							</SettingsField>
 							<SettingsField label="network">
 								<ToggleGroup

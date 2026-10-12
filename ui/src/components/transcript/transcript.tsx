@@ -34,7 +34,14 @@ export interface TranscriptProps {
  * same card across that boundary; every other entry is keyed by its own id.
  */
 function entryKey(entry: TranscriptEntry): string {
-	return entry.kind === "tool" && entry.callId !== undefined ? `tool-${entry.callId}` : entry.id;
+	if (entry.kind === "tool" && entry.callId !== undefined) return `tool-${entry.callId}`;
+	// A thinking block has no id that survives the live-to-committed boundary — the wire gives a
+	// message none — so it is keyed by the beginning of what it says, which does survive: the
+	// committed block starts with the words that were streaming. Without this the card remounts
+	// when the run lands and folds under the reader, which is the churn this pass is about.
+	if (entry.kind === "thinking" && entry.text !== "")
+		return `thinking-${entry.text.slice(0, 64)}`;
+	return entry.id;
 }
 
 function Entry({
@@ -60,7 +67,7 @@ function Entry({
 		case "tool":
 			return <ToolCard key={entryKey(entry)} entry={entry} />;
 		case "thinking":
-			return <ThinkingCard key={entry.id} entry={entry} />;
+			return <ThinkingCard key={entryKey(entry)} entry={entry} />;
 		case "notice":
 			return <NoticeLine key={entry.id} entry={entry} />;
 		case "summary":
