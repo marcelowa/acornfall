@@ -75,5 +75,22 @@ the first real second user exists, their block goes in this file and the panels 
 
 ## What each persona approved
 
-- Step 04, journeys: pending this run.
-- Step 10, look: pending this run.
+- **Step 04, journeys:** all three approved the six journeys, with the changes recorded in
+  `docs/ui-workflow/refactor-ux/03-journeys.md` — spend and the age on the rail row, the mark
+  surviving a commit, one commit moment in settings, the phone type step, and J2 rewritten to what
+  the UI owns.
+- **Step 10, look:** round 1 was `approve with changes` from all three, and every item is listed
+  with where it stands in `10-panel-look.md`. Round 2 could not run as a panel (the session was at
+  its child limit and stopping a child did not free one), so it was checked item by item in that
+  session and written down as weaker than the reviewers. The panel's sharpest catch was a lie:
+  a workspace's `running` is its worker process (`Control.WorkerUp`), not a turn, so the run mark
+  built on it was taken back out.
+- **Step 11, the owner's pass:** two phone defects (the settings tab row, and a long tool name
+  widening the page), the clipped-name tooltip, and the two information-architecture decisions —
+  the sandbox fields moved behind a workspaces row's menu, and Appearance folded into Defaults.
+
+## The direction this ICP approved
+
+The shipped direction is written down in `design.md`: bronze on warm bark with blue as the second
+voice, facts quiet in mono `2xs`, a two-line fold from the card header, an even phone type ladder,
+and one commit moment per settings page.
