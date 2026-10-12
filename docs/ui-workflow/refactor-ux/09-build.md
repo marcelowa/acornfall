@@ -70,3 +70,22 @@ the changes most likely to need it, and `data-slot`, `data-status`, `data-live` 
 
 `Conversation/UserMessage`: Steered, Queued (the marks). `Screens/Settings`: WorkspaceImageRefused.
 `Conversation/ConversationRow`: SpendOnTheRow, RunningFresh, RunningStale.
+
+## Verification after the rebase onto origin/main
+
+The branch started from the local tip of `feat-amber-tokens`, which was `origin/main` as of then;
+it was not fetched first, and `origin/main` had moved three commits (a control-plane lock fix and
+the amber-tokens merge, both Go-only). Rebased onto `origin/main` with no conflicts, 19 commits.
+
+- `make lint` (gofmt, vet, staticcheck, house rules, worker, interface, check-system, format) — clean.
+- `make test` (worker units, Go units under `-race`, the feature suite including e2e at 57s) — green.
+- `bun run build:storybook`, `bun test` in `ui/` (86) — green.
+- `make ui` against a real gateway in this sandbox — **80 passed, 4 failed, twice.** Not flaky: the
+  same four, including after a rebuild. The same suite at the commit this branch started from
+  (built in a worktree here) fails 11 and passes 69, so the four are not from this work:
+  1. "a conversation with content is on screen" — the suite checks the transcript before it has
+     sent anything, and a fresh install has no content.
+  2. "the line reads agent, model, thinking" and 3. "the panel is the three choices" — the suite
+     splits the composer's summary on a spaced separator; the app renders `·` without spaces.
+  4. "the drawer carries the rail's own close" — it looks for `aria-label="Hide the rail"` inside
+     the drawer's dialog; the sheet's own close button is labelled "Close".
