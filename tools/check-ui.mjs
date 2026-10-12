@@ -236,23 +236,25 @@ try {
 	if (settingsTrigger !== null) {
 		await press(page, "button[aria-label='Settings']");
 		await page.waitForSelector("[data-slot=settings-screen]", { timeout: 5000 });
+		// Each page has its own URL, so this is /settings/<page> rather than a bare /settings.
 		check(
 			"settings has a URL of its own",
-			await page.evaluate(() => window.location.pathname === "/settings"),
+			await page.evaluate(() => window.location.pathname.startsWith("/settings")),
 		);
 		const settingsText = await page.evaluate(
 			() => document.querySelector("[data-slot=settings-screen]")?.textContent ?? "",
 		);
-		const activePath = await page.evaluate(async () => {
-			const state = await (await fetch("/api/state")).json();
-			return state.workspace.path;
-		});
-		check(
-			"settings says where this workspace points",
-			settingsText.includes(activePath),
-			activePath,
-		);
 		check("settings shows the defaults", settingsText.includes("Defaults"));
+		// The sandbox fields left this screen: a workspace names itself on the workspaces screen,
+		// and the row menu opens them there. So this screen has three pages, and the theme is a
+		// group on the first one rather than a tab of its own.
+		check(
+			"settings has three pages, and no workspace tab",
+			settingsText.includes("Providers") &&
+				settingsText.includes("Updates") &&
+				!settingsText.includes("Workspace\n"),
+			settingsText.replace(/\s+/g, " ").slice(0, 80),
+		);
 		check(
 			"the defaults have a tab per scope",
 			settingsText.includes("This workspace") && settingsText.includes("Global"),
@@ -310,6 +312,53 @@ try {
 				() => document.querySelector("[data-slot=error-strip]") === null,
 			);
 			check("the error strip can be dismissed", dismissed);
+		}
+
+		const activePath = await page.evaluate(async () => {
+			const state = await (await fetch("/api/state")).json();
+			return state.workspace.path ?? "";
+		});
+
+		// The sandbox fields live behind a workspaces row now, not on the settings screen: the
+		// row names the workspace, so this is where its image and network are set.
+		const rowActions = await page.$(
+			"[data-slot=workspace-row][data-active=true] button[aria-label^=\"Actions for\"]",
+		);
+		check("a workspace row offers its actions from a menu", rowActions !== null);
+		if (rowActions !== null) {
+			await page.hover("[data-slot=workspace-row][data-active=true]");
+			await rowActions.click();
+			await page.waitForSelector("[role=menu]", { timeout: 5000 });
+			await page.evaluate(() => {
+				const item = [...document.querySelectorAll("[role=menu] [role=menuitem]")].find((one) =>
+					one.textContent?.includes("Sandbox"),
+				);
+				item?.setAttribute("data-ui-check", "sandbox");
+			});
+			const offered = await page.evaluate(
+				() => document.querySelector("[data-ui-check=sandbox]") !== null,
+			);
+			check("the row menu offers the sandbox", offered);
+			if (offered) {
+				await page.click("[data-ui-check=sandbox]");
+				const dialog = await page
+					.waitForSelector("[role=dialog]", { timeout: 5000 })
+					.catch(() => null);
+				const dialogText =
+					dialog === null
+						? ""
+						: await dialog.evaluate((element) => element.textContent ?? "");
+				check(
+					"the sandbox dialog says where the workspace points",
+					activePath !== "" && dialogText.includes(activePath),
+					dialogText.replace(/\s+/g, " ").slice(0, 80),
+				);
+				check(
+					"the sandbox dialog sets an image and a network",
+					dialogText.includes("image") && dialogText.includes("network"),
+				);
+				await page.keyboard.press("Escape");
+			}
 		}
 
 		// Creating a workspace for real, which is the one flow here that leaves something
