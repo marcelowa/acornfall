@@ -16,7 +16,7 @@ export function Page({ className, children }: PageProps) {
 	return (
 		<div
 			className={cn(
-				"flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground",
+				"flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground pb-[var(--keyboard-inset)]",
 				className,
 			)}
 		>

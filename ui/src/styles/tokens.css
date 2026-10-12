@@ -304,6 +304,13 @@
 	 * that shrinks the layout viewport instead of moving the visual one. */
 	--keyboard-inset: 0px;
 
+	/* A dialog is centred on what can be seen, not on the whole layout: half the keyboard's height
+	 * up, and never taller than the room left above it. Without this a field near the bottom of a
+	 * dialog sits behind the keyboard, because a fixed panel does not follow the visual viewport.
+	 * Every field in the app is meant to be visible while it is focused, not just the composer. */
+	--dialog-top: calc(50% - var(--keyboard-inset) / 2);
+	--dialog-max-height: calc(100dvh - var(--keyboard-inset) - var(--base-space-8));
+
 	/* A compaction note shows this much when put away. Output and reasoning fold to two lines
 	 * instead (see PaneCard): a line count is what a reader of those actually counts. */
 	--summary-card-collapsed-height: 96px;

@@ -27,8 +27,8 @@ The operator is still one person, the owner. Run 1's foundation clause still hol
 - [x] 07 Consolidate — one layer, one close, one bar height, the phone step in the ladder
 - [x] 08 Framework doctor — checks green; the phone step is now probed
 - [x] 09 Build for real — all four journeys in the app; the mocks are deleted
-- [~] 10 Panel on the look — gate
-- [ ] 11 The owner's final pass
+- [x] 10 Panel on the look — round 2 delivered; its findings fixed; four items await the owner
+- [~] 11 The owner's final pass
 - [ ] 12 Finalize the docs
 
 ## The owner's named pains (input to step 03)
