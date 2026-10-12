@@ -230,8 +230,6 @@ export interface Platform {
 	modelLabel: (value: string) => string;
 	/** The levels a model offers, for the thinking default that follows it. */
 	thinkingFor: (model: string) => PickerGroup[];
-	/** The active workspace's image and network. */
-	setWorkspace: (change: { image: string; network: string }) => void;
 	/** Any workspace's image and network, by name: the workspaces screen's rows are not the one
 	 * in view, and its menu is where a sandbox is changed. */
 	setWorkspaceSandbox: (name: string, change: { image: string; network: string }) => void;
@@ -843,13 +841,6 @@ export function usePlatform(): Platform {
 		});
 	}, []);
 
-	const setWorkspace = useCallback(
-		(change: { image: string; network: string }) => {
-			act(updateWorkspace(workspace, change), () => void reload());
-		},
-		[act, workspace, reload],
-	);
-
 	// A row on the workspaces screen is not the workspace in view, so the name comes from the
 	// caller: the gateway takes it either way.
 	const setWorkspaceSandbox = useCallback(
@@ -1142,7 +1133,6 @@ export function usePlatform(): Platform {
 		setDefault,
 		modelLabel,
 		thinkingFor,
-		setWorkspace,
 		setWorkspaceSandbox,
 		createWorkspace,
 		removeWorkspace,

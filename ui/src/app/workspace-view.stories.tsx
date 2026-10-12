@@ -209,7 +209,6 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		setDefault: noop,
 		modelLabel: (value: string) => value.split("/").at(-1) ?? "",
 		thinkingFor: () => [{ options: [{ value: "max", label: "max" }] }],
-		setWorkspace: noop,
 		setWorkspaceSandbox: noop,
 		createWorkspace: noop,
 		removeWorkspace: noop,
