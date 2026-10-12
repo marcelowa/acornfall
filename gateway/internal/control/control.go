@@ -2474,9 +2474,21 @@ func (c *Control) persist() {
 // cards still say it is working.
 func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.runActiveLocked(info, now)
+}
+
+// runActiveLocked is the same rule for a caller that already holds the lock. A state build
+// renders every conversation while holding its snapshot read lock, and taking the read lock
+// again there is not a nested read: Go's RWMutex puts a read lock that arrives after a queued
+// writer behind that writer, so the second acquisition waits for a writer that is waiting for
+// the first — held by this same goroutine — and every request behind it waits too. It was
+// observed in production: one state request and one event-stream subscribe wedged the control
+// lock; the eviction sweep then took the registry lock and waited on that control, and the
+// whole interface sat down until the process was killed.
+func (c *Control) runActiveLocked(info protocol.ConversationInfo, now int64) bool {
 	prompted := c.promptedAt[info.ID]
 	action := c.actionAt[info.ID]
-	c.mu.RUnlock()
 	if now-prompted < 10_000 {
 		return true
 	}
@@ -2530,6 +2542,9 @@ func (c *Control) RunningIDs() []string {
 	return ids
 }
 
+// toConversations renders the rows the interface reads. It must be called with c.mu held for
+// reading: the busy rule reads the prompt stamps, and asking for the lock here would be the
+// second acquisition that deadlocks a state build behind a queued writer.
 func (c *Control) toConversations(infos []protocol.ConversationInfo) []Conversation {
 	now := time.Now().UnixMilli()
 	conversations := make([]Conversation, 0, len(infos))
@@ -2539,7 +2554,7 @@ func (c *Control) toConversations(infos []protocol.ConversationInfo) []Conversat
 			Title:       info.Title,
 			Root:        info.Root,
 			Hidden:      info.Hidden,
-			Running:     c.runActive(info, now),
+			Running:     c.runActiveLocked(info, now),
 			LastEntryID: info.LastEntryID,
 			UpdatedAt:   info.UpdatedAt,
 			Tokens:      info.Tokens,
