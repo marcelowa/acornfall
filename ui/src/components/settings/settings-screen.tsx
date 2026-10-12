@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
+import { SettingsField, SettingsGroup } from "./settings-group";
 
 /** The theme as someone chooses it: following the system is a choice, not the absence of one. */
 export type ThemeChoice = "light" | "dark" | "system";
@@ -122,10 +123,7 @@ export function SettingsScreen({
 					</Tabs>
 
 					{tab === "appearance" ? (
-						<Stack gap="sm" data-slot="settings-theme">
-							<Text size="sm" weight="semibold">
-								Theme
-							</Text>
+						<SettingsGroup slot="settings-theme" title="Theme">
 							<div>
 								<ToggleGroup
 									type="single"
@@ -148,21 +146,20 @@ export function SettingsScreen({
 									<ToggleGroupItem value="system">System</ToggleGroupItem>
 								</ToggleGroup>
 							</div>
-						</Stack>
+						</SettingsGroup>
 					) : null}
 
 					{tab === "workspace" ? (
-						<Stack gap="sm" data-slot="settings-workspace">
-							<Text size="sm" weight="semibold">
-								This workspace
-							</Text>
-							<Text size="2xs" tone="muted" className="font-mono">
-								{workspace?.path ?? ""}
-							</Text>
-							<Stack gap="2xs">
-								<Text size="2xs" tone="muted">
-									image
+						<SettingsGroup
+							slot="settings-workspace"
+							title="This workspace"
+							intro={
+								<Text size="2xs" tone="muted" className="font-mono">
+									{workspace?.path ?? ""}
 								</Text>
+							}
+						>
+							<SettingsField label="image">
 								<Input
 									inputSize="sm"
 									value={image}
@@ -176,11 +173,8 @@ export function SettingsScreen({
 										commit({ image, network });
 									}}
 								/>
-							</Stack>
-							<Stack gap="2xs">
-								<Text size="2xs" tone="muted">
-									network
-								</Text>
+							</SettingsField>
+							<SettingsField label="network">
 								<ToggleGroup
 									type="single"
 									value={network}
@@ -197,25 +191,27 @@ export function SettingsScreen({
 									<ToggleGroupItem value="on">on</ToggleGroupItem>
 									<ToggleGroupItem value="off">off</ToggleGroupItem>
 								</ToggleGroup>
-							</Stack>
+							</SettingsField>
 							<Text size="2xs" tone="muted">
 								Applies as chosen — the image when you leave the field — and takes
 								effect at the next sandbox.
 							</Text>
-						</Stack>
+						</SettingsGroup>
 					) : null}
 
 					{tab === "defaults" ? (
-						<Stack gap="sm" data-slot="settings-defaults">
-							<Text size="sm" weight="semibold">
-								Defaults
-							</Text>
-							<Text size="2xs" tone="muted">
-								What a new conversation starts from. An existing one keeps what it
-								pinned.
-							</Text>
+						<SettingsGroup
+							slot="settings-defaults"
+							title="Defaults"
+							intro={
+								<Text size="2xs" tone="muted">
+									What a new conversation starts from. An existing one keeps what
+									it pinned.
+								</Text>
+							}
+						>
 							{defaults}
-						</Stack>
+						</SettingsGroup>
 					) : null}
 
 					{tab === "providers" ? providers : null}

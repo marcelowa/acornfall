@@ -1,10 +1,10 @@
 import { useState } from "react";
 import type { ProviderSummary } from "@/app/view-models";
-import { Stack } from "@/components/layout/stack";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/typography/text";
 import { cn } from "cn";
+import { SettingsGroup } from "./settings-group";
 
 export interface ProvidersSectionProps {
 	providers: ProviderSummary[];
@@ -49,13 +49,16 @@ export function ProvidersSection({
 				);
 
 	return (
-		<Stack gap="sm" data-slot="providers-section">
-			<Text size="sm" weight="semibold">
-				Providers
-			</Text>
-			<Text size="2xs" tone="muted">
-				Whose models this install may call. Keys are global — every workspace shares them.
-			</Text>
+		<SettingsGroup
+			slot="providers-section"
+			title="Providers"
+			intro={
+				<Text size="2xs" tone="muted">
+					Whose models this install may call. Keys are global — every workspace shares
+					them.
+				</Text>
+			}
+		>
 			{connected === 0 ? (
 				<Text size="sm" tone="muted">
 					No provider connected. Connect one to choose models.
@@ -168,6 +171,6 @@ export function ProvidersSection({
 			<Text size="2xs" tone="muted">
 				Added a key outside the app? Re-check reads it.
 			</Text>
-		</Stack>
+		</SettingsGroup>
 	);
 }

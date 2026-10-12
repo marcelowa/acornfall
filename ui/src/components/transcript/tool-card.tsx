@@ -1,11 +1,9 @@
-import { useState } from "react";
 import type { ToolEntry } from "@/app/view-models";
-import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Text } from "@/components/typography/text";
 import { stripAnsi } from "@/lib/text";
 import { cn } from "cn";
-import { PaneFooter } from "./pane-footer";
+import { PaneCard } from "./pane-card";
 import { ThinkingDots } from "./thinking-dots";
 
 /**
@@ -40,21 +38,16 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 		status === "done" &&
 		(lineCount > COLLAPSE_AFTER_LINES || body.length > COLLAPSE_AFTER_CHARS);
 
-	// Only a completed card with room to spare collapses: what is still running, or failed,
-	// is what the reader is here for.
-	const [expanded, setExpanded] = useState(defaultExpanded);
-	const clamped = collapsible && !expanded;
-
 	return (
-		<div
-			data-slot="tool"
-			data-status={status}
-			className="rounded-lg border border-border bg-card"
-		>
-			<div className="flex items-center gap-2 border-b border-border px-3 py-2">
+		<PaneCard
+			slot="tool"
+			status={status}
+			title={
 				<Text as="span" size="sm" weight="semibold" className="font-mono">
 					{entry.name}
 				</Text>
+			}
+			aside={
 				<Text
 					as="span"
 					size="2xs"
@@ -69,35 +62,38 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 				>
 					{status}
 				</Text>
-			</div>
-			{body === "" ? null : (
+			}
+			fold={
+				// Only a completed card with room to spare collapses: what is still running, or
+				// failed, is what the reader is here for.
+				collapsible
+					? {
+							size: "tool",
+							label: (expanded) =>
+								expanded ? "Show less" : `Show output (${lineCount} lines)`,
+						}
+					: undefined
+			}
+			defaultExpanded={defaultExpanded}
+			below={
+				status === "running" ? (
+					<div className="px-3 pb-2">
+						<ThinkingDots />
+					</div>
+				) : undefined
+			}
+			at={entry.at}
+			trailing={body === "" ? undefined : <CopyButton value={body} />}
+			body={({ clamp }) => (
 				<pre
 					className={cn(
 						"overflow-x-auto overflow-y-hidden px-3 py-2 font-mono text-xs whitespace-pre-wrap wrap-anywhere text-foreground tabular-nums",
-						clamped && "max-h-(--tool-card-collapsed-height)",
+						clamp,
 					)}
 				>
 					{body}
 				</pre>
 			)}
-			{status === "running" ? (
-				<div className="px-3 pb-2">
-					<ThinkingDots />
-				</div>
-			) : null}
-			<PaneFooter at={entry.at} className="px-3 pb-2">
-				{collapsible ? (
-					<Button
-						type="button"
-						variant="ghost"
-						size="xs"
-						onClick={() => setExpanded((value) => !value)}
-					>
-						{expanded ? "Show less" : `Show output (${lineCount} lines)`}
-					</Button>
-				) : null}
-				{body === "" ? null : <CopyButton value={body} />}
-			</PaneFooter>
-		</div>
+		/>
 	);
 }

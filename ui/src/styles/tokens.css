@@ -301,6 +301,9 @@
 	/* A finished thinking card shows this much: reasoning is narrower than output, so its
 	 * collapsed form is shorter. */
 	--thinking-card-collapsed-height: 120px;
+	/* A compaction note shows this much when put away. It was `max-h-24` — a spacing step doing a
+	 * component token's job — until the three cards were consolidated onto one shell. */
+	--summary-card-collapsed-height: 96px;
 }
 
 .dark {
