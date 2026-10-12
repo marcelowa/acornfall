@@ -6,9 +6,11 @@ const meta = {
 	title: "Conversation/ConversationRow",
 	component: ConversationRow,
 	parameters: { layout: "centered" },
+	// The rail's own width, not a round number: a row is judged at 280px, and at the 192px the
+	// splitter drags down to when the time is the first thing to go.
 	decorators: [
 		(Story) => (
-			<div className="w-80 rounded-md border border-border bg-background p-2">
+			<div className="w-[var(--rail-width)] rounded-md border border-border bg-background p-2">
 				<Story />
 			</div>
 		),
@@ -78,4 +80,19 @@ export const LongTitle: Story = {
 			title: "A conversation whose title runs past the width of the rail and truncates",
 		},
 	},
+};
+
+/**
+ * The narrowest the splitter allows (about 192px): the age keeps its place at the right edge and
+ * the spend truncates first, which is the order the row was built for.
+ */
+export const NarrowRail: Story = {
+	args: { conversation: { ...base, tokens: 12400, cost: 0.0432 } },
+	decorators: [
+		(Story) => (
+			<div className="w-48 rounded-md border border-border bg-background p-2">
+				<Story />
+			</div>
+		),
+	],
 };

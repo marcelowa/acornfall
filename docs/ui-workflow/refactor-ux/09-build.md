@@ -13,9 +13,10 @@ without hovering, which a phone cannot do at all. `formatMoved` in `lib/format.t
 freshness window keeps its dot but loses the accent, so a dead run stops looking alive. The
 tooltip keeps the id and the sender.
 
-**J2 — the workspaces screen.** The row now says whether anything is running in it
-(`running` was already mapped and never rendered), and it wraps: below `sm` the controls drop to
-their own line instead of the row running off a phone.
+**J2 — the workspaces screen.** The row wraps: below `sm` the controls drop to their own line
+instead of the row running off a phone. The running mark this pass first added was **taken back
+out** in the panel round: the wire's `running` for a workspace is its worker process, not a turn
+(see `10-panel-look.md`).
 
 **J3 — the transcript cards.** `PaneCard` grew the approved fold: the control moved from the
 footer into the header, and a folded card shows its first two lines instead of a 200px window.

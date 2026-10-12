@@ -5,7 +5,6 @@ import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StatusDot } from "@/components/ui/status-dot";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -31,6 +30,12 @@ export interface WorkspacesScreenProps {
  * The workspaces, one row each: open it, rename it, or forget it. It is a screen rather than a
  * sheet because it is a place you go — the conversations you were reading are behind it, and
  * the rail's top button is the way back to them.
+ *
+ * A row does not say whether a run is happening in it: the wire's per-workspace `running` is the
+ * workspace's worker process being up (`control.go` `WorkerUp`), which is a warm process, not an
+ * active turn. The mark was built on that field and taken out again — see
+ * `docs/ui-workflow/refactor-ux/10-panel-look.md`. A per-workspace run flag would need the wire
+ * to carry one.
  *
  * Creating one is a name, not a path: the folder is made inside the workspaces folder, and the
  * server refuses a name that would escape it. A new workspace opens with an empty conversation,
@@ -92,9 +97,6 @@ export function WorkspacesScreen({
 								className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border bg-card px-3 py-2"
 							>
 								<div className="flex min-w-0 flex-1 items-center gap-2">
-									{workspace.running ? (
-										<StatusDot state="running" size="sm" />
-									) : null}
 									<div className="min-w-0 flex-1">
 										<Text size="sm" weight="medium" className="truncate">
 											{workspace.title}
@@ -109,11 +111,6 @@ export function WorkspacesScreen({
 									</div>
 								</div>
 								<div className="flex shrink-0 items-center gap-2">
-									{workspace.running ? (
-										<Text as="span" size="2xs" tone="muted">
-											running
-										</Text>
-									) : null}
 									{workspace.active ? (
 										<Badge variant="soft">in view</Badge>
 									) : (

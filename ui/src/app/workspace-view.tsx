@@ -31,6 +31,7 @@ import { RenameDialog } from "@/components/ui/rename-dialog";
 import { CompactDialog } from "@/components/ui/compact-dialog";
 import { formatContext } from "@/lib/format";
 import { StatusDot } from "@/components/ui/status-dot";
+import { runState, useNow } from "@/lib/clock";
 import { StatusPill } from "@/components/ui/status-pill";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
@@ -321,8 +322,11 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 
 	// Busy is the flag: the gateway owns the rule now — a fresh record, or an accepted
 	// prompt the record has not caught up to — so the interface reads it instead of
-	// re-deriving it from transcript evidence.
+	// re-deriving it from transcript evidence. The age is the interface's: the same rule the
+	// rail uses, so the two dots cannot disagree about whether a run is still happening.
 	const busy = running;
+	const now = useNow();
+	const run = runState(busy, platform.active?.updatedAt, now);
 	const topbarTitle =
 		platform.screen === "workspaces"
 			? "Workspaces"
@@ -331,7 +335,9 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 				: (platform.active?.title ?? "Acornfall");
 	const barTitle = (
 		<span className="flex min-w-0 items-center gap-2">
-			{busy && platform.screen === "conversation" ? <StatusDot state="running" /> : null}
+			{run !== "idle" && platform.screen === "conversation" ? (
+				<StatusDot state={run} />
+			) : null}
 			<Text as="span" size="sm" weight="medium" className="truncate">
 				{topbarTitle}
 			</Text>

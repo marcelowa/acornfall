@@ -14,18 +14,15 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/ui/status-dot";
-import { useNow } from "@/lib/clock";
+import { useNow, runState } from "@/lib/clock";
 import { formatCost, formatMoved, formatTokens } from "@/lib/format";
 import { cn } from "cn";
 
 /**
- * A run whose last move is older than this stops claiming to be live in the rail: the dot drops
- * its accent and the row carries the time instead. The gateway's own busy window is half an
- * hour, which is long enough for a run that died to keep a lit dot — the panel's finding — and
- * a shorter window here would dim a genuinely slow tool call, so this matches the window the
- * server itself calls fresh and lets the time on the row do the rest.
+ * A run whose last move is older than the honesty rule in `lib/clock.ts` stops claiming to be
+ * live in the rail. That rule lives beside the dot it dims, and the top bar reads the same one,
+ * so the two places that show a run cannot disagree about whether it is happening.
  */
-const STALE_AFTER_MINUTES = 30;
 
 export interface ConversationRowProps {
 	conversation: ConversationSummary;
@@ -99,14 +96,11 @@ export function ConversationRow({
 	const meta = [
 		conversation.tokens > 0 ? formatTokens(conversation.tokens) : "",
 		conversation.cost > 0 ? formatCost(conversation.cost) : "",
-		formatMoved(conversation.updatedAt, now),
 	]
 		.filter((part) => part !== "")
 		.join(" · ");
-	const stale =
-		conversation.running &&
-		conversation.updatedAt !== undefined &&
-		now.getTime() - conversation.updatedAt.getTime() > STALE_AFTER_MINUTES * 60_000;
+	const moved = formatMoved(conversation.updatedAt, now);
+	const run = runState(conversation.running, conversation.updatedAt, now);
 
 	const actions: RowAction[] = conversation.hidden
 		? [{ label: "Restore", destructive: false, run: () => onRestore?.(conversation.id) }]
@@ -142,14 +136,13 @@ export function ConversationRow({
 				className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 flex min-w-0 flex-1 items-start gap-2 text-start"
 			>
 				<span className="flex w-4 shrink-0 items-center justify-center pt-1">
-					{conversation.running ? (
-						<StatusDot
-							state="running"
-							className={stale ? "animate-none bg-muted-foreground" : undefined}
-						/>
-					) : conversation.unread ? (
-						<StatusDot state="unread" />
-					) : null}
+					{run === "idle" ? (
+						conversation.unread ? (
+							<StatusDot state="unread" />
+						) : null
+					) : (
+						<StatusDot state={run} />
+					)}
 				</span>
 				<span className="min-w-0 flex-1">
 					<span
@@ -164,11 +157,16 @@ export function ConversationRow({
 					>
 						{conversation.title}
 					</span>
-					{meta === "" ? null : (
-						<span className="block truncate font-mono text-2xs text-muted-foreground tabular-nums">
-							{meta}
-						</span>
-					)}
+					{/*
+					 * The line is always there, even when it has nothing to say: a row that grows when it
+					 * learns its first token shifts every row under it while the reader is watching.
+					 * Spend sits left, the age right, so ages line up at the edge and the time is the
+					 * last thing a narrow rail takes away rather than the first.
+					 */}
+					<span className="flex min-h-4 items-baseline justify-between gap-2 font-mono text-2xs text-muted-foreground tabular-nums">
+						<span className="truncate">{meta}</span>
+						<span className="shrink-0">{moved}</span>
+					</span>
 				</span>
 			</button>
 			<span className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">

@@ -24,8 +24,8 @@ Confirmed by the owner in the same message that answered the setup questions.
 - [x] 06 Mock and iterate — approved with three notes, all applied
 - [x] 07 Consolidate — transcript cards onto `PaneCard`, settings onto `SettingsGroup`/`SettingsField`
 - [x] 08 Framework doctor — checks green; `user-message` storied; no browser for the a11y run
-- [ ] 09 Build for real
-- [ ] 10 Panel on the look
+- [x] 09 Build for real — all eight changes in the app, mocks deleted, 11 commits on `docs-ui-refactor-chain`
+- [ ] 10 Panel on the look — running
 - [ ] 11 The owner's final pass
 - [ ] 12 Finalize the docs
 
