@@ -1,21 +1,13 @@
 import { useState } from "react";
-import { ChevronLeft, Ellipsis } from "lucide-react";
 import type { WorkspaceSummary } from "@/app/view-models";
 import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ClippedText } from "@/components/ui/clipped-text";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Text } from "@/components/typography/text";
 import { SandboxDialog } from "./sandbox-dialog";
+import { WorkspaceRow } from "./workspace-row";
 
 export interface WorkspacesScreenProps {
 	/** Every workspace, with the one in view marked. */
@@ -28,29 +20,19 @@ export interface WorkspacesScreenProps {
 	onUpdateSandbox: (name: string, change: { image: string; network: string }) => void;
 	/** The last refusal, in the server's words: the sandbox dialog shows its own. */
 	failure?: string | undefined;
-	/** Back to the conversation that was in view. */
-	onClose: () => void;
 }
 
 /**
- * The workspaces, one row each: open it, rename it, or forget it. It is a screen rather than a
- * sheet because it is a place you go — the conversations you were reading are behind it, and
- * the rail's top button is the way back to them.
+ * The workspaces, one row each: open it, rename it, or forget it.
  *
- * A row does not say whether a run is happening in it: the wire's per-workspace `running` is the
- * workspace's worker process being up (`control.go` `WorkerUp`), which is a warm process, not an
- * active turn. The mark was built on that field and taken out again — see
- * `docs/ui-workflow/refactor-ux/10-panel-look.md`. A per-workspace run flag would need the wire
- * to carry one.
+ * It is the content of a layer, not a screen (step 09): the layer slides in from the left under
+ * the bar, carries no close of its own, and keeps no URL, so the bar's toggle, Back, or opening a
+ * workspace returns to the conversation behind it. The `data-slot` name stays `workspaces-screen`
+ * because the browser suite reads it.
  *
  * Creating one is a name, not a path: the folder is made inside the workspaces folder, and the
  * server refuses a name that would escape it. A new workspace opens with an empty conversation,
- * which is the app's doing — this screen only reports the name.
- *
- * Opening is the row's own button; renaming and forgetting live in the row's menu, the way
- * the rail's rows keep destructive gestures one step away. Forgetting is not a confirmation:
- * the general workspace cannot be forgotten, and the others are a folder that stays where
- * it is.
+ * which is the app's doing — this content only reports the name.
  */
 export function WorkspacesScreen({
 	workspaces,
@@ -60,7 +42,6 @@ export function WorkspacesScreen({
 	onForget,
 	onUpdateSandbox,
 	failure,
-	onClose,
 }: WorkspacesScreenProps) {
 	const [name, setName] = useState("");
 	/** The workspace being renamed, if any: the dialog is about one row at a time. */
@@ -78,16 +59,6 @@ export function WorkspacesScreen({
 			<Measure size="page" padding="lg">
 				<Stack gap="lg">
 					<Stack gap="2xs">
-						<Button
-							variant="ghost"
-							size="xs"
-							className="self-start"
-							aria-label="Back to the conversation"
-							onClick={onClose}
-						>
-							<ChevronLeft />
-							Back to the conversation
-						</Button>
 						<Text as="h1" size="xl" weight="semibold">
 							Workspaces
 						</Text>
@@ -99,75 +70,14 @@ export function WorkspacesScreen({
 
 					<Stack gap="xs" data-slot="workspaces-list">
 						{workspaces.map((workspace) => (
-							<div
+							<WorkspaceRow
 								key={workspace.name}
-								data-slot="workspace-row"
-								data-name={workspace.name}
-								data-active={workspace.active}
-								className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border bg-card px-3 py-2"
-							>
-								<div className="flex min-w-0 flex-1 items-center gap-2">
-									<div className="min-w-0 flex-1">
-										<ClippedText
-											text={workspace.title}
-											className="block text-sm font-medium"
-										/>
-										<Text
-											size="2xs"
-											tone="muted"
-											className="truncate font-mono"
-										>
-											{workspace.path}
-										</Text>
-									</div>
-								</div>
-								<div className="flex shrink-0 items-center gap-2">
-									{workspace.active ? (
-										<Badge variant="soft">in view</Badge>
-									) : (
-										<Button
-											size="xs"
-											variant="outline"
-											aria-label={`Open ${workspace.title}`}
-											onClick={() => onSelect(workspace.name)}
-										>
-											Open
-										</Button>
-									)}
-									<DropdownMenu>
-										<DropdownMenuTrigger asChild>
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon-xs"
-												aria-label={`Actions for ${workspace.title}`}
-											>
-												<Ellipsis />
-											</Button>
-										</DropdownMenuTrigger>
-										<DropdownMenuContent align="end">
-											<DropdownMenuItem
-												onSelect={() => setSandboxFor(workspace)}
-											>
-												Sandbox…
-											</DropdownMenuItem>
-											<DropdownMenuItem
-												onSelect={() => setRenaming(workspace)}
-											>
-												Rename
-											</DropdownMenuItem>
-											{workspace.general ? null : (
-												<DropdownMenuItem
-													variant="destructive"
-													onSelect={() => onForget(workspace.name)}
-												>
-													Forget
-												</DropdownMenuItem>
-											)}
-										</DropdownMenuContent>
-									</DropdownMenu>
-								</div>
-							</div>
+								workspace={workspace}
+								onSelect={onSelect}
+								onRename={setRenaming}
+								onSandbox={setSandboxFor}
+								onForget={onForget}
+							/>
 						))}
 					</Stack>
 

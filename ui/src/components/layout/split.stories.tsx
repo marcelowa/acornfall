@@ -72,7 +72,7 @@ export const Topbar: Story = {
 	globals: { viewport: { value: "laptop" } },
 };
 
-/** Same bar on a phone: the drawer toggle sits beside the brand. */
+/** Same bar on a phone: the layer toggle sits beside the brand. */
 export const TopbarPhone: Story = {
 	args: {
 		aside,
@@ -99,7 +99,7 @@ export const TopbarPhone: Story = {
 	globals: { viewport: { value: "phone" } },
 };
 
-/** Drawer open: the bar stays mounted, the toggle shows X, the rail drops below. */
+/** Layer open: the bar stays mounted, the toggle shows X, and the rail slides in from the left. */
 function TopbarPhoneRailOpenFrame() {
 	const [open, setOpen] = useState(true);
 	return (

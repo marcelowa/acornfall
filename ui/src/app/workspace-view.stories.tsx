@@ -230,6 +230,10 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		},
 		harness: "pi-durable",
 		railOpen: false,
+		// The workspaces layer: the story fixtures set it open where the story is about the layer.
+		workspacesOpen: false,
+		openWorkspaces: noop,
+		closeWorkspaces: noop,
 		railCollapsed: false,
 		theme: "light",
 		themeChoice: "system",
@@ -389,9 +393,9 @@ export const RefusedAction: Story = {
 	globals: { viewport: { value: "laptop" } },
 };
 
-/** The workspace list, one screen over: open, rename, forget, or create. */
-export const WorkspacesScreen: Story = {
-	args: { platform: makePlatform({ screen: "workspaces" }) },
+/** The workspace list, as the layer it is now: over the conversation, no X of its own. */
+export const WorkspacesLayer: Story = {
+	args: { platform: makePlatform({ workspacesOpen: true }) },
 	globals: { viewport: { value: "laptop" } },
 };
 

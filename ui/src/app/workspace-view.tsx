@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, ChevronsUpDown, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
+import { ArrowUp, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
 import type { DefaultScope, ProviderAuthType, UploadedAttachment } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { MAX_ATTACHMENT_BYTES, refuseAttachments } from "@/lib/attachments";
@@ -24,6 +24,8 @@ import { UpdateSection } from "@/components/settings/update-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesScreen } from "@/components/workspace/workspaces-screen";
+import { WorkspaceButton } from "@/components/workspace/workspace-button";
+import { Layer } from "@/components/layout/layer";
 import { Transcript } from "@/components/transcript/transcript";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,6 +82,9 @@ export interface DraftAttachment {
 
 export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProps) {
 	const [draft, setDraft] = useState(initialDraft);
+	/** The composer's fold, the phone's rest state. It lives here, above the composer, so the
+	 * draft and the fold survive the composer unmounting when a screen shows (step 04, panel). */
+	const [composerFolded, setComposerFolded] = useState(true);
 	const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
 	const attachmentKey = useRef(0);
 	const [scope, setScope] = useState<DefaultScope>("workspace");
@@ -238,8 +243,8 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 
 	// The brand lives in the top bar, not the rail: the bar spans the full width on
 	// mobile and desktop, so the mark stays put whether the rail is open or not.
-	// It opens nothing — below `lg` the drawer toggle beside it opens the rail,
-	// and the workspace switcher in the rail head is the navigation.
+	// It opens nothing — below `lg` the layer toggle beside it opens the rail,
+	// and the workspace's own name in the rail head opens its list.
 	const brand = (
 		<span className="flex shrink-0 items-center gap-2">
 			<BrandMark />
@@ -251,32 +256,23 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 	const rail = (
 		<Rail
 			head={
-				<Text size="sm" weight="semibold" className="truncate">
-					{activeWorkspace?.title ?? "Workspaces"}
-				</Text>
+				<WorkspaceButton
+					title={activeWorkspace?.title ?? "Workspaces"}
+					expanded={platform.workspacesOpen}
+					onClick={platform.openWorkspaces}
+				/>
 			}
 			headActions={
-				<>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-sm"
-						aria-label="Workspaces"
-						onClick={() => platform.showScreen("workspaces")}
-					>
-						<ChevronsUpDown />
-					</Button>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-sm"
-						className="hidden lg:flex"
-						aria-label="Hide the rail"
-						onClick={platform.toggleRail}
-					>
-						<PanelLeftClose />
-					</Button>
-				</>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					className="hidden lg:flex"
+					aria-label="Hide the rail"
+					onClick={platform.toggleRail}
+				>
+					<PanelLeftClose />
+				</Button>
 			}
 			list={
 				<ConversationList
@@ -328,11 +324,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 	const now = useNow();
 	const run = runState(busy, platform.active?.updatedAt, now);
 	const topbarTitle =
-		platform.screen === "workspaces"
-			? "Workspaces"
-			: platform.screen === "settings"
-				? "Settings"
-				: (platform.active?.title ?? "Acornfall");
+		platform.screen === "settings" ? "Settings" : (platform.active?.title ?? "Acornfall");
 	const barTitle = (
 		<span className="flex min-w-0 items-center gap-2">
 			{run !== "idle" && platform.screen === "conversation" ? (
@@ -512,21 +504,11 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 		else platform.closeLogin();
 	};
 
-	// The screens replace the conversation rather than sitting over it: they are places, and
-	// the rail is how you leave and how you come back.
+	// A screen replaces the conversation rather than sitting over it: settings is a place, and the
+	// rail is how you leave and how you come back. The workspaces list is not one of them — it is
+	// a layer, below the bar, with the bar's own toggle as its close.
 	const screen =
-		platform.screen === "workspaces" ? (
-			<WorkspacesScreen
-				workspaces={platform.workspaces}
-				onSelect={platform.selectWorkspace}
-				onCreate={platform.createWorkspace}
-				onRename={platform.renameWorkspace}
-				onForget={platform.removeWorkspace}
-				onUpdateSandbox={platform.setWorkspaceSandbox}
-				failure={platform.failure}
-				onClose={() => platform.showScreen("conversation")}
-			/>
-		) : platform.screen === "settings" ? (
+		platform.screen === "settings" ? (
 			<SettingsScreen
 				tab={platform.settingsTab}
 				onTabChange={platform.showSettingsTab}
@@ -539,6 +521,27 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 				onClose={() => platform.showScreen("conversation")}
 			/>
 		) : undefined;
+
+	// The second layer: the same shape as the rail's, in the same place, opened by the
+	// workspace's own name. One at a time, so one X in the bar closes whichever is open.
+	const workspacesLayer = (
+		<Layer
+			open={platform.workspacesOpen}
+			onOpenChange={(open) => (open ? platform.openWorkspaces() : platform.closeWorkspaces())}
+			label="Workspaces"
+			belowBar
+		>
+			<WorkspacesScreen
+				workspaces={platform.workspaces}
+				onSelect={platform.selectWorkspace}
+				onCreate={platform.createWorkspace}
+				onRename={platform.renameWorkspace}
+				onForget={platform.removeWorkspace}
+				onUpdateSandbox={platform.setWorkspaceSandbox}
+				failure={platform.failure}
+			/>
+		</Layer>
+	);
 
 	// The full-width bar: the brand, then the active name, then the pane control.
 	// No rail buttons here from `lg`: the rail head closes it and the collapsed strip
@@ -609,6 +612,8 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 							value={draft}
 							onChange={setDraft}
 							onSend={submit}
+							folded={composerFolded}
+							onFoldedChange={setComposerFolded}
 							attachments={attachments}
 							onAttachFiles={chooseFiles}
 							onRemoveAttachment={removeAttachment}
@@ -652,10 +657,12 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 								if (match !== undefined) setDraft(`/${match.name} `);
 							}}
 							onSlashDismiss={() => setSlashHiddenFor(slashKey)}
-							controls={
+							ambient={
 								<>
-									{/* Ambient state first: a dropped stream or a dead harness is the thing to know
-									 * before choosing a model. Nothing renders while everything is well. */}
+									{/* Ambient state: a dropped stream or a dead harness is the thing to know
+									 * before choosing a model, and it stays in the folded row — a fold that hid
+									 * it would make a dead run look alive (step 06, J11). Nothing renders while
+									 * everything is well. */}
 									{platform.workerUp ? (
 										platform.connection === "reconnecting" ? (
 											<StatusPill state="reconnecting" />
@@ -666,12 +673,14 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 											detail={platform.workerError}
 										/>
 									)}
-									<ChoiceControl
-										agent={platform.agent}
-										model={platform.model}
-										thinking={platform.thinking}
-									/>
 								</>
+							}
+							controls={
+								<ChoiceControl
+									agent={platform.agent}
+									model={platform.model}
+									thinking={platform.thinking}
+								/>
 							}
 						/>
 					) : undefined
@@ -680,6 +689,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 			{/* The inspector is about the conversation in front of you, so it is only there
 			 * when one is: on a screen, it would be answering a question nobody asked. */}
 			{screen === undefined ? inspectorDialog : null}
+			{workspacesLayer}
 			<RenameDialog
 				open={renaming !== undefined}
 				title="Rename conversation"
