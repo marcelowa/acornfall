@@ -251,6 +251,21 @@ export function Split({
 								>
 									<SheetTitle className="sr-only">{asideLabel}</SheetTitle>
 									<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+										{/* The drawer carries the rail's own close, in the rail's own corner and with
+										 * the rail's own icon: the bar's toggle is a second way out, not the only one,
+										 * and the gesture is the same here as in the docked drawer. */}
+										<div className="flex shrink-0 items-center justify-end">
+											<SheetClose asChild>
+												<Button
+													type="button"
+													variant="ghost"
+													size="icon-sm"
+													aria-label="Hide the rail"
+												>
+													<PanelLeftClose />
+												</Button>
+											</SheetClose>
+										</div>
 										{aside}
 									</div>
 								</SheetPrimitive.Content>
