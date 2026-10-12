@@ -4,19 +4,22 @@ import { Button } from "@/components/ui/button";
 import { PaneFooter } from "./pane-footer";
 
 /**
- * The folded heights, in one place: a card names its size, never a class. Dynamic class names
- * are not an option — Tailwind compiles what it can read in the source — so the three literal
- * classes live here and the cards pick one by name. Each carries the overflow rule, because a
- * height that folds without hiding what passes it is not a fold.
+ * The folded sizes, in one place: a card names its size, never a class. Dynamic class names are
+ * not an option — Tailwind compiles what it can read in the source — so the literal classes live
+ * here and the cards pick one by name.
+ *
+ * Output and reasoning fold to two lines (the owner's review note): the 200px window they used
+ * before was most of a short output, so nothing was actually put away. The summary keeps a
+ * height, because a line count is not the shape a markdown note has when it is put away.
  */
 const foldHeights = {
-	tool: "max-h-(--tool-card-collapsed-height) overflow-y-hidden",
-	thinking: "max-h-(--thinking-card-collapsed-height) overflow-y-hidden",
+	tool: "line-clamp-2",
+	thinking: "line-clamp-2",
 	summary: "max-h-(--summary-card-collapsed-height) overflow-y-hidden",
 } as const;
 
 export interface PaneFold {
-	/** Which component token sets the folded height. */
+	/** Which folded size this card uses. */
 	size: keyof typeof foldHeights;
 	/** The toggle's own words: "Show output (12 lines)", "Show summary", "Show less". */
 	label: (expanded: boolean) => string;
@@ -93,21 +96,23 @@ export function PaneCard({
 			<div className="flex items-center gap-2 border-b border-border px-3 py-2">
 				{leading}
 				{title}
-				{aside}
+				<span className="ml-auto flex shrink-0 items-center gap-2">
+					{fold === undefined ? null : (
+						<Button
+							type="button"
+							variant="ghost"
+							size="xs"
+							onClick={() => setExpanded((value) => !value)}
+						>
+							{fold.label(expanded)}
+						</Button>
+					)}
+					{aside}
+				</span>
 			</div>
 			{body({ folded, clamp: folded ? foldHeights[fold.size] : "" })}
 			{below === undefined ? null : below}
 			<PaneFooter at={at} className="px-3 pb-2">
-				{fold === undefined ? null : (
-					<Button
-						type="button"
-						variant="ghost"
-						size="xs"
-						onClick={() => setExpanded((value) => !value)}
-					>
-						{fold.label(expanded)}
-					</Button>
-				)}
 				{trailing}
 			</PaneFooter>
 		</div>

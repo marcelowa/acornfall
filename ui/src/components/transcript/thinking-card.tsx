@@ -35,7 +35,7 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 				</Text>
 			}
 			aside={
-				<Text as="span" size="2xs" className="ml-auto tabular-nums text-muted-foreground">
+				<Text as="span" size="2xs" className="tabular-nums text-muted-foreground">
 					{open ? "live" : `${lines} lines`}
 				</Text>
 			}

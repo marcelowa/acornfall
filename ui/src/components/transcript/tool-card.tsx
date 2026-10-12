@@ -52,7 +52,7 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 					as="span"
 					size="2xs"
 					className={cn(
-						"ml-auto font-mono tabular-nums",
+						"font-mono tabular-nums",
 						status === "error"
 							? "text-destructive"
 							: status === "running"

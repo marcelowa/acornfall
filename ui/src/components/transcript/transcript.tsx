@@ -28,6 +28,15 @@ export interface TranscriptProps {
 	onFork?: ((at: string) => void) | undefined;
 }
 
+/**
+ * What React keys a card by, and so what decides whether a card keeps the fold a reader opened.
+ * A tool call has the same provider id while it runs and after it settles, so the card is the
+ * same card across that boundary; every other entry is keyed by its own id.
+ */
+function entryKey(entry: TranscriptEntry): string {
+	return entry.kind === "tool" && entry.callId !== undefined ? `tool-${entry.callId}` : entry.id;
+}
+
 function Entry({
 	entry,
 	onOpenConversation,
@@ -49,7 +58,7 @@ function Entry({
 		case "assistant":
 			return <AssistantMessage key={entry.id} entry={entry} />;
 		case "tool":
-			return <ToolCard key={entry.id} entry={entry} />;
+			return <ToolCard key={entryKey(entry)} entry={entry} />;
 		case "thinking":
 			return <ThinkingCard key={entry.id} entry={entry} />;
 		case "notice":
@@ -147,7 +156,7 @@ export function Transcript({ entries, ready = true, onOpenConversation, onFork }
 									<Stack key={turn[0]?.id ?? index} gap="lg" data-turn={index}>
 										{turn.map((entry) => (
 											<Entry
-												key={entry.id}
+												key={entryKey(entry)}
 												entry={entry}
 												onOpenConversation={onOpenConversation}
 												onFork={onFork}
