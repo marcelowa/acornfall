@@ -90,7 +90,10 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 			body={({ clamp }) => (
 				<pre
 					className={cn(
-						"overflow-x-auto overflow-y-hidden px-3 py-2 font-mono text-xs whitespace-pre-wrap wrap-anywhere text-foreground tabular-nums",
+						// No sideways scroll: every line wraps (`wrap-anywhere`), so an
+						// `overflow-x-auto` here bought a scrollbar nobody needed and, on a phone,
+						// dragged the whole card with it.
+						"overflow-hidden px-3 py-2 font-mono text-xs whitespace-pre-wrap wrap-anywhere text-foreground tabular-nums",
 						clamp,
 					)}
 				>
