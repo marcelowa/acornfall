@@ -20,7 +20,12 @@ const chrome = process.env.CHROME_PATH ?? "/usr/bin/chromium";
 
 let passed = 0;
 const failures = [];
+/**
+ * One check. `UI_CHECK_TRACE=1` also prints it as it runs: a run that stops on a crash says
+ * nothing about how far it got otherwise. The failure list at the end is unchanged.
+ */
 const check = (label, ok, detail) => {
+	if (process.env.UI_CHECK_TRACE === "1") console.error((ok ? "ok   " : "FAIL ") + label);
 	if (ok) {
 		passed += 1;
 		return;
@@ -613,6 +618,48 @@ try {
 		await page.keyboard.press("Escape");
 	}
 
+	// A fresh install has no transcript, and this section is about one, so it makes one: the
+	// scripted dev provider answers a message with a tool call and a reply, which is the
+	// content the checks below are written for. The workspace and conversation come from the
+	// page's own URL, which is the app's answer to "where am I" — a fresh install has no
+	// workspace in flight for /api/state to resolve.
+	const seeded = await page
+		.evaluate(async () => {
+			try {
+				const match = /^\/c\/([^/]+)\/([^/]+)/.exec(window.location.pathname);
+				if (match === null) return false;
+				const url =
+					"/api/workspaces/" +
+					match[1] +
+					"/conversations/" +
+					match[2] +
+					"/messages";
+				const response = await fetch(url, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ text: "list the workspace", whenBusy: "followUp" }),
+				});
+				return response.ok;
+			} catch {
+				return false;
+			}
+		})
+		.catch(() => false);
+	check("a turn can be started for the transcript checks", seeded);
+	if (seeded) {
+		// Both halves of the turn: the tool call, and the answer once it has settled — a live
+		// answer renders as plain text, and the checks below are about rendered markdown.
+		await page
+			.waitForFunction(
+				() =>
+					document.querySelector("[data-slot=transcript] [data-slot=tool]") !== null &&
+					document.querySelector(
+						"[data-slot=transcript] [data-slot=assistant]:not([data-live])",
+					) !== null,
+				{ timeout: 90000 },
+			)
+			.catch(() => undefined);
+	}
 	// 2. The transcript renders, and nothing in it is squashed or clipped.
 	const found = await showConversationWithContent(page);
 	check("a conversation with content is on screen", found, "no conversation in this install has any content");
@@ -835,10 +882,13 @@ try {
 		parts.length >= 3 && parts.slice(0, 3).every((part) => part !== "") && wire.model !== "",
 		`"${summary}"`,
 	);
+	// An unset level is shown as "not set" rather than as nothing, so the check is against
+	// what the interface says, not against the empty string the wire carries.
+	const thinkingShown = wire.thinking === "" ? "not set" : wire.thinking;
 	check(
 		"the line reads agent, model, thinking",
-		parts[0] === wire.agent && parts[2] === wire.thinking,
-		`"${summary}" for ${wire.agent} … ${wire.thinking}`,
+		parts[0] === wire.agent && parts[2] === thinkingShown,
+		`"${summary}" for ${wire.agent} … ${thinkingShown}`,
 	);
 	// Long names truncate inside a fixed line: the control never outgrows the screen.
 	const pastEdge = await page.evaluate(() => {
@@ -866,11 +916,13 @@ try {
 						.replace(/\s+/g, " ") ?? "",
 			),
 		);
+		// Each choice is labelled once, by prefix, and shows a value: counting the word again
+		// would fail on a value that contains it — the model here is called "Faux Model".
 		check(
 			"the panel is the three choices, each labelled once",
 			inside.every((text, index) => {
 				const label = ["Agent", "Model", "Thinking"][index];
-				return text.startsWith(`${label}:`) && text.split(label).length === 2;
+				return text.startsWith(`${label}:`) && text.slice(label.length + 1).trim() !== "";
 			}),
 			JSON.stringify(inside),
 		);
@@ -1055,7 +1107,9 @@ try {
 						?.getBoundingClientRect().x ?? -1) >= 0,
 				{ timeout: 5000 },
 			);
-			await drawerClose.click();
+			// Clicked through the page, not through this handle: a re-render between the wait and
+			// the click replaces the node, and a stale handle clicks at coordinates that are gone.
+			await press(page, '[role="dialog"] button[aria-label="Hide the rail"]');
 		} else {
 			await page.keyboard.press("Escape");
 		}
