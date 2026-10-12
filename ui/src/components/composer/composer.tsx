@@ -13,17 +13,13 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { formatFileSize } from "@/lib/attachments";
 import { formatContext } from "@/lib/format";
-import { usePhone } from "@/lib/media";
+import { COARSE_POINTER, matchesQuery, usePhone } from "@/lib/media";
 import { cn } from "cn";
 import { stepSlashIndex } from "./slash-menu";
 
-/** True on touch devices: Enter must not send there. */
+/** True on touch devices: Enter must not send there, and the fold is for a thumb. */
 function isCoarsePointer(): boolean {
-	try {
-		return window.matchMedia("(pointer: coarse)").matches;
-	} catch {
-		return false;
-	}
+	return matchesQuery(COARSE_POINTER);
 }
 
 /** `1 file`, `2 files`: a count line that reads like a sentence on the one it is wrong on. */
