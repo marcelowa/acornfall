@@ -75,12 +75,15 @@ last update falls outside the freshness window the dot stops claiming life. Wher
 is decided in the step 06 mocks.
 
 **J2 — rewritten to what the UI owns.** The switch is rail → Workspaces → Open (the rail head
-holds an icon, not a switcher). The Workspaces screen marks a running row — `running` is already
-mapped (`app/view-models.ts:17`) and never rendered. The rail list and its title stay honest
-during a switch instead of showing the old workspace under the old title. Landing on the latest
-conversation is **dropped from this pass**: it is a gateway decision
-(`control.go:2582` `defaultConversation` prefers the root), recorded as a follow-up rather than
-carried as a UI change. Correct this reading if the Go change was meant to be in scope.
+holds an icon, not a switcher). The rail list and its title stay honest during a switch instead
+of showing the old workspace under the old title. Landing on the latest conversation is
+**dropped from this pass**: it is a gateway decision (`control.go:2582` `defaultConversation`
+prefers the root), recorded as a follow-up rather than carried as a UI change. Correct this
+reading if the Go change was meant to be in scope.
+
+**A mark on the workspace row was built and taken back out.** The wire's per-workspace `running`
+is `Control.WorkerUp()` — the worker process being up, not a turn — so the mark claimed the wrong
+thing. See `10-panel-look.md`; it needs a wire field to come back. The row's wrap stays.
 
 **J3.** Show output / Show less moves into the card header (`components/transcript/tool-card.tsx:96`
 is in the footer, under the output). Output that was open while a call ran stays open after it

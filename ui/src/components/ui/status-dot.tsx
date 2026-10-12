@@ -10,6 +10,10 @@ const dotVariants = cva("inline-block shrink-0 rounded-full", {
 	variants: {
 		state: {
 			running: "bg-primary animate-pulse",
+			// A run that stopped moving keeps the dot but loses the accent and the pulse: the
+			// slot stays, so the rail does not shift when a run dies, and the label stops
+			// claiming life the run no longer shows.
+			stale: "bg-muted-foreground",
 			unread: "bg-success",
 		},
 		size: {
@@ -25,6 +29,7 @@ const dotVariants = cva("inline-block shrink-0 rounded-full", {
 
 const labels = {
 	running: "Running",
+	stale: "Still marked running, but nothing has moved for half an hour",
 	unread: "New since you last looked",
 } as const;
 
