@@ -581,6 +581,8 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 				inspector={screen === undefined ? dockedInspector : undefined}
 				railOpen={platform.railOpen}
 				onRailOpenChange={platform.setRailOpen}
+				appLayerOpen={platform.workspacesOpen}
+				onAppLayerClose={platform.closeWorkspaces}
 				inlineRailToggle
 				railCollapsed={platform.railCollapsed}
 				onRailCollapsedChange={platform.toggleRail}
@@ -621,7 +623,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 								setAborting(true);
 								platform.abort();
 							}}
-							running={busy}
+							running={run === "running"}
 							aborting={aborting}
 							focusConversation={platform.active?.id}
 							focusToken={platform.composerFocusToken}
