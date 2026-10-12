@@ -42,6 +42,7 @@ import { trackBuild } from "./update";
 import {
 	contextWindowFor,
 	stalePins,
+	textOf,
 	toAgentGroups,
 	toConversation,
 	toModelChoices,
@@ -330,6 +331,12 @@ export function usePlatform(): Platform {
 	const [state, setState] = useState<WireState | undefined>(undefined);
 	const [view, setView] = useState<WireView | undefined>(undefined);
 	const [senders, setSenders] = useState<Record<string, WireSender>>({});
+	/**
+	 * The steer-or-queued mark a message was sent with, per conversation and entry id. The wire
+	 * keeps no link between an inbox item and the entry it becomes, so this is the interface's own
+	 * memory: `onView` claims it as the message lands. See `docs/ui-workflow/refactor-ux/09-build.md`.
+	 */
+	const [marks, setMarks] = useState<Record<string, Record<string, BusyAction>>>({});
 	const [seen, setSeen] = useState<Record<string, string>>(() => read(SEEN_KEY, {}));
 	const [railWidth, setRailWidthState] = useState<number | undefined>(
 		() => read<number | null>(RAIL_WIDTH_KEY, null) ?? undefined,
@@ -357,6 +364,16 @@ export function usePlatform(): Platform {
 	const workspace = route.workspace === "" ? "general" : route.workspace;
 	const activeId =
 		route.conversation === "" ? (state?.conversation?.id ?? "") : route.conversation;
+
+	// The view frame does not say which conversation it belongs to, so the claim in `onView`
+	// reads the one the stream is following from here.
+	const activeIdRef = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		activeIdRef.current = activeId;
+	}, [activeId]);
+
+	/** What is in the inbox and not committed yet, by its own words: how it was sent. */
+	const sentMarks = useRef(new Map<string, BusyAction>());
 
 	useEffect(() => {
 		const back = (): void => setRoute(fromUrl());
@@ -404,6 +421,35 @@ export function usePlatform(): Platform {
 			},
 			onView: (nextView, nextSenders) => {
 				if (cancelled) return;
+				// A message's steer-or-queued mark cannot come from the wire: an inbox item and the
+				// entry it becomes are different records. So what was sent is remembered, and the
+				// message that lands with the same words gets the mark — once, by entry id, so it
+				// survives every later frame.
+				const pending = sentMarks.current;
+				for (const item of nextView.docs?.["pi.inbox"]?.items ?? []) {
+					if (item.mode !== "steer" && item.mode !== "followUp") continue;
+					const text = textOf(item.content).trim();
+					if (text !== "") pending.set(text, item.mode);
+				}
+				const conversation = activeIdRef.current;
+				const claims: Record<string, BusyAction> = {};
+				for (const entry of nextView.entries ?? []) {
+					if (entry.kind !== "pi.user") continue;
+					const text = (entry.model ?? [])
+						.map((message) => textOf(message.content))
+						.join("\n")
+						.trim();
+					const mode = pending.get(text);
+					if (mode === undefined) continue;
+					pending.delete(text);
+					claims[String(entry.id)] = mode;
+				}
+				if (conversation !== undefined && Object.keys(claims).length > 0) {
+					setMarks((current) => ({
+						...current,
+						[conversation]: { ...current[conversation], ...claims },
+					}));
+				}
 				setView(nextView);
 				setSenders(nextSenders);
 			},
@@ -522,8 +568,14 @@ export function usePlatform(): Platform {
 		(state?.conversations ?? []).find((conversation) => conversation.id === activeId)
 			?.running === true;
 	const entries = useMemo(
-		() => toTranscript(view, senders, runningNow),
-		[view, senders, runningNow],
+		() =>
+			toTranscript(
+				view,
+				senders,
+				runningNow,
+				activeId === undefined ? undefined : marks[activeId],
+			),
+		[view, senders, runningNow, activeId, marks],
 	);
 	const active = useMemo(
 		() => (state?.conversations ?? []).find((conversation) => conversation.id === activeId),

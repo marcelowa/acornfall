@@ -71,3 +71,32 @@ export const PeerAsk: Story = {
 		onOpenConversation: () => undefined,
 	},
 };
+
+/**
+ * Sent while a turn was running: the mark says whether it joined that turn or waited behind it.
+ * It is claimed by the app as the message lands, because the wire keeps no link between the
+ * inbox item and the entry it becomes.
+ */
+export const Steered: Story = {
+	args: {
+		entry: {
+			kind: "user",
+			id: "5",
+			text: "wait, check the lock order first",
+			at,
+			action: "steer",
+		},
+	},
+};
+
+export const Queued: Story = {
+	args: {
+		entry: {
+			kind: "user",
+			id: "6",
+			text: "then update the changelog",
+			at,
+			action: "followUp",
+		},
+	},
+};

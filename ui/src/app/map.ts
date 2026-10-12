@@ -1,4 +1,5 @@
 import type {
+	BusyAction,
 	ConversationSummary,
 	ModelChoice,
 	PickerGroup,
@@ -147,6 +148,7 @@ function toolEntry(
 	return {
 		kind: "tool",
 		id: `live-${slot.callId}`,
+		callId: slot.callId,
 		name: slot.name,
 		// Only done is done: a pending call has not started yet, but its round is live,
 		// so the card stays open and counts as the run happening.
@@ -279,6 +281,8 @@ export function toTranscript(
 	view: WireView | undefined,
 	senders: Record<string, WireSender>,
 	running = false,
+	/** How each landed message was sent, by entry id. The app claims it; the wire has no link. */
+	marks: Record<string, BusyAction> | undefined = undefined,
 ): TranscriptEntry[] {
 	const entries = view?.entries ?? [];
 	const calls = toolCalls(entries);
@@ -306,6 +310,7 @@ export function toTranscript(
 					id,
 					text,
 					at: at(first),
+					action: marks?.[id],
 					sender: senders[id],
 					forkAt: previous === undefined ? undefined : String(previous.id),
 				});
@@ -336,6 +341,7 @@ export function toTranscript(
 				transcript.push({
 					kind: "tool",
 					id,
+					callId: first?.toolCallId,
 					name: first?.toolName ?? call?.name ?? "tool",
 					status: "done",
 					isError: first?.isError === true,
