@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
+import { useEffect, useRef } from "react";
 import { Dialog as LayerPrimitive } from "radix-ui";
 import { cn } from "cn";
 
@@ -36,6 +37,41 @@ export function Layer({
 	className,
 	children,
 }: LayerProps) {
+	/** Where the caret was before the layer opened: closed, it goes back there, because the bar's
+	 * toggle is the close and the layer has no trigger of its own for Radix to return to. */
+	const restoreTo = useRef<HTMLElement | null>(null);
+	useEffect(() => {
+		if (!open) return;
+		restoreTo.current =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	}, [open]);
+
+	/**
+	 * Tab stays inside. The layer is not modal — that is what keeps the bar's own X clickable — so
+	 * nothing traps the focus for us, and a keyboard that walked out of the layer and into the
+	 * composer behind it would be describing a screen the eye cannot reach.
+	 */
+	const keepTabInside = (event: KeyboardEvent<HTMLDivElement>): void => {
+		if (event.key !== "Tab") return;
+		const node = event.currentTarget;
+		const focusable = node.querySelectorAll<HTMLElement>(
+			"a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
+		);
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		if (first === undefined || last === undefined) return;
+		const active = document.activeElement;
+		if (event.shiftKey && (active === first || active === node)) {
+			event.preventDefault();
+			last.focus();
+			return;
+		}
+		if (!event.shiftKey && active === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	};
+
 	return (
 		<LayerPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
 			<LayerPrimitive.Portal>
@@ -52,9 +88,16 @@ export function Layer({
 					/* The bar's toggle and Back are the ways out; a click on the dimmed pane is
 					 * not, so an accidental tap cannot close a layer mid-read. */
 					onInteractOutside={(event) => event.preventDefault()}
+					onCloseAutoFocus={(event) => {
+						event.preventDefault();
+						restoreTo.current?.focus({ preventScroll: true });
+					}}
+					onKeyDown={keepTabInside}
 					className={cn(
 						"fixed inset-x-0 z-50 flex flex-col overflow-hidden bg-rail transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=closed]:duration-200 data-[state=open]:animate-in data-[state=open]:slide-in-from-left data-[state=open]:duration-200",
-						belowBar ? "top-[var(--bar-height)] bottom-0" : "inset-y-0",
+						belowBar ? "top-[var(--bar-height)]" : "top-0",
+						/* Above the keyboard as well: the new-workspace field lives in here. */
+						"bottom-[var(--keyboard-inset)]",
 						className,
 					)}
 				>

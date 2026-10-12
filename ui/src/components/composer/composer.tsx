@@ -5,7 +5,6 @@ import {
 	type ChangeEvent,
 	type KeyboardEvent,
 	type ReactNode,
-	type PointerEvent as ReactPointerEvent,
 } from "react";
 import { ArrowUp, Paperclip, X } from "lucide-react";
 import { Measure } from "@/components/layout/measure";
@@ -153,7 +152,6 @@ export function Composer({
 	const fileInput = useRef<HTMLInputElement>(null);
 	/** The whole composer, used to tell a blur that stays inside it from one that leaves it. */
 	const root = useRef<HTMLDivElement>(null);
-	const [dragStart, setDragStart] = useState<number | undefined>(undefined);
 	/** A tap on the folded row asked for the caret; it lands when the field exists. */
 	const [openPending, setOpenPending] = useState(false);
 	/** The fold is the phone layout: below `sm` the card rests folded. A desktop window narrowed
@@ -161,15 +159,6 @@ export function Composer({
 	 * reviewable in Storybook. */
 	const folds = usePhone();
 	const collapsed = folds && folded;
-	/**
-	 * Put the composing away: blur, and fold. This is what the swipe down the band calls, and
-	 * what a tap on the transcript calls through the field's own blur — one path, so a fold can
-	 * never happen without the keyboard going, or the other way round.
-	 */
-	const dismiss = (): void => {
-		field.current?.blur();
-		onFoldedChange?.(true);
-	};
 	/**
 	 * Open the card and take the caret: the folded row's own tap, so the keyboard is asked for.
 	 * The field does not exist yet on a fold, so the focus waits for it — in an effect, still
@@ -332,10 +321,7 @@ export function Composer({
 			ref={root}
 			data-slot="composer"
 			data-folded={collapsed}
-			className={cn(
-				"w-full shrink-0 border-t border-border pb-[var(--keyboard-inset)]",
-				className,
-			)}
+			className={cn("w-full shrink-0 border-t border-border", className)}
 		>
 			<Measure size="wide" padding="md">
 				{above}
@@ -373,31 +359,9 @@ export function Composer({
 					</div>
 				) : (
 					<>
-						{/* The band from the approved sketch: the pill plus the gap above the card,
-						 * full card width and 44px tall, with `touch-none` so a drag is not the
-						 * transcript's scroll. A phone's own gesture: on a wider layout the card
-						 * keeps its height, because there is no keyboard to put away. */}
-						{folds ? (
-							<div
-								data-slot="composer-handle"
-								aria-hidden
-								className="flex h-11 touch-none items-end justify-center"
-								onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
-									setDragStart(event.clientY);
-									event.currentTarget.setPointerCapture(event.pointerId);
-								}}
-								onPointerMove={(event: ReactPointerEvent<HTMLDivElement>) => {
-									if (dragStart === undefined) return;
-									if (event.clientY - dragStart < 24) return;
-									setDragStart(undefined);
-									dismiss();
-								}}
-								onPointerUp={() => setDragStart(undefined)}
-								onPointerCancel={() => setDragStart(undefined)}
-							>
-								<span className="block h-1 w-10 rounded-full bg-muted-foreground/40" />
-							</div>
-						) : null}
+						{/* No band, no grabber (owner, step 11): the fold gesture cost 52px of a phone
+						 * screen while typing, and the two things that already put the composing away do
+						 * the same job — leaving the field, and sending. */}
 						<div className="rounded-xl border border-border bg-card shadow-sm transition-[border-color] focus-within:border-ring">
 							<Textarea
 								ref={field}
@@ -406,8 +370,11 @@ export function Composer({
 								onKeyDown={onKeyDown}
 								onFocus={() => onFoldedChange?.(false)}
 								onBlur={(event) => {
-									// Leaving the composer folds it. Moving between its own controls — a
-									// picker, a chip's remove button — is not leaving it.
+									// Leaving the composer folds it: one path for the fold, so the card can never
+									// fold without the keyboard going, or the other way round. (The drag band that
+									// used to call this was cut by the owner in step 11.) Moving between the
+									// composer's own controls — a picker, a chip's remove button — is not
+									// leaving it.
 									const next = event.relatedTarget;
 									if (
 										next instanceof Node &&
