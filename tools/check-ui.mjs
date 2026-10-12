@@ -140,7 +140,7 @@ try {
 	);
 
 	// The rail's top button names the workspace in view and opens the screen that changes it.
-	const workspaceButton = await page.$("button[aria-label='Workspaces']");
+	const workspaceButton = await page.$("[data-slot=workspace-button]");
 	check("the rail names the workspace on top", workspaceButton !== null);
 	const workspaceState = await page.evaluate(async () => {
 		const state = await (await fetch("/api/state")).json();
@@ -159,10 +159,15 @@ try {
 	);
 
 	if (workspaceButton !== null) {
-		await press(page, "button[aria-label='Workspaces']");
-		await page.waitForFunction(() => window.location.pathname === "/workspaces", {
-			timeout: 10000,
-		});
+		await press(page, "[data-slot=workspace-button]");
+		// No address change: the list is a layer now, not a page (step 09).
+		await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 10000 });
+		check(
+			"the workspace button opens the list as a layer",
+			await page.evaluate(
+				() => window.location.pathname !== "/workspaces",
+			),
+		);
 		const rows = await page.evaluate(() =>
 			[...document.querySelectorAll("[data-slot=workspaces-screen] [data-slot=workspace-row]")].map(
 				(row) => ({
@@ -172,12 +177,12 @@ try {
 			),
 		);
 		check(
-			"the workspace button opens the workspaces screen",
+			"the layer lists every workspace",
 			rows.length === workspaceState.count,
 			`${rows.length} rows, ${workspaceState.count} workspaces`,
 		);
 		check(
-			"the screen marks the workspace in view",
+			"the list marks the workspace in view",
 			rows.find((row) => row.active)?.name === workspaceState.active,
 			JSON.stringify(rows),
 		);
@@ -205,11 +210,10 @@ try {
 				landed &&
 					(await page.evaluate(() => document.querySelector("[data-slot=workspaces-screen]") === null)),
 			);
-			// Back where it started, so the rest of the suite runs against the same workspace.
-			await press(page, "button[aria-label='Workspaces']");
-			await page.waitForFunction(() => window.location.pathname === "/workspaces", {
-				timeout: 10000,
-			});
+			// Back to the workspace the rest of the suite runs in: the layer's own button, then the
+			// row's Open.
+			await press(page, "[data-slot=workspace-button]");
+			await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 10000 });
 			// The row offers Open only once the state says this workspace is the one in view;
 			// waiting for it is waiting for the fetch, not for a timer.
 			await page.waitForSelector(
@@ -278,7 +282,7 @@ try {
 		// so on a screen too, which is why the strip sits in the shell and not in the composer.
 		await press(page, "button[aria-label='Back to the conversation']");
 		await page.waitForSelector("[data-slot=composer]", { timeout: 5000 });
-		await press(page, "button[aria-label='Workspaces']");
+		await press(page, "[data-slot=workspace-button]");
 		await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 5000 });
 		await page.type("[data-slot=workspaces-create] input", "ui-check/refused");
 		const created = await page.evaluate(() => {
@@ -410,7 +414,7 @@ try {
 
 		// Back to the workspace the rest of the suite runs in, before the scratch one goes
 		// away: a tab pointed at a removed workspace has nothing to show.
-		await press(page, "button[aria-label='Workspaces']");
+		await press(page, "[data-slot=workspace-button]");
 		await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 5000 });
 		await press(
 			page,
@@ -433,7 +437,7 @@ try {
 		}, scratch);
 		for (const path of litter) rmSync(path, { recursive: true, force: true });
 
-		await press(page, "button[aria-label='Back to the conversation']");
+		// The row's Open already left the layer, so the composer is what is here to wait for.
 		await page.waitForSelector("[data-slot=composer]", { timeout: 5000 });
 	}
 
@@ -482,7 +486,7 @@ try {
 		const aside = document.querySelector("aside");
 		const list = document.querySelector("[data-slot=conversation-list]");
 		const settings = document.querySelector("button[aria-label='Settings']");
-		const workspaces = document.querySelector("button[aria-label='Workspaces']");
+		const workspaces = document.querySelector("[data-slot=workspace-button]");
 		const toggle = document.querySelector("button[aria-label='Hide the rail']");
 		if (aside === null || list === null || settings === null || workspaces === null) return null;
 		const box = (element) => {

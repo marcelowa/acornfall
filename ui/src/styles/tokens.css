@@ -276,6 +276,10 @@
 	 * for itself. The rail is the panel #11 rebuilds; the inspector is #13's, given room only
 	 * where the screen has it (2xl). */
 	--rail-width: 280px;
+	/* The bar that spans the top on both widths: the layers below it start exactly there, so
+	 * the bar's own toggle stays reachable while one is open. One value, and the phone step
+	 * for it lives with the rest of the phone ladder in `globals.css`. */
+	--bar-height: 48px;
 	/* A collapsed rail is the toggle and nothing else. */
 	--rail-collapsed-width: 40px;
 	--inspector-width: 360px;
@@ -294,6 +298,11 @@
 	/* A draft stops growing here and starts scrolling: past this it is not a draft any more,
 	 * it is a document, and it should not own the screen. */
 	--composer-max-height: 200px;
+
+	/* What the phone's keyboard covers, written by `lib/keyboard.ts` from the visual viewport and
+	 * reserved under the composer. Zero everywhere the keyboard is not up, and on a platform
+	 * that shrinks the layout viewport instead of moving the visual one. */
+	--keyboard-inset: 0px;
 
 	/* A compaction note shows this much when put away. Output and reasoning fold to two lines
 	 * instead (see PaneCard): a line count is what a reader of those actually counts. */

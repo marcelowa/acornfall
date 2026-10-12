@@ -89,8 +89,10 @@ interface Route {
 	settingsTab: SettingsTab;
 }
 
-/** The screens the URL can name. A conversation is one of them, because it has a URL too. */
-export type Screen = "conversation" | "workspaces" | "settings";
+/** The screens the URL can name. A conversation is one of them, because it has a URL too. The
+ * workspaces list is not: it is a layer over the conversation, and it keeps no URL of its own
+ * (step 06), so no address can land on it. */
+export type Screen = "conversation" | "settings";
 
 /** The settings pages, each with its own URL under /settings. */
 export type SettingsTab = "defaults" | "providers" | "updates";
@@ -120,21 +122,19 @@ function systemTheme(): "light" | "dark" {
 }
 
 /** The URL scheme the gateway routes: /c/<workspace>/<conversation>, /w/<workspace>, the
- * two screens, and one page per settings tab. Settings remembers the workspace in a query
- * so a reload shows the one it was about; the workspace list is about all of them. */
-function fromUrl(): Route {
-	const path = window.location.pathname;
+ * settings screen, and one page per settings tab. Settings remembers the workspace in a query
+ * so a reload shows the one it was about. `/workspaces` is no longer an address: it was the
+ * list's own page, and the list is a layer now, so an old link lands on the conversation
+ * instead of on nothing. */
+export function routeFromUrl(path: string, search: string): Route {
 	const settings = /^\/settings(?:\/([^/]+))?\/?$/.exec(path);
 	if (settings !== null) {
 		return {
 			screen: "settings",
-			workspace: new URLSearchParams(window.location.search).get("workspace") ?? "",
+			workspace: new URLSearchParams(search).get("workspace") ?? "",
 			conversation: "",
 			settingsTab: settingsTabFrom(settings[1]),
 		};
-	}
-	if (path === "/workspaces" || path === "/workspaces/") {
-		return { screen: "workspaces", workspace: "", conversation: "", settingsTab: "defaults" };
 	}
 	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(path);
 	if (conversation !== null) {
@@ -155,6 +155,10 @@ function fromUrl(): Route {
 		};
 	}
 	return { screen: "conversation", workspace: "", conversation: "", settingsTab: "defaults" };
+}
+
+function fromUrl(): Route {
+	return routeFromUrl(window.location.pathname, window.location.search);
 }
 
 /** Preferences are ours and local; a corrupt value is a fresh start, not a crash. */
@@ -203,9 +207,15 @@ export interface Platform {
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
 	workspaces: WorkspaceSummary[];
-	/** The screen in view: a conversation, the workspace list, or settings. */
+	/** The screen in view: a conversation or settings. The workspaces list is a layer over the
+	 * conversation, not a screen (`workspacesOpen`). */
 	screen: Screen;
 	showScreen: (screen: Screen) => void;
+	/** The workspaces list, as a layer over the conversation: it keeps no URL, so Back closes
+	 * it instead of leaving the console. Opening it closes the rail. */
+	workspacesOpen: boolean;
+	openWorkspaces: () => void;
+	closeWorkspaces: () => void;
 	/** The settings page in view, with its own URL. */
 	settingsTab: SettingsTab;
 	showSettingsTab: (tab: SettingsTab) => void;
@@ -337,6 +347,9 @@ export function usePlatform(): Platform {
 		() => read<number | null>(RAIL_WIDTH_KEY, null) ?? undefined,
 	);
 	const [railOpen, setRailOpen] = useState(false);
+	/** The workspaces layer. It has no URL of its own, so it lives here and not in `route`; the
+	 * entry a `pushState` leaves behind is what makes Back close it. */
+	const [workspacesOpen, setWorkspacesOpen] = useState(false);
 	const [composerFocusToken, setComposerFocusToken] = useState(0);
 	const [railCollapsed, setRailCollapsed] = useState<boolean>(() =>
 		read(RAIL_COLLAPSED_KEY, false),
@@ -370,8 +383,26 @@ export function usePlatform(): Platform {
 	/** What is in the inbox and not committed yet, by its own words: how it was sent. */
 	const sentMarks = useRef(new Map<string, BusyAction>());
 
+	const workspacesOpenRef = useRef(workspacesOpen);
 	useEffect(() => {
-		const back = (): void => setRoute(fromUrl());
+		workspacesOpenRef.current = workspacesOpen;
+	}, [workspacesOpen]);
+
+	useEffect(() => {
+		const back = (): void => {
+			// The layer has no address, so Back is its own gesture: it closes the layer and puts
+			// the entry straight back, and the conversation behind it never moves.
+			if (workspacesOpenRef.current) {
+				setWorkspacesOpen(false);
+				window.history.pushState(
+					null,
+					"",
+					window.location.pathname + window.location.search,
+				);
+				return;
+			}
+			setRoute(fromUrl());
+		};
 		window.addEventListener("popstate", back);
 		return () => window.removeEventListener("popstate", back);
 	}, []);
@@ -684,7 +715,8 @@ export function usePlatform(): Platform {
 	);
 
 	/** The rail is the way between the screens; each one keeps its own URL so a reload and a
-	 * shared link land where someone was. */
+	 * shared link land where someone was. The workspaces list is not one of them: it opens as a
+	 * layer and keeps no address. */
 	const showScreen = useCallback(
 		(screen: Screen) => {
 			if (screen === "conversation") {
@@ -697,7 +729,7 @@ export function usePlatform(): Platform {
 						? `/w/${encodeURIComponent(name)}`
 						: `/c/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
 				);
-			} else if (screen === "settings") {
+			} else {
 				// Settings are about a workspace, and each page has its own URL;
 				// coming back lands on the page that was open.
 				setRoute((current) => {
@@ -710,9 +742,6 @@ export function usePlatform(): Platform {
 				});
 				setRailOpen(false);
 				return;
-			} else {
-				// The list is about all workspaces, so it carries no query.
-				window.history.pushState(null, "", `/${screen}`);
 			}
 			setRailOpen(false);
 			// The conversation stays the one behind the screen: the stream keeps following it, so
@@ -721,6 +750,15 @@ export function usePlatform(): Platform {
 		},
 		[state, workspace, activeId],
 	);
+
+	/** The workspace list, as a layer: opening it closes the rail, because one layer at a time is
+	 * what the one-close rule needs, and because two left layers would put two X's in one corner. */
+	const openWorkspaces = useCallback(() => {
+		setRailOpen(false);
+		setWorkspacesOpen(true);
+	}, []);
+
+	const closeWorkspaces = useCallback(() => setWorkspacesOpen(false), []);
 
 	/** One settings page to another: the URL moves so a reload stays where someone was. */
 	const showSettingsTab = useCallback(
@@ -832,6 +870,8 @@ export function usePlatform(): Platform {
 	const selectWorkspace = useCallback((name: string) => {
 		window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
 		setRailOpen(false);
+		// Opening a workspace leaves the layer: the row is the layer's own action.
+		setWorkspacesOpen(false);
 		setView(undefined);
 		setRoute({
 			screen: "conversation",
@@ -1168,6 +1208,9 @@ export function usePlatform(): Platform {
 		abort,
 		setRailWidth,
 		setRailOpen,
+		workspacesOpen,
+		openWorkspaces,
+		closeWorkspaces,
 		renameWorkspace,
 		providers,
 		authFlow,

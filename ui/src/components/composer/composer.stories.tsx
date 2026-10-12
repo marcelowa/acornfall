@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { Composer } from "./composer";
 import { ChoiceControl } from "./choice-control";
 import { SlashMenu } from "./slash-menu";
+import { StatusPill } from "@/components/ui/status-pill";
 
 const meta = {
 	title: "Conversation/Composer",
@@ -198,6 +199,53 @@ export const RunningOnPhone: Story = {
 		...Running.args,
 	},
 	globals: { viewport: { value: "phone" } },
+};
+
+/**
+ * The phone's rest state: one row that says what it is, the draft's own words, and every action.
+ * It is what the composer is before a tap and after a send; tapping the row opens it and asks for
+ * the keyboard. The open card on a phone carries the band above it — the pill plus the gap at
+ * `composer-handle` — which is the drag that folds it again.
+ */
+export const Folded: Story = {
+	args: { ...Idle.args, folded: true },
+	globals: { viewport: { value: "phone" } },
+	render: (args) => (
+		<Frame>
+			{([value, setValue]) => <Composer {...args} value={value} onChange={setValue} />}
+		</Frame>
+	),
+};
+
+/** Folded with a draft in it: the row still shows the words, so a fold never looks like a loss. */
+export const FoldedWithDraft: Story = {
+	args: { ...Folded.args, value: "Check the worker logs before the restart" },
+	globals: { viewport: { value: "phone" } },
+	render: (args) => (
+		<Frame>
+			{([value, setValue]) => <Composer {...args} value={value} onChange={setValue} />}
+		</Frame>
+	),
+};
+
+/**
+ * Folded while something is wrong: the ambient pill stays in the folded row, and an upload in
+ * flight says why the send is off. DELEGATOR's rule from step 04: a fold that hides a dropped
+ * stream makes a dead run look alive.
+ */
+export const FoldedWithStatus: Story = {
+	args: {
+		...Folded.args,
+		value: "",
+		ambient: <StatusPill state="reconnecting" />,
+		attachments: [{ key: "a-1", name: "logs.txt", size: 400, status: "uploading" }],
+	},
+	globals: { viewport: { value: "phone" } },
+	render: (args) => (
+		<Frame>
+			{([value, setValue]) => <Composer {...args} value={value} onChange={setValue} />}
+		</Frame>
+	),
 };
 
 export const SlashKeyboard: Story = {

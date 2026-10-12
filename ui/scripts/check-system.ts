@@ -98,6 +98,15 @@ const tokenClasses = [
 	"gap-2",
 	"gap-4",
 	"size-4",
+	/* The phone step from the step 05 reach rule: 44px targets, 20px chrome icons, 16px fields,
+	 * and the bar height the layers offset from. If one of these stops resolving, the phone
+	 * ladder is no longer real and every story that shows it is a picture of nothing. */
+	"size-11",
+	"max-sm:size-11",
+	"max-sm:size-5",
+	"max-sm:text-lg",
+	"h-[var(--bar-height)]",
+	"pb-[var(--keyboard-inset)]",
 	"min-w-32",
 	"bg-background",
 	"bg-primary",
