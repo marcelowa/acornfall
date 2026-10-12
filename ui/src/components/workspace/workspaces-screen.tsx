@@ -85,7 +85,9 @@ export function WorkspacesScreen({
 						<Text size="sm" weight="semibold">
 							New workspace
 						</Text>
-						<div className="flex items-center gap-2">
+						{/* It wraps: from `lg` the list is a panel the width of the rail, and a field and
+						 * a button do not fit on one line there. */}
+						<div className="flex flex-wrap items-center gap-2">
 							<Input
 								inputSize="sm"
 								value={name}

@@ -80,6 +80,9 @@ export function Layer({
 					className={cn(
 						"fixed inset-x-0 bottom-0 z-50 bg-overlay data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
 						belowBar ? "top-[var(--bar-height)]" : "top-0",
+						/* From `lg` the layer is a panel beside the conversation, not a cover over it: a
+						 * dim pane would block the thing it is meant to leave in view. */
+						"lg:hidden",
 					)}
 				/>
 				<LayerPrimitive.Content
@@ -98,6 +101,12 @@ export function Layer({
 						belowBar ? "top-[var(--bar-height)]" : "top-0",
 						/* Above the keyboard as well: the new-workspace field lives in here. */
 						"bottom-[var(--keyboard-inset)]",
+						/* A phone gets the whole width: half a screen is neither the layer's content nor
+						 * the conversation. From `lg` it takes the rail's own place instead, so a wide
+						 * screen keeps the conversation visible and usable beside it (owner, option B).
+						 * The width is the token, not a dragged rail: `inset-x-0` leaves `right` ignored
+						 * once a width is set. */
+						"lg:w-[var(--rail-width)]",
 						className,
 					)}
 				>

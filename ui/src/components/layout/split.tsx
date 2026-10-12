@@ -206,8 +206,17 @@ export function Split({
 					className="flex h-[var(--bar-height)] shrink-0 items-center gap-1 border-b border-border px-1"
 				>
 					{/* Below `lg` the layer drops from under this bar: the bar stays mounted, and
-					 * its toggle is the only close. From `lg` the bar carries no rail buttons. */}
-					<div className="flex shrink-0 items-center lg:hidden">{layerToggle}</div>
+					 * its toggle is the only close. From `lg` the bar carries no rail buttons — unless
+					 * a layer is open, because then the X is the way out and it has to be reachable
+					 * on every width. */}
+					<div
+						className={cn(
+							"flex shrink-0 items-center",
+							open || appLayerOpen ? "" : "lg:hidden",
+						)}
+					>
+						{layerToggle}
+					</div>
 					<div className="flex min-w-0 flex-1 items-center gap-2">{topbar}</div>
 				</div>
 			)}
