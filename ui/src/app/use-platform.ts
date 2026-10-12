@@ -93,18 +93,12 @@ interface Route {
 export type Screen = "conversation" | "workspaces" | "settings";
 
 /** The settings pages, each with its own URL under /settings. */
-export type SettingsTab = "workspace" | "defaults" | "providers" | "appearance" | "updates";
+export type SettingsTab = "defaults" | "providers" | "updates";
 
-const SETTINGS_TABS: SettingsTab[] = [
-	"workspace",
-	"defaults",
-	"providers",
-	"appearance",
-	"updates",
-];
+const SETTINGS_TABS: SettingsTab[] = ["defaults", "providers", "updates"];
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
-	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "workspace";
+	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "defaults";
 }
 
 /**
@@ -140,7 +134,7 @@ function fromUrl(): Route {
 		};
 	}
 	if (path === "/workspaces" || path === "/workspaces/") {
-		return { screen: "workspaces", workspace: "", conversation: "", settingsTab: "workspace" };
+		return { screen: "workspaces", workspace: "", conversation: "", settingsTab: "defaults" };
 	}
 	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(path);
 	if (conversation !== null) {
@@ -148,7 +142,7 @@ function fromUrl(): Route {
 			screen: "conversation",
 			workspace: decodeURIComponent(conversation[1] ?? ""),
 			conversation: decodeURIComponent(conversation[2] ?? ""),
-			settingsTab: "workspace",
+			settingsTab: "defaults",
 		};
 	}
 	const workspace = /^\/w\/([^/]+)\/?$/.exec(path);
@@ -157,10 +151,10 @@ function fromUrl(): Route {
 			screen: "conversation",
 			workspace: decodeURIComponent(workspace[1] ?? ""),
 			conversation: "",
-			settingsTab: "workspace",
+			settingsTab: "defaults",
 		};
 	}
-	return { screen: "conversation", workspace: "", conversation: "", settingsTab: "workspace" };
+	return { screen: "conversation", workspace: "", conversation: "", settingsTab: "defaults" };
 }
 
 /** Preferences are ours and local; a corrupt value is a fresh start, not a crash. */
@@ -238,6 +232,9 @@ export interface Platform {
 	thinkingFor: (model: string) => PickerGroup[];
 	/** The active workspace's image and network. */
 	setWorkspace: (change: { image: string; network: string }) => void;
+	/** Any workspace's image and network, by name: the workspaces screen's rows are not the one
+	 * in view, and its menu is where a sandbox is changed. */
+	setWorkspaceSandbox: (name: string, change: { image: string; network: string }) => void;
 	createWorkspace: (name: string) => void;
 	removeWorkspace: (name: string) => void;
 	renameWorkspace: (name: string, title: string) => void;
@@ -682,7 +679,7 @@ export function usePlatform(): Platform {
 				screen: "conversation",
 				workspace: name,
 				conversation: id,
-				settingsTab: "workspace",
+				settingsTab: "defaults",
 			});
 		},
 		[state, workspace],
@@ -842,7 +839,7 @@ export function usePlatform(): Platform {
 			screen: "conversation",
 			workspace: name,
 			conversation: "",
-			settingsTab: "workspace",
+			settingsTab: "defaults",
 		});
 	}, []);
 
@@ -851,6 +848,15 @@ export function usePlatform(): Platform {
 			act(updateWorkspace(workspace, change), () => void reload());
 		},
 		[act, workspace, reload],
+	);
+
+	// A row on the workspaces screen is not the workspace in view, so the name comes from the
+	// caller: the gateway takes it either way.
+	const setWorkspaceSandbox = useCallback(
+		(name: string, change: { image: string; network: string }) => {
+			act(updateWorkspace(name, change), () => void reload());
+		},
+		[act, reload],
 	);
 
 	const createWorkspace = useCallback(
@@ -865,7 +871,7 @@ export function usePlatform(): Platform {
 					screen: "conversation",
 					workspace: name,
 					conversation: "",
-					settingsTab: "workspace",
+					settingsTab: "defaults",
 				});
 			});
 		},
@@ -884,7 +890,7 @@ export function usePlatform(): Platform {
 						screen: "conversation",
 						workspace: "general",
 						conversation: "",
-						settingsTab: "workspace",
+						settingsTab: "defaults",
 					});
 					return;
 				}
@@ -1064,7 +1070,7 @@ export function usePlatform(): Platform {
 					screen: "conversation",
 					workspace,
 					conversation: id,
-					settingsTab: "workspace",
+					settingsTab: "defaults",
 				});
 			})
 			.catch(reportError);
@@ -1137,6 +1143,7 @@ export function usePlatform(): Platform {
 		modelLabel,
 		thinkingFor,
 		setWorkspace,
+		setWorkspaceSandbox,
 		createWorkspace,
 		removeWorkspace,
 		usage: lastUsage(view?.entries ?? []),

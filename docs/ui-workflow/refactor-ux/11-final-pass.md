@@ -28,6 +28,26 @@ line already wraps (`wrap-anywhere`), so it offered a scroll area nobody needed.
 The inspector's context block had the same pointless `overflow-x-auto` under wrapping text, and was
 fixed with it.
 
+## Note 3 — the Workspace tab is gone; the sandbox lives with the workspace
+
+The owner's note: the sandbox fields belong where workspaces are named, and the row's own `…`
+menu should be able to do what that tab did — or the tab should not exist. Option 3 was chosen
+over merging the fields into Defaults or keeping the tab with a menu shortcut.
+
+What changed: **`SandboxDialog`** (`components/workspace/sandbox-dialog.tsx`) holds the image and
+the network, opened from a row's menu on the workspaces screen; `WorkspacesScreen` gained a
+`Sandbox…` item and an `onUpdateSandbox(name, change)`; the platform gained `setWorkspaceSandbox`
+because a row is not the workspace in view; and Settings lost its Workspace tab, its `workspace`,
+`onUpdateWorkspace` and `failure` props along with it. The commit moment and its outcome moved
+with the fields, unchanged: `Apply`, then applied or refused where the field sits.
+
+## Note 4 — Appearance is inside Defaults
+
+Theme was a tab holding one control. It is a `Theme` group on the Defaults page now, so the tab
+bar is **Defaults / Providers / Updates** — three tabs, which also stops the tab row needing to
+scroll at 390px. `SettingsTab` lost `appearance`, and an unknown or stale `/settings/<tab>` URL
+lands on Defaults.
+
 ## What this round did not change
 
 The direction the panel approved: the rail row's second line, the fold in the card header with two
