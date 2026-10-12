@@ -5,9 +5,12 @@ const meta = {
 	title: "Conversation/ToolCard",
 	component: ToolCard,
 	parameters: { layout: "centered" },
+	// `min-w-0` because the decorator is itself a flex item in Storybook's centered layout: without
+	// it the frame refuses to shrink below the card's min-content width, and a phone-width story
+	// reports a horizontal scroll the app does not have.
 	decorators: [
 		(Story) => (
-			<div className="w-full max-w-2xl bg-background p-6">
+			<div className="mx-auto min-w-0 w-full max-w-2xl bg-background p-6">
 				<Story />
 			</div>
 		),
@@ -137,5 +140,9 @@ export const LongNameOnAPhone: Story = {
 			).join("\n"),
 		},
 	},
+	// Fullscreen rather than centred: Storybook's centred layout sizes its column to the story's
+	// max-content, so a phone-width story measured wider than the phone. Fullscreen gives the
+	// decorator a real 100% to be a percentage of.
+	parameters: { layout: "fullscreen" },
 	globals: { viewport: { value: "phone" } },
 };

@@ -8,14 +8,14 @@ import { PaneFooter } from "./pane-footer";
  * not an option — Tailwind compiles what it can read in the source — so the literal classes live
  * here and the cards pick one by name.
  *
- * Output and reasoning fold to two lines (the owner's review note): the 200px window they used
- * before was most of a short output, so nothing was actually put away. The summary keeps a
- * height, because a line count is not the shape a markdown note has when it is put away.
+ * Output and reasoning fold to two lines (the owner's review note). It is a height, not a
+ * `line-clamp`: `-webkit-box`, which the clamp needs, calls the longest line its minimum width,
+ * so a long output stretched the card and scrolled the page sideways on a phone.
  */
 const foldHeights = {
 	tool: "line-clamp-2",
 	thinking: "line-clamp-2",
-	summary: "max-h-(--summary-card-collapsed-height) overflow-y-hidden",
+	summary: "max-h-(--summary-card-collapsed-height) overflow-hidden",
 } as const;
 
 export interface PaneFold {

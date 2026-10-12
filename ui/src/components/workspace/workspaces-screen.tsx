@@ -5,6 +5,7 @@ import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ClippedText } from "@/components/ui/clipped-text";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -98,9 +99,10 @@ export function WorkspacesScreen({
 							>
 								<div className="flex min-w-0 flex-1 items-center gap-2">
 									<div className="min-w-0 flex-1">
-										<Text size="sm" weight="medium" className="truncate">
-											{workspace.title}
-										</Text>
+										<ClippedText
+											text={workspace.title}
+											className="block text-sm font-medium"
+										/>
 										<Text
 											size="2xs"
 											tone="muted"

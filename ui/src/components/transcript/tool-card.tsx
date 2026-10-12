@@ -1,4 +1,5 @@
 import type { ToolEntry } from "@/app/view-models";
+import { ClippedText } from "@/components/ui/clipped-text";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Text } from "@/components/typography/text";
 import { stripAnsi } from "@/lib/text";
@@ -42,11 +43,7 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 		<PaneCard
 			slot="tool"
 			status={status}
-			title={
-				<Text as="span" size="sm" weight="semibold" className="truncate font-mono">
-					{entry.name}
-				</Text>
-			}
+			title={<ClippedText text={entry.name} className="font-mono text-sm font-semibold" />}
 			aside={
 				<Text
 					as="span"
