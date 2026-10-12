@@ -26,9 +26,10 @@ function Tabs({
 
 const tabsListVariants = cva(
 	// A settings page has five tabs and a phone does not: the list scrolls sideways rather than
-	// pushing the page wide. `w-fit` keeps it as wide as its content where there is room, and
-	// `max-w-full` is what stops the overflow from becoming the page's.
-	"group/tabs-list inline-flex w-fit max-w-full items-center justify-start gap-1 overflow-x-auto rounded-lg p-0.5 text-muted-foreground group-data-[orientation=horizontal]/tabs:h-9 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col data-[variant=line]:rounded-none",
+	// pushing the page wide, with no scrollbar — the half tab at the edge is what says there is
+	// more of it. `w-fit` keeps it as wide as its content where there is room, and `max-w-full`
+	// is what stops the overflow from becoming the page's.
+	"group/tabs-list scrollbar-none inline-flex w-fit max-w-full items-center justify-start gap-1 overflow-x-auto rounded-lg p-0.5 text-muted-foreground group-data-[orientation=horizontal]/tabs:h-9 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col data-[variant=line]:rounded-none",
 	{
 		variants: {
 			variant: {
