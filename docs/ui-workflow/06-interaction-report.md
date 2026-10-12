@@ -32,7 +32,7 @@ Keyboard-first, never keyboard-only. Running work is always interruptible and it
 Reduced-motion: fades only, no slide/scale.
 
 ## Keyboard and Mobile Behavior
-- Enter is always a newline; sending happens only through Send/Steer/Queue (button-only: a multiline draft must never escape early).
+- Enter is always a newline; sending happens only through Send/Steer/Queue (button-only: a multiline draft must never escape early). *(Superseded 2026-08-29: Enter sends on a fine pointer — a steer while a run is live, and the composer says so — and Shift+Enter is the newline. See `refactor-ux/09-build.md`.)*
 - Slash: ↑↓ navigate (wrapping), Enter picks the highlighted command, Esc dismisses for the word; list ≤8 + overflow note.
 - Splitter keyboard-resizable; long-press = right-click parity; drawer swipe/Esc.
 - Esc closes settings/screens back to conversation; focus returns to trigger.
