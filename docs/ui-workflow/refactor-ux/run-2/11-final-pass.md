@@ -60,6 +60,25 @@ Two rough edges followed, and both are fixed rather than explained away:
 What remains, and is accepted: a click on the dimmed pane does nothing (the X and Back are the
 ways out), and a screen reader is not told the layer is modal, because it is not.
 
+## Note 5 — desktop: the list is a panel, not a cover (option B)
+
+The owner asked what the layer does on a desktop, and chose option B. From `lg` up the layer is
+`--rail-width` wide instead of full width, so it takes the rail's own place and the conversation
+stays visible beside it, and the dim pane is gone there (`lg:hidden`) so the conversation stays
+readable and clickable rather than sitting behind a scrim.
+
+Two consequences, both handled:
+
+- The bar's toggle is shown on `lg` whenever a layer is open, because the X is the one close and it
+  has to be reachable on every width; when no layer is open, the desktop bar carries no rail
+  buttons, as before.
+- The workspaces content was a page and is now a 280px column: its create row wraps, and its padding
+  is the panel's (`md`) rather than a page's (`lg`).
+
+What did not change: clicking the conversation behind the panel does nothing (the X, Back, Escape
+or opening a workspace are the exits), and the panel's width is the token, not a dragged rail — the
+layer is portalled to the body, so it never sees the `--rail-width` override a drag writes.
+
 ## Checks
 
 `typecheck`, `lint`, `check:system` (the probe now carries the dialog and layer classes too),
