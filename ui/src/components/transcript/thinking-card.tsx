@@ -34,10 +34,13 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 					Thinking
 				</Text>
 			}
+			// The count belongs to the fold button, so a settled card does not print it twice.
 			aside={
-				<Text as="span" size="2xs" className="tabular-nums text-muted-foreground">
-					{open ? "live" : `${lines} lines`}
-				</Text>
+				open ? (
+					<Text as="span" size="2xs" className="tabular-nums text-muted-foreground">
+						live
+					</Text>
+				) : undefined
 			}
 			fold={
 				collapsible && !open

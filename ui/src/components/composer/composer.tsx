@@ -83,10 +83,13 @@ export interface ComposerProps {
  * The composer: one card holding the draft and everything it can do. It owns the keyboard
  * contract — Enter sends on a fine pointer, Shift+Enter is always a newline, and on a
  * coarse pointer Enter is always a newline too, so a phone never sends by accident. While a
- * run is live, sending with Enter is a steer, and the composer says so on a line above the
- * controls: an action nobody can see is a trap, however deliberate it is. While the slash menu
- * is open the arrows move its highlight, Enter picks it, and Escape dismisses it. What the
+ * run is live, sending with Enter does whatever the buttons offer: a steer when the worker can
+ * steer, a queue when it cannot, and the line above the controls says which. While the slash
+ * menu is open the arrows move its highlight, Enter picks it, and Escape dismisses it. What the
  * message means is the server's business.
+ *
+ * The draft prints at the size of the message it becomes (`text-lg`, 16px): it used to inherit
+ * the primitive's `md:text-sm`, so the smallest print in the console was the text being typed.
  */
 export function Composer({
 	value,
@@ -141,6 +144,14 @@ export function Composer({
 
 	const submit = (): void => {
 		if (!canSend) return;
+		// While a run is live the landing is the worker's to offer: a steer joins the turn, and
+		// when the worker cannot steer, queueing behind it is the only landing there is. Enter
+		// does whichever one the composer is showing, so the line above the controls is true.
+		if (running) {
+			if (steerable) onSend();
+			else onQueue();
+			return;
+		}
 		onSend();
 	};
 
@@ -192,7 +203,7 @@ export function Composer({
 						aria-controls="slash-menu-listbox"
 						aria-autocomplete="list"
 						aria-activedescendant={slashOpen ? `slash-option-${slashIndex}` : undefined}
-						className="max-h-(--composer-max-height) rounded-t-xl border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-base dark:bg-transparent"
+						className="max-h-(--composer-max-height) rounded-t-xl border-0 bg-transparent text-lg shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-lg dark:bg-transparent"
 					/>
 					{attachments.length === 0 ? null : (
 						<div
@@ -229,10 +240,12 @@ export function Composer({
 							))}
 						</div>
 					)}
-					{running ? (
+					{running && !isCoarsePointer() ? (
 						<div className="px-3 pb-1">
 							<Text size="2xs" tone="muted">
-								Enter steers this turn · Shift+Enter is a newline
+								{steerable
+									? "Enter steers this turn · Shift+Enter is a newline"
+									: "Enter queues behind this turn · Shift+Enter is a newline"}
 							</Text>
 						</div>
 					) : null}

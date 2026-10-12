@@ -14,6 +14,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/ui/status-dot";
+import { useNow } from "@/lib/clock";
 import { formatCost, formatMoved, formatTokens } from "@/lib/format";
 import { cn } from "cn";
 
@@ -70,6 +71,9 @@ export function ConversationRow({
 	onRestore,
 	className,
 }: ConversationRowProps) {
+	// The age and the stale rule are decisions about now, and the row is the only thing on
+	// screen that changes while nothing else does.
+	const now = useNow();
 	const tags = [
 		conversation.root ? "root" : null,
 		conversation.createdBy === undefined ? null : "peer",
@@ -95,14 +99,14 @@ export function ConversationRow({
 	const meta = [
 		conversation.tokens > 0 ? formatTokens(conversation.tokens) : "",
 		conversation.cost > 0 ? formatCost(conversation.cost) : "",
-		formatMoved(conversation.updatedAt),
+		formatMoved(conversation.updatedAt, now),
 	]
 		.filter((part) => part !== "")
 		.join(" · ");
 	const stale =
 		conversation.running &&
 		conversation.updatedAt !== undefined &&
-		Date.now() - conversation.updatedAt.getTime() > STALE_AFTER_MINUTES * 60_000;
+		now.getTime() - conversation.updatedAt.getTime() > STALE_AFTER_MINUTES * 60_000;
 
 	const actions: RowAction[] = conversation.hidden
 		? [{ label: "Restore", destructive: false, run: () => onRestore?.(conversation.id) }]

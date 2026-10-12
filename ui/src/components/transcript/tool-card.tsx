@@ -43,7 +43,7 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 			slot="tool"
 			status={status}
 			title={
-				<Text as="span" size="sm" weight="semibold" className="font-mono">
+				<Text as="span" size="sm" weight="semibold" className="truncate font-mono">
 					{entry.name}
 				</Text>
 			}
@@ -54,9 +54,9 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 					className={cn(
 						"font-mono tabular-nums",
 						status === "error"
-							? "text-destructive"
+							? "text-destructive-subtle-foreground"
 							: status === "running"
-								? "text-primary"
+								? "text-primary-subtle-foreground"
 								: "text-muted-foreground",
 					)}
 				>
@@ -69,8 +69,11 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 				collapsible
 					? {
 							size: "tool",
+							// The count is the whole body — arguments and output — because that is what
+							// expanding shows. The name used to say "output", which is only the part after
+							// the two lines a folded card already shows.
 							label: (expanded) =>
-								expanded ? "Show less" : `Show output (${lineCount} lines)`,
+								expanded ? "Show less" : `Show all (${lineCount} lines)`,
 						}
 					: undefined
 			}

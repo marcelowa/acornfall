@@ -18,12 +18,17 @@ export function formatAt(at: Date): string {
 
 export interface PaneFooterProps {
 	at?: Date | undefined;
+	/**
+	 * A note beside the time — how a message was sent, for instance. It belongs with the when,
+	 * not with the controls on the right: put in the controls' group it reads as one of them.
+	 */
+	note?: ReactNode | undefined;
 	className?: string | undefined;
 	children?: ReactNode | undefined;
 }
 
 /** Every pane ends the same way: when it happened on the left, controls on the right. */
-export function PaneFooter({ at, className, children }: PaneFooterProps) {
+export function PaneFooter({ at, note, className, children }: PaneFooterProps) {
 	return (
 		<Stack
 			direction="horizontal"
@@ -32,9 +37,12 @@ export function PaneFooter({ at, className, children }: PaneFooterProps) {
 			gap="sm"
 			className={cn("pt-1", className)}
 		>
-			<Text as="span" size="2xs" tone="muted" className="tabular-nums">
-				{at === undefined ? "" : formatAt(at)}
-			</Text>
+			<span className="flex min-w-0 items-center gap-2">
+				<Text as="span" size="2xs" tone="muted" className="tabular-nums">
+					{at === undefined ? "" : formatAt(at)}
+				</Text>
+				{note}
+			</span>
 			{children === undefined ? null : (
 				<Stack direction="horizontal" align="center" gap="2xs">
 					{children}

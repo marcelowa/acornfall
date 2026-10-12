@@ -115,3 +115,27 @@ export const NoArguments: Story = {
 		},
 	},
 };
+
+/**
+ * A folded card on a phone, with an MCP name long enough to push the control out of a card
+ * header that cannot shrink. The name truncates and the control keeps its place; the fold button
+ * is a size larger on a coarse pointer, because it is the only way back into the output.
+ */
+export const LongNameOnAPhone: Story = {
+	args: {
+		entry: {
+			kind: "tool",
+			id: "5",
+			at,
+			name: "mcp__playwright__browser_take_screenshot",
+			status: "done",
+			isError: false,
+			args: { element: "the rail", path: "shot.png" },
+			output: Array.from(
+				{ length: 60 },
+				(_, index) => `line ${index} of a long output that is folded to two lines`,
+			).join("\n"),
+		},
+	},
+	globals: { viewport: { value: "phone" } },
+};
