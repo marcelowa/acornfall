@@ -295,14 +295,8 @@
 	 * it is a document, and it should not own the screen. */
 	--composer-max-height: 200px;
 
-	/* A completed tool card shows this much before asking: the evidence stays one click away,
-	 * but a 400-line dump stops pushing the answer off the screen. */
-	--tool-card-collapsed-height: 200px;
-	/* A finished thinking card shows this much: reasoning is narrower than output, so its
-	 * collapsed form is shorter. */
-	--thinking-card-collapsed-height: 120px;
-	/* A compaction note shows this much when put away. It was `max-h-24` — a spacing step doing a
-	 * component token's job — until the three cards were consolidated onto one shell. */
+	/* A compaction note shows this much when put away. Output and reasoning fold to two lines
+	 * instead (see PaneCard): a line count is what a reader of those actually counts. */
 	--summary-card-collapsed-height: 96px;
 }
 
