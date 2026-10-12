@@ -70,5 +70,39 @@ fractions of a cent — at three decimals a `$0.0031` turn prints as `$0.003`, a
 
 - Step 04, journeys: all three approved the six journeys with the changes recorded in
   `03-journeys.md`.
-- Step 10, look: round 2 re-run after the changes above — recorded at the end of this file when it
-  lands.
+- Step 10, look: round 2 below.
+
+## Round 2 — checked in this session, not by the panel
+
+**A subagent round 2 could not run:** this session already had the maximum children (six — the
+step 04 panel and the step 10 panel), and the limit does not free when a child is stopped. So the
+round-2 check below was done here, item by item, against the tree — which is weaker than the same
+three reviewers, and is written down as weaker rather than presented as their approval.
+
+Every round-1 item, and where it stands:
+
+| Reviewer | Item | Standing |
+|---|---|---|
+| OWNER-OPERATOR | Enter line false when steering is unavailable or on touch | fixed — `composer.tsx` gates the line and words it by `steerable`; `submit()` queues when the worker cannot steer |
+| OWNER-OPERATOR | Draft smaller than the sent text | fixed — `text-lg` at both widths |
+| OWNER-OPERATOR | `primary`/`destructive` as small text | fixed — the subtle-foreground tokens |
+| OWNER-OPERATOR | Thinking card re-folds at settle | fixed — the fold key is the start of the block's own text |
+| OWNER-OPERATOR | Nothing ticks | fixed — `useNow`, one minute, in the row and the top bar |
+| OWNER-OPERATOR | Long tool name has nothing to shrink | fixed — the header's title span is `min-w-0`, the name truncates; `Long Name On A Phone` |
+| OWNER-OPERATOR | No phone stories for the two screens | fixed — `Screens/Workspaces :: Phone`, `Screens/Settings :: Phone` |
+| OWNER-OPERATOR | Steer mark sits with the controls | fixed — `PaneFooter` takes a `note` and renders it beside the time |
+| DELEGATOR | "running" on the workspace row claims a warm process is a run | fixed by taking the mark out; a wire field is the follow-up |
+| DELEGATOR | Fourth decimal on the rail's cost | declined, with the reason recorded above |
+| DELEGATOR | Values cannot be compared down a column | fixed — spend left, age right, the line always there |
+| DELEGATOR | The stale rule has no clock, and lives in one file | fixed — `runState` + `useNow` in `lib/clock.ts`, read by the row and the top bar; `StatusDot` gained `stale` |
+| DELEGATOR | Rows grow when they learn their first token | fixed — the second line is reserved |
+| DELEGATOR | Row stories at 320px, rail is 280 and drags to 192 | fixed — the stories render at `--rail-width`, with `Narrow Rail` beside it |
+| TINKERER | The image field's outcome is owned by nothing | fixed — derived from what the field sent; `UI/SettingsOutcome` is the three states |
+| TINKERER | The thinking card prints its count twice | fixed |
+| TINKERER | "Show output" counts the arguments | fixed — "Show all (N lines)" |
+| TINKERER | One fold survives a settle, one does not | fixed |
+| TINKERER | The fold button is 24px on a phone | fixed — `pointer-coarse:h-8` |
+| TINKERER | The draft's size | fixed |
+
+What round 2 could not settle, and the owner's to close: a browser check of any of it. `make ui`
+needs a gateway and a browser, and neither exists in this sandbox.
