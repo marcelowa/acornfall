@@ -184,14 +184,17 @@
 }
 
 @layer base {
-	/* Phones read at arm's length: small text steps up one notch below sm, but the
-	 * body stays 14px — 16px body was too large. The line-heights are ratios, so
-	 * leading follows for free. */
+	/* Phones read at arm's length: every step up to `base` moves one notch below sm, so the
+	 * ladder stays even (12 / 13 / 14 / 15 / 16) and chrome never reads as content. The body
+	 * used to stay at 14px, which put `sm` and `base` at the same size on a phone: a row title
+	 * and the text beside it were indistinguishable. The transcript body (`lg`, 16px) is the
+	 * same at both widths — that is the settled reading size. */
 	@media (max-width: 639px) {
 		:root {
 			--text-2xs: var(--base-font-size-xs);
 			--text-xs: var(--base-font-size-sm);
 			--text-sm: var(--base-font-size-base);
+			--text-base: 15px;
 		}
 	}
 
