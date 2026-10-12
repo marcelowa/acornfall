@@ -21,7 +21,7 @@ function Row({ label, text }: { label: string; text: string }) {
 					{text.length} chars · ~{estimateTokens(text)} tok
 				</span>
 			</summary>
-			<pre className="overflow-x-auto pb-2 font-mono text-2xs whitespace-pre-wrap text-muted-foreground">
+			<pre className="overflow-hidden pb-2 font-mono text-2xs whitespace-pre-wrap text-muted-foreground">
 				{text}
 			</pre>
 		</details>

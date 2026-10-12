@@ -96,7 +96,12 @@ export function PaneCard({
 			<div className="flex items-center gap-2 border-b border-border px-3 py-2">
 				<span className="flex min-w-0 items-center gap-2">
 					{leading}
-					{title}
+					{/*
+					 * The title is what gives way when the header runs out of room: a flex item defaults to
+					 * `min-width: auto`, so a long tool name pushed the fold control and the status out of
+					 * the card and scrolled the page on a phone instead of truncating.
+					 */}
+					<span className="min-w-0 truncate">{title}</span>
 				</span>
 				<span className="ml-auto flex shrink-0 items-center gap-2">
 					{fold === undefined ? null : (
