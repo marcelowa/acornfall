@@ -14,8 +14,17 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/ui/status-dot";
-import { formatCost, formatTokens } from "@/lib/format";
+import { formatCost, formatMoved, formatTokens } from "@/lib/format";
 import { cn } from "cn";
+
+/**
+ * A run whose last move is older than this stops claiming to be live in the rail: the dot drops
+ * its accent and the row carries the time instead. The gateway's own busy window is half an
+ * hour, which is long enough for a run that died to keep a lit dot — the panel's finding — and
+ * a shorter window here would dim a genuinely slow tool call, so this matches the window the
+ * server itself calls fresh and lets the time on the row do the rest.
+ */
+const STALE_AFTER_MINUTES = 30;
 
 export interface ConversationRowProps {
 	conversation: ConversationSummary;
@@ -80,6 +89,21 @@ export function ConversationRow({
 		.filter((part) => part !== "")
 		.join(" · ");
 
+	// Spend and when it last moved, on the row. Both were tooltip-only (the panel's finding: a
+	// phone has no hover, and a value you must hover to compare cannot be compared). The tooltip
+	// keeps the id and the sender, which are not worth a line.
+	const meta = [
+		conversation.tokens > 0 ? formatTokens(conversation.tokens) : "",
+		conversation.cost > 0 ? formatCost(conversation.cost) : "",
+		formatMoved(conversation.updatedAt),
+	]
+		.filter((part) => part !== "")
+		.join(" · ");
+	const stale =
+		conversation.running &&
+		conversation.updatedAt !== undefined &&
+		Date.now() - conversation.updatedAt.getTime() > STALE_AFTER_MINUTES * 60_000;
+
 	const actions: RowAction[] = conversation.hidden
 		? [{ label: "Restore", destructive: false, run: () => onRestore?.(conversation.id) }]
 		: [
@@ -111,26 +135,36 @@ export function ConversationRow({
 				onClick={() => onSelect?.(conversation.id)}
 				aria-current={active ? "true" : undefined}
 				title={title === "" ? undefined : title}
-				className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-2 text-start"
+				className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 flex min-w-0 flex-1 items-start gap-2 text-start"
 			>
-				<span className="flex w-4 shrink-0 items-center justify-center">
+				<span className="flex w-4 shrink-0 items-center justify-center pt-1">
 					{conversation.running ? (
-						<StatusDot state="running" />
+						<StatusDot
+							state="running"
+							className={stale ? "animate-none bg-muted-foreground" : undefined}
+						/>
 					) : conversation.unread ? (
 						<StatusDot state="unread" />
 					) : null}
 				</span>
-				<span
-					dir="auto"
-					className={cn(
-						"truncate text-sm",
-						conversation.hidden
-							? "text-muted-foreground line-through"
-							: "text-foreground",
-						active && "font-semibold",
+				<span className="min-w-0 flex-1">
+					<span
+						dir="auto"
+						className={cn(
+							"block truncate text-sm",
+							conversation.hidden
+								? "text-muted-foreground line-through"
+								: "text-foreground",
+							active && "font-semibold",
+						)}
+					>
+						{conversation.title}
+					</span>
+					{meta === "" ? null : (
+						<span className="block truncate font-mono text-2xs text-muted-foreground tabular-nums">
+							{meta}
+						</span>
 					)}
-				>
-					{conversation.title}
 				</span>
 			</button>
 			<span className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">
