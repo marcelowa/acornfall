@@ -1,6 +1,7 @@
 # ICP — who this console is for
 
-Status: approved by the owner, 2026-08-29. Read by every panel in the `refactor-ux` chain
+Status: approved by the owner, 2026-08-29; carried into run 2 (2026-10-12) unchanged. Read by every
+panel in the `refactor-ux` chain
 (`.agents/skills/refactor-ux-04-icp-panel-journeys`, `-10-icp-panel-look`), so the reviewers stay
 the same people across passes.
 
@@ -75,6 +76,8 @@ the first real second user exists, their block goes in this file and the panels 
 
 ## What each persona approved
 
+### Run 1 (2026-08-29)
+
 - **Step 04, journeys:** all three approved the six journeys, with the changes recorded in
   `docs/ui-workflow/refactor-ux/03-journeys.md` — spend and the age on the rail row, the mark
   surviving a commit, one commit moment in settings, the phone type step, and J2 rewritten to what
@@ -89,8 +92,28 @@ the first real second user exists, their block goes in this file and the panels 
   widening the page), the clipped-name tooltip, and the two information-architecture decisions —
   the sandbox fields moved behind a workspaces row's menu, and Appearance folded into Defaults.
 
+### Run 2 (2026-10-12), the phone pass
+
+- **Step 04, journeys:** the same three approved the four new journeys and folded the fifth (the
+  phone check-in) into the send and the move-between-conversations paths, as a regression line
+  rather than a journey of its own (`run-2/04-panel-journeys.md`). Their calls: one close, top-left;
+  the band mocked before deciding; the workspaces list as a layer with no X of its own; Back closes
+  the layer; the wide 44px reach, taken below `sm` only; and the rule that the fold never hides run
+  state.
+- **Step 10, look:** round 2 found three things that were not shipped as promised, and all three
+  are fixed in `run-2/10-panel-look.md`: the layer had no close on the phone (the bar's toggle knew
+  only about the rail), Back moved the address under the screen, and a stale run kept offering Stop
+  in the composer. Two reviewers also wanted the drag band cut; the owner agreed at the next step.
+- **Step 11, the owner's pass:** five notes, all answered in `run-2/11-final-pass.md` — the band
+  cut (it cost 52px of a phone screen while typing), the keyboard for every focused field rather
+  than the composer alone, the 44px ladder kept as one rule with no exceptions, the layer's focus
+  behaviour fixed rather than made modal, and the desktop panel (option B) chosen after asking
+  what the layer does on a wide screen.
+
 ## The direction this ICP approved
 
 The shipped direction is written down in `design.md`: bronze on warm bark with blue as the second
 voice, facts quiet in mono `2xs`, a two-line fold from the card header, an even phone type ladder,
-and one commit moment per settings page.
+and one commit moment per settings page. Run 2 added the phone's own section to it: one layer with
+one close, a folded composer, one keyboard variable, a 44px thumb ladder below `sm`, and the
+workspaces list as a layer with no address.
