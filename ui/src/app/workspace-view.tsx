@@ -517,10 +517,21 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 	);
 
 	// Provider keys are global, so their section never sits under the workspace tabs.
+	// A provider with one method offers that method: the row's own button already says "Add key"
+	// or "Sign in", and a dialog asking again is a press the panel cut. Only a provider that
+	// offers both opens the chooser.
+	const connectProvider = (provider: ProviderSummary): void => {
+		const method = provider.authTypes.length === 1 ? provider.authTypes[0] : undefined;
+		if (method === undefined) {
+			setConnecting(provider);
+			return;
+		}
+		void platform.startLogin(provider, method).catch(() => undefined);
+	};
 	const providers = (
 		<ProvidersSection
 			providers={platform.providers}
-			onConnect={setConnecting}
+			onConnect={connectProvider}
 			onDisconnect={platform.logoutProvider}
 			onRefresh={platform.refreshProviders}
 		/>
