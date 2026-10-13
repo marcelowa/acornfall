@@ -801,6 +801,29 @@ async function main(): Promise<void> {
 			emit({ type: "response", id: command.id, ok: true });
 			return;
 		}
+		// A login runs beside the queue as well. It is a conversation with the provider that can
+		// wait minutes for a code, and one sign-in nobody answers must not hold up every command
+		// behind it — the state, the conversations, the next message. Its response still comes
+		// when the flow ends, which is what the caller is waiting for.
+		if (command.type === "login") {
+			void handle(command).then(
+				(data) =>
+					emit({
+						type: "response",
+						id: command.id,
+						ok: true,
+						...(data === undefined ? {} : { data }),
+					}),
+				(error) =>
+					emit({
+						type: "response",
+						id: command.id,
+						ok: false,
+						error: (error as Error).message,
+					}),
+			);
+			return;
+		}
 		queue.push(async () => {
 			try {
 				const data = await handle(command);
@@ -828,15 +851,15 @@ async function main(): Promise<void> {
 }
 
 /**
- * The commands the queue handles. Login answers are not among them: they arrive while a login
+ * The commands `handle` answers. Login answers are not among them: they arrive while a login
  * is in flight and bypass the queue, because queueing an answer behind the login it answers
  * would deadlock. Saying so in the type is what lets the switch below be exhaustive — a new
  * command in the protocol is then either handled here or added to this exclusion, and the
  * compiler asks.
  */
-type QueuedCommand = Exclude<Command, { type: "auth_answer" } | { type: "auth_cancel" }>;
+type HandledCommand = Exclude<Command, { type: "auth_answer" } | { type: "auth_cancel" }>;
 
-async function handle(command: QueuedCommand): Promise<unknown> {
+async function handle(command: HandledCommand): Promise<unknown> {
 	switch (command.type) {
 		case "describe":
 			return await describe();
