@@ -207,12 +207,12 @@ export interface Platform {
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
 	workspaces: WorkspaceSummary[];
-	/** The screen in view: a conversation or settings. The workspaces list is a layer over the
-	 * conversation, not a screen (`workspacesOpen`). */
+	/** The screen in view: a conversation or settings. The workspaces list is a level of the rail
+	 * over the conversations, not a screen (`workspacesOpen`). */
 	screen: Screen;
 	showScreen: (screen: Screen) => void;
-	/** The workspaces list, as a layer over the conversation: it keeps no URL, so Back closes
-	 * it instead of leaving the console. Opening it closes the rail. */
+	/** The workspaces list, the level above the conversations in the rail: it keeps no URL, so Back
+	 * goes back to the conversations instead of leaving the console. The rail stays where it is. */
 	workspacesOpen: boolean;
 	openWorkspaces: () => void;
 	closeWorkspaces: () => void;
@@ -390,9 +390,9 @@ export function usePlatform(): Platform {
 
 	useEffect(() => {
 		const back = (): void => {
-			// The layer has no address of its own, so Back is its own gesture: the entry it consumed
-			// is the one the layer pushed when it opened, which carried the same address. Closing it
-			// is all that is left — the address and the conversation are already where they were.
+			// The level has no address of its own, so Back is its own gesture: the entry it consumed
+			// is the one it pushed when it opened, which carried the same address. Popping the level
+			// is all that is left — the address, the rail and the conversation are where they were.
 			if (workspacesOpenRef.current) {
 				setWorkspacesOpen(false);
 				return;
@@ -711,8 +711,8 @@ export function usePlatform(): Platform {
 	);
 
 	/** The rail is the way between the screens; each one keeps its own URL so a reload and a
-	 * shared link land where someone was. The workspaces list is not one of them: it opens as a
-	 * layer and keeps no address. */
+	 * shared link land where someone was. The workspaces list is not one of them: it is a level of
+	 * the rail and keeps no address. */
 	const showScreen = useCallback(
 		(screen: Screen) => {
 			if (screen === "conversation") {
@@ -747,14 +747,14 @@ export function usePlatform(): Platform {
 		[state, workspace, activeId],
 	);
 
-	/** The workspace list, as a layer: opening it closes the rail, because one layer at a time is
-	 * what the one-close rule needs, and because two left layers would put two X's in one corner.
+	/** The workspace list is a level of the rail, not a layer beside it: opening it leaves the rail
+	 * where it is — open on a desktop, the drawer on a phone — and fills it, so the X goes back to
+	 * the conversations before it puts the rail away.
 	 *
 	 * It pushes its own history entry, with the address it already has, so a press of Back has
 	 * something to consume: consuming it leaves the address unchanged and the conversation behind
-	 * it never moves (J10). Without that entry Back would leave the console on a fresh tab. */
+	 * the rail never moves (J10). Without that entry Back would leave the console on a fresh tab. */
 	const openWorkspaces = useCallback(() => {
-		setRailOpen(false);
 		window.history.pushState(null, "", window.location.pathname + window.location.search);
 		setWorkspacesOpen(true);
 	}, []);

@@ -28,6 +28,10 @@ const MAX_RAIL = 480;
  * layer and the resize handle. In topbar mode the bar carries no rail buttons from `lg`: the
  * rail head closes it while the collapsed strip opens it again. The width is the token unless
  * the app hands one in.
+ *
+ * The rail's own stack — the conversations, and the workspaces list above them — is the app's:
+ * Split hands the toggle's intent up (`onAsideOpenChange`) and renders whatever the app gives it
+ * as `aside`, so a level in front closes with the same X as the rail itself.
  */
 const splitVariants = cva("grid min-h-0 w-full flex-1 grid-cols-1", {
 	variants: {
@@ -81,10 +85,6 @@ export interface SplitProps extends VariantProps<typeof splitVariants> {
 	/** The layer, below `lg`. */
 	asideOpen?: boolean | undefined;
 	onAsideOpenChange?: ((open: boolean) => void) | undefined;
-	/** A layer the app opens of its own (the workspaces list): the bar's toggle is the one close,
-	 * so it shows the X for it too, and closes it before the rail. */
-	appLayerOpen?: boolean | undefined;
-	onAppLayerClose?: (() => void) | undefined;
 	/**
 	 * The app carries the collapse toggle itself — in the rail head, beside the workspace
 	 * title — instead of Split floating one over the rail. The collapsed strip keeps its
@@ -111,8 +111,6 @@ export function Split({
 	asideLabel = "Conversations",
 	asideOpen,
 	onAsideOpenChange,
-	appLayerOpen = false,
-	onAppLayerClose,
 	inlineAsideToggle = false,
 	asideCollapsed = false,
 	onAsideCollapsedChange,
@@ -154,25 +152,20 @@ export function Split({
 			</Button>
 		);
 
-	/** The one control that opens a layer and the one that closes it: a hamburger that becomes
-	 * an X while a layer is open, in the bar's own corner. It closes whatever is in front: the
-	 * app's own layer first (the workspaces list), then the rail. */
+	/** The one control that opens the rail and the one that puts it away: a hamburger that becomes
+	 * an X while it is open, in the bar's own corner. What the X closes is the rail's own business
+	 * — the app closes the level in front first, so a phone's X goes back to the conversations
+	 * before it hides the drawer. */
 	const layerToggle = (
 		<Button
 			type="button"
 			variant="ghost"
 			size="icon-sm"
-			aria-label={open || appLayerOpen ? "Close navigation" : asideLabel}
-			aria-expanded={open || appLayerOpen}
-			onClick={() => {
-				if (appLayerOpen) {
-					onAppLayerClose?.();
-					return;
-				}
-				setOpen(!open);
-			}}
+			aria-label={open ? "Close navigation" : asideLabel}
+			aria-expanded={open}
+			onClick={() => setOpen(!open)}
 		>
-			{open || appLayerOpen ? <X /> : <Menu />}
+			{open ? <X /> : <Menu />}
 		</Button>
 	);
 
@@ -206,15 +199,8 @@ export function Split({
 					className="flex h-[var(--bar-height)] shrink-0 items-center gap-1 border-b border-border px-1"
 				>
 					{/* Below `lg` the layer drops from under this bar: the bar stays mounted, and
-					 * its toggle is the only close. From `lg` the bar carries no rail buttons — unless
-					 * a layer is open, because then the X is the way out and it has to be reachable
-					 * on every width. */}
-					<div
-						className={cn(
-							"flex shrink-0 items-center",
-							open || appLayerOpen ? "" : "lg:hidden",
-						)}
-					>
+					 * its toggle is the only close while it is open. */}
+					<div className={cn("flex shrink-0 items-center", open ? "" : "lg:hidden")}>
 						{layerToggle}
 					</div>
 					<div className="flex min-w-0 flex-1 items-center gap-2">{topbar}</div>

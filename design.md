@@ -93,26 +93,34 @@ These are the product's defined paths, and what each one shipped in this pass
 8. **Put the composing down, keep the draft** — leaving the field (or sending) folds the card and
    the draft is still there, shown in the folded row.
 9. **Move between conversations from a phone** — one button in the bar, one left slide, one X in
-   the same corner as the button that opened it.
+   the same corner as the button that opened it, and the same X goes back a level before it takes
+   the drawer away.
 10. **Reach the workspaces list without leaving the conversation** — the workspace's own name opens
-    the list; on a desktop it is a panel beside the conversation, and no address changes.
+    the list as a level of the rail and fills it, on a phone and on a desktop; its X goes back to
+    the conversations, and no address changes.
 
 ## The phone
 
 Run 2 (2026-10-12) made the phone a surface of its own instead of a shrunken desktop. What is
 settled, and what a later pass may build on:
 
-- **One layer, one close.** The conversation rail and the workspaces list arrive the same way:
-  full width below `lg`, slid in from the left, out to the left, 200ms, under the reduced-motion
-  guard. Neither carries a close of its own — the bar's own toggle is the X, which is why a layer
-  starts *below* the bar (`--bar-height`), why it is not modal (a modal layer blocks the bar it is
-  closed from), and why the dim pane does not close it: a stray tap never loses your place. Tab
-  stays inside the layer and closing it returns focus where it came from.
-- **From `lg`, the list is a panel, not a cover**: the layer is `--rail-width` wide and the dim is
-  gone, so the conversation stays readable and usable beside it.
-- **The layer keeps no URL.** `/workspaces` is not an address: opening the list pushes an entry
-  carrying the address it already has, so Back closes the list without moving the page, and an old
-  link lands on the conversation.
+- **One layer, one close.** The rail arrives as a layer below `lg`: full width, slid in from the
+  left, out to the left, 200ms, under the reduced-motion guard. It carries no close of its own —
+  the bar's own toggle is the X, which is why it starts *below* the bar (`--bar-height`), why it
+  is not modal (a modal layer blocks the bar it is closed from), and why the dim pane does not
+  close it: a stray tap never loses your place. Tab stays inside the layer and closing it returns
+  focus where it came from.
+- **The rail is a stack, and its X pops one level.** The workspaces list is a level of the rail,
+  not a second layer: it fills the rail — head, rows and foot — at both widths, so the list is
+  never a pane beside the conversations and the X never moves. It goes back to the conversations
+  first, and puts the rail away second: the one step the widths do differently (a phone hides the
+  drawer, a desktop collapses the column to its hamburger strip). The rail is open by default on a
+  desktop, and that strip is the way back.
+- **From `lg`, the rail is a column, not a cover**: `--rail-width` wide and no dim, so the
+  conversation stays readable and usable beside it.
+- **The list keeps no URL.** `/workspaces` is not an address: opening the list pushes an entry
+  carrying the address it already has, so Back goes back to the conversations without moving the
+  page, and an old link lands on the conversation.
 - **The composer folds below `sm`**: the phone's rest state is one row that shows the draft's own
   first line, and it keeps every action, so Stop is never behind a tap. Leaving the field folds it;
   sending folds it. There is no drag band and no grabber — a 44px band above the card cost 52px of
