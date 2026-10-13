@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { PanelLeft, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Stack } from "./stack";
 import { Text } from "@/components/typography/text";
@@ -52,7 +52,7 @@ function BelowBarFrame() {
 					aria-expanded={open}
 					onClick={() => setOpen(!open)}
 				>
-					{open ? <X /> : <PanelLeft />}
+					{open ? <X /> : <Menu />}
 				</Button>
 				<Text size="sm" className="truncate">
 					Conversation title
