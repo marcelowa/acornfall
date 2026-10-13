@@ -52,6 +52,20 @@ Both are live in this sandbox, reachable from the owner's own machines and phone
   methods), with three rows marked connected for the mock — the sandbox had none — using the real
   shapes of a saved key, a sign-in, and a Vertex ADC path.
 
+## Round 2 — the panel's findings, mocked
+
+The step 04 panel (one reviewer back so far, `04-panel-journeys.md`) found the list's real gaps, so
+the mocks gained a round:
+
+| Story | What it argues for | Journey |
+|---|---|---|
+| **List — a dead connection** | A stored credential whose check fails is its own state — "Not working · key stored", in the warning tone, leading with the connected rows, with Reconnect — not "Not connected" | J15, panel finding |
+| **List — the reading** (both widths, updated) | The count is pluralised (`1 model`); the rows sort by the name they show (`OpenCode Go` before `OpenCode Zen`); the state line is mono `2xs`; the search clears in one gesture and its empty state names the catalogue's words ("try 'anthropic' or 'bedrock'"); Re-check says what it read ("Read 42 providers just now") | J12, J15, R1, R4 |
+
+Fixed in the product this round: the count (`1 models` → `1 model`). Everything else above is
+mock-only until the build step; the dead-connection state also needs one field from the worker
+(`stored` with `authenticated: false`).
+
 ## Checks
 
 `typecheck`, `lint`, `check:system`, `format:check`, `bun test` (107 pass), `bun run

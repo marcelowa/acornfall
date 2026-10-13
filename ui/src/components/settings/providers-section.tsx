@@ -20,7 +20,8 @@ function statusLine(provider: ProviderSummary): string {
 	}
 	const how = provider.authType === "oauth" ? "signed in" : "key saved";
 	const where = provider.source === undefined ? "" : ` · ${provider.source}`;
-	return `Connected · ${how}${where} · ${provider.modelCount} models`;
+	const models = provider.modelCount === 1 ? "1 model" : `${provider.modelCount} models`;
+	return `Connected · ${how}${where} · ${models}`;
 }
 
 /** The row names the act it leads to: a provider with one method offers that one, and only a

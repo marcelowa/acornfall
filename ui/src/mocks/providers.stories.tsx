@@ -113,9 +113,21 @@ export const ListTheReading: Story = {
 		<MockFrame
 			width="pane"
 			label="The list answers 'what can this install use' before the scroll"
-			note="J12, R1. Two named groups; Re-check beside the search where the person who just added a key is looking; the state line clips and shows itself whole on hover, focus or tap — Vertex's source is 57 characters and cannot be read any other way."
+			note="J12, R1. Two named groups; Re-check beside the search, and it says what it read; the state line clips in mono and shows itself whole on hover, focus or tap; the search clears in one gesture. The panel's findings are in: the count is pluralised, the rows sort by the name they show, and 'claude' in the search now gets a hint instead of silence."
 		>
 			<ProviderListProposal rows={providerRows} />
+		</MockFrame>
+	),
+};
+
+export const ListADeadConnection: Story = {
+	render: () => (
+		<MockFrame
+			width="pane"
+			label="A dead connection is its own state, not 'Not connected'"
+			note="J15, panel finding (DELEGATOR: 'a stopped provider is not representable here… I will find out via a failed run — the exact late discovery I came to avoid'). A stored credential whose check fails reads 'Not working · key stored' in the warning tone, leads with the connected rows, and offers Reconnect. Making it real needs one field from the worker (`stored` with `authenticated: false`); the mock shows the direction."
+		>
+			<ProviderListProposal rows={providerRows} broken={["anthropic"]} />
 		</MockFrame>
 	),
 };
@@ -126,7 +138,7 @@ export const ListTheReadingPhone: Story = {
 		<MockFrame
 			width="phone"
 			label="The same reading on a phone"
-			note="J12, R5. The groups still answer first; the search and Re-check share a row at 44px; the rows keep their action and the state line stays one line."
+			note="J12, R5. The groups still answer first; the search, its clear and Re-check are three 44px targets in one row; the rows keep their action and the state line stays one line."
 		>
 			<ProviderListProposal rows={providerRows} />
 		</MockFrame>

@@ -1,13 +1,16 @@
 /**
  * The providers list, as run 3 proposes it. Mock-only: this file is deleted in the build step,
  * once the direction is real. It mirrors `settings/providers-section.tsx` deliberately — the
- * question it puts to the owner is the list's reading, and the three moves below are the ones
- * that change it:
+ * question it puts to the owner is the list's reading, and these are the moves that change it:
  *
  * 1. two named groups, so "what can this install use" is answered before a scroll;
- * 2. Re-check beside the search, where the person who just added a key is looking;
- * 3. the state line as clipped text that shows itself whole on hover, focus or tap — the source
- *    of a credential can be a long path, and a clipped fact nobody can read is a lost fact.
+ * 2. Re-check beside the search, and it says what it read — the DELEGATOR persona stops
+ *    checking a control whose entire answer is silence, and J15 is the check-in;
+ * 3. the state line clips, in mono, and shows itself whole on hover, focus or tap — the source
+ *    of a credential can be 57 characters, and a clipped fact nobody can read is a lost fact;
+ * 4. a stored credential whose check fails is its own state ("Not working · key stored"), not
+ *    "Not connected" — the state the wire cannot carry yet (panel finding, `04-panel-journeys.md`);
+ * 5. the search clears in one gesture, and its empty state names the catalogue's words.
  */
 import { useState } from "react";
 import type { ProviderSummary } from "@/app/view-models";
@@ -17,15 +20,18 @@ import { ClippedText } from "@/components/ui/clipped-text";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/typography/text";
 import { cn } from "cn";
+import { X } from "lucide-react";
 
-function statusLine(provider: ProviderSummary): string {
+function statusLine(provider: ProviderSummary, broken: boolean): string {
+	if (broken) return "Not working · key stored";
 	if (!provider.authenticated) {
 		if (provider.authTypes.length === 0) return "Needs a key where it runs";
 		return "Not connected";
 	}
 	const how = provider.authType === "oauth" ? "signed in" : "key saved";
 	const where = provider.source === undefined ? "" : ` · ${provider.source}`;
-	return `Connected · ${how}${where} · ${provider.modelCount} models`;
+	const models = provider.modelCount === 1 ? "1 model" : `${provider.modelCount} models`;
+	return `Connected · ${how}${where} · ${models}`;
 }
 
 function connectLabel(provider: ProviderSummary): string {
@@ -36,7 +42,7 @@ function connectLabel(provider: ProviderSummary): string {
 	return "Connect";
 }
 
-function ProviderRow({ provider }: { provider: ProviderSummary }) {
+function ProviderRow({ provider, broken }: { provider: ProviderSummary; broken: boolean }) {
 	return (
 		<div
 			data-slot="mock-provider-row"
@@ -47,18 +53,25 @@ function ProviderRow({ provider }: { provider: ProviderSummary }) {
 				<Text
 					as="span"
 					size="sm"
-					weight={provider.authenticated ? "medium" : undefined}
-					className={cn(!provider.authenticated && "text-muted-foreground")}
+					weight={provider.authenticated || broken ? "medium" : undefined}
+					className={cn(!provider.authenticated && !broken && "text-muted-foreground")}
 				>
 					{provider.name}
 				</Text>
 				<ClippedText
-					text={statusLine(provider)}
-					className="text-2xs text-muted-foreground"
+					text={statusLine(provider, broken)}
+					className={cn(
+						"font-mono text-2xs",
+						broken ? "text-warning-subtle-foreground" : "text-muted-foreground",
+					)}
 					side="bottom"
 				/>
 			</div>
-			{provider.authenticated ? (
+			{broken ? (
+				<Button type="button" variant="outline" size="sm" className="shrink-0">
+					Reconnect
+				</Button>
+			) : provider.authenticated ? (
 				<Button type="button" variant="ghost" size="sm" className="shrink-0">
 					Disconnect
 				</Button>
@@ -75,7 +88,15 @@ function ProviderRow({ provider }: { provider: ProviderSummary }) {
 	);
 }
 
-function Group({ label, rows }: { label: string; rows: ProviderSummary[] }) {
+function Group({
+	label,
+	rows,
+	broken,
+}: {
+	label: string;
+	rows: ProviderSummary[];
+	broken: Set<string>;
+}) {
 	if (rows.length === 0) return null;
 	return (
 		<Stack gap="2xs">
@@ -84,15 +105,27 @@ function Group({ label, rows }: { label: string; rows: ProviderSummary[] }) {
 			</Text>
 			<div className="flex flex-col gap-1">
 				{rows.map((provider) => (
-					<ProviderRow key={provider.id} provider={provider} />
+					<ProviderRow
+						key={provider.id}
+						provider={provider}
+						broken={broken.has(provider.id)}
+					/>
 				))}
 			</div>
 		</Stack>
 	);
 }
 
-export function ProviderListProposal({ rows }: { rows: ProviderSummary[] }) {
+export interface ProviderListProposalProps {
+	rows: ProviderSummary[];
+	/** Ids to show as stored-but-not-working, the state the wire cannot carry yet. */
+	broken?: string[];
+}
+
+export function ProviderListProposal({ rows, broken = [] }: ProviderListProposalProps) {
 	const [query, setQuery] = useState("");
+	const [read, setRead] = useState(false);
+	const brokenIds = new Set(broken);
 	const words = query.trim().toLowerCase();
 	const visible =
 		words === ""
@@ -102,8 +135,15 @@ export function ProviderListProposal({ rows }: { rows: ProviderSummary[] }) {
 						provider.name.toLowerCase().includes(words) ||
 						provider.id.toLowerCase().includes(words),
 				);
-	const connected = visible.filter((provider) => provider.authenticated);
-	const rest = visible.filter((provider) => !provider.authenticated);
+	// Sorted by the name the row shows, not by the id: "OpenCode Zen" before "OpenCode Go" is
+	// the id order, and a person reading names reads it as wrong (panel finding).
+	const byName = (a: ProviderSummary, b: ProviderSummary) => a.name.localeCompare(b.name);
+	const connected = visible
+		.filter((provider) => provider.authenticated || brokenIds.has(provider.id))
+		.sort(byName);
+	const rest = visible
+		.filter((provider) => !provider.authenticated && !brokenIds.has(provider.id))
+		.sort(byName);
 	return (
 		<Stack gap="sm">
 			<Text size="2xs" tone="muted">
@@ -116,22 +156,54 @@ export function ProviderListProposal({ rows }: { rows: ProviderSummary[] }) {
 					placeholder="Search providers"
 					aria-label="Search providers"
 					onChange={(event) => setQuery(event.target.value)}
+					onKeyDown={(event) => {
+						if (event.key === "Escape") setQuery("");
+					}}
 				/>
-				<Button type="button" variant="ghost" size="sm" className="shrink-0">
+				{query === "" ? null : (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Clear the search"
+						className="shrink-0"
+						onClick={() => setQuery("")}
+					>
+						<X />
+					</Button>
+				)}
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					className="shrink-0"
+					onClick={() => setRead(true)}
+				>
 					Re-check
 				</Button>
 			</span>
 			<Text size="2xs" tone="muted">
-				Added a key outside the app? Re-check reads it.
+				{read
+					? `Read ${rows.length} providers just now.`
+					: "Added a key outside the app? Re-check reads it."}
 			</Text>
 			{visible.length === 0 ? (
 				<Text size="sm" tone="muted">
-					No provider matches.
+					No provider matches. The list knows catalogue names — try “anthropic” or
+					“bedrock”.
 				</Text>
 			) : (
 				<>
-					<Group label={`Connected (${connected.length})`} rows={connected} />
-					<Group label={`Not connected (${rest.length})`} rows={rest} />
+					<Group
+						label={`Connected (${connected.length})`}
+						rows={connected}
+						broken={brokenIds}
+					/>
+					<Group
+						label={`Not connected (${rest.length})`}
+						rows={rest}
+						broken={brokenIds}
+					/>
 				</>
 			)}
 		</Stack>
