@@ -52,14 +52,13 @@ function Address({ url, label = "Open" }: { url: string; label?: string | undefi
 				<ClippedText text={url} className="font-mono text-2xs text-muted-foreground" />
 			</span>
 			<CopyButton value={url} label="Copy address" />
-			<a
-				href={url}
-				target="_blank"
-				rel="noreferrer"
-				className="text-sm text-primary underline"
-			>
-				{label}
-			</a>
+			{/* A link on a phone is still a target: the panel measured it at 37×21, the only control
+			    under 44px in these flows. The button's own ladder carries the phone step. */}
+			<Button asChild variant="link" size="sm" className="shrink-0">
+				<a href={url} target="_blank" rel="noreferrer">
+					{label}
+				</a>
+			</Button>
 		</span>
 	);
 }

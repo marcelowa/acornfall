@@ -54,9 +54,45 @@ artifact, not a product state, and it is worth naming: no real install shows `fa
   product names and cannot be cleared; (4) OpenCode Zen before OpenCode Go; (5) the state line is
   Inter 11px/12px, muted but not mono, so values are not set apart (R4).
 
-## OWNER-OPERATOR and TINKERER
+## OWNER-OPERATOR
 
-Still running; their raw answers land in this file when they arrive.
+Still running; its raw answer lands in this file when it arrives.
+
+## TINKERER — raw answer
+
+- keep — the two-press start with the provider's own method question ("API key | paste a key" vs
+  "Sign in | sign in with the provider", then Anthropic's "Select Anthropic login method: Browser
+  login (default) / Copy code login (headless)"), and the Copilot device dialog that puts code +
+  Copy code + address + Copy address + Open together on screen (356/356 wide on the phone) because
+  the address is short — that block, the blank-field-blocks-Continue gate, and the refusal that
+  returns the server's own words with "Try again" and clears the field are the parts to protect.
+- cut — the address row as a width driver: a `truncate` that resolves at 1269px inside a 446px
+  window is decoration, and Copy/Open/Continue parked at x=1774/1880/1832 (1440) and
+  x=1413/1526/1476 (390) cost a 1019–1238px sideways drag; printing the whole OAuth URL
+  (client_id, scope, code_challenge) in the dialog buys nothing a Copy button does not.
+- confused-by — a dialog that says "copy the code Anthropic shows and paste it here" while showing
+  no field and "Finishing sign-in…" at the same time; a Copilot device dialog with no line saying
+  it is waiting; an address I can read 63 of 214 characters of, with the ellipsis off-screen; and
+  "Copy failed" on every press here, which I cannot lay at the product's door from this box.
+- would I keep using this — no for the paths I own: the sign-in dialog is the one screen that must
+  not fight me, and here the thing I need is not one move away but one sideways drag away, at both
+  widths; I would keep the key path and the Copilot device code, and run every other sign-in in a
+  real browser outside the console.
+
+### Its evidence, and what it could not see
+
+- **Bug A** (the owner's defect): `dialog-content` 446/1465 at 1440×900, 356/1594 at 390×844; every
+  child laid out at 1417px; Copy/Open/Continue past the viewport; a real click on Copy auto-scrolled
+  the dialog 2549px; the instruction lines themselves were cut (64 of 106 characters).
+- **Bug B (R3)**: Anthropic → Sign in → Copy code login stuck in "…| Finishing sign-in…" with no
+  input in **7 of 18 runs** (no recovery in 8–12s); healthy runs show the paste field.
+- **Bug C (R5)**: at 390 the `Open` link measured **37×21** — the only sub-44px control in these
+  flows (Copy/Continue/Cancel are 44).
+- **Bug D (environment-bound)**: in this sandbox `clipboard-write` is denied and `writeText` throws
+  `NotAllowedError`; the button then read "Copy failed" for a clipboard the textarea fallback would
+  have filled — it only runs when the API is missing, not when the write is refused.
+- It could not see: the soft keyboard (headless), whether a scrollbar is painted, or the "Copied"
+  label (Bug D). It cancelled every flow and left nothing listening on 1455/53692.
 
 ## What the panel forces (my reading, for the owner)
 
@@ -67,6 +103,15 @@ Still running; their raw answers land in this file when they arrive.
 3. The order reads by id, not by name (`OpenCode Zen` before `OpenCode Go`): the mock sorts by
    name, and the build step moves the worker's sort to the name it shows.
 4. The state line is muted Inter, not mono (R4): the mock renders values in mono `2xs`.
+5. **The answer's confirmation cleared a newer question** (TINKERER's bug B, 7 of 18 runs): a
+   select is answered, the flow asks for the paste next, and the confirmation of the select landed
+   after the paste had arrived — clearing it. The question now goes only when its own answer
+   lands (`authFlowAnswered(flow, promptId)`), and the reproduction is 0 of 10 missing fields
+   after the fix, 6 of 10 before it.
+6. **The `Open` link was 37×21 on a phone** (bug C): it is a `Button`-as-link now, 61×44 at 390.
+7. **Copy said "Copy failed" for a refused write** (bug D): the textarea fallback runs when the
+   clipboard API throws, not only when it is missing; verified with `writeText` rejecting — the
+   button reads "Copied".
 
 **Direction questions the panel puts to the owner** (mocked, not decided):
 
@@ -81,3 +126,7 @@ Still running; their raw answers land in this file when they arrive.
    the empty search state ("try the provider's name — anthropic") or real data (the worker's known
    models per provider). The first is copy; the second is a platform change and this run's
    guardrails say no new capabilities — so the recommendation is the hint now, the data later.
+8. **The address as text or as a label** (TINKERER: it could read 63 of 214 characters, "printing
+   the whole OAuth URL buys nothing a Copy button does not"): the mock shows both — today's clipped
+   address, and the host as the label ("Sign in at openrouter.ai") with Copy carrying the whole of
+   it either way. The owner picks.

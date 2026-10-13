@@ -2,11 +2,13 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { AuthFlow } from "@/app/auth-flow";
 import type { ProviderSummary } from "@/app/view-models";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
+import { Button } from "@/components/ui/button";
 import { ClippedText } from "@/components/ui/clipped-text";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Stack } from "@/components/layout/stack";
 import { Text } from "@/components/typography/text";
 import { MockFrame } from "./frame";
-import { ProviderListProposal } from "./providers";
+import { AddressLabelled, ProviderListProposal } from "./providers";
 import { providerRows } from "./providers-data";
 
 /**
@@ -141,6 +143,35 @@ export const ListTheReadingPhone: Story = {
 			note="J12, R5. The groups still answer first; the search, its clear and Re-check are three 44px targets in one row; the rows keep their action and the state line stays one line."
 		>
 			<ProviderListProposal rows={providerRows} />
+		</MockFrame>
+	),
+};
+
+export const AddressLabelledVariant: Story = {
+	render: () => (
+		<MockFrame
+			width="dialog"
+			label="The address as a label, or the address as text"
+			note="J14, R1, R2 — the panel's question (TINKERER): it could read 63 of the address's 214 characters, and asked what printing the rest buys that Copy does not. Above: today's row, the whole address clipped. Below: the host as the label, with Copy carrying the whole of it either way."
+		>
+			<Stack gap="md">
+				<span className="flex min-w-0 flex-wrap items-center gap-2">
+					<ClippedText
+						text={openRouterUrl}
+						className="min-w-0 flex-1 font-mono text-2xs text-muted-foreground"
+					/>
+					<CopyButton value={openRouterUrl} label="Copy address" />
+					<Button asChild variant="link" size="sm" className="shrink-0">
+						<a href={openRouterUrl} target="_blank" rel="noreferrer">
+							Open
+						</a>
+					</Button>
+				</span>
+				<AddressLabelled
+					url={openRouterUrl}
+					instructions="Complete sign-in in your browser. If the browser is on another machine, paste the final redirect URL here."
+				/>
+			</Stack>
 		</MockFrame>
 	),
 };

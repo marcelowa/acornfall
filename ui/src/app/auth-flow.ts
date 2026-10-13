@@ -106,16 +106,26 @@ function withNotice(notices: AuthNotice[], event: AuthNotice): AuthNotice[] {
 }
 
 /**
- * An answer that reached the server: the provider owns the flow now, so the question goes.
- * The line the dialog shows in its place comes from `answered`, not from a stale prompt.
+ * An answer that reached the server: the question it answered goes. Only that one — a provider
+ * can ask its next question before the confirmation of the last one lands (a select answered,
+ * then the paste the flow asks for), and clearing whatever is on screen would take the new
+ * question away with the old answer.
  */
-export function authFlowAnswered(flow: AuthFlow): AuthFlow {
-	return { ...flow, prompt: undefined, answering: false, answered: true };
+export function authFlowAnswered(flow: AuthFlow, promptId: string): AuthFlow {
+	return {
+		...flow,
+		...(flow.prompt?.promptId === promptId ? { prompt: undefined } : {}),
+		answering: false,
+		answered: true,
+	};
 }
 
 /** An answer that could not be sent: the question stays, and the controls come back. */
-export function authFlowAnswerFailed(flow: AuthFlow): AuthFlow {
-	return { ...flow, answering: false };
+export function authFlowAnswerFailed(flow: AuthFlow, promptId: string): AuthFlow {
+	return {
+		...flow,
+		...(flow.prompt?.promptId === promptId ? { answering: false } : {}),
+	};
 }
 
 /**

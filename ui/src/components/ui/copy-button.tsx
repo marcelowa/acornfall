@@ -6,13 +6,20 @@ import { cn } from "cn";
  * Copy is the one control a transcript pane always shows.
  *
  * navigator.clipboard exists only in a secure context, and the interface is served over the
- * tailnet's plain HTTP, so the old client's textarea fallback is kept: without it the button
- * would work on localhost and fail on the URL people actually use.
+ * tailnet's plain HTTP, so the old client's textarea fallback is kept — and it is kept for a
+ * refusal too, not only for a missing API: a browser can expose the API and then refuse the
+ * write (the panel saw `NotAllowedError` on every press, and "Copy failed" for a clipboard that
+ * a textarea would have filled). Without that, the one control whose whole job is to hand a
+ * value over says it could not.
  */
 async function writeClipboard(value: string): Promise<void> {
-	if (navigator.clipboard?.writeText !== undefined) {
-		await navigator.clipboard.writeText(value);
-		return;
+	try {
+		if (navigator.clipboard?.writeText !== undefined) {
+			await navigator.clipboard.writeText(value);
+			return;
+		}
+	} catch {
+		// Fall through to the scratch textarea.
 	}
 	const scratch = document.createElement("textarea");
 	scratch.value = value;
@@ -20,8 +27,9 @@ async function writeClipboard(value: string): Promise<void> {
 	scratch.style.opacity = "0";
 	document.body.appendChild(scratch);
 	scratch.select();
-	document.execCommand("copy");
+	const copied = document.execCommand("copy");
 	scratch.remove();
+	if (!copied) throw new Error("copy refused");
 }
 
 export interface CopyButtonProps {
@@ -34,7 +42,6 @@ export interface CopyButtonProps {
 export function CopyButton({ value, label = "Copy", className, onCopied }: CopyButtonProps) {
 	const [result, setResult] = useState<"idle" | "copied" | "failed">("idle");
 	const timer = useRef<number | null>(null);
-
 	useEffect(
 		() => () => {
 			if (timer.current !== null) window.clearTimeout(timer.current);
