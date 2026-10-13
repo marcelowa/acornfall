@@ -66,6 +66,23 @@ Fixed in the product this round: the count (`1 models` → `1 model`). Everythin
 mock-only until the build step; the dead-connection state also needs one field from the worker
 (`stored` with `authenticated: false`).
 
+## Round 3 — the owner's finding: the dialog rearranged itself
+
+The owner looked, approved the direction, and named one thing: "transitions between modes — connect
+to Anthropic then sign in — too many layout changes of the dialog panel; and it is not only the
+size of the card, it is also the elements inside". So the dialog became a frame with three slots
+(see `05-palette.md` §4b) and the body a stable height, and a story prints the claim:
+
+| Story | What it argues for | Journey |
+|---|---|---|
+| **The frame holds across the flow** | Every state the same size at the same place, the action button at the same y; the before/after numbers in px | R6 |
+
+Measured after the change, at both widths: desktop every state 357px at top 222 (was
+300/280/320/256, tops 250/260/240/272); phone every state 448px at top 198 (was 288/305/305/397,
+tops 278/270/270/224). The action button: 466 on desktop and 517 on the phone in every state that
+has one. The dialog stories in the catalogue render the product, so the new slots are visible in
+all of them.
+
 ## Checks
 
 `typecheck`, `lint`, `check:system`, `format:check`, `bun test` (107 pass), `bun run

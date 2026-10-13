@@ -76,6 +76,26 @@ Rules: instructions (address, code) are sticky; a prompt replaces a prompt and i
 the provider resolves it; a refusal wraps inside the dialog and never widens it; the only exit
 while a flow runs is the labelled Cancel.
 
+## 4b. The frame and the slots (the owner's finding)
+
+The dialog is a frame with **three slots**, and every state fills the same ones:
+
+- **the ask** — one line of words, in the provider's own voice (its question, its instructions, or
+  the flow's own "Starting…" / "Finishing…");
+- **the controls** — what the person acts on, in the same order every time: the addresses and
+  codes, then the choices, then the field;
+- **the action** — one button, full width, pinned to the bottom of the body.
+
+The body is never shorter than `--connect-body-min` (176px, 256px below `sm` — the phone states
+wrap to more lines and every control is at the 44px step), so a state change moves the words and
+not the panel. Measured at 1200×800: every state 357px tall at top 222 (before: 300/280/320/256 at
+tops 250/260/240/272); at 390×844: every state 448px at top 198 (before: 288/305/305/397, tops
+278/270/270/224). The action button lands at the same y in every state that has one.
+
+The token carries its own phone step in `tokens.css` rather than in `globals.css`'s phone ladder:
+a step written in `@layer base` loses to an unlayered token file, which is why the type ladder can
+live there and this cannot.
+
 ## 5. What does not change
 
 - No new tokens, no new type step, no new colour. The classes the mocks use are the product's.

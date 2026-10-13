@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import type { AuthFlow, AuthNotice } from "@/app/auth-flow";
 import type { ProviderAuthType } from "@/app/client";
 import type { ProviderSummary } from "@/app/view-models";
@@ -63,182 +64,65 @@ function Address({ url, label = "Open" }: { url: string; label?: string | undefi
 	);
 }
 
-function noticeKey(notice: AuthNotice): string {
-	if (notice.kind === "auth_url") return `url-${notice.url}`;
-	if (notice.kind === "device_code") return `code-${notice.userCode}`;
-	return `info-${notice.message}`;
-}
-
-function Notice({ event }: { event: AuthNotice }) {
-	switch (event.kind) {
+/**
+ * The rows a notice puts on screen: an address, a code, a link. They are what the person acts
+ * on, and they sit in the same slot in every state — under the words, above the action.
+ */
+function noticeControls(notice: AuthNotice) {
+	switch (notice.kind) {
 		case "info":
 			return (
-				<Stack gap="2xs">
-					<Text size="sm" className="wrap-anywhere">
-						{event.message}
-					</Text>
-					{(event.links ?? []).map((link) => (
+				<>
+					{(notice.links ?? []).map((link) => (
 						<Address key={link.url} url={link.url} label={link.label ?? "Open"} />
 					))}
-				</Stack>
+				</>
 			);
 		case "auth_url":
-			return (
-				<Stack gap="2xs">
-					<Text size="sm" className="wrap-anywhere">
-						{event.instructions ?? "Open this address to finish signing in."}
-					</Text>
-					<Address url={event.url} />
-				</Stack>
-			);
+			return <Address url={notice.url} />;
 		case "device_code":
 			return (
-				<Stack gap="2xs">
-					<Text size="sm">Enter this code where the provider asks:</Text>
+				<>
 					<span className="flex items-center gap-2">
 						<Text as="span" size="lg" weight="semibold" className="font-mono">
-							{event.userCode}
+							{notice.userCode}
 						</Text>
-						<CopyButton value={event.userCode} label="Copy code" />
+						<CopyButton value={notice.userCode} label="Copy code" />
 					</span>
-					<Address url={event.verificationUri} />
-				</Stack>
+					<Address url={notice.verificationUri} />
+				</>
 			);
 	}
 }
 
-function Prompt({
-	flow,
-	onAnswer,
-}: {
-	flow: AuthFlow;
-	onAnswer: ((value: string) => void) | undefined;
-}) {
-	const prompt = flow.prompt;
-	if (prompt === undefined) return null;
-	if (prompt.promptType === "select") {
-		return (
-			<Stack gap="2xs">
-				<Text size="sm" weight="medium">
-					{prompt.message}
-				</Text>
-				{(prompt.options ?? []).map((option) => (
-					<Button
-						key={option.id}
-						type="button"
-						variant="outline"
-						// A choice is a sentence, not a word: it wraps, and it grows instead of
-						// clipping the answer it offers.
-						className="h-auto justify-start py-2 whitespace-normal"
-						disabled={flow.answering}
-						onClick={() => onAnswer?.(option.id)}
-					>
-						<span className="flex min-w-0 flex-col items-start gap-0.5">
-							<span>{option.label}</span>
-							{option.description === undefined ? null : (
-								<Text as="span" size="2xs" tone="muted">
-									{option.description}
-								</Text>
-							)}
-						</span>
-					</Button>
-				))}
-			</Stack>
-		);
+/** The words a notice asks with, when no prompt says it better. */
+function noticeAsk(notice: AuthNotice): string | undefined {
+	switch (notice.kind) {
+		case "info":
+			return notice.message;
+		case "auth_url":
+			return notice.instructions ?? "Open this address to finish signing in.";
+		case "device_code":
+			return "Enter this code where the provider asks:";
 	}
-	return (
-		<AnswerField
-			key={prompt.promptId}
-			message={prompt.message}
-			placeholder={prompt.placeholder}
-			secret={prompt.promptType === "secret" || prompt.promptType === "manual_code"}
-			// A text prompt may accept a blank answer on purpose — "GitHub Enterprise URL/domain
-			// (blank for github.com)" is one — while a key or a code is never blank.
-			allowEmpty={prompt.promptType === "text"}
-			// A pasted code or redirect URL is continued with, a key is saved: the button says
-			// which, because the two mean different things to the flow behind it.
-			action={prompt.promptType === "secret" ? "Save" : "Continue"}
-			busy={prompt.promptType === "secret" ? "Saving" : "Checking"}
-			disabled={flow.answering}
-			onAnswer={onAnswer}
-		/>
-	);
-}
-
-function AnswerField({
-	message,
-	placeholder,
-	secret,
-	allowEmpty,
-	action,
-	busy,
-	disabled,
-	onAnswer,
-}: {
-	message: string;
-	placeholder?: string | undefined;
-	secret: boolean;
-	allowEmpty: boolean;
-	action: string;
-	busy: string;
-	disabled: boolean;
-	onAnswer: ((value: string) => void) | undefined;
-}) {
-	const [value, setValue] = useState("");
-	// One field per prompt: a second prompt is a second question, not an edit.
-	useEffect(() => {
-		setValue("");
-	}, [message]);
-	const submit = (): void => {
-		if (disabled) return;
-		if (value === "" && !allowEmpty) return;
-		onAnswer?.(value);
-	};
-	return (
-		<Stack gap="2xs">
-			<Text size="sm" weight="medium" className="wrap-anywhere">
-				{message}
-			</Text>
-			<span className="flex items-center gap-2">
-				<Input
-					value={value}
-					type={secret ? "password" : "text"}
-					autoFocus
-					autoComplete="off"
-					spellCheck={false}
-					placeholder={placeholder}
-					aria-label={message}
-					disabled={disabled}
-					onChange={(event) => setValue(event.target.value)}
-					onKeyDown={(event) => {
-						if (event.key !== "Enter") return;
-						event.preventDefault();
-						submit();
-					}}
-				/>
-				<Button
-					type="button"
-					size="sm"
-					disabled={disabled || (value === "" && !allowEmpty)}
-					onClick={submit}
-				>
-					{disabled ? `${busy}…` : action}
-				</Button>
-			</span>
-		</Stack>
-	);
 }
 
 /**
- * Connecting a provider, as a dialog: the method first, then whatever the provider asks
- * for — a key, a choice, a page to open, a code to copy. Prompts and notices arrive on
- * the stream, so the dialog renders what is here and waits for the rest. Cancelling
- * aborts the server flow too, not just the dialog: a dialog that only hides would leave
- * a sign-in running behind it.
+ * Connecting a provider, as a dialog: the method first, then whatever the provider asks for — a
+ * key, a choice, a page to open, a code to copy. Prompts and notices arrive on the stream, so
+ * the dialog renders what is here and waits for the rest. Cancelling aborts the server flow too,
+ * not just the dialog: a dialog that only hides would leave a sign-in running behind it.
+ *
+ * The dialog is a frame with three slots, and every state fills the same ones: **the ask** (one
+ * line of words, in the provider's own voice), **the controls** (what the person acts on — the
+ * method buttons, an address, a code, the field), and **the action** (one full-width button, the
+ * last thing in the body). A state change then moves nothing but the words: the owner's finding
+ * was that connecting — choice, then the provider's question, then the address and the paste —
+ * rearranged the whole panel at every step. The body keeps a minimum height for the same reason,
+ * so the frame does not resize between states.
  *
  * While a flow runs, a tap outside does nothing and the X is gone: the only way out is the
- * Cancel button. A stray tap on a phone must not end a sign-in half done, and "outside" is
- * where the person taps when the page is not the dialog.
+ * Cancel button. A stray tap on a phone must not end a sign-in half done.
  */
 export function ProviderLoginDialog({
 	pending,
@@ -253,15 +137,21 @@ export function ProviderLoginDialog({
 	const provider = flow?.provider ?? pending;
 	const outcome = flow?.outcome;
 	const live = flow !== undefined && outcome === undefined;
+	const prompt = flow?.prompt;
 	/** The method being started, and why it did not: the flow's own state arrives later. */
 	const [starting, setStarting] = useState<ProviderAuthType | undefined>(undefined);
 	const [startError, setStartError] = useState<string | undefined>(undefined);
+	/** The answer to the waiting prompt. One field per prompt: a second prompt is a new question. */
+	const [answer, setAnswer] = useState("");
 
 	// A new provider is a new question: the last attempt's state does not belong to it.
 	useEffect(() => {
 		setStarting(undefined);
 		setStartError(undefined);
 	}, [pending?.id]);
+	useEffect(() => {
+		setAnswer("");
+	}, [prompt?.promptId]);
 
 	const close = (): void => {
 		if (flow === undefined || outcome === undefined) onCancel?.();
@@ -277,10 +167,17 @@ export function ProviderLoginDialog({
 		});
 	};
 
+	const submit = (): void => {
+		if (prompt === undefined || flow?.answering === true) return;
+		// A text prompt may accept a blank answer on purpose — "GitHub Enterprise URL/domain
+		// (blank for github.com)" is one — while a key or a code is never blank.
+		if (answer === "" && prompt.promptType !== "text") return;
+		onAnswer?.(answer);
+	};
+
 	// With nothing else to say, the flow says where it is: starting, or finishing what was
 	// answered or taken over. A provider's own line wins when it has one. A device code is the
-	// exception: it is the question, and the flow is waiting for the person until it ends, so
-	// no line is added under it.
+	// exception: it is the question, and the flow waits for the person until it ends.
 	const waitingOnCode = flow?.notices.some((notice) => notice.kind === "device_code") ?? false;
 	const status =
 		flow === undefined || outcome !== undefined
@@ -293,6 +190,183 @@ export function ProviderLoginDialog({
 							: "Saving the key…"
 						: `Starting ${methodLabel(flow.method).toLowerCase()}…`
 					: undefined));
+
+	// The three slots. Only their contents change between states.
+	let ask: ReactNode;
+	let controls: ReactNode;
+	let action: ReactNode;
+	if (flow === undefined && pending !== undefined) {
+		ask =
+			starting === undefined ? (
+				startError === undefined ? undefined : (
+					<Text size="sm" tone="muted" className="wrap-anywhere">
+						Could not start: {startError}
+					</Text>
+				)
+			) : (
+				<Text size="sm" tone="muted">
+					Starting {methodLabel(starting).toLowerCase()}…
+				</Text>
+			);
+		controls = (
+			<Stack gap="2xs">
+				{pending.authTypes.map((method) => (
+					<Button
+						key={method}
+						type="button"
+						variant="outline"
+						// A choice is a sentence, not a word: it wraps, and it grows instead of
+						// clipping the answer it offers.
+						className="h-auto justify-start py-2 whitespace-normal"
+						disabled={starting !== undefined}
+						onClick={() => pick(method)}
+					>
+						<span className="flex min-w-0 flex-col items-start gap-0.5">
+							<span>{methodLabel(method)}</span>
+							<Text as="span" size="2xs" tone="muted">
+								{methodHint(method)}
+							</Text>
+						</span>
+					</Button>
+				))}
+			</Stack>
+		);
+		action = undefined;
+	} else if (flow !== undefined) {
+		if (outcome?.ok === true) {
+			ask = <Text size="sm">{flow.provider.name} connected.</Text>;
+		} else if (outcome !== undefined) {
+			ask = (
+				<Stack gap="2xs">
+					<Text size="sm" weight="medium">
+						Could not connect.
+					</Text>
+					<Text size="sm" className="wrap-anywhere">
+						{outcome.message}
+					</Text>
+				</Stack>
+			);
+			action = (
+				<Button
+					type="button"
+					variant="outline"
+					// Pinned to the bottom of the body's frame: the action is in the same place in
+					// every state, whatever is above it.
+					className="mt-auto w-full"
+					onClick={() => onRetry?.()}
+				>
+					Try again
+				</Button>
+			);
+		} else {
+			// The ask: the provider's own question when it has one, else its instructions, else
+			// the flow's own line. The prompt says what the notice says better, so only one of
+			// them is the ask.
+			const asked = prompt === undefined ? undefined : prompt.message;
+			const instructions = flow.notices
+				.map((notice) => noticeAsk(notice))
+				.filter((line): line is string => line !== undefined)
+				.join(" ");
+			ask = (
+				<>
+					{asked === undefined && instructions !== "" ? (
+						<Text size="sm" className="wrap-anywhere">
+							{instructions}
+						</Text>
+					) : null}
+					{asked === undefined ? null : (
+						<Text size="sm" weight="medium" className="wrap-anywhere">
+							{asked}
+						</Text>
+					)}
+					{status === undefined ? null : (
+						<Text size="sm" tone="muted" className="wrap-anywhere">
+							{status}
+						</Text>
+					)}
+				</>
+			);
+			// The controls: what to read or act on — the addresses and codes, then the choices,
+			// then the field. The address comes before the field because the flow needs the
+			// address finished first.
+			controls = (
+				<>
+					{flow.notices.map((notice) => (
+						<Stack key={noticeKey(notice)} gap="2xs">
+							{noticeControls(notice)}
+						</Stack>
+					))}
+					{prompt?.promptType === "select" ? (
+						<Stack gap="2xs">
+							{(prompt.options ?? []).map((option) => (
+								<Button
+									key={option.id}
+									type="button"
+									variant="outline"
+									className="h-auto justify-start py-2 whitespace-normal"
+									disabled={flow.answering}
+									onClick={() => onAnswer?.(option.id)}
+								>
+									<span className="flex min-w-0 flex-col items-start gap-0.5">
+										<span>{option.label}</span>
+										{option.description === undefined ? null : (
+											<Text as="span" size="2xs" tone="muted">
+												{option.description}
+											</Text>
+										)}
+									</span>
+								</Button>
+							))}
+						</Stack>
+					) : null}
+					{prompt === undefined || prompt.promptType === "select" ? null : (
+						<Input
+							value={answer}
+							type={
+								prompt.promptType === "secret" ||
+								prompt.promptType === "manual_code"
+									? "password"
+									: "text"
+							}
+							autoFocus
+							autoComplete="off"
+							spellCheck={false}
+							placeholder={prompt.placeholder}
+							aria-label={prompt.message}
+							disabled={flow.answering}
+							onChange={(event) => setAnswer(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key !== "Enter") return;
+								event.preventDefault();
+								submit();
+							}}
+						/>
+					)}
+				</>
+			);
+			// The action: one button, full width, the last thing in the body — the same place a
+			// choice, a paste and a retry all land.
+			action =
+				prompt === undefined || prompt.promptType === "select" ? undefined : (
+					<Button
+						type="button"
+						// Pinned to the bottom of the body's frame: the action is in the same place in
+						// every state, whatever is above it.
+						className="mt-auto w-full"
+						disabled={flow.answering || (answer === "" && prompt.promptType !== "text")}
+						onClick={submit}
+					>
+						{flow.answering
+							? prompt.promptType === "secret"
+								? "Saving…"
+								: "Checking…"
+							: prompt.promptType === "secret"
+								? "Save"
+								: "Continue"}
+					</Button>
+				);
+		}
+	}
 
 	return (
 		<Dialog
@@ -316,74 +390,11 @@ export function ProviderLoginDialog({
 							: "A key or a sign-in is stored on this install, for every workspace."}
 					</DialogDescription>
 				</DialogHeader>
-				{flow === undefined && pending !== undefined ? (
-					<Stack gap="sm">
-						{pending.authTypes.map((method) => (
-							<Button
-								key={method}
-								type="button"
-								variant="outline"
-								className="h-auto justify-start py-2 whitespace-normal"
-								disabled={starting !== undefined}
-								onClick={() => pick(method)}
-							>
-								<span className="flex min-w-0 flex-col items-start gap-0.5">
-									<span>{methodLabel(method)}</span>
-									<Text as="span" size="2xs" tone="muted">
-										{methodHint(method)}
-									</Text>
-								</span>
-							</Button>
-						))}
-						{starting === undefined ? null : (
-							<Text size="sm" tone="muted">
-								Starting {methodLabel(starting).toLowerCase()}…
-							</Text>
-						)}
-						{startError === undefined ? null : (
-							<Text size="sm" tone="muted">
-								Could not start: {startError}
-							</Text>
-						)}
-					</Stack>
-				) : flow !== undefined ? (
-					<Stack gap="sm">
-						{outcome?.ok === true ? (
-							<Text size="sm">{flow.provider.name} connected.</Text>
-						) : outcome !== undefined ? (
-							<Stack gap="2xs">
-								<Text size="sm" weight="medium">
-									Could not connect.
-								</Text>
-								<Text size="sm" className="wrap-anywhere">
-									{outcome.message}
-								</Text>
-								<span className="flex gap-2">
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										onClick={() => onRetry?.()}
-									>
-										Try again
-									</Button>
-								</span>
-							</Stack>
-						) : (
-							<>
-								{flow.notices.map((notice) => (
-									<Notice key={noticeKey(notice)} event={notice} />
-								))}
-								{status === undefined ? null : (
-									<Text size="sm" tone="muted" className="wrap-anywhere">
-										{status}
-									</Text>
-								)}
-								<Prompt flow={flow} onAnswer={onAnswer} />
-							</>
-						)}
-					</Stack>
-				) : null}
+				<Stack gap="sm" className="min-h-[var(--connect-body-min)]">
+					{ask}
+					{controls}
+					{action}
+				</Stack>
 				<DialogFooter>
 					{flow === undefined ? (
 						<Button type="button" variant="ghost" onClick={() => onCancel?.()}>
@@ -402,4 +413,10 @@ export function ProviderLoginDialog({
 			</DialogContent>
 		</Dialog>
 	);
+}
+
+function noticeKey(notice: AuthNotice): string {
+	if (notice.kind === "auth_url") return `url-${notice.url}`;
+	if (notice.kind === "device_code") return `code-${notice.userCode}`;
+	return `info-${notice.message}`;
 }

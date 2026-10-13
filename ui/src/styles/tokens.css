@@ -314,6 +314,22 @@
 	/* A compaction note shows this much when put away. Output and reasoning fold to two lines
 	 * instead (see PaneCard): a line count is what a reader of those actually counts. */
 	--summary-card-collapsed-height: 96px;
+
+	/* The connect dialog keeps its frame across its states: choice, the provider's question, the
+	 * address and the paste, the outcome. The body is never shorter than this, so a state change
+	 * moves the words and not the panel — the owner's finding was that every step rearranged the
+	 * dialog. */
+	--connect-body-min: 176px;
+}
+
+/* The connect dialog's frame on a phone, taller: the same states wrap to more lines and every
+ * control is at the 44px step. It sits here, unlayered with its token, because a step written in
+ * `@layer base` loses to this file — which is how the type ladder can live in the base layer and
+ * this cannot. */
+@media (max-width: 639px) {
+	:root {
+		--connect-body-min: 256px;
+	}
 }
 
 .dark {
