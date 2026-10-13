@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Menu, PanelRight, Plus, Settings } from "lucide-react";
+import { ArrowUp, PanelRight, Plus, Settings, X } from "lucide-react";
 import type { DefaultScope, ProviderAuthType, UploadedAttachment } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { MAX_ATTACHMENT_BYTES, refuseAttachments } from "@/lib/attachments";
@@ -23,9 +23,8 @@ import { SettingsScreen } from "@/components/settings/settings-screen";
 import { UpdateSection } from "@/components/settings/update-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
-import { WorkspacesScreen } from "@/components/workspace/workspaces-screen";
+import { WorkspacesPanel } from "@/components/workspace/workspaces-panel";
 import { WorkspaceButton } from "@/components/workspace/workspace-button";
-import { Layer } from "@/components/layout/layer";
 import { Transcript } from "@/components/transcript/transcript";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -253,7 +252,51 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 			</Text>
 		</span>
 	);
-	const rail = (
+	// The rail is a stack, and the X is the whole of its navigation: it goes back a level before
+	// it goes away. The workspaces list is the level above the conversations and fills the rail —
+	// head, rows and all — so opening it never moves the X and never opens a second pane.
+	// Putting the rail away is the one thing the widths do differently: a phone hides the drawer,
+	// a desktop collapses the column to its strip.
+	const closeRail = (away: () => void): void => {
+		if (platform.workspacesOpen) {
+			platform.closeWorkspaces();
+			return;
+		}
+		away();
+	};
+	const railToggle = (
+		<Button
+			type="button"
+			variant="ghost"
+			size="icon-sm"
+			className="hidden lg:flex"
+			aria-label={platform.workspacesOpen ? "Back to conversations" : "Hide the rail"}
+			onClick={() => closeRail(platform.toggleRail)}
+		>
+			<X />
+		</Button>
+	);
+	const rail = platform.workspacesOpen ? (
+		<Rail
+			head={
+				<Text as="span" size="sm" weight="semibold" className="truncate">
+					Workspaces
+				</Text>
+			}
+			headActions={railToggle}
+			list={
+				<WorkspacesPanel
+					workspaces={platform.workspaces}
+					onSelect={platform.selectWorkspace}
+					onCreate={platform.createWorkspace}
+					onRename={platform.renameWorkspace}
+					onForget={platform.removeWorkspace}
+					onUpdateSandbox={platform.setWorkspaceSandbox}
+					failure={platform.failure}
+				/>
+			}
+		/>
+	) : (
 		<Rail
 			head={
 				<WorkspaceButton
@@ -262,18 +305,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 					onClick={platform.openWorkspaces}
 				/>
 			}
-			headActions={
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-sm"
-					className="hidden lg:flex"
-					aria-label="Hide the rail"
-					onClick={platform.toggleRail}
-				>
-					<Menu />
-				</Button>
-			}
+			headActions={railToggle}
 			list={
 				<ConversationList
 					conversations={platform.conversations}
@@ -522,27 +554,6 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 			/>
 		) : undefined;
 
-	// The second layer: the same shape as the rail's, in the same place, opened by the
-	// workspace's own name. One at a time, so one X in the bar closes whichever is open.
-	const workspacesLayer = (
-		<Layer
-			open={platform.workspacesOpen}
-			onOpenChange={(open) => (open ? platform.openWorkspaces() : platform.closeWorkspaces())}
-			label="Workspaces"
-			belowBar
-		>
-			<WorkspacesScreen
-				workspaces={platform.workspaces}
-				onSelect={platform.selectWorkspace}
-				onCreate={platform.createWorkspace}
-				onRename={platform.renameWorkspace}
-				onForget={platform.removeWorkspace}
-				onUpdateSandbox={platform.setWorkspaceSandbox}
-				failure={platform.failure}
-			/>
-		</Layer>
-	);
-
 	// The full-width bar: the brand, then the active name, then the pane control.
 	// No rail buttons here from `lg`: the rail head closes it and the collapsed strip
 	// opens it. Below `lg` Split puts the drawer toggle beside the brand.
@@ -580,9 +591,12 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 				topbar={topbar}
 				inspector={screen === undefined ? dockedInspector : undefined}
 				railOpen={platform.railOpen}
-				onRailOpenChange={platform.setRailOpen}
-				appLayerOpen={platform.workspacesOpen}
-				onAppLayerClose={platform.closeWorkspaces}
+				onRailOpenChange={(open) => {
+					// Opening is opening; closing is the stack's: back to the conversations
+					// first, then the drawer goes.
+					if (open) platform.setRailOpen(true);
+					else closeRail(() => platform.setRailOpen(false));
+				}}
 				inlineRailToggle
 				railCollapsed={platform.railCollapsed}
 				onRailCollapsedChange={platform.toggleRail}
@@ -691,7 +705,6 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 			{/* The inspector is about the conversation in front of you, so it is only there
 			 * when one is: on a screen, it would be answering a question nobody asked. */}
 			{screen === undefined ? inspectorDialog : null}
-			{workspacesLayer}
 			<RenameDialog
 				open={renaming !== undefined}
 				title="Rename conversation"

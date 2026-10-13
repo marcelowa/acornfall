@@ -160,16 +160,31 @@ try {
 
 	if (workspaceButton !== null) {
 		await press(page, "[data-slot=workspace-button]");
-		// No address change: the list is a layer now, not a page (step 09).
-		await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 10000 });
+		// No address change: the list is a level of the rail now, not a page (run 2).
+		await page.waitForSelector("[data-slot=workspaces-panel]", { timeout: 10000 });
 		check(
-			"the workspace button opens the list as a layer",
+			"the workspace button opens the list",
 			await page.evaluate(
 				() => window.location.pathname !== "/workspaces",
 			),
 		);
+		// The level fills the rail: the panel is inside it, and the conversations are not behind it.
+		const filled = await page.evaluate(() => {
+			const rail = document.querySelector("[data-slot=rail]");
+			const panel = document.querySelector("[data-slot=workspaces-panel]");
+			if (rail === null || panel === null) return null;
+			return {
+				inside: rail.contains(panel),
+				conversations: document.querySelector("[data-slot=conversation-list]") !== null,
+			};
+		});
+		check(
+			"the list fills the rail and leaves the conversations behind",
+			filled !== null && filled.inside && !filled.conversations,
+			JSON.stringify(filled),
+		);
 		const rows = await page.evaluate(() =>
-			[...document.querySelectorAll("[data-slot=workspaces-screen] [data-slot=workspace-row]")].map(
+			[...document.querySelectorAll("[data-slot=workspaces-panel] [data-slot=workspace-row]")].map(
 				(row) => ({
 					name: row.getAttribute("data-name"),
 					active: row.getAttribute("data-active") === "true",
@@ -177,7 +192,7 @@ try {
 			),
 		);
 		check(
-			"the layer lists every workspace",
+			"the level lists every workspace",
 			rows.length === workspaceState.count,
 			`${rows.length} rows, ${workspaceState.count} workspaces`,
 		);
@@ -186,14 +201,25 @@ try {
 			rows.find((row) => row.active)?.name === workspaceState.active,
 			JSON.stringify(rows),
 		);
-		// The conversation is behind the screen, not gone: the rail is still the way back.
+		// One X, one stack: the rail's own control goes back to the conversations, and the rail
+		// itself stays where it was — it is not a close.
+		await press(page, "button[aria-label='Back to conversations']");
+		const popped = await page.evaluate(() => ({
+			panel: document.querySelector("[data-slot=workspaces-panel]") !== null,
+			conversations: document.querySelector("[data-slot=conversation-list]") !== null,
+			rail: document.querySelector("[data-slot=rail]")?.getBoundingClientRect().width ?? 0,
+		}));
 		check(
-			"the rail stays while a screen is open",
-			(await page.$("[data-slot=conversation-list]")) !== null,
+			"the X goes back to the conversations, not away",
+			!popped.panel && popped.conversations && popped.rail > 200,
+			JSON.stringify(popped),
 		);
 
 		const otherWorkspace = rows.find((row) => !row.active)?.name ?? "";
 		if (otherWorkspace !== "") {
+			// Back into the list: the pop above left the conversations in front.
+			await press(page, "[data-slot=workspace-button]");
+			await page.waitForSelector("[data-slot=workspaces-panel]", { timeout: 10000 });
 			await press(page, `[data-slot=workspace-row][data-name="${otherWorkspace}"] button[aria-label^='Open ']`);
 			await page.waitForFunction(
 				(name) => window.location.pathname === `/w/${name}`,
@@ -206,14 +232,14 @@ try {
 				.then(() => true)
 				.catch(() => false);
 			check(
-				"opening a workspace lands on it, out of the screen",
+				"opening a workspace lands on it, out of the list",
 				landed &&
-					(await page.evaluate(() => document.querySelector("[data-slot=workspaces-screen]") === null)),
+					(await page.evaluate(() => document.querySelector("[data-slot=workspaces-panel]") === null)),
 			);
-			// Back to the workspace the rest of the suite runs in: the layer's own button, then the
+			// Back to the workspace the rest of the suite runs in: the rail's own button, then the
 			// row's Open.
 			await press(page, "[data-slot=workspace-button]");
-			await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 10000 });
+			await page.waitForSelector("[data-slot=workspaces-panel]", { timeout: 10000 });
 			// The row offers Open only once the state says this workspace is the one in view;
 			// waiting for it is waiting for the fetch, not for a timer.
 			await page.waitForSelector(
@@ -283,7 +309,7 @@ try {
 		await press(page, "button[aria-label='Back to the conversation']");
 		await page.waitForSelector("[data-slot=composer]", { timeout: 5000 });
 		await press(page, "[data-slot=workspace-button]");
-		await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 5000 });
+		await page.waitForSelector("[data-slot=workspaces-panel]", { timeout: 5000 });
 		await page.type("[data-slot=workspaces-create] input", "ui-check/refused");
 		const created = await page.evaluate(() => {
 			const create = [...document.querySelectorAll("[data-slot=workspaces-create] button")].find(
@@ -415,7 +441,7 @@ try {
 		// Back to the workspace the rest of the suite runs in, before the scratch one goes
 		// away: a tab pointed at a removed workspace has nothing to show.
 		await press(page, "[data-slot=workspace-button]");
-		await page.waitForSelector("[data-slot=workspaces-screen]", { timeout: 5000 });
+		await page.waitForSelector("[data-slot=workspaces-panel]", { timeout: 5000 });
 		await press(
 			page,
 			`[data-slot=workspace-row][data-name="${workspaceState.active}"] button[aria-label^='Open ']`,
@@ -1093,27 +1119,56 @@ try {
 			Math.abs(drawerWidth.drawer - drawerWidth.window) <= 1,
 			`${drawerWidth.drawer}px of ${drawerWidth.window}px`,
 		);
-		// The drawer closes with the rail's own icon, not an X in a different corner.
+		// The bar's own toggle is the X, as it is for every layer: the drawer carries no close of
+		// its own, which is the one-close rule from the phone pass.
 		const drawerClose = await page
-			.waitForSelector('[role="dialog"] button[aria-label="Hide the rail"]', {
-				timeout: 5000,
-				visible: true,
-			})
+			.waitForSelector("button[aria-label='Close navigation']", { timeout: 5000, visible: true })
 			.catch(() => null);
-		check("the drawer carries the rail's own close", drawerClose !== null);
+		check("the bar's X is on the phone while the drawer is open", drawerClose !== null);
+		check(
+			"the drawer brings no close of its own",
+			await page.evaluate(
+				() =>
+					document.querySelector("[role=dialog] button[aria-label='Close navigation']") === null,
+			),
+		);
+
+		// The rail is a stack on a phone too: the workspace's own name fills the drawer with the
+		// list, and the same X goes back to the conversations before it closes the drawer.
+		await press(page, "[data-slot=workspace-button]");
+		await page.waitForSelector("[data-slot=workspaces-panel]", { timeout: 10000 });
+		const phoneLevel = await page.evaluate(() => ({
+			panel: document.querySelector("[role=dialog] [data-slot=workspaces-panel]") !== null,
+			conversations: document.querySelector("[data-slot=conversation-list]") !== null,
+		}));
+		check(
+			"the list fills the phone's drawer",
+			phoneLevel.panel && !phoneLevel.conversations,
+			JSON.stringify(phoneLevel),
+		);
+		await press(page, "button[aria-label='Close navigation']");
+		const poppedDrawer = await page.evaluate(() => ({
+			drawer: document.querySelector("[role=dialog]") !== null,
+			panel: document.querySelector("[data-slot=workspaces-panel]") !== null,
+			conversations: document.querySelector("[data-slot=conversation-list]") !== null,
+		}));
+		check(
+			"the phone's X goes back to the conversations first",
+			poppedDrawer.drawer && poppedDrawer.conversations && !poppedDrawer.panel,
+			JSON.stringify(poppedDrawer),
+		);
+
 		if (drawerClose !== null) {
-			// The drawer slides in from the left; clicking before it lands aims at a point that
-			// is still off the screen.
 			await page.waitForFunction(
 				() =>
 					(document
-						.querySelector('[role="dialog"] button[aria-label="Hide the rail"]')
+						.querySelector("button[aria-label='Close navigation']")
 						?.getBoundingClientRect().x ?? -1) >= 0,
 				{ timeout: 5000 },
 			);
 			// Clicked through the page, not through this handle: a re-render between the wait and
 			// the click replaces the node, and a stale handle clicks at coordinates that are gone.
-			await press(page, '[role="dialog"] button[aria-label="Hide the rail"]');
+			await press(page, "button[aria-label='Close navigation']");
 		} else {
 			await page.keyboard.press("Escape");
 		}

@@ -1,12 +1,21 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { WorkspaceSummary } from "@/app/view-models";
-import { WorkspacesScreen } from "./workspaces-screen";
+import { WorkspacesPanel } from "./workspaces-panel";
 
 const meta = {
-	title: "Screens/Workspaces",
-	component: WorkspacesScreen,
-	parameters: { layout: "fullscreen" },
-} satisfies Meta<typeof WorkspacesScreen>;
+	title: "Layout/WorkspacesPanel",
+	component: WorkspacesPanel,
+	parameters: { layout: "centered" },
+	// The rail's shape: the panel is a level of it, not a page, so it is reviewed at the width
+	// and on the surface it ships in.
+	decorators: [
+		(Story) => (
+			<div className="flex h-96 w-80 flex-col overflow-hidden border border-border bg-rail p-2">
+				<Story />
+			</div>
+		),
+	],
+} satisfies Meta<typeof WorkspacesPanel>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -57,10 +66,17 @@ export const GeneralOnly: Story = {
 };
 
 /**
- * A phone: the rows wrap instead of running off the screen, and the running mark has to earn its
- * place next to the title. This is the state the reviewer asked to see and nothing showed.
+ * A phone: the drawer is the width of the screen, so the rows get their room back and the create
+ * form stops wrapping. It is the same panel at another width, not a second one.
  */
 export const Phone: Story = {
 	args: Default.args,
 	globals: { viewport: { value: "phone" } },
+	decorators: [
+		(Story) => (
+			<div className="flex h-96 w-full flex-col overflow-hidden bg-rail p-2">
+				<Story />
+			</div>
+		),
+	],
 };

@@ -7,18 +7,21 @@ import { cn } from "cn";
  * below the content, with the right border doing the separation — the rail is chrome, not a
  * card. Rendered in the desktop column and again in the mobile drawer; both forms share this.
  *
- * The head is one quiet row: the workspace title the app passes, and the app's own icon
- * buttons beside it (switch, collapse). The collapse toggle lives here now, not floating
- * over the rail — so there is no notch, and the head aligns with the rows below it.
+ * The head is one quiet row: the workspace title the app passes, and the app's own controls
+ * beside it. The rail's toggle lives here now, not floating over the rail — so there is no
+ * notch, and the head aligns with the rows below it.
+ *
+ * A zone can be absent: the workspaces list is a level of the rail with no foot of its own, and
+ * an empty row would only be a gap.
  */
 export interface RailProps {
 	/** The mark and name above everything: branding, not navigation. */
 	brand?: ReactNode | undefined;
 	head: ReactNode;
-	/** Icon buttons that belong to the head row: switching and collapsing, usually. */
+	/** The control that closes the rail, or goes back a level: one icon, one corner, both levels. */
 	headActions?: ReactNode | undefined;
 	list: ReactNode;
-	foot: ReactNode;
+	foot?: ReactNode | undefined;
 	className?: string | undefined;
 }
 
@@ -45,9 +48,11 @@ export function Rail({ brand, head, list, headActions, foot, className }: RailPr
 			<div data-slot="rail-list" className="flex min-h-0 flex-1 flex-col">
 				{list}
 			</div>
-			<div data-slot="rail-foot" className="flex shrink-0 flex-col gap-0.5">
-				{foot}
-			</div>
+			{foot === undefined ? null : (
+				<div data-slot="rail-foot" className="flex shrink-0 flex-col gap-0.5">
+					{foot}
+				</div>
+			)}
 		</div>
 	);
 }

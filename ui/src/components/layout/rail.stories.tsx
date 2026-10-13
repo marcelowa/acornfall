@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { ChevronsUpDown, Menu, Plus, Settings } from "lucide-react";
+import { ChevronsUpDown, Plus, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/typography/text";
 import { BrandMark } from "./brand-mark";
@@ -42,7 +42,7 @@ const headActions = (
 			<ChevronsUpDown />
 		</Button>
 		<Button type="button" variant="ghost" size="icon-xs" aria-label="Hide the rail">
-			<Menu />
+			<X />
 		</Button>
 	</>
 );
