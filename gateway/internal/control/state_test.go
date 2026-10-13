@@ -273,6 +273,82 @@ func TestAViewFrameReachesOnlyItsConversation(t *testing.T) {
 	}
 }
 
+// A login is a burst: a status line, an address, and the prompt that asks for an answer
+// arrive within a millisecond of each other. Every one has to reach the client — a dropped
+// prompt leaves the dialog waiting for a question the provider already asked.
+func TestALoginBurstReachesTheClient(t *testing.T) {
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	frames := make(chan protocol.Frame, subscriberQueue)
+	control.subscribers[1] = frames
+
+	for _, kind := range []string{"progress", "auth_url", "prompt"} {
+		control.publish(protocol.Frame{
+			Type:   "auth",
+			AuthID: "auth-1",
+			Event:  &protocol.AuthEvent{Kind: kind},
+		})
+	}
+
+	close(frames)
+	var kinds []string
+	for frame := range frames {
+		kinds = append(kinds, frame.Event.Kind)
+	}
+	if len(kinds) != 3 {
+		t.Fatalf("the burst must arrive whole, got %v", kinds)
+	}
+}
+
+// A full queue drops the view, not the event: the next view carries the whole transcript,
+// and the event a view would have displaced is one of a sequence, not replaceable.
+func TestAFullQueueKeepsTheEventAndDropsTheView(t *testing.T) {
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	frames := make(chan protocol.Frame, 1)
+	control.subscribers[1] = frames
+	control.subscriberConversation[1] = "1"
+
+	control.publish(protocol.Frame{
+		Type:   "auth",
+		AuthID: "auth-1",
+		Event:  &protocol.AuthEvent{Kind: "prompt"},
+	})
+	control.publish(protocol.Frame{Type: "view", ConversationID: "1", Seq: 2})
+
+	frame := <-frames
+	if frame.Type != "auth" {
+		t.Fatalf("the event stays and the view goes, got a %q frame", frame.Type)
+	}
+	select {
+	case extra := <-frames:
+		t.Fatalf("only the event was waiting, got a %q frame too", extra.Type)
+	default:
+	}
+}
+
+// A client that cannot keep up loses the oldest frame, never the newest: the newest event is
+// the one the flow is waiting on.
+func TestAFullQueueOfEventsDropsTheOldest(t *testing.T) {
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	frames := make(chan protocol.Frame, 1)
+	control.subscribers[1] = frames
+
+	control.publish(protocol.Frame{
+		Type:   "auth",
+		AuthID: "auth-1",
+		Event:  &protocol.AuthEvent{Kind: "progress"},
+	})
+	control.publish(protocol.Frame{
+		Type:   "auth",
+		AuthID: "auth-1",
+		Event:  &protocol.AuthEvent{Kind: "prompt"},
+	})
+
+	frame := <-frames
+	if frame.Event == nil || frame.Event.Kind != "prompt" {
+		t.Fatalf("the newest event wins, got %+v", frame.Event)
+	}
+}
+
 func TestStateCarriesUpdateSummary(t *testing.T) {
 	control := New(Options{
 		Workspace: Workspace{Name: "w", Path: t.TempDir()},
