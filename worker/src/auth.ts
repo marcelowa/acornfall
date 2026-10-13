@@ -39,6 +39,7 @@ export async function login(
 	authId: string,
 	providerId: string,
 	authType: "api_key" | "oauth",
+	deviceId: string,
 ): Promise<{ providerId: string }> {
 	const controller = new AbortController();
 	controllers.set(authId, controller);
@@ -108,7 +109,9 @@ export async function login(
 	};
 
 	try {
-		await models.login(providerId, authType, interaction);
+		// A stable id for the install: OpenAI's ChatGPT sign-in asks for it and refuses to start
+		// without one, and it has to be the same value on every later call.
+		await models.login(providerId, authType, interaction, { getDeviceId: () => deviceId });
 		notify({ kind: "done", providerId });
 		return { providerId };
 	} catch (error) {

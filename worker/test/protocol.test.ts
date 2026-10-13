@@ -370,4 +370,34 @@ describe("the worker protocol", () => {
 		const login = await worker.response<{ providerId: string }>(id, 5_000);
 		expect(login.providerId).toBe("anthropic");
 	});
+
+	test("a sign-in that identifies the install is not refused for want of an id", async () => {
+		// OpenAI's ChatGPT sign-in sends the install id as the agent host id, and refuses to
+		// start when it has none — the failure this guards. The flow's own callback port is
+		// fixed (1455), so it may end with "port in use" when a Codex CLI or another sign-in
+		// holds it; the id is read before that, which is what this asks about.
+		const id = worker.send({
+			type: "login",
+			authId: "auth-host-id",
+			providerId: "openai",
+			authType: "oauth",
+		});
+		const frame = await worker.wait(
+			(candidate) =>
+				candidate.type === "auth" &&
+				["auth_url", "error"].includes(
+					(candidate as { event?: { kind?: string } }).event?.kind ?? "",
+				),
+		);
+		const event = (frame as { event: { kind: string; url?: string; message?: string } }).event;
+		if (event.kind === "auth_url") {
+			const url = new URL(event.url ?? "");
+			expect(url.searchParams.get("ext_agent_host_id")).toMatch(/^urn:uuid:[0-9a-f-]{36}$/);
+		} else {
+			expect(event.message ?? "").not.toContain("device ID");
+		}
+		// The flow ends as cancelled, which is also what frees the fixed port.
+		await worker.call({ type: "auth_cancel", authId: "auth-host-id" });
+		await worker.response(id).catch(() => undefined);
+	});
 });
