@@ -25,7 +25,7 @@ export function PendingMessage({ entry, className }: PendingMessageProps) {
 				className,
 			)}
 		>
-			<Text as="div" size="lg" dir="auto" className="whitespace-pre-wrap">
+			<Text as="div" size="lg" dir="auto" className="whitespace-pre-wrap wrap-anywhere">
 				{entry.text}
 			</Text>
 			<PaneFooter>
