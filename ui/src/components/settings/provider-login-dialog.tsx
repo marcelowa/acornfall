@@ -75,7 +75,9 @@ function Notice({ event }: { event: AuthNotice }) {
 		case "info":
 			return (
 				<Stack gap="2xs">
-					<Text size="sm">{event.message}</Text>
+					<Text size="sm" className="wrap-anywhere">
+						{event.message}
+					</Text>
 					{(event.links ?? []).map((link) => (
 						<Address key={link.url} url={link.url} label={link.label ?? "Open"} />
 					))}
@@ -84,7 +86,7 @@ function Notice({ event }: { event: AuthNotice }) {
 		case "auth_url":
 			return (
 				<Stack gap="2xs">
-					<Text size="sm">
+					<Text size="sm" className="wrap-anywhere">
 						{event.instructions ?? "Open this address to finish signing in."}
 					</Text>
 					<Address url={event.url} />
@@ -195,7 +197,7 @@ function AnswerField({
 	};
 	return (
 		<Stack gap="2xs">
-			<Text size="sm" weight="medium">
+			<Text size="sm" weight="medium" className="wrap-anywhere">
 				{message}
 			</Text>
 			<span className="flex items-center gap-2">
@@ -354,7 +356,9 @@ export function ProviderLoginDialog({
 								<Text size="sm" weight="medium">
 									Could not connect.
 								</Text>
-								<Text size="sm">{outcome.message}</Text>
+								<Text size="sm" className="wrap-anywhere">
+									{outcome.message}
+								</Text>
 								<span className="flex gap-2">
 									<Button
 										type="button"
@@ -372,7 +376,7 @@ export function ProviderLoginDialog({
 									<Notice key={noticeKey(notice)} event={notice} />
 								))}
 								{status === undefined ? null : (
-									<Text size="sm" tone="muted">
+									<Text size="sm" tone="muted" className="wrap-anywhere">
 										{status}
 									</Text>
 								)}

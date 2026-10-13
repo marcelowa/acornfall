@@ -53,7 +53,10 @@ function DialogContent({
 			<DialogPrimitive.Content
 				data-slot="dialog-content"
 				className={cn(
-					"fixed top-[var(--dialog-top)] left-1/2 z-50 grid max-h-[var(--dialog-max-height)] w-full max-w-[var(--dialog-max-width)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+					// Every child is allowed to shrink: a grid column sizes to its content, and one long
+					// unbreakable value — an authorization URL, a token, a key — otherwise widens the
+					// dialog and its header and footer with it. The children clip what is theirs.
+					"fixed top-[var(--dialog-top)] left-1/2 z-50 grid max-h-[var(--dialog-max-height)] w-full max-w-[var(--dialog-max-width)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none [&>*]:min-w-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
 					className,
 				)}
 				{...props}
