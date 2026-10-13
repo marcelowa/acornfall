@@ -62,6 +62,7 @@ import {
 	type ResolvedAgent,
 } from "./config.ts";
 import { devProvider, scriptedDevProvider } from "./devprovider.ts";
+import { installId } from "./install.ts";
 import { conversationIdOf, ConversationMetaDoc } from "./meta.ts";
 import { delegationExtension, policyFor } from "./delegation.ts";
 import { guardsExtension } from "./hooks.ts";
@@ -1162,7 +1163,13 @@ async function handle(command: HandledCommand): Promise<unknown> {
 				rules: workspaceRules !== undefined,
 			};
 		case "login":
-			return await login(models, command.authId, command.providerId, command.authType);
+			return await login(
+				models,
+				command.authId,
+				command.providerId,
+				command.authType,
+				await installId(args.home),
+			);
 		case "logout":
 			// Removes the stored credential for this provider only.
 			await models.logout(command.providerId);
