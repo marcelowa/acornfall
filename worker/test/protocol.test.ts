@@ -336,4 +336,38 @@ describe("the worker protocol", () => {
 		const described = await worker.call<{ provider: string }>({ type: "describe" });
 		expect(described.provider).toBe("pi-durable");
 	});
+
+	test("a login waiting for an answer does not hold up the queue", async () => {
+		// A dialog nobody answers leaves the flow waiting for a prompt that never comes. The
+		// queue must not wait with it: the state, the conversations, and the next message all
+		// queue behind the login otherwise, and the console looks dead until the provider's own
+		// timeout ends the flow.
+		const id = worker.send({
+			type: "login",
+			authId: "auth-queue",
+			providerId: "anthropic",
+			authType: "api_key",
+		});
+		const frame = await worker.wait(
+			(candidate) =>
+				candidate.type === "auth" &&
+				(candidate as { authId?: string }).authId === "auth-queue",
+		);
+		const prompt = (frame as { event: { kind: string; promptId: string } }).event;
+		expect(prompt.kind).toBe("prompt");
+
+		// The queue is free while the login waits.
+		const described = await worker.call<{ provider: string }>({ type: "describe" }, 5_000);
+		expect(described.provider).toBe("pi-durable");
+
+		// The answer bypasses the queue, and the login settles with its own response.
+		await worker.call({
+			type: "auth_answer",
+			authId: "auth-queue",
+			promptId: prompt.promptId,
+			value: "sk-test",
+		});
+		const login = await worker.response<{ providerId: string }>(id, 5_000);
+		expect(login.providerId).toBe("anthropic");
+	});
 });
