@@ -23,6 +23,16 @@ function statusLine(provider: ProviderSummary): string {
 	return `Connected · ${how}${where} · ${provider.modelCount} models`;
 }
 
+/** The row names the act it leads to: a provider with one method offers that one, and only a
+ * provider with both leaves the choice to the dialog. */
+function connectLabel(provider: ProviderSummary): string {
+	if (provider.authTypes.includes("oauth") && !provider.authTypes.includes("api_key"))
+		return "Sign in";
+	if (provider.authTypes.includes("api_key") && !provider.authTypes.includes("oauth"))
+		return "Add key";
+	return "Connect";
+}
+
 /**
  * The providers, as settings lists them: keys are global, so this section is global too —
  * it never sits under the workspace tabs. Connected rows lead, the rest follow by name,
@@ -152,7 +162,7 @@ export function ProvidersSection({
 									className="shrink-0"
 									onClick={() => onConnect?.(provider)}
 								>
-									Connect
+									{connectLabel(provider)}
 								</Button>
 							)}
 						</div>

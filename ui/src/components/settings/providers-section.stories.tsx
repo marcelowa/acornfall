@@ -38,6 +38,15 @@ const providers: ProviderSummary[] = [
 		modelCount: 0,
 	},
 	{
+		id: "openai-codex",
+		name: "OpenAI Codex (legacy)",
+		authenticated: false,
+		// Sign-in only: the row's own button says so, rather than a Connect that leads to
+		// a dialog with one button in it.
+		authTypes: ["oauth"],
+		modelCount: 0,
+	},
+	{
 		id: "aws",
 		name: "AWS Bedrock",
 		authenticated: false,

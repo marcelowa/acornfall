@@ -526,9 +526,11 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 		/>
 	);
 
-	const pickMethod = (method: ProviderAuthType): void => {
-		if (connecting === undefined) return;
-		platform.startLogin(connecting, method);
+	const pickMethod = (method: ProviderAuthType): Promise<void> => {
+		if (connecting === undefined) return Promise.resolve();
+		// The dialog holds its own "starting" state until this settles, so a second tap
+		// cannot start a second flow and a refusal is said where the method was chosen.
+		return platform.startLogin(connecting, method);
 	};
 	const dismissLogin = (abort: boolean): void => {
 		setConnecting(undefined);

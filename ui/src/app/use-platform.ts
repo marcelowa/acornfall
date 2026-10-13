@@ -37,6 +37,16 @@ import {
 	type UpdatePrefs,
 	type UpdateStatus,
 } from "./client";
+import {
+	authFlowAnswerFailed,
+	authFlowAnswered,
+	authFlowStarted,
+	foldAuthEvent,
+	rememberAuthEvent,
+	takeAuthEvents,
+	type AuthFlow,
+	type AuthWaiting,
+} from "./auth-flow";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
 import { trackBuild } from "./update";
 import {
@@ -65,15 +75,7 @@ import type {
 	TranscriptEntry,
 	WorkspaceSummary,
 } from "./view-models";
-import type {
-	WireAuthEvent,
-	WireAuthNotice,
-	WireResolvedAgent,
-	WireSender,
-	WireState,
-	WireUsage,
-	WireView,
-} from "./wire";
+import type { WireResolvedAgent, WireSender, WireState, WireUsage, WireView } from "./wire";
 
 const RAIL_WIDTH_KEY = "acornfall.ui.railWidth";
 const RAIL_COLLAPSED_KEY = "acornfall.ui.railCollapsed";
@@ -176,20 +178,8 @@ function timeOf(updatedAt: Date | undefined): number {
 	return updatedAt instanceof Date ? updatedAt.getTime() : Number.NEGATIVE_INFINITY;
 }
 
-/** One provider login in flight: the dialog renders this, nothing else. */
-export interface AuthFlow {
-	authId: string;
-	provider: ProviderSummary;
-	method: ProviderAuthType;
-	/** Notices so far: info, links, codes, progress. Prompts are not notices. */
-	notices: WireAuthNotice[];
-	/** The prompt waiting for an answer, if any. */
-	prompt?: Extract<WireAuthEvent, { kind: "prompt" }> | undefined;
-	/** An answer on its way: the dialog holds its submit until it lands. */
-	answering: boolean;
-	/** How the flow ended, when it ended. The dialog stays open to say so. */
-	outcome?: { ok: true } | { ok: false; message: string } | undefined;
-}
+/** A login in flight is the dialog's whole state, folded in `auth-flow.ts`. */
+export type { AuthFlow } from "./auth-flow";
 
 export interface Platform {
 	ready: boolean;
@@ -250,8 +240,9 @@ export interface Platform {
 	providers: ProviderSummary[];
 	/** A login in flight, if any: the connect dialog renders it. */
 	authFlow?: AuthFlow | undefined;
-	/** Start connecting a provider. Prompts arrive on the stream. */
-	startLogin: (provider: ProviderSummary, method: ProviderAuthType) => void;
+	/** Start connecting a provider. Prompts arrive on the stream. A refusal rejects, so the
+	 * dialog can say so where the method was chosen. */
+	startLogin: (provider: ProviderSummary, method: ProviderAuthType) => Promise<void>;
 	/** Answer the waiting prompt. */
 	answerLoginPrompt: (value: string) => void;
 	/** Abort the running flow. */
@@ -362,6 +353,15 @@ export function usePlatform(): Platform {
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
 	const [ready, setReady] = useState(false);
 	const [authFlow, setAuthFlow] = useState<AuthFlow | undefined>(undefined);
+	/**
+	 * The auth id the dialog is rendering, and the frames that arrived before the POST that
+	 * named it. A worker can answer a login start before the reply is parsed, and a frame with
+	 * no flow to land in would otherwise be dropped — the dialog then waits forever on a prompt
+	 * the provider already sent. The ref is written where the flow is set, not in an effect, so
+	 * a frame cannot slip between the state and its own id.
+	 */
+	const authId = useRef<string | undefined>(undefined);
+	const authWaiting = useRef<AuthWaiting>(new Map());
 
 	const reportError = useCallback((cause: unknown): void => {
 		setFailure(cause instanceof Error ? cause.message : String(cause));
@@ -475,24 +475,15 @@ export function usePlatform(): Platform {
 				setView(nextView);
 				setSenders(nextSenders);
 			},
-			onAuth: (authId, event) => {
+			onAuth: (id, event) => {
 				if (cancelled) return;
-				// A login belongs to the dialog that started it: frames from another
-				// tab's flow are not ours to render.
-				setAuthFlow((current) => {
-					if (current?.authId !== authId) return current;
-					if (event.kind === "prompt")
-						return { ...current, prompt: event, answering: false };
-					if (event.kind === "done")
-						return { ...current, prompt: undefined, outcome: { ok: true } };
-					if (event.kind === "error")
-						return {
-							...current,
-							prompt: undefined,
-							outcome: { ok: false, message: event.message },
-						};
-					return { ...current, notices: [...current.notices, event] };
-				});
+				if (authId.current !== id) {
+					rememberAuthEvent(authWaiting.current, id, event);
+					return;
+				}
+				setAuthFlow((current) =>
+					current === undefined ? current : foldAuthEvent(current, event),
+				);
 			},
 			onReconnecting: () => {
 				if (!cancelled) setConnection("reconnecting");
@@ -942,46 +933,63 @@ export function usePlatform(): Platform {
 	// Provider logins. The start answers 202 with a flow id; every step after that
 	// arrives as an auth frame on the stream, matched to the dialog that started it.
 	const startLogin = useCallback(
-		(provider: ProviderSummary, method: ProviderAuthType) => {
-			void startProviderLogin(workspace, provider.id, method)
-				.then((authId) => {
+		(provider: ProviderSummary, method: ProviderAuthType): Promise<void> => {
+			return startProviderLogin(workspace, provider.id, method).then(
+				(next) => {
 					setFailure(undefined);
-					setAuthFlow({
-						authId,
-						provider,
-						method,
-						notices: [],
-						prompt: undefined,
-						answering: false,
-						outcome: undefined,
-					});
-				})
-				.catch(reportError);
+					authId.current = next;
+					// Whatever arrived while the reply was in flight belongs to this flow.
+					setAuthFlow(
+						authFlowStarted(
+							next,
+							provider,
+							method,
+							takeAuthEvents(authWaiting.current, next),
+						),
+					);
+				},
+				(cause: unknown) => {
+					reportError(cause);
+					throw cause;
+				},
+			);
 		},
 		[workspace, reportError],
 	);
 	const answerLoginPrompt = useCallback(
 		(value: string) => {
 			if (authFlow?.prompt === undefined) return;
-			const { authId, prompt } = { authId: authFlow.authId, prompt: authFlow.prompt };
+			const { authId: id, prompt } = { authId: authFlow.authId, prompt: authFlow.prompt };
 			setAuthFlow({ ...authFlow, answering: true });
-			void answerAuthPrompt(workspace, authId, prompt.promptId, value)
-				.then(() => setFailure(undefined))
-				.catch((cause: unknown) => {
-					reportError(cause);
+			void answerAuthPrompt(workspace, id, prompt.promptId, value).then(
+				() => {
+					setFailure(undefined);
+					// The answer landed: the question goes, and the flow's own line takes over.
 					setAuthFlow((current) =>
-						current?.authId === authId ? { ...current, answering: false } : current,
+						current?.authId === id ? authFlowAnswered(current) : current,
 					);
-				});
+				},
+				(cause: unknown) => {
+					reportError(cause);
+					// The question stays, so the answer can be given again.
+					setAuthFlow((current) =>
+						current?.authId === id ? authFlowAnswerFailed(current) : current,
+					);
+				},
+			);
 		},
 		[authFlow, reportError, workspace],
 	);
 	const cancelLogin = useCallback(() => {
-		const authId = authFlow?.authId;
+		const id = authFlow?.authId;
+		authId.current = undefined;
 		setAuthFlow(undefined);
-		if (authId !== undefined) void cancelAuthFlow(workspace, authId).catch(reportError);
+		if (id !== undefined) void cancelAuthFlow(workspace, id).catch(reportError);
 	}, [authFlow, reportError, workspace]);
-	const closeLogin = useCallback(() => setAuthFlow(undefined), []);
+	const closeLogin = useCallback(() => {
+		authId.current = undefined;
+		setAuthFlow(undefined);
+	}, []);
 	const logoutProviderById = useCallback(
 		(id: string) => {
 			act(logoutProvider(workspace, id), () => void reload());

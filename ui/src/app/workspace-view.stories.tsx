@@ -266,7 +266,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 				modelCount: 29,
 			},
 		],
-		startLogin: noop,
+		startLogin: () => Promise.resolve(),
 		answerLoginPrompt: noop,
 		cancelLogin: noop,
 		closeLogin: noop,
