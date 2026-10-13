@@ -176,6 +176,60 @@ export const AddressLabelledVariant: Story = {
 	),
 };
 
+/**
+ * The frame across the flow, with the numbers this sandbox measured: the dialog's top and
+ * height at every state, before the slots and after them. A transition cannot be photographed,
+ * so the claim is printed instead — and the live console is where it can be watched.
+ */
+export const TheFrameHolds: Story = {
+	render: () => (
+		<Stack gap="md" className="w-full max-w-2xl">
+			<Stack gap="2xs">
+				<Text as="p" size="sm" weight="semibold">
+					The dialog keeps its frame across the flow
+				</Text>
+				<Text as="p" size="2xs" tone="muted">
+					The owner's finding: connecting — choice, the provider's question, the address
+					and the paste, the outcome — rearranged the panel at every step. Every state now
+					fills the same three slots: the ask, the controls, the action, with the action
+					pinned to the bottom of a body that is never shorter than the frame.
+				</Text>
+			</Stack>
+			<div className="flex flex-col gap-1">
+				{[
+					[
+						"state",
+						"before · desktop",
+						"after · desktop",
+						"before · phone",
+						"after · phone",
+					],
+					["method choice", "250 / 300", "222 / 357", "278 / 288", "198 / 448"],
+					["starting", "260 / 280", "222 / 357", "270 / 305", "198 / 448"],
+					["provider's question", "260 / 280", "222 / 357", "270 / 305", "198 / 448"],
+					["address + paste", "240 / 320", "222 / 357", "224 / 397", "198 / 448"],
+					["refusal", "272 / 256", "222 / 357", "281 / 282", "198 / 448"],
+				].map((row) => (
+					<div key={row[0]} className="flex gap-2 font-mono text-2xs">
+						<span className="w-40 shrink-0 text-foreground">{row[0]}</span>
+						<span className="min-w-0 flex-1 text-muted-foreground">
+							{row[1]} → {row[2]}
+						</span>
+						<span className="min-w-0 flex-1 text-muted-foreground">
+							{row[3]} → {row[4]}
+						</span>
+					</div>
+				))}
+			</div>
+			<Text as="p" size="2xs" tone="muted">
+				Top / height in px, measured in this sandbox at 1200×800 and 390×844. The action
+				button lands at the same y in every state that has one: 466 on desktop, 517 on the
+				phone.
+			</Text>
+		</Stack>
+	),
+};
+
 export const AddressDesktop: Story = {
 	render: () => (
 		<>

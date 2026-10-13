@@ -79,6 +79,11 @@ Must be true: the honest state is on the row; a refusal says what happened and w
   actions are the only accents on the surface.
 - **R5 — the phone is a real surface.** 44px targets below `sm`, fields at 16px, nothing sideways,
   and a dialog that stays above the keyboard when the paste field takes focus.
+- **R6 — the dialog keeps its frame and its slots.** Every state of the connect dialog fills the
+  same three slots — the ask (one line of words), the controls (what the person acts on), the
+  action (one button, pinned to the bottom of the body) — and the body is never shorter than the
+  frame, so a state change moves the words and not the panel. The owner's finding: connecting
+  rearranged the whole dialog at every step.
 
 ## What the panel gets
 
