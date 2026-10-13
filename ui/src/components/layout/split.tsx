@@ -4,7 +4,7 @@ import {
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
-import { PanelLeft, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
@@ -150,7 +150,7 @@ export function Split({
 				aria-label={asideCollapsed ? "Show the rail" : "Hide the rail"}
 				onClick={() => onAsideCollapsedChange(!asideCollapsed)}
 			>
-				{asideCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+				<Menu />
 			</Button>
 		);
 
@@ -172,7 +172,7 @@ export function Split({
 				setOpen(!open);
 			}}
 		>
-			{open || appLayerOpen ? <X /> : <PanelLeft />}
+			{open || appLayerOpen ? <X /> : <Menu />}
 		</Button>
 	);
 

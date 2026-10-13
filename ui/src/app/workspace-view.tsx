@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, PanelLeftClose, PanelRight, Plus, Settings } from "lucide-react";
+import { ArrowUp, Menu, PanelRight, Plus, Settings } from "lucide-react";
 import type { DefaultScope, ProviderAuthType, UploadedAttachment } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { MAX_ATTACHMENT_BYTES, refuseAttachments } from "@/lib/attachments";
@@ -271,7 +271,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 					aria-label="Hide the rail"
 					onClick={platform.toggleRail}
 				>
-					<PanelLeftClose />
+					<Menu />
 				</Button>
 			}
 			list={
