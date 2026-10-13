@@ -18,6 +18,7 @@ import { Stack } from "@/components/layout/stack";
 import { Button } from "@/components/ui/button";
 import { ClippedText } from "@/components/ui/clipped-text";
 import { Input } from "@/components/ui/input";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Text } from "@/components/typography/text";
 import { cn } from "cn";
 import { X } from "lucide-react";
@@ -112,6 +113,39 @@ function Group({
 					/>
 				))}
 			</div>
+		</Stack>
+	);
+}
+
+/**
+ * The address as a label instead of a URL, the panel's alternative to today's row: it read 63 of
+ * 214 characters of the OpenRouter address and asked what printing the rest buys. This keeps the
+ * two things that matter — the host to recognise, and Copy — and drops the part nobody reads.
+ */
+export function AddressLabelled({ url, instructions }: { url: string; instructions: string }) {
+	const host = (() => {
+		try {
+			return new URL(url).host;
+		} catch {
+			return url;
+		}
+	})();
+	return (
+		<Stack gap="2xs">
+			<Text size="sm" className="wrap-anywhere">
+				{instructions}
+			</Text>
+			<span className="flex min-w-0 flex-wrap items-center gap-2">
+				<Text as="span" size="sm" className="min-w-0 flex-1 truncate font-mono">
+					Sign in at {host}
+				</Text>
+				<CopyButton value={url} label="Copy address" />
+				<Button asChild variant="link" size="sm" className="shrink-0">
+					<a href={url} target="_blank" rel="noreferrer">
+						Open
+					</a>
+				</Button>
+			</span>
 		</Stack>
 	);
 }

@@ -964,16 +964,20 @@ export function usePlatform(): Platform {
 			void answerAuthPrompt(workspace, id, prompt.promptId, value).then(
 				() => {
 					setFailure(undefined);
-					// The answer landed: the question goes, and the flow's own line takes over.
+					// The answer landed: the question it answered goes, and only that one.
 					setAuthFlow((current) =>
-						current?.authId === id ? authFlowAnswered(current) : current,
+						current?.authId === id
+							? authFlowAnswered(current, prompt.promptId)
+							: current,
 					);
 				},
 				(cause: unknown) => {
 					reportError(cause);
 					// The question stays, so the answer can be given again.
 					setAuthFlow((current) =>
-						current?.authId === id ? authFlowAnswerFailed(current) : current,
+						current?.authId === id
+							? authFlowAnswerFailed(current, prompt.promptId)
+							: current,
 					);
 				},
 			);

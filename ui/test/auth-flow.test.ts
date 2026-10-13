@@ -114,18 +114,46 @@ describe("foldAuthEvent", () => {
 });
 
 describe("answering", () => {
-	test("a landed answer clears the question and says what is left to do", () => {
-		const flow = authFlowAnswered(fold(prompt));
+	test("a landed answer clears the question it answered", () => {
+		const flow = authFlowAnswered(fold(prompt), "p-1");
 		expect(flow.prompt).toBeUndefined();
 		expect(flow.answered).toBe(true);
 		expect(flow.answering).toBe(false);
 	});
 
+	test("and leaves a newer question alone", () => {
+		// The race the panel found: a select is answered, and the paste the flow asks for next
+		// arrives before the answer's confirmation. Clearing whatever is on screen took the new
+		// question with the old answer, and the dialog waited for a paste with no field to make
+		// it in — six runs of ten.
+		const answeredSelect = fold(prompt);
+		const next = foldAuthEvent(answeredSelect, {
+			kind: "prompt",
+			promptId: "p-2",
+			promptType: "secret",
+			message: "Paste the code",
+		});
+		const late = authFlowAnswered(next, "p-1");
+		expect(late.prompt?.promptId).toBe("p-2");
+		expect(late.answered).toBe(true);
+	});
+
 	test("a refused answer keeps the question, so it can be given again", () => {
-		const flow = authFlowAnswerFailed({ ...fold(prompt), answering: true });
+		const flow = authFlowAnswerFailed({ ...fold(prompt), answering: true }, "p-1");
 		expect(flow.prompt?.promptId).toBe("p-1");
 		expect(flow.answering).toBe(false);
 		expect(flow.answered).toBe(false);
+	});
+
+	test("a refusal for a question that is gone does not touch the new one", () => {
+		const next = fold(prompt, {
+			kind: "prompt",
+			promptId: "p-2",
+			promptType: "secret",
+			message: "Paste the code",
+		});
+		const late = authFlowAnswerFailed(next, "p-1");
+		expect(late.prompt?.promptId).toBe("p-2");
 	});
 });
 
@@ -146,7 +174,7 @@ describe("a prompt the provider resolved itself", () => {
 	});
 
 	test("does not push an earlier answer aside", () => {
-		const answered = authFlowAnswered(fold(prompt));
+		const answered = authFlowAnswered(fold(prompt), "p-1");
 		const later = foldAuthEvent(answered, { kind: "prompt_cancelled", promptId: "p-1" });
 		expect(later.prompt).toBeUndefined();
 		expect(later.answered).toBe(true);
