@@ -277,17 +277,15 @@ export function ProviderLoginDialog({
 	};
 
 	// With nothing else to say, the flow says where it is: starting, or finishing what was
-	// answered. A provider's own line wins when it has one, and an instruction on screen is a
-	// question for the person — the flow is not finishing, it is waiting for them.
-	const asking =
-		flow?.notices.some(
-			(notice) => notice.kind === "auth_url" || notice.kind === "device_code",
-		) ?? false;
+	// answered or taken over. A provider's own line wins when it has one. A device code is the
+	// exception: it is the question, and the flow is waiting for the person until it ends, so
+	// no line is added under it.
+	const waitingOnCode = flow?.notices.some((notice) => notice.kind === "device_code") ?? false;
 	const status =
 		flow === undefined || outcome !== undefined
 			? undefined
 			: (flow.progress ??
-				(flow.prompt === undefined && !asking
+				(flow.prompt === undefined && !waitingOnCode
 					? flow.answered
 						? flow.method === "oauth"
 							? "Finishing sign-in…"

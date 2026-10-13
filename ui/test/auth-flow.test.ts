@@ -129,6 +129,30 @@ describe("answering", () => {
 	});
 });
 
+describe("a prompt the provider resolved itself", () => {
+	test("goes from the dialog, and the flow reads as past the question", () => {
+		// The callback server won the race against the paste: the field is asking for an answer
+		// nobody is waiting on, and the next step may be a whole exchange away.
+		const flow = fold(prompt, { kind: "prompt_cancelled", promptId: "p-1" });
+		expect(flow.prompt).toBeUndefined();
+		expect(flow.answered).toBe(true);
+		expect(flow.answering).toBe(false);
+	});
+
+	test("is not this flow's business when it names another prompt", () => {
+		const flow = fold(prompt, { kind: "prompt_cancelled", promptId: "p-other" });
+		expect(flow.prompt?.promptId).toBe("p-1");
+		expect(flow.answered).toBe(false);
+	});
+
+	test("does not push an earlier answer aside", () => {
+		const answered = authFlowAnswered(fold(prompt));
+		const later = foldAuthEvent(answered, { kind: "prompt_cancelled", promptId: "p-1" });
+		expect(later.prompt).toBeUndefined();
+		expect(later.answered).toBe(true);
+	});
+});
+
 describe("the waiting room", () => {
 	test("frames wait by auth id and leave in the order they arrived", () => {
 		const waiting: AuthWaiting = new Map();

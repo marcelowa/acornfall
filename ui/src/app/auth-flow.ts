@@ -79,6 +79,14 @@ export function foldAuthEvent(flow: AuthFlow, event: WireAuthEvent): AuthFlow {
 		case "progress":
 			// Anything the provider says means the answer that was in flight has landed.
 			return { ...flow, progress: event.message, answering: false };
+		case "prompt_cancelled":
+			// The provider answered the question itself — a callback server won the race against
+			// the pasted code — so the field goes. The flow is past the question, which is what
+			// `answered` says: with no progress line of its own, the dialog says it is finishing.
+			// A cancellation for a prompt this flow is not showing is not its business.
+			return flow.prompt?.promptId === event.promptId
+				? { ...flow, prompt: undefined, answering: false, answered: true }
+				: flow;
 		case "info":
 		case "auth_url":
 		case "device_code":

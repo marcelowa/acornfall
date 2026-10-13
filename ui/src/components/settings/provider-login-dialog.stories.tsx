@@ -112,6 +112,30 @@ export const DeviceFlow: Story = {
 	},
 };
 
+/**
+ * The callback won the race: the provider resolved the prompt itself, so the field is gone and
+ * the flow reads as finishing — which is what a reload or a slow exchange would have hidden.
+ */
+export const CallbackWon: Story = {
+	args: {
+		flow: {
+			...flowBase,
+			notices: [
+				{
+					kind: "auth_url",
+					url: "https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a",
+					instructions: "Complete login in your browser.",
+				},
+			],
+			answered: true,
+		},
+		onPickMethod: noop,
+		onAnswer: noop,
+		onCancel: noop,
+		onClose: noop,
+	},
+};
+
 /** A choice the provider offers, as buttons that wrap the sentence they are. */
 export const SelectPrompt: Story = {
 	args: {

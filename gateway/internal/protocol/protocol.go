@@ -59,8 +59,10 @@ type Command struct {
 
 func (c Command) Marshal() ([]byte, error) { return json.Marshal(c) }
 
-// AuthEventKind enumerates the login interaction events, a 1:1 projection of
-// pi-ai's AuthPrompt and AuthEvent.
+// AuthEvent is one step of a provider login: pi-ai's AuthPrompt and AuthEvent, plus
+// prompt_cancelled, which the worker sends when the provider resolves a prompt itself (a
+// callback server winning the race against a pasted code) so the interface can drop a field
+// nobody is waiting on. The gateway carries these opaquely: the kinds are the worker's.
 type AuthEvent struct {
 	Kind             string       `json:"kind"`
 	PromptID         string       `json:"promptId,omitempty"`

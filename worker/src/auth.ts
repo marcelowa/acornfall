@@ -64,8 +64,12 @@ export async function login(
 				});
 				// A prompt may carry its own signal: an out-of-band resolution, such as a
 				// callback server winning a race against a manual code, cancels just this step.
+				// The interface is told, because it is holding a field for an answer nobody is
+				// waiting for any more — its next event may be a whole exchange away.
 				prompt.signal?.addEventListener("abort", () => {
-					if (pending.delete(promptId)) reject(new Error("cancelled"));
+					if (!pending.delete(promptId)) return;
+					notify({ kind: "prompt_cancelled", promptId });
+					reject(new Error("cancelled"));
 				});
 				controller.signal.addEventListener("abort", () => {
 					if (pending.delete(promptId)) reject(new Error("cancelled"));
