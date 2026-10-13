@@ -2099,7 +2099,7 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 	c.attachments[conversationID] += 1
 	id := c.nextSub
 	c.nextSub++
-	channel := make(chan protocol.Frame, 1)
+	channel := make(chan protocol.Frame, subscriberQueue)
 	stale := make(chan struct{}, 1)
 	c.subscribers[id] = channel
 	c.staleSignals[id] = stale
@@ -2215,9 +2215,16 @@ func (c *Control) notifyState() {
 	}
 }
 
-// publish fans one frame out to attached clients. A view frame is a complete
-// value, so the newest supersedes any undelivered older one; a slow client loses
-// frames, never state.
+// subscriberQueue is how many frames may wait for one client. It is not 1: a login is a
+// burst — a status line, an address, and the prompt that asks for an answer arrive within a
+// millisecond — and a queue of one loses the middle of it, which is the prompt. A view
+// coalesces; an event queues.
+const subscriberQueue = 32
+
+// publish fans one frame out to attached clients. A view frame is a complete value, so the
+// newest supersedes any undelivered older one. An event frame — a submission, a login step —
+// is one of a sequence and cannot be replaced: a dropped prompt leaves a dialog waiting for a
+// question the provider already asked.
 func (c *Control) publish(frame protocol.Frame) {
 	// A state frame is a signal and takes the other road: the frame channel would let a slow
 	// write drop it, and a client that never hears the state moved keeps the state it read
@@ -2247,29 +2254,32 @@ func (c *Control) publish(frame protocol.Frame) {
 		}
 		subscribers = append(subscribers, channel)
 	}
-	coalesce := frame.Type == "view"
 	c.mu.Unlock()
 
 	for _, channel := range subscribers {
-		if coalesce {
-			select {
-			case channel <- frame:
-			default:
-				select {
-				case <-channel:
-				default:
-				}
-				select {
-				case channel <- frame:
-				default:
-				}
-			}
-			continue
-		}
-		select {
-		case channel <- frame:
-		default:
-		}
+		queueFrame(channel, frame)
+	}
+}
+
+// queueFrame hands one frame to a subscriber's queue without ever blocking the publisher.
+// A client that cannot keep up loses the oldest frame, never the newest; a view that finds a
+// full queue is dropped instead, because the next view carries everything it would have.
+func queueFrame(channel chan protocol.Frame, frame protocol.Frame) {
+	select {
+	case channel <- frame:
+		return
+	default:
+	}
+	if frame.Type == "view" {
+		return
+	}
+	select {
+	case <-channel:
+	default:
+	}
+	select {
+	case channel <- frame:
+	default:
 	}
 }
 
