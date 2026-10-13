@@ -21,9 +21,9 @@ The operator is still one person, the owner. Run 1's foundation clause still hol
 - [x] 01 Frame the session — frame confirmed; the answers are below
 - [x] 02 Confirm the goal — `02-goal.md`; the owner's rule: gates are answered by looking
 - [x] 03 Draft the desired journeys — J12–J15 and R1–R5, in `03-journeys.md`
-- [~] 04 Panel on the journeys — three reviewers against the running console (in flight)
+- [x] 04 Panel on the journeys — all three answered raw in `04-panel-journeys.md`; eleven findings fixed or mocked
 - [x] 05 Pick the surface's direction — `05-palette.md`: long values, copy, the list, the states
-- [~] 06 Mock and iterate — `06-mocks.md`: seven stories in the catalogue, awaiting the owner
+- [~] 06 Mock and iterate — `06-mocks.md`: nine stories in the catalogue, awaiting the owner's look
 - [ ] 07 Consolidate — one implementation per pattern
 - [ ] 08 Framework doctor — checks green, or what they flag is fixed
 - [ ] 09 Build for real — every journey matches its mock
