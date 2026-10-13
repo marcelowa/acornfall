@@ -94,6 +94,46 @@ Still running; its raw answer lands in this file when it arrives.
 - It could not see: the soft keyboard (headless), whether a scrollbar is painted, or the "Copied"
   label (Bug D). It cancelled every flow and left nothing listening on 1455/53692.
 
+## OWNER-OPERATOR — raw answer
+
+- keep — one line per provider that reads as a sentence (name + "Not connected" / "Connected ·
+  key saved · stored credential · 7 models"), an action that names its own method and never invents
+  one (Add key only where a key exists, Sign in only on OpenAI Codex, Connect only where both are
+  on offer), connected rows first, live search over names and ids, Disconnect → Forget key / Keep
+  both resolving in the row, and a key dialog that says "stored on this install, for every
+  workspace" before you type a character.
+- cut — Re-check anchored under 43 rows (2517px down at 1440, 2927px at 390) and completely
+  silent when pressed; the extra chooser that re-asks "API key / paste a key" after you already
+  pressed "Add key"; "1 models".
+- confused-by — the faux row says "Connected · key saved · 1 models" with no source and offers
+  Disconnect → Forget key on a provider that has no typed key and nothing removable; at 390 the
+  status clips to "Connected · key saved · stored creden…" and the model count is exactly what
+  falls off; the search cannot be cleared in one gesture; "Connect" is the one action that does
+  not say whether it will ask for a key or open a sign-in.
+- would I keep using this — yes for reading the list and for Add key / Disconnect, which beat a
+  terminal; but the churn verdict is no for "did the key I added outside the app land" — two
+  screens of scroll to a button that says nothing back, so I'd still drop to a shell for that one
+  errand.
+
+### Its evidence
+
+- Rows: 47px at 1440, 56px at 390; 2549px of content in an 852px viewport; name 13px/14px, status
+  `2xs` (11px/12px) in Inter, `nowrap` + ellipsis; nothing clips at 1440, but at 390 the Groq row
+  loses 84px — "Connected · key saved · stored creden" visible, "tial · 7 models" hidden.
+- Re-check: at top 2517 (viewport 900) and 2927 (viewport 844); pressing it posts refresh + state
+  and a 2s MutationObserver recorded no text change, no disabled state, no toast.
+- J13 with a dummy Groq key: the field took a 38-character paste whole, blank Save disabled,
+  "Saving…" existed for ~16ms (under one frame), the outcome named the next step, the row moved to
+  the connected group; Disconnect → Forget key / Keep both resolved in the row. The dialog never
+  widened the page at either width; at 390 the field was 16px and the Save button 44px — and the
+  **search field stayed 32px, the one control under the 44px ladder**.
+- **Its bug**: the faux row (dev-only) is `authenticated: true, authType: "api_key", source
+  absent, authTypes absent` → `authTypes` maps to `[]`, and the "managed outside" branch required
+  a source, so the row rendered Disconnect → Forget key for a provider with no login method and
+  nothing stored. The same branch catches any provider authenticated with no method and no source.
+- It could not see: the sign-in journeys, a refused or stopped-working key, the Re-check failure
+  line, or an env-var source on a row — and said so instead of guessing.
+
 ## What the panel forces (my reading, for the owner)
 
 **Bugs, fixed or mocked now** (unambiguous, no direction question):
@@ -112,6 +152,16 @@ Still running; its raw answer lands in this file when it arrives.
 7. **Copy said "Copy failed" for a refused write** (bug D): the textarea fallback runs when the
    clipboard API throws, not only when it is missing; verified with `writeText` rejecting — the
    button reads "Copied".
+8. **The connected-with-no-method row offered a Forget key that could only no-op**
+   (OWNER-OPERATOR's bug): "managed outside" no longer requires a source. Verified on the dev row:
+   "Connected · key saved · 1 model | managed outside".
+9. **The count is the fact that falls off** at 390: the status line now reads
+   "Connected · key saved · 7 models · <source>", so the source clips, not the count.
+10. **The search field was 32px on a phone** — the last control under the 44px ladder: `Input`
+    takes `max-sm:h-11`, and the probe list keeps it armed (measured 44px, 16px font, at 390).
+11. **A one-method provider asked twice** ("Add key" on the row, then a one-option chooser):
+    pressing the row's action starts that method straight away; only a provider with both opens
+    the chooser. Verified: Groq's "Add key" lands on "Enter Groq API key | Save".
 
 **Direction questions the panel puts to the owner** (mocked, not decided):
 
@@ -130,3 +180,6 @@ Still running; its raw answer lands in this file when it arrives.
    the whole OAuth URL buys nothing a Copy button does not"): the mock shows both — today's clipped
    address, and the host as the label ("Sign in at openrouter.ai") with Copy carrying the whole of
    it either way. The owner picks.
+9. **"Connect" does not say which it will be** (OWNER-OPERATOR): a provider with both methods
+   keeps the chooser — one press, and the dialog names both — or the label grows to say "key or
+   sign-in". The owner picks; the recommendation is the chooser.

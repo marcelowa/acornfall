@@ -133,10 +133,12 @@ export function ProvidersSection({
 											Keep
 										</Button>
 									</span>
-								) : provider.authTypes.length === 0 &&
-								  provider.source !== undefined ? (
-									// Ambient-only: the key lives outside the app, so there is
-									// nothing to forget and no button pretending otherwise.
+								) : provider.authTypes.length === 0 ? (
+									// No login method: the key lives outside the app, so there is
+									// nothing to forget and no button pretending otherwise. A source is
+									// not required to say so — the dev provider is authenticated with
+									// neither a method nor a source, and used to offer a Forget key
+									// that could only no-op (panel finding).
 									<Text as="span" size="2xs" tone="muted" className="shrink-0">
 										managed outside
 									</Text>

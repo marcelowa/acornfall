@@ -31,8 +31,10 @@ function statusLine(provider: ProviderSummary, broken: boolean): string {
 	}
 	const how = provider.authType === "oauth" ? "signed in" : "key saved";
 	const where = provider.source === undefined ? "" : ` · ${provider.source}`;
+	// The count before the source: a narrow row clips the tail, and the count is the fact a
+	// person scans for (panel finding: the model count was exactly what fell off at 390).
 	const models = provider.modelCount === 1 ? "1 model" : `${provider.modelCount} models`;
-	return `Connected · ${how}${where} · ${models}`;
+	return `Connected · ${how} · ${models}${where}`;
 }
 
 function connectLabel(provider: ProviderSummary): string {
