@@ -42,10 +42,23 @@ long address and assert that neither the dialog nor the page has horizontal over
 - **Two named groups with counts**: `Connected (n)` first, then `Not connected (n)`. The order is
   already right; the labels make the answer to "what can this install use" arrive before a scroll.
   While a search is on, the groups narrow with it (a count of matches, not of the catalogue).
+  Rows sort by the name they show, not by id (panel finding: `OpenCode Zen` before `OpenCode Go`
+  is the id order, and a person reading names reads it as wrong).
 - **Re-check beside the search**, not 42 rows below it: the person who just added a key outside
-  the app is looking at the search row. Its hint stays one quiet line under it.
-- **The state line clips** (`ClippedText`), because a source can be 57 characters and a clipped
-  fact nobody can read is a lost fact.
+  the app is looking at the search row. And it says what it read — "Read 42 providers just
+  now." — because the panel's verdict on a silent control was that it would stop pressing it
+  (panel finding, `04-panel-journeys.md`).
+- **A dead connection is its own state**: a stored credential whose check fails reads "Not
+  working · key stored", in the warning tone, with Reconnect — not "Not connected". Making it
+  real needs one field from the worker (`stored` with `authenticated: false`); until then the
+  mock carries the direction (panel finding: a stopped provider is not representable, so the
+  check-in surface cannot catch it).
+- **The search clears in one gesture** (a clear control, and Escape), and its empty state names
+  the catalogue's words: the panel typed `claude` and got silence while Anthropic sat six rows
+  away. The hint is copy now; searching model names would be a platform change.
+- **The state line clips** (`ClippedText`), in mono `2xs` so the values (a source, a count) are set
+  apart from prose (panel finding, R4), because a source can be 57 characters and a clipped fact
+  nobody can read is a lost fact.
 - Search, groups and rows are the same primitives as today; nothing new is introduced.
 
 ## 4. The dialog's states
