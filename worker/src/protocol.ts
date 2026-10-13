@@ -145,7 +145,11 @@ export interface ConversationInfo {
 	createdBy?: string;
 }
 
-/** Provider auth prompts, a 1:1 projection of pi-ai's AuthPrompt and AuthEvent. */
+/**
+ * Provider auth prompts: a 1:1 projection of pi-ai's AuthPrompt and AuthEvent, plus the one
+ * event the interface needs and pi-ai has no name for — a prompt the provider resolved itself
+ * (a callback winning the race), so the field it is holding can go.
+ */
 export type AuthEvent =
 	| {
 			kind: "prompt";
@@ -165,6 +169,8 @@ export type AuthEvent =
 			expiresInSeconds?: number;
 	  }
 	| { kind: "progress"; message: string }
+	/** The provider resolved a prompt itself — a callback won the race — so the answer is gone. */
+	| { kind: "prompt_cancelled"; promptId: string }
 	| { kind: "done"; providerId: string }
 	| { kind: "error"; message: string };
 

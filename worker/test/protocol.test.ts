@@ -145,6 +145,18 @@ class Worker {
 let worker: Worker;
 let home: string;
 
+/**
+ * One auth frame of one flow, by kind. The file shares a worker, so a frame an earlier test
+ * left unmatched is still in the buffer — the frame has to be this flow's and this kind's.
+ */
+function authFrame(authId: string, kind: string): (candidate: Frame) => boolean {
+	return (candidate) => {
+		if (candidate.type !== "auth") return false;
+		const frame = candidate as { authId: string; event?: { kind?: string } };
+		return frame.authId === authId && frame.event?.kind === kind;
+	};
+}
+
 beforeAll(async () => {
 	home = await tempDir("acornfall-protocol-");
 	const workspace = join(home, "workspace");
@@ -348,11 +360,7 @@ describe("the worker protocol", () => {
 			providerId: "anthropic",
 			authType: "api_key",
 		});
-		const frame = await worker.wait(
-			(candidate) =>
-				candidate.type === "auth" &&
-				(candidate as { authId?: string }).authId === "auth-queue",
-		);
+		const frame = await worker.wait(authFrame("auth-queue", "prompt"));
 		const prompt = (frame as { event: { kind: string; promptId: string } }).event;
 		expect(prompt.kind).toBe("prompt");
 
@@ -382,13 +390,14 @@ describe("the worker protocol", () => {
 			providerId: "openai",
 			authType: "oauth",
 		});
-		const frame = await worker.wait(
-			(candidate) =>
-				candidate.type === "auth" &&
-				["auth_url", "error"].includes(
-					(candidate as { event?: { kind?: string } }).event?.kind ?? "",
-				),
-		);
+		const frame = await worker.wait((candidate) => {
+			if (candidate.type !== "auth") return false;
+			const event = candidate as { authId?: string; event?: { kind?: string } };
+			return (
+				event.authId === "auth-host-id" &&
+				["auth_url", "error"].includes(event.event?.kind ?? "")
+			);
+		});
 		const event = (frame as { event: { kind: string; url?: string; message?: string } }).event;
 		if (event.kind === "auth_url") {
 			const url = new URL(event.url ?? "");
@@ -398,6 +407,43 @@ describe("the worker protocol", () => {
 		}
 		// The flow ends as cancelled, which is also what frees the fixed port.
 		await worker.call({ type: "auth_cancel", authId: "auth-host-id" });
+		await worker.response(id).catch(() => undefined);
+	});
+
+	test("a prompt the callback resolved itself is withdrawn", async () => {
+		// The browser sign-in races a loopback callback against a pasted code. When the
+		// callback wins, the provider cancels the paste prompt out of band: the interface is
+		// holding a field nobody is waiting on, so the worker says so — before the exchange,
+		// which is the next step and may be a while away.
+		const id = worker.send({
+			type: "login",
+			authId: "auth-race",
+			providerId: "anthropic",
+			authType: "oauth",
+		});
+		const choice = await worker.wait(authFrame("auth-race", "prompt"));
+		await worker.call({
+			type: "auth_answer",
+			authId: "auth-race",
+			promptId: (choice as { event: { promptId: string } }).event.promptId,
+			value: "browser",
+		});
+
+		// The address carries the state the callback server checks; the field it races is the
+		// last prompt of the flow.
+		const urlFrame = await worker.wait(authFrame("auth-race", "auth_url"));
+		const address = new URL((urlFrame as { event: { url: string } }).event.url);
+		const state = address.searchParams.get("state") ?? "";
+		const field = await worker.wait(authFrame("auth-race", "prompt"));
+		const promptId = (field as { event: { promptId: string } }).event.promptId;
+
+		// The browser on this machine finishes the sign-in: the callback wins the race.
+		await fetch(`http://127.0.0.1:53692/callback?code=test-code&state=${state}`);
+		const withdrawn = await worker.wait(authFrame("auth-race", "prompt_cancelled"));
+		expect((withdrawn as { event: { promptId: string } }).event.promptId).toBe(promptId);
+
+		// The exchange itself needs the provider, and the test does not: stop it here.
+		await worker.call({ type: "auth_cancel", authId: "auth-race" });
 		await worker.response(id).catch(() => undefined);
 	});
 });

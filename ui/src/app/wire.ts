@@ -99,6 +99,8 @@ export type WireAuthEvent =
 			expiresInSeconds?: number | undefined;
 	  }
 	| { kind: "progress"; message: string }
+	/** The provider resolved a prompt itself — a callback won the race — so it is no longer waiting. */
+	| { kind: "prompt_cancelled"; promptId: string }
 	| { kind: "done"; providerId: string }
 	| { kind: "error"; message: string };
 
