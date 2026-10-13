@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type { AuthFlow } from "@/app/use-platform";
+import type { AuthFlow } from "@/app/auth-flow";
 import type { ProviderSummary } from "@/app/view-models";
 import { ProviderLoginDialog } from "./provider-login-dialog";
 
@@ -27,8 +27,8 @@ const flowBase: AuthFlow = {
 	provider: pending,
 	method: "oauth",
 	notices: [],
-	prompt: undefined,
 	answering: false,
+	answered: false,
 	outcome: undefined,
 };
 
@@ -58,24 +58,30 @@ export const KeyPrompt: Story = {
 	},
 };
 
-/** Sign-in mid-flow: device code, progress, and a waiting prompt. */
-export const DeviceFlow: Story = {
+/**
+ * The sign-in URL, with the paste the headless path needs: the console is often open on
+ * another device, so the address is text to copy as much as a link to open.
+ */
+export const SignInUrl: Story = {
 	args: {
 		flow: {
 			...flowBase,
 			notices: [
 				{
 					kind: "auth_url",
-					url: "https://example.com/activate",
-					instructions: "Open the page, then come back.",
+					url: "https://openrouter.ai/auth?callback_url=http%3A%2F%2F127.0.0.1%3A45049%2Foauth%2Fcallback%2Fe480471b&code_challenge=d2Pb_D0PtvWDe_ajhsGwYhFr8DLoUidWT8UhYqorrAc",
+					instructions:
+						"Complete sign-in in your browser. If the browser is on another machine, paste the final redirect URL here.",
 				},
-				{
-					kind: "device_code",
-					userCode: "ABCD-1234",
-					verificationUri: "https://example.com/activate",
-				},
-				{ kind: "progress", message: "Waiting for approval…" },
 			],
+			prompt: {
+				kind: "prompt",
+				promptId: "p-2",
+				promptType: "manual_code",
+				message:
+					"Complete sign-in in your browser, or paste the authorization code / redirect URL here:",
+				placeholder: "http://127.0.0.1:45049/oauth/callback/e480471b",
+			},
 		},
 		onPickMethod: noop,
 		onAnswer: noop,
@@ -84,20 +90,66 @@ export const DeviceFlow: Story = {
 	},
 };
 
-/** A choice the provider offers, as buttons. */
+/** A device code and the address to enter it at, both copyable. */
+export const DeviceFlow: Story = {
+	args: {
+		flow: {
+			...flowBase,
+			provider: { ...pending, id: "github-copilot", name: "GitHub Copilot" },
+			notices: [
+				{
+					kind: "device_code",
+					userCode: "ABCD-1234",
+					verificationUri: "https://github.com/login/device",
+				},
+			],
+			progress: "Waiting for approval…",
+		},
+		onPickMethod: noop,
+		onAnswer: noop,
+		onCancel: noop,
+		onClose: noop,
+	},
+};
+
+/** A choice the provider offers, as buttons that wrap the sentence they are. */
 export const SelectPrompt: Story = {
 	args: {
 		flow: {
 			...flowBase,
 			prompt: {
 				kind: "prompt",
-				promptId: "p-2",
+				promptId: "p-3",
 				promptType: "select",
-				message: "Which account?",
+				message: "Sign in to Radius:",
 				options: [
-					{ id: "a", label: "Personal", description: "Your own key" },
-					{ id: "b", label: "Work" },
+					{ id: "browser", label: "Sign in with browser (recommended)" },
+					{
+						id: "device-code",
+						label: "Sign in with device code (when signing in from another device)",
+					},
 				],
+			},
+		},
+		onPickMethod: noop,
+		onAnswer: noop,
+		onCancel: noop,
+		onClose: noop,
+	},
+};
+
+/** An answer on its way: the field waits, so a second paste cannot race the first. */
+export const Answering: Story = {
+	args: {
+		flow: {
+			...flowBase,
+			method: "api_key",
+			answering: true,
+			prompt: {
+				kind: "prompt",
+				promptId: "p-4",
+				promptType: "secret",
+				message: "Enter Anthropic API key",
 			},
 		},
 		onPickMethod: noop,
