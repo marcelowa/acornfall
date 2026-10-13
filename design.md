@@ -64,6 +64,9 @@ typed. Mono is for ids, timestamps, cost and code — never for prose.
   per surface rather than per call site.
 - Truncated text is one gesture from being read: `ClippedText` shows the whole string on hover, on
   focus and on tap, and shows nothing when the text fits.
+- Prose wraps anywhere (`wrap-anywhere`), so a pasted token, hash or data URL cannot widen the
+  console; the transcript also clips its own width, so a future miss cannot scroll the app
+  sideways. Only a code block scrolls, inside itself.
 - Motion answers an action or reports live state — never on mount, never on scroll, and always
   under the global reduced-motion guard.
 

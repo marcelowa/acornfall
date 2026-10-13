@@ -50,7 +50,7 @@ export function AssistantMessage({ entry, defaultRaw = false }: AssistantMessage
 	return (
 		<div data-slot="assistant" className="w-full">
 			{raw ? (
-				<Text as="div" size="lg" className="whitespace-pre-wrap">
+				<Text as="div" size="lg" className="whitespace-pre-wrap wrap-anywhere">
 					{entry.markdown}
 				</Text>
 			) : (

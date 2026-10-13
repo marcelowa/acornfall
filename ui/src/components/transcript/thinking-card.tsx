@@ -63,7 +63,12 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 			trailing={<CopyButton value={entry.text} />}
 			body={({ clamp }) => (
 				<div className={cn("overflow-y-hidden px-3 py-2", clamp)}>
-					<Text as="div" size="sm" dir="auto" className="whitespace-pre-wrap">
+					<Text
+						as="div"
+						size="sm"
+						dir="auto"
+						className="whitespace-pre-wrap wrap-anywhere"
+					>
 						{entry.text}
 					</Text>
 				</div>

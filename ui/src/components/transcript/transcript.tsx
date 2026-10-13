@@ -142,7 +142,7 @@ export function Transcript({ entries, ready = true, onOpenConversation, onFork }
 						element.scrollHeight - element.scrollTop - element.clientHeight < 80;
 					setAway(!following.current);
 				}}
-				className="min-h-0 flex-1 overflow-y-auto [&>*]:shrink-0"
+				className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [&>*]:shrink-0"
 			>
 				<Measure size="wide" padding="lg">
 					{!ready ? (
