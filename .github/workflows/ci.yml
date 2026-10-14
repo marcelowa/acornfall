@@ -2,10 +2,13 @@
 #
 # `make lint` is static analysis and `make test` adds the unit tests, the worker protocol
 # against a real worker process, -race, and the end-to-end suite against a real gateway.
-# `make test-sandbox` boots real microVMs, and GitHub-hosted Linux runners do expose
-# /dev/kvm — it is just 660 root:kvm, so the job makes it readable first. The dispatch input
-# is for running the microVM suite somewhere else (a self-hosted label, or an ARM image that
-# has KVM).
+# `make test-sandbox` boots real microVMs, which need /dev/kvm. Every job here runs on the
+# self-hosted runner: one Linux container with the hypervisor passed through, and with the
+# toolchains installed once instead of once per job. The label sets are what the job needs,
+# not a machine name, so a second runner can join without an edit here. The dispatch input is
+# the way to send the microVM suite somewhere else — a runner with another hypervisor, or an
+# ARM image that has KVM — and its default is this runner's own label, so that a plain
+# dispatch lands where the rest of the CI does.
 name: ci
 
 # Branches only: a pull request is tested on its branch, and a rebase-merge
@@ -21,14 +24,14 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: "Runner for the microVM suite (default: ubuntu-latest, which has /dev/kvm)"
+        description: "Runner for the microVM suite (default: the self-hosted runner, which has /dev/kvm)"
         required: false
-        default: ubuntu-latest
+        default: kvm
         type: string
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -48,7 +51,7 @@ jobs:
   commits:
     # The commit format is a standard (`.pi/skills/conventional-commits`), so it is checked
     # rather than trusted — over the commits a push adds, not all of history.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -77,14 +80,13 @@ jobs:
         run: echo "the first push to a branch has no range behind it; skipping"
 
   sandbox:
-    # `make test-sandbox` boots real microVMs. GitHub's Linux runners have /dev/kvm, owned by
-    # root:kvm at mode 0660, and the udev rule is what gives the runner user access to it.
-    # A self-hosted runner in a container has neither udev nor sudo for it, and does not need
-    # either: the device is passed through readable, or the runner user is in the `kvm` group
-    # that owns it. The step is skipped where it cannot work, not failed. The tier itself
-    # still fails rather than skips when /dev/kvm is missing or unreadable, because a slow
-    # tier that silently does nothing is how this bug class survives.
-    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    # `make test-sandbox` boots real microVMs. The runner passes /dev/kvm through, owned by
+    # root:kvm at mode 0660, and the runner user is in the `kvm` group that owns it. A
+    # GitHub-hosted runner has the same device and needs the udev rule below to reach it; the
+    # rule is skipped where it cannot work (no udev, no sudo for it) rather than failed. The
+    # tier itself still fails rather than skips when /dev/kvm is missing or unreadable,
+    # because a slow tier that silently does nothing is how this bug class survives.
+    runs-on: ${{ inputs.runner || 'kvm' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

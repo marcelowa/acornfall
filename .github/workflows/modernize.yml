@@ -17,7 +17,9 @@ on:
 
 jobs:
   modernize:
-    runs-on: ubuntu-latest
+    # On the self-hosted runner, where the rest of the CI runs: the toolchain is already
+    # there, and a job that reads and reports costs nothing to run off the shelf.
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
