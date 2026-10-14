@@ -77,10 +77,13 @@ jobs:
         run: echo "the first push to a branch has no range behind it; skipping"
 
   sandbox:
-    # `make test-sandbox` boots real microVMs. GitHub's Linux runners have /dev/kvm; the udev
-    # rule gives the runner user access to it. It fails rather than skips when /dev/kvm is
-    # missing or unreadable, because a slow tier that silently does nothing is how this bug
-    # class survives.
+    # `make test-sandbox` boots real microVMs. GitHub's Linux runners have /dev/kvm, owned by
+    # root:kvm at mode 0660, and the udev rule is what gives the runner user access to it.
+    # A self-hosted runner in a container has neither udev nor sudo for it, and does not need
+    # either: the device is passed through readable, or the runner user is in the `kvm` group
+    # that owns it. The step is skipped where it cannot work, not failed. The tier itself
+    # still fails rather than skips when /dev/kvm is missing or unreadable, because a slow
+    # tier that silently does nothing is how this bug class survives.
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
@@ -92,7 +95,7 @@ jobs:
         with:
           bun-version: latest
       - name: Make /dev/kvm readable
-        if: runner.os == 'Linux'
+        if: runner.environment == 'github-hosted' && runner.os == 'Linux'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
