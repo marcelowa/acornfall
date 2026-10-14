@@ -909,7 +909,7 @@ func verify(list string, payload []byte, tag string) error {
 func matchChecksum(payload []byte, list, tag string) error {
 	sum := sha256.Sum256(payload)
 	want := hex.EncodeToString(sum[:])
-	for _, line := range strings.Split(list, "\n") {
+	for line := range strings.SplitSeq(list, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[0] == want {
 			return nil

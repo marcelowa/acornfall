@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -290,12 +291,7 @@ func TestSlashClearResetsTheContext(t *testing.T) {
 	c.prompt("general", created.ID, "/clear")
 	c.waitForText("general", created.ID, "/clear")
 	c.waitView("general", created.ID, func(v view) bool {
-		for _, kind := range v.kinds() {
-			if kind == "pi.reset" {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(v.kinds(), "pi.reset")
 	}, 2*time.Minute)
 }
 
@@ -329,7 +325,7 @@ func TestSlashCompactReportsTheFold(t *testing.T) {
 
 	created := c.create("general")
 	bulk := strings.Repeat("abcdefghij ", 2500)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		c.prompt("general", created.ID, "fill the context "+bulk)
 		// Count replies, not text: every reply says the same word, so waiting
 		// for the word matches the last turn's leftover and fires the next

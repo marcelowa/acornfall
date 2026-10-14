@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -2534,10 +2535,7 @@ func (c *Control) RunningIDs() []string {
 	c.mu.RLock()
 	infos := make([]protocol.ConversationInfo, len(c.conversations))
 	copy(infos, c.conversations)
-	prompted := make(map[string]int64, len(c.promptedAt))
-	for id, at := range c.promptedAt {
-		prompted[id] = at
-	}
+	prompted := maps.Clone(c.promptedAt)
 	c.mu.RUnlock()
 	var ids []string
 	for _, info := range infos {
