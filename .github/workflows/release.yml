@@ -13,14 +13,21 @@ permissions:
 
 jobs:
   binaries:
+    # All four legs cross-build on the self-hosted runner, which is Linux. The gateway has no
+    # cgo, so a darwin binary built here is the same program the macOS runners built — and a
+    # macOS runner bills at ten times a Linux one. CGO_ENABLED=0 is written out because it is
+    # the one setting that differed between the legs: it was 1 wherever the build was native
+    # (linux/amd64 on amd64, darwin/arm64 on arm64) and 0 wherever it crossed, so one source
+    # produced two kinds of artifact. Off everywhere, an artifact no longer depends on which
+    # machine made it.
     strategy:
       matrix:
         include:
-          - { os: ubuntu-latest, goos: linux, goarch: amd64 }
-          - { os: ubuntu-latest, goos: linux, goarch: arm64 }
-          - { os: macos-latest, goos: darwin, goarch: amd64 }
-          - { os: macos-latest, goos: darwin, goarch: arm64 }
-    runs-on: ${{ matrix.os }}
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -39,7 +46,7 @@ jobs:
       - run: cd ui && bun install && bun run build
       - run: >
           cd gateway &&
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }}
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }}
           go build
           -ldflags "-X github.com/acornfall/acornfall/gateway/internal/update.BuildVersion=${{ github.ref_name }}"
           -o ../acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -53,7 +60,7 @@ jobs:
     # Platform-independent: one tarball for every leg. Sources only, never
     # node_modules — the gateway installs those once, under the install
     # folder, so no release bytes are spent on them and no host is touched.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v7
       - run: tar -czf worker.tar.gz -C worker package.json bun.lock src
@@ -64,7 +71,7 @@ jobs:
 
   publish:
     needs: binaries
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/download-artifact@v4
         with:
