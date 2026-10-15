@@ -5,7 +5,7 @@ import { Stack } from "@/components/layout/stack";
 import { Text } from "@/components/typography/text";
 import { ReleaseMark } from "./release-mark";
 import { ReleaseScreen } from "./release-screen";
-import { InstallSection } from "./install-section";
+import { UpdatesSection } from "./updates-section";
 
 /**
  * The release surface, as it shipped (run 4 of the refactor-ux chain). The stories hand the page
@@ -526,7 +526,7 @@ export const InstallSettingsPage: Story = {
 						one that still works with auto-check off.
 					</Text>
 				</Stack>
-				<InstallSection status={status()} onSavePrefs={noop} onOpenReleases={noop} />
+				<UpdatesSection status={status()} onSavePrefs={noop} onOpenReleases={noop} />
 			</Stack>
 		</Measure>
 	),

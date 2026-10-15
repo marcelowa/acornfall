@@ -99,15 +99,16 @@ interface Route {
  * (step 06), so no address can land on it. */
 export type Screen = "conversation" | "settings" | "update";
 
-/** The settings pages, each with its own URL under /settings. `install` is the install-wide
- * page: what runs, and how it keeps itself current. The old `updates` page is gone, and it kept
- * no redirect — the release page has its own address now. */
-export type SettingsTab = "defaults" | "providers" | "install";
+/** The settings pages, each with its own URL under /settings. `general` is the install-wide
+ * page: what runs and how it keeps itself current, the defaults a new conversation starts from,
+ * and the theme. The old `defaults`, `updates` and `install` pages kept no redirect — the
+ * release page has its own address now, and an unknown page lands on general. */
+export type SettingsTab = "general" | "providers";
 
-const SETTINGS_TABS: SettingsTab[] = ["defaults", "providers", "install"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "providers"];
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
-	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "defaults";
+	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "general";
 }
 
 /**
@@ -151,7 +152,7 @@ export function routeFromUrl(path: string, search: string): Route {
 			screen: "update",
 			workspace: new URLSearchParams(search).get("workspace") ?? "",
 			conversation: "",
-			settingsTab: "defaults",
+			settingsTab: "general",
 			updateTag: update[1] === undefined ? "" : decodeURIComponent(update[1]),
 		};
 	}
@@ -161,7 +162,7 @@ export function routeFromUrl(path: string, search: string): Route {
 			screen: "conversation",
 			workspace: decodeURIComponent(conversation[1] ?? ""),
 			conversation: decodeURIComponent(conversation[2] ?? ""),
-			settingsTab: "defaults",
+			settingsTab: "general",
 			updateTag: "",
 		};
 	}
@@ -171,7 +172,7 @@ export function routeFromUrl(path: string, search: string): Route {
 			screen: "conversation",
 			workspace: decodeURIComponent(workspace[1] ?? ""),
 			conversation: "",
-			settingsTab: "defaults",
+			settingsTab: "general",
 			updateTag: "",
 		};
 	}
@@ -179,7 +180,7 @@ export function routeFromUrl(path: string, search: string): Route {
 		screen: "conversation",
 		workspace: "",
 		conversation: "",
-		settingsTab: "defaults",
+		settingsTab: "general",
 		updateTag: "",
 	};
 }
@@ -726,7 +727,7 @@ export function usePlatform(): Platform {
 				screen: "conversation",
 				workspace: name,
 				conversation: id,
-				settingsTab: "defaults",
+				settingsTab: "general",
 				updateTag: "",
 			});
 		},
@@ -918,7 +919,7 @@ export function usePlatform(): Platform {
 			screen: "conversation",
 			workspace: name,
 			conversation: "",
-			settingsTab: "defaults",
+			settingsTab: "general",
 			updateTag: "",
 		});
 	}, []);
@@ -944,7 +945,7 @@ export function usePlatform(): Platform {
 					screen: "conversation",
 					workspace: name,
 					conversation: "",
-					settingsTab: "defaults",
+					settingsTab: "general",
 					updateTag: "",
 				});
 			});
@@ -964,7 +965,7 @@ export function usePlatform(): Platform {
 						screen: "conversation",
 						workspace: "general",
 						conversation: "",
-						settingsTab: "defaults",
+						settingsTab: "general",
 						updateTag: "",
 					});
 					return;
@@ -1174,7 +1175,7 @@ export function usePlatform(): Platform {
 					screen: "conversation",
 					workspace,
 					conversation: id,
-					settingsTab: "defaults",
+					settingsTab: "general",
 					updateTag: "",
 				});
 			})

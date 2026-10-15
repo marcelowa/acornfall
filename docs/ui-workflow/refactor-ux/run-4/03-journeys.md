@@ -26,7 +26,7 @@ What the console fights today, and where:
    alone. It is there while the newest GA is **newer** than the running build. While a restart is
    pending, the bar carries that too, so the one state that needs the owner is visible without the
    page.
-2. Two ways in, both always: press the mark, or Settings → the install-wide page → **Releases**,
+2. Two ways in, both always: press the mark, or Settings → **General** → **Releases**,
    which opens `/update` whether or not a newer release is known. A pasted URL works as well.
 3. The page opens on the newest GA, "newest" meaning the newest on the fetched list — the list is
    the truth for newest, the status is the truth for running, and `Check now` refreshes both.
@@ -108,7 +108,7 @@ choice legible; the page is one fetch plus one list fetch.
 
 ## J21 — Auto-check, and the install-wide page `new` (pain 1)
 
-1. Settings' install-wide page shows the running build, `auto-check` on or off, and a **Releases**
+1. Settings' General page (its Updates section) shows the running build, `auto-check` on or off, and a **Releases**
    row that opens `/update`. The running build and the row are the permanent doors; the bar's mark
    is the shortcut.
 2. Toggling saves in one moment and says it saved; the page states the check's own rule (hourly

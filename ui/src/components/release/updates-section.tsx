@@ -5,26 +5,27 @@ import { Text } from "@/components/typography/text";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
-export interface InstallSectionProps {
+export interface UpdatesSectionProps {
 	status: UpdateStatus | undefined;
 	onSavePrefs: (prefs: { autoCheck?: boolean }) => void;
 	onOpenReleases: () => void;
 }
 
 /**
- * Settings' install-wide page (J21): what this install runs, and how it keeps itself current.
+ * Settings' General page, the Updates section (J21): what this install runs, and how it keeps
+ * itself current.
  *
  * The running build and auto-check live here, and the Releases row is the permanent door to the
  * release page — the only in-app way in when nothing newer is known, and the one that still
  * works with auto-check off. Check now lives with the releases, not here: nothing on this page
  * installs anything.
  */
-export function InstallSection({ status, onSavePrefs, onOpenReleases }: InstallSectionProps) {
+export function UpdatesSection({ status, onSavePrefs, onOpenReleases }: UpdatesSectionProps) {
 	return (
 		<>
 			<SettingsGroup
 				slot="settings-install"
-				title="Install"
+				title="Updates"
 				intro={
 					<Text size="2xs" tone="muted">
 						What this install runs, and how it keeps itself current.

@@ -20,7 +20,7 @@ import { ErrorStrip } from "@/components/ui/error-strip";
 import { ChoiceControl } from "@/components/composer/choice-control";
 import { Picker } from "@/components/composer/picker";
 import { SettingsScreen } from "@/components/settings/settings-screen";
-import { InstallSection } from "@/components/release/install-section";
+import { UpdatesSection } from "@/components/release/updates-section";
 import { ReleaseMark } from "@/components/release/release-mark";
 import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProvidersSection } from "@/components/settings/providers-section";
@@ -519,7 +519,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 	);
 
 	const install = (
-		<InstallSection
+		<UpdatesSection
 			status={platform.update}
 			onSavePrefs={platform.setUpdatePrefs}
 			onOpenReleases={() => platform.showUpdate()}

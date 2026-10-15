@@ -12,7 +12,7 @@ chain (the list, the by-name read, the tag install) and the panel's forced work.
 | J18 — pick a version | The picker lists the last twenty, a per-visit **Pre-release builds** switch that refetches, the running row kept visible when it is older than the window, the target's own page with its notes and the notes in between, "older than the running build" in the facts line, and a real 404 state for a tag the source does not have |
 | J19 — refusals and the restart | The rolled-back block, the list's refusal sentence, `No such release`, the dev-build line, and **Restart** on the page for a pending update |
 | J20 — the phone | The same page at 390px; the mark is the bare arrow |
-| J21 — install-wide settings | The Install page: running build, auto-check, and the Releases row; `Check now` lives on the release page; `/settings/updates` is gone with no redirect |
+| J21 — install-wide settings | Settings' **General** page, with an **Updates** section first: running build, auto-check, and the Releases row; `Check now` lives on the release page; the old `/settings/defaults`, `/settings/updates` and `/settings/install` addresses are gone with no redirect |
 
 Gateway work the build needed, already committed: `GET /api/update/releases/{tag}`,
 `POST /api/update/restart`, `runsActive`/`runs` in the status, `relation` on every release read,
@@ -31,6 +31,9 @@ from the tag annotation.
   claim a restart before the gateway says the files are swapped (R11).
 - **The in-between list renders only when the target is newer** than the running build; an older
   pick shows its own notes and the facts line says so.
+- **The tabs are General and Providers**, owner's call, 2026-10-15: Defaults became General, and
+the updates section moved into it, so one page holds what the install runs, what a new conversation
+starts from, and the theme.
 - **The notes print at the markdown renderer's own step (16px)**, not the `base` the direction
   named: `.markdown` sets `--text-lg` outside the utility layer, so no call site can re-step it.
   The look panel's word was to keep the size — it is the size the transcript already reads at — so

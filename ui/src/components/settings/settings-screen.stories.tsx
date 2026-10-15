@@ -5,7 +5,7 @@ import { Picker } from "@/components/composer/picker";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProvidersSection } from "./providers-section";
 import { SettingsScreen } from "./settings-screen";
-import { InstallSection } from "@/components/release/install-section";
+import { UpdatesSection } from "@/components/release/updates-section";
 
 const meta = {
 	title: "Screens/Settings",
@@ -108,7 +108,7 @@ const providers: ProviderSummary[] = [
 ];
 
 const install = (
-	<InstallSection
+	<UpdatesSection
 		status={{
 			current: "v0.9.33",
 			latest: "v0.9.33",
@@ -130,7 +130,7 @@ const install = (
 
 export const Default: Story = {
 	args: {
-		tab: "defaults",
+		tab: "general",
 		onTabChange: noop,
 		theme: "system",
 		onThemeChange: noop,
@@ -158,7 +158,10 @@ export const Phone: Story = {
 	globals: { viewport: { value: "phone" } },
 };
 
-/** The install page: the running build, auto-check, and the door to the releases. */
-export const Install: Story = {
-	args: { ...Default.args, tab: "install" },
+/** The updates section before the gateway answers: the sentence, not a blank. */
+export const UpdatesUnanswered: Story = {
+	args: {
+		...Default.args,
+		install: <UpdatesSection status={undefined} onSavePrefs={noop} onOpenReleases={noop} />,
+	},
 };

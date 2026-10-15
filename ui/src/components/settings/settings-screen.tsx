@@ -22,7 +22,7 @@ export interface SettingsScreenProps {
 	defaults: ReactNode;
 	/** The providers section: global keys, so it never sits under workspace tabs. */
 	providers: ReactNode;
-	/** The install-wide section: the running build, auto-check, and the door to the releases. */
+	/** The updates section: the running build, auto-check, and the door to the releases. */
 	install: ReactNode;
 	/** The running build, when the gateway answered: shown under the title. */
 	version?: string | undefined;
@@ -80,19 +80,19 @@ export function SettingsScreen({
 					<Tabs
 						value={tab}
 						onValueChange={(next) => {
-							if (next === "defaults" || next === "providers" || next === "install")
-								onTabChange(next);
+							if (next === "general" || next === "providers") onTabChange(next);
 						}}
 					>
 						<TabsList aria-label="Settings pages">
-							<TabsTrigger value="defaults">Defaults</TabsTrigger>
+							<TabsTrigger value="general">General</TabsTrigger>
 							<TabsTrigger value="providers">Providers</TabsTrigger>
-							<TabsTrigger value="install">Install</TabsTrigger>
 						</TabsList>
 					</Tabs>
 
-					{tab === "defaults" ? (
+					{tab === "general" ? (
 						<>
+							{/* The install's own facts first: what runs, and how it keeps itself current. */}
+							{install}
 							<SettingsGroup
 								slot="settings-defaults"
 								title="Defaults"
@@ -137,8 +137,6 @@ export function SettingsScreen({
 					) : null}
 
 					{tab === "providers" ? providers : null}
-
-					{tab === "install" ? install : null}
 				</Stack>
 			</Measure>
 		</div>

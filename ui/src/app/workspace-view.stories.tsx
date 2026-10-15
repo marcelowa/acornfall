@@ -253,7 +253,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		setRailWidth: noop,
 		setRailOpen: noop,
 		toggleRail: noop,
-		settingsTab: "defaults",
+		settingsTab: "general",
 		showSettingsTab: noop,
 		updateTag: "",
 		showUpdate: noop,
