@@ -380,6 +380,16 @@ export async function fetchReleases(
 	return body.releases;
 }
 
+/** The notes of several releases in one read: the page's "what changed in between". */
+export async function fetchNotes(tags: string[]): Promise<Record<string, string>> {
+	if (tags.length === 0) return {};
+	const query = new URLSearchParams({ tags: tags.join(",") });
+	const response = await fetch(`/api/update/notes?${query}`);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	const body = (await response.json()) as { notes: Record<string, string> };
+	return body.notes;
+}
+
 /** One release by name: a version outside the twenty, and the running row. */
 export async function fetchRelease(tag: string): Promise<UpdateRelease> {
 	const response = await fetch(`/api/update/releases/${encodeURIComponent(tag)}`);

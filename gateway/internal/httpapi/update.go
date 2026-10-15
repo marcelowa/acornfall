@@ -256,3 +256,30 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	s.updateStatus(w, r)
 }
+
+// updateNotes resolves several releases' notes in one read: the page's "what
+// changed in between" needs a handful, and a read per release was five seconds
+// of waiting. `tags` is a comma-separated list, capped at the list limit.
+func (s *Server) updateNotes(w http.ResponseWriter, r *http.Request) {
+	if s.update == nil {
+		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("tags"))
+	if raw == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"notes": map[string]string{}})
+		return
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > update.MaxListLimit {
+		http.Error(w, "too many tags", http.StatusBadRequest)
+		return
+	}
+	tags := make([]string, 0, len(parts))
+	for _, tag := range parts {
+		if trimmed := strings.TrimSpace(tag); trimmed != "" {
+			tags = append(tags, trimmed)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"notes": s.update.Notes(r.Context(), tags)})
+}

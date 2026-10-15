@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft } from "lucide-react";
-import { fetchRelease, fetchReleases, type UpdateRelease, type UpdateStatus } from "@/app/client";
+import {
+	fetchNotes,
+	fetchRelease,
+	fetchReleases,
+	type UpdateRelease,
+	type UpdateStatus,
+} from "@/app/client";
 import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Text } from "@/components/typography/text";
@@ -39,6 +45,7 @@ export interface ReleaseScreenProps {
 	/** The reads the page owns. Tests and stories hand in fixtures; the app omits them. */
 	loadReleases?: typeof fetchReleases | undefined;
 	loadRelease?: typeof fetchRelease | undefined;
+	loadNotes?: typeof fetchNotes | undefined;
 }
 
 /** How many release reads the in-between list may make: the window's own size. */
@@ -69,6 +76,7 @@ export function ReleaseScreen({
 	onRollback,
 	loadReleases = fetchReleases,
 	loadRelease = fetchRelease,
+	loadNotes = fetchNotes,
 }: ReleaseScreenProps) {
 	const [prereleases, setPrereleases] = useState(false);
 	const [releases, setReleases] = useState<UpdateRelease[] | undefined>(undefined);
@@ -76,7 +84,8 @@ export function ReleaseScreen({
 	const [target, setTarget] = useState<UpdateRelease | undefined>(undefined);
 	const [targetError, setTargetError] = useState<string | undefined>(undefined);
 	const [runningRow, setRunningRow] = useState<UpdateRelease | undefined>(undefined);
-	const [between, setBetween] = useState<UpdateRelease[]>([]);
+	const [notes, setNotes] = useState<Record<string, string>>({});
+	const [readingNotes, setReadingNotes] = useState(false);
 	const [cleanVMs, setCleanVMs] = useState(false);
 	const [dialogOpen, setDialogOpen] = useState(false);
 	// A time base for the states that wait on the gateway: a dead apply and a slow
@@ -89,8 +98,8 @@ export function ReleaseScreen({
 	// The reads are props so stories and tests can hand in fixtures; a ref keeps
 	// them out of the effects' dependencies, where an inline loader would re-run
 	// the effect on every render.
-	const loaders = useRef({ loadReleases, loadRelease });
-	loaders.current = { loadReleases, loadRelease };
+	const loaders = useRef({ loadReleases, loadRelease, loadNotes });
+	loaders.current = { loadReleases, loadRelease, loadNotes };
 
 	const current = status?.current ?? "";
 	const isTag = current !== "" && current !== "dev";
@@ -139,7 +148,7 @@ export function ReleaseScreen({
 		return () => {
 			cancelled = true;
 		};
-	}, [targetTag, releases]);
+	}, [targetTag]);
 
 	// The running build, when it is older than the list: its own row, by name.
 	// Once the list holds it, this row goes — the list's own row is the one that
@@ -165,32 +174,40 @@ export function ReleaseScreen({
 		};
 	}, [current, isTag, releases]);
 
-	// The changes in between: every release newer than the running build but
-	// not the target, inside the fetched window, newest first — so a jump of
-	// several versions reads as one list of changes.
+	// The changes in between: every release newer than the running build but not
+	// the target, inside the fetched window, newest first — so a jump of several
+	// versions reads as one list of changes. The rows come from the list at once;
+	// their notes arrive in one read, which is what used to take five seconds.
+	const between = useMemo(
+		() => betweenReleases(releases, targetTag, target?.relation === "newer"),
+		[releases, targetTag, target?.relation],
+	);
+	// The target's own notes ride its by-name read; this one read is for the
+	// releases in between, and it is keyed by the tags themselves so a re-render
+	// cannot ask again.
+	const betweenNotesTags = useMemo(() => notesTags(between), [between]);
+	const notesKey = betweenNotesTags.join(",");
 	useEffect(() => {
-		if (target?.relation !== "newer" || releases === undefined) {
-			setBetween([]);
-			return;
-		}
-		const rows = releases
-			.filter((release) => release.relation === "newer" && release.tag !== target.tag)
-			.slice(0, BETWEEN_LIMIT);
-		if (rows.length === 0) {
-			setBetween([]);
+		if (notesKey === "") {
 			return;
 		}
 		let cancelled = false;
-		void Promise.all(rows.map((release) => loaders.current.loadRelease(release.tag))).then(
+		setReadingNotes(true);
+		void loaders.current.loadNotes(notesKey.split(",")).then(
 			(loaded) => {
-				if (!cancelled) setBetween(loaded);
+				if (!cancelled) {
+					setNotes((current) => ({ ...current, ...loaded }));
+					setReadingNotes(false);
+				}
 			},
-			() => undefined,
+			() => {
+				if (!cancelled) setReadingNotes(false);
+			},
 		);
 		return () => {
 			cancelled = true;
 		};
-	}, [releases, target]);
+	}, [notesKey]);
 
 	// Follow the swap and the restart until the gateway answers with the new
 	// build: any amount of waiting, and no give-up timer deciding what the page
@@ -302,6 +319,8 @@ export function ReleaseScreen({
 						<ReleaseCard
 							target={target}
 							between={between}
+							notes={notes}
+							readingNotes={readingNotes}
 							cleanVMs={cleanVMs}
 							onCleanVMs={setCleanVMs}
 							applying={applying}
@@ -396,6 +415,30 @@ export function ReleaseScreen({
 	);
 }
 
+/**
+ * The releases between the running build and the target: the list's rows whose
+ * relation says newer, the target itself out, newest first, capped at the window.
+ */
+export function betweenReleases(
+	releases: UpdateRelease[] | undefined,
+	targetTag: string,
+	targetIsNewer: boolean,
+): UpdateRelease[] {
+	if (releases === undefined || !targetIsNewer) return [];
+	return releases
+		.filter((release) => release.relation === "newer" && release.tag !== targetTag)
+		.slice(0, BETWEEN_LIMIT);
+}
+
+/**
+ * The tags the one notes read asks for: everything in between. The target's own
+ * notes ride its by-name read, so asking for it here would be a second read for
+ * the same words.
+ */
+export function notesTags(between: UpdateRelease[]): string[] {
+	return between.map((release) => release.tag).filter((tag) => tag !== "");
+}
+
 /** One sentence for the runs an install would interrupt. */
 function runsLine(runs: { workspace: string; runs: number }[]): string {
 	const total = runs.reduce((sum, item) => sum + item.runs, 0);
@@ -412,6 +455,8 @@ function clock(at: Date): string {
 function ReleaseCard({
 	target,
 	between,
+	notes,
+	readingNotes,
 	cleanVMs,
 	onCleanVMs,
 	applying,
@@ -420,6 +465,8 @@ function ReleaseCard({
 }: {
 	target: UpdateRelease;
 	between: UpdateRelease[];
+	notes: Record<string, string>;
+	readingNotes: boolean;
 	cleanVMs: boolean;
 	onCleanVMs: (clean: boolean) => void;
 	applying: boolean;
@@ -454,14 +501,20 @@ function ReleaseCard({
 							{formatBytes(target.downloadSize + target.workerSize)}
 						</Text>
 					</Stack>
-					{target.notes === "" ? (
+					{notes[target.tag] === undefined && readingNotes ? (
+						<Text size="lg" tone="muted">
+							Reading the release notes…
+						</Text>
+					) : (notes[target.tag] ?? target.notes) === "" ? (
 						<Text size="lg" tone="muted">
 							This release shipped no notes.
 						</Text>
 					) : (
-						<Markdown>{target.notes}</Markdown>
+						<Markdown>{notes[target.tag] ?? target.notes}</Markdown>
 					)}
-					{between.length > 0 ? <Between releases={between} /> : null}
+					{between.length > 0 ? (
+						<Between releases={between} notes={notes} running={target.relation} />
+					) : null}
 					{isRunning ? null : (
 						<>
 							<Text size="2xs" tone="muted">
@@ -506,29 +559,52 @@ function ReleaseCard({
 	);
 }
 
-/** The changes between the running build and the target, newest first, as prose. */
-function Between({ releases }: { releases: UpdateRelease[] }) {
+/**
+ * The changes between the running build and the target, newest first: the rows are
+ * the list's own, so they are there at once, and each one's notes fill in when the
+ * single notes read answers.
+ */
+function Between({
+	releases,
+	notes,
+	running,
+}: {
+	releases: UpdateRelease[];
+	notes: Record<string, string>;
+	running: UpdateRelease["relation"];
+}) {
 	return (
 		<Stack gap="sm" data-slot="release-between">
 			<Text size="2xs" weight="medium" tone="muted">
 				what changed in between
 			</Text>
 			<Stack gap="md">
-				{releases.map((release) => (
-					<Stack key={release.tag} gap="2xs">
-						<Text as="span" size="sm" className="font-mono">
-							{release.tag}
-						</Text>
-						{release.notes === "" ? (
-							<Text size="lg" tone="muted">
-								This release shipped no notes.
+				{releases.map((release) => {
+					const note = notes[release.tag];
+					return (
+						<Stack key={release.tag} gap="2xs">
+							<Text as="span" size="sm" className="font-mono">
+								{release.tag}
 							</Text>
-						) : (
-							<Markdown>{release.notes}</Markdown>
-						)}
-					</Stack>
-				))}
+							{note === undefined ? (
+								<Text size="lg" tone="muted">
+									Reading the notes…
+								</Text>
+							) : note === "" ? (
+								<Text size="lg" tone="muted">
+									This release shipped no notes.
+								</Text>
+							) : (
+								<Markdown>{note}</Markdown>
+							)}
+						</Stack>
+					);
+				})}
 			</Stack>
+			<Text size="2xs" tone="muted">
+				{running === "newer" ? "The releases above run between " : ""}
+				{running === "newer" ? "the running build and the target." : ""}
+			</Text>
 		</Stack>
 	);
 }

@@ -127,6 +127,7 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
 function fixtureFor(current: string): {
 	loadReleases: (prereleases: boolean) => Promise<UpdateRelease[]>;
 	loadRelease: (tag: string) => Promise<UpdateRelease>;
+	loadNotes: (tags: string[]) => Promise<Record<string, string>>;
 } {
 	const list = listFor(current);
 	return {
@@ -136,6 +137,10 @@ function fixtureFor(current: string): {
 			tag === candidateFor(current).tag
 				? candidateFor(current)
 				: (list.find((item) => item.tag === tag) ?? list[0]!),
+		loadNotes: async (tags: string[]) =>
+			Object.fromEntries(
+				tags.map((tag) => [tag, list.find((item) => item.tag === tag)?.notes ?? ""]),
+			),
 	};
 }
 
@@ -212,6 +217,32 @@ export const RunsAreLive: Story = {
 				onRestart={noop}
 				onRollback={noop}
 				{...fixtureFor("v0.9.28")}
+			/>
+		</Frame>
+	),
+};
+
+/** The notes read in flight: the rows are already there, and say so. */
+export const NotesLoading: Story = {
+	render: () => (
+		<Frame
+			label="The changes in between, while their notes arrive"
+			note="J18. The rows are the list's and are there at once; one read brings the notes. This story holds that read open, so the busy state the owner asked for is visible: each tag says it is reading, and nothing waits on a blank."
+		>
+			<ReleaseScreen
+				status={status()}
+				tag=""
+				applying={false}
+				onOpenTag={noop}
+				onClose={noop}
+				onCheck={noop}
+				onRefresh={noop}
+				onApply={noop}
+				onRestart={noop}
+				onRollback={noop}
+				loadReleases={fixtureFor("v0.9.28").loadReleases}
+				loadRelease={fixtureFor("v0.9.28").loadRelease}
+				loadNotes={async () => new Promise(() => undefined)}
 			/>
 		</Frame>
 	),

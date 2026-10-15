@@ -75,6 +75,30 @@ Two things they saw, both explained and neither a defect:
 
 The review install was rebuilt from the branch with a fresh data dir afterwards, back on v0.9.20.
 
+## The owner's report: five seconds of nothing, and what it was (2026-10-15)
+
+The owner: *"it takes more than 5 seconds to show all the versions 'what changed in between', maybe
+we need a busy/loading indicator until they show."* Both halves were right.
+
+The cause was a read per release: each in-between entry called the by-name read, which is three
+GitHub calls (the release, the tag ref, the tag object), and twelve entries meant up to thirty-six
+calls behind one blank block.
+
+What changed:
+
+- **One read for all of them**: `GET /api/update/notes?tags=…` answers several tags at once, with a
+  cache (a tag's notes never change) and eight lanes, so a cold picker open makes two calls, not
+  thirty-six. A read through any other path warms the same cache.
+- **The rows are the list's, and are there at once**: the in-between block renders each tag the
+  moment the list arrives, each saying "Reading the notes…" until the single read answers, and "This
+  release shipped no notes." when a release has none. A bug the measurement caught: the block was
+  rebuilt on every render, so the notes effect looped — hundreds of calls in one page load. It is a
+  memo now, keyed by the tags themselves.
+
+Measured on the review install, 1280: the notes were visible at **6028ms** before, with dozens of
+calls; **3051ms** cold and **982ms** warm after, with five and four calls. The blank wait is gone
+either way: the tags and their dates are on screen within a second.
+
 ## What is left for step 10 and 11
 
 - The owners' panel on the shipped look, and the owner's own notes.

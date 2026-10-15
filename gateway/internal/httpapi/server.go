@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/update/status", s.updateStatus)
 	mux.HandleFunc("GET /api/update/releases", s.updateReleases)
 	mux.HandleFunc("GET /api/update/releases/{tag}", s.updateRelease)
+	mux.HandleFunc("GET /api/update/notes", s.updateNotes)
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
 	mux.HandleFunc("POST /api/update/restart", s.updateRestart)

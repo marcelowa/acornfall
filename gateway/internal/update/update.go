@@ -204,8 +204,15 @@ type Manager struct {
 	current  string
 	latest   Release
 	checking bool
-	failed   string
-	restart  bool
+
+	// notesMu guards the notes cache: a tag's notes never change, so one read
+	// per process is enough, and the page's "what changed in between" asks
+	// once for several tags instead of one read each (the owner: five
+	// seconds of nothing while the list filled in).
+	notesMu    sync.Mutex
+	notesCache map[string]string
+	failed     string
+	restart    bool
 
 	// RunsActive reports whether any conversation is running. Injected so
 	// tests need no control plane.
@@ -475,6 +482,72 @@ func (m *Manager) Release(ctx context.Context, tag string) (Release, error) {
 	return release, nil
 }
 
+// NotesConcurrency is how many releases the notes read resolves at once: a picker
+// open must not burst the API flat, and three calls per tag is the cost here.
+const NotesConcurrency = 8
+
+// Notes resolves the notes of several releases at once, by tag. The page's
+// "what changed in between" needs a handful of them, and one read per release
+// over three API calls each was the five seconds the owner waited through.
+// Each tag is resolved at most once per process — notes never change — and a
+// tag that cannot be read is simply absent from the answer, while a tag with
+// no notes at all answers with an empty string.
+func (m *Manager) Notes(ctx context.Context, tags []string) map[string]string {
+	notes := make(map[string]string, len(tags))
+	var missing []string
+	m.notesMu.Lock()
+	if m.notesCache == nil {
+		m.notesCache = make(map[string]string, len(tags))
+	}
+	for _, tag := range tags {
+		if cached, ok := m.notesCache[tag]; ok {
+			notes[tag] = cached
+			continue
+		}
+		missing = append(missing, tag)
+	}
+	m.notesMu.Unlock()
+
+	resolved := make([]string, len(missing))
+	read := make([]bool, len(missing))
+	var wait sync.WaitGroup
+	lanes := make(chan struct{}, NotesConcurrency)
+	for index, tag := range missing {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			lanes <- struct{}{}
+			defer func() { <-lanes }()
+			release, err := m.Release(ctx, tag)
+			if err != nil {
+				return
+			}
+			resolved[index] = release.Notes
+			read[index] = true
+		}()
+	}
+	wait.Wait()
+
+	m.notesMu.Lock()
+	if len(m.notesCache) > 200 {
+		// A tag's notes never change, so the cache only grows; a cap keeps a
+		// long-lived process honest rather than clever.
+		m.notesCache = make(map[string]string, len(tags))
+	}
+	for index, tag := range missing {
+		// A read that happened is cached even when it found no notes: the
+		// answer says "no notes", not "could not read", and it says it once.
+		// A read that failed is not cached, so the next visit tries again.
+		if !read[index] {
+			continue
+		}
+		m.notesCache[tag] = resolved[index]
+		notes[tag] = resolved[index]
+	}
+	m.notesMu.Unlock()
+	return notes
+}
+
 // resolveNotes fills an empty body from the tag annotation. GitHub release
 // bodies are null for every release cut before the workflow started filling
 // them, and the notes live in the tag message (`git tag -a`) — which is why
@@ -521,6 +594,21 @@ func (m *Manager) resolveNotes(ctx context.Context, release *Release) {
 		return
 	}
 	release.Notes = strings.TrimSpace(object.Message)
+	m.cacheNotes(release.Tag, release.Notes)
+}
+
+// cacheNotes remembers a tag's notes: they never change, so one read per tag is
+// enough, and the page's batch read can answer from here.
+func (m *Manager) cacheNotes(tag, notes string) {
+	if tag == "" {
+		return
+	}
+	m.notesMu.Lock()
+	defer m.notesMu.Unlock()
+	if m.notesCache == nil {
+		m.notesCache = make(map[string]string)
+	}
+	m.notesCache[tag] = notes
 }
 
 // githubRelease is one release as GitHub answers it, the shape the single

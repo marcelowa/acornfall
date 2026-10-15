@@ -1125,3 +1125,49 @@ func TestApplyStopsWorkersBeforeWipe(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNotesResolvesSeveralTagsAndCachesThem(t *testing.T) {
+	manager, _ := testManager(t)
+	hits := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits[r.URL.Path]++
+		switch r.URL.Path {
+		case "/o/r/releases/tags/v0.9.0", "/o/r/releases/tags/v0.9.1":
+			tag := strings.TrimPrefix(r.URL.Path, "/o/r/releases/tags/")
+			_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","body":null,"assets":[]}`))
+		case "/o/r/git/ref/tags/v0.9.0", "/o/r/git/ref/tags/v0.9.1":
+			tag := strings.TrimPrefix(r.URL.Path, "/o/r/git/ref/tags/")
+			sha := "sha-" + tag
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + sha + `","type":"tag"}}`))
+		case "/o/r/git/tags/sha-v0.9.0", "/o/r/git/tags/sha-v0.9.1":
+			tag := strings.TrimPrefix(r.URL.Path, "/o/r/git/tags/sha-")
+			_, _ = w.Write([]byte(`{"message":"notes for ` + tag + `"}`))
+		case "/o/r/releases/tags/vnope":
+			http.Error(w, "not found", http.StatusNotFound)
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+
+	notes := manager.Notes(context.Background(), []string{"v0.9.0", "v0.9.1"})
+	if notes["v0.9.0"] != "notes for v0.9.0" || notes["v0.9.1"] != "notes for v0.9.1" {
+		t.Fatalf("notes = %v", notes)
+	}
+	// The second visit is answered from the cache: a tag's notes never change.
+	before := len(hits)
+	again := manager.Notes(context.Background(), []string{"v0.9.0", "v0.9.1"})
+	if len(hits) != before {
+		t.Fatalf("the cache must answer, hits went from %d to %d", before, len(hits))
+	}
+	if again["v0.9.0"] != "notes for v0.9.0" {
+		t.Fatalf("notes = %v", again)
+	}
+	// A tag the source does not have is absent, not empty: the page can say so.
+	tags := manager.Notes(context.Background(), []string{"vnope"})
+	if _, ok := tags["vnope"]; ok {
+		t.Fatalf("an unread tag must be absent, got %v", tags)
+	}
+}
