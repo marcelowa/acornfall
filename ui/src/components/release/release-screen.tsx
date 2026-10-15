@@ -24,6 +24,7 @@ import {
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { formatBytes } from "@/lib/format";
+import { betweenReleases, notesTags } from "./between";
 import { cn } from "cn";
 
 export interface ReleaseScreenProps {
@@ -47,9 +48,6 @@ export interface ReleaseScreenProps {
 	loadRelease?: typeof fetchRelease | undefined;
 	loadNotes?: typeof fetchNotes | undefined;
 }
-
-/** How many release reads the in-between list may make: the window's own size. */
-const BETWEEN_LIMIT = 20;
 
 /**
  * The release page: running → offered → changed → cost → the press (J16–J19).
@@ -413,30 +411,6 @@ export function ReleaseScreen({
 			</Dialog>
 		</div>
 	);
-}
-
-/**
- * The releases between the running build and the target: the list's rows whose
- * relation says newer, the target itself out, newest first, capped at the window.
- */
-export function betweenReleases(
-	releases: UpdateRelease[] | undefined,
-	targetTag: string,
-	targetIsNewer: boolean,
-): UpdateRelease[] {
-	if (releases === undefined || !targetIsNewer) return [];
-	return releases
-		.filter((release) => release.relation === "newer" && release.tag !== targetTag)
-		.slice(0, BETWEEN_LIMIT);
-}
-
-/**
- * The tags the one notes read asks for: everything in between. The target's own
- * notes ride its by-name read, so asking for it here would be a second read for
- * the same words.
- */
-export function notesTags(between: UpdateRelease[]): string[] {
-	return between.map((release) => release.tag).filter((tag) => tag !== "");
 }
 
 /** One sentence for the runs an install would interrupt. */

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { UpdateRelease } from "../src/app/client";
-import { betweenReleases, notesTags } from "../src/components/release/release-screen";
+import { betweenReleases, notesTags } from "../src/components/release/between";
 
 /**
  * The "changes in between" selection: which releases the page lists, and
