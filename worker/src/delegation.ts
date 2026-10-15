@@ -367,7 +367,7 @@ export function delegationExtension(deps: DelegationDeps) {
 		execute: async (args, api, context) => {
 			const parentId = String(api.conversationId);
 			const reply = (text: string, conversationId?: string) => ({
-				content: [{ type: "text" as const, text }],
+				output: [{ type: "text" as const, text }],
 				...(conversationId === undefined || args.name === undefined
 					? {}
 					: { details: { name: args.name, conversationId } }),
@@ -639,7 +639,7 @@ export function delegationExtension(deps: DelegationDeps) {
 			const policy = await policyFor(deps, parentId, context);
 			if (!policy.canSpawn) {
 				return {
-					content: [
+					output: [
 						{
 							type: "text" as const,
 							text: `Cannot delegate from here: ${policy.blockedBy}. Do the work yourself and say why.`,
@@ -658,7 +658,7 @@ export function delegationExtension(deps: DelegationDeps) {
 				try {
 					level = thinkingLevelFor(definition.thinking);
 				} catch (error) {
-					return { content: [{ type: "text" as const, text: (error as Error).message }] };
+					return { output: [{ type: "text" as const, text: (error as Error).message }] };
 				}
 			}
 
@@ -692,7 +692,7 @@ export function delegationExtension(deps: DelegationDeps) {
 			const handle = await api.conversation(childId as ConversationId, context);
 			if (handle === undefined) {
 				return {
-					content: [
+					output: [
 						{ type: "text" as const, text: "The subagent conversation vanished." },
 					],
 				};
@@ -711,7 +711,7 @@ export function delegationExtension(deps: DelegationDeps) {
 			const answer = child === undefined ? "" : await answerFrom(child, context);
 			await api.details({ conversationId: String(childId), status: settled.status }, context);
 			return {
-				content: [
+				output: [
 					{
 						type: "text" as const,
 						text:

@@ -143,7 +143,7 @@ export function skillsExtension(
 					if (skill === undefined) {
 						const names = available.map((candidate) => candidate.name).join(", ");
 						return {
-							content: [
+							output: [
 								{
 									type: "text" as const,
 									text: `Skill "${args.name}" is not available here. Available: ${names || "none"}.`,
@@ -156,7 +156,7 @@ export function skillsExtension(
 					const source = await files.read(skill.path);
 					if (source === null) {
 						return {
-							content: [
+							output: [
 								{
 									type: "text" as const,
 									text: `Skill "${args.name}" is no longer there: ${skill.path}`,
@@ -167,7 +167,7 @@ export function skillsExtension(
 					const body = skillBody(source);
 					const request = args.args === undefined ? "" : `\n\nUser request: ${args.args}`;
 					return {
-						content: [
+						output: [
 							{
 								type: "text" as const,
 								text: `# Skill: ${skill.name}\nDirectory: ${skill.dir}\n\n${body}${request}`,
