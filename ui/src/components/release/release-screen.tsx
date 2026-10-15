@@ -50,6 +50,10 @@ const BETWEEN_LIMIT = 20;
  * facts when it is older than the list, and the notes in between — because they are the page's
  * own content and nobody else reads them. Every version it shows says what it is next to the
  * running build, and it decides none of that itself: the gateway's `relation` says it (R6, R7).
+ *
+ * One control per job, and one statement per fact: the running build is marked once per list, the
+ * restart has one block and one button, and a state that carries its own control does not get a
+ * second one under the picker.
  */
 export function ReleaseScreen({
 	status,
@@ -106,15 +110,13 @@ export function ReleaseScreen({
 			cancelled = true;
 		};
 	}, [prereleases]);
+
 	// The target's own read: notes, date, size, relation. The list carries no
 	// notes — GitHub bodies are null for every release so far — so the page asks
 	// by name.
 	useEffect(() => {
 		if (targetTag === "") return;
 		let cancelled = false;
-		if (releases !== undefined && releases.some((release) => release.tag === targetTag)) {
-			if (!cancelled) setTargetError(undefined);
-		}
 		void loaders.current.loadRelease(targetTag).then(
 			(release) => {
 				if (!cancelled) {
@@ -131,10 +133,19 @@ export function ReleaseScreen({
 			cancelled = true;
 		};
 	}, [targetTag, releases]);
+
 	// The running build, when it is older than the list: its own row, by name.
+	// Once the list holds it, this row goes — the list's own row is the one that
+	// stays, so the picker never prints the same release twice.
 	useEffect(() => {
-		if (!isTag) return;
-		if (releases !== undefined && releases.some((release) => release.tag === current)) return;
+		if (!isTag) {
+			setRunningRow(undefined);
+			return;
+		}
+		if (releases !== undefined && releases.some((release) => release.tag === current)) {
+			setRunningRow(undefined);
+			return;
+		}
 		let cancelled = false;
 		void loaders.current.loadRelease(current).then(
 			(release) => {
@@ -197,6 +208,13 @@ export function ReleaseScreen({
 	const runs = status?.runs ?? [];
 	const runCount = runs.reduce((total, item) => total + item.runs, 0);
 	const workspaces = runs.map((item) => item.workspace).join(", ");
+	const failed = status?.failed !== undefined && status.failed !== "";
+	// A state that carries its own control does not get a second one below it.
+	const ownsCheck =
+		listError !== undefined ||
+		targetError !== undefined ||
+		failed ||
+		status?.restartRequired === true;
 
 	return (
 		<div data-slot="release-screen" className="min-h-0 flex-1 overflow-y-auto">
@@ -231,12 +249,12 @@ export function ReleaseScreen({
 					onRestart={onRestart}
 				/>
 
-				{status?.failed !== undefined && status.failed !== "" ? (
+				{failed ? (
 					<Stack gap="2xs" data-slot="release-rolled-back">
 						<Badge variant="soft" tone="danger" size="sm">
 							Rolled back
 						</Badge>
-						<Text size="xs">{status.failed}</Text>
+						<Text size="xs">{status?.failed}</Text>
 						<Text size="2xs" tone="muted">
 							{current} is running. Check the next release, or roll back by hand.
 						</Text>
@@ -265,126 +283,22 @@ export function ReleaseScreen({
 					</Stack>
 				) : null}
 
-				{status?.restartRequired === true ? (
-					<Stack gap="2xs" data-slot="release-restart">
-						<Badge variant="soft" tone="warning" size="sm">
-							Restart pending
-						</Badge>
-						<Text size="xs">
-							The new build is on disk and the old process still answers. Restarting
-							finishes it.
-						</Text>
-						<div>
-							<Button size="sm" variant="outline" onClick={onRestart}>
-								Restart
-							</Button>
-						</div>
-					</Stack>
+				{target !== undefined && targetError === undefined && !failed ? (
+					<ReleaseCard
+						target={target}
+						between={between}
+						cleanVMs={cleanVMs}
+						onCleanVMs={setCleanVMs}
+						applying={applying}
+						onInstall={startUpdate}
+					/>
 				) : null}
 
-				{target !== undefined &&
-				targetError === undefined &&
-				(status?.failed === undefined || status.failed === "") ? (
-					<Stack gap="sm" data-slot="release-card">
-						<div className="rounded-lg border border-border bg-card p-3">
-							<Stack gap="sm">
-								<Stack gap="2xs">
-									<div className="flex items-center gap-2">
-										<Text
-											as="span"
-											size="sm"
-											weight="semibold"
-											className="font-mono"
-										>
-											{target.tag}
-										</Text>
-										{target.prerelease ? (
-											<Text
-												as="span"
-												size="2xs"
-												tone="muted"
-												className="font-mono"
-											>
-												pre
-											</Text>
-										) : null}
-										{target.relation === "running" ? (
-											<Badge variant="soft" tone="neutral" size="sm">
-												running
-											</Badge>
-										) : null}
-									</div>
-									<Text
-										size="2xs"
-										tone="muted"
-										className="font-mono tabular-nums"
-									>
-										{target.publishedAt.slice(0, 10)}
-										{target.relation === "older"
-											? " · older than the running build"
-											: ""}
-										{target.relation === "unknown"
-											? " · not a release tag"
-											: ""}
-										{" · "}
-										{formatBytes(target.downloadSize + target.workerSize)}
-									</Text>
-								</Stack>
-								{target.notes === "" ? (
-									<Text size="base" tone="muted">
-										This release shipped no notes.
-									</Text>
-								) : (
-									<Markdown>{target.notes}</Markdown>
-								)}
-								{between.length > 0 ? <Between releases={between} /> : null}
-								<Text size="2xs" tone="muted">
-									Backs up config, state DB, and workspace list first (last 3
-									kept). VM disks are not backed up. The update stops if backup
-									fails. The window reloads when the new build answers; a draft is
-									not kept.
-								</Text>
-								<Stack gap="2xs">
-									<Text size="2xs" tone="muted">
-										sandbox VMs
-									</Text>
-									<ToggleGroup
-										type="single"
-										value={cleanVMs ? "clean" : "keep"}
-										onValueChange={(next) => {
-											if (next === "keep") setCleanVMs(false);
-											if (next === "clean") setCleanVMs(true);
-										}}
-										variant="outline"
-										size="sm"
-										spacing={0}
-										aria-label="Sandbox VMs"
-									>
-										<ToggleGroupItem value="keep">Keep VMs</ToggleGroupItem>
-										<ToggleGroupItem value="clean">Start clean</ToggleGroupItem>
-									</ToggleGroup>
-									<Text size="2xs" tone="muted">
-										Clean wipes the sandbox root only — never files under
-										workspaces.
-									</Text>
-								</Stack>
-								<div>
-									<Button
-										size="sm"
-										onClick={startUpdate}
-										disabled={applying || target.relation === "running"}
-									>
-										{applying ? "Installing…" : "Install"}
-									</Button>
-								</div>
-							</Stack>
-						</div>
-					</Stack>
-				) : null}
-
-				<Button size="xs" variant="ghost" className="self-start" onClick={onCheck}>
-					{status?.checking === true ? "Checking…" : "Check now"}
-				</Button>
+				{ownsCheck ? null : (
+					<Button size="xs" variant="ghost" className="self-start" onClick={onCheck}>
+						{status?.checking === true ? "Checking…" : "Check now"}
+					</Button>
+				)}
 
 				<Stack gap="sm" data-slot="release-picker">
 					<div className="flex items-center justify-between gap-2">
@@ -401,28 +315,28 @@ export function ReleaseScreen({
 							Pre-release builds
 						</Toggle>
 					</div>
-					{listError !== undefined ? (
-						<Text size="xs">{listError}</Text>
-					) : (
-						<div className="flex flex-col gap-0.5">
-							{isTag && runningRow !== undefined ? (
-								<ReleaseRow release={runningRow} current onOpen={onOpenTag} />
-							) : null}
-							{(releases ?? []).map((release) => (
-								<ReleaseRow
-									key={release.tag}
-									release={release}
-									current={release.tag === targetTag}
-									onOpen={onOpenTag}
-								/>
-							))}
-						</div>
+					{listError !== undefined ? null : (
+						<>
+							<div className="flex flex-col gap-0.5">
+								{isTag && runningRow !== undefined ? (
+									<ReleaseRow release={runningRow} onOpen={onOpenTag} />
+								) : null}
+								{(releases ?? []).map((release) => (
+									<ReleaseRow
+										key={release.tag}
+										release={release}
+										current={release.tag === targetTag}
+										onOpen={onOpenTag}
+									/>
+								))}
+							</div>
+							<Text size="2xs" tone="muted">
+								{isTag && runningRow !== undefined
+									? "From the twenty most recent. Older changes are not listed."
+									: "The twenty most recent releases. Newest first."}
+							</Text>
+						</>
 					)}
-					<Text size="2xs" tone="muted">
-						{isTag && runningRow !== undefined
-							? "From the twenty most recent. Older changes are not listed."
-							: "The twenty most recent releases. Newest first."}
-					</Text>
 				</Stack>
 			</Stack>
 
@@ -465,22 +379,121 @@ export function ReleaseScreen({
 	);
 }
 
-/** The changes between the running build and the target, newest first. */
+/** The release card: the target, its notes, the changes in between, and the press. */
+function ReleaseCard({
+	target,
+	between,
+	cleanVMs,
+	onCleanVMs,
+	applying,
+	onInstall,
+}: {
+	target: UpdateRelease;
+	between: UpdateRelease[];
+	cleanVMs: boolean;
+	onCleanVMs: (clean: boolean) => void;
+	applying: boolean;
+	onInstall: () => void;
+}) {
+	// The running build is not offered as a target: its notes are worth reading,
+	// its cost and its press are not.
+	const isRunning = target.relation === "running";
+	return (
+		<Stack gap="sm" data-slot="release-card">
+			<div className="rounded-lg border border-border bg-card p-3">
+				<Stack gap="sm">
+					<Stack gap="2xs">
+						<div className="flex items-center gap-2">
+							<Text as="span" size="sm" weight="semibold" className="font-mono">
+								{target.tag}
+							</Text>
+							{target.prerelease ? (
+								<Text as="span" size="2xs" tone="muted" className="font-mono">
+									pre
+								</Text>
+							) : null}
+						</div>
+						<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+							{target.publishedAt.slice(0, 10)}
+							{isRunning ? " · running" : ""}
+							{target.relation === "older" ? " · older than the running build" : ""}
+							{target.relation === "unknown" ? " · not a release tag" : ""}
+							{" · "}
+							{formatBytes(target.downloadSize + target.workerSize)}
+						</Text>
+					</Stack>
+					{target.notes === "" ? (
+						<Text size="lg" tone="muted">
+							This release shipped no notes.
+						</Text>
+					) : (
+						<Markdown>{target.notes}</Markdown>
+					)}
+					{between.length > 0 ? <Between releases={between} /> : null}
+					{isRunning ? null : (
+						<>
+							<Text size="2xs" tone="muted">
+								Backs up config, state DB, and workspace list first (last 3 kept).
+								VM disks are not backed up. The update stops if backup fails. The
+								window reloads when the new build answers; a draft is not kept.
+							</Text>
+							<Stack gap="2xs">
+								<Text size="2xs" tone="muted">
+									sandbox VMs
+								</Text>
+								<ToggleGroup
+									type="single"
+									value={cleanVMs ? "clean" : "keep"}
+									onValueChange={(next) => {
+										if (next === "keep") onCleanVMs(false);
+										if (next === "clean") onCleanVMs(true);
+									}}
+									variant="outline"
+									size="sm"
+									spacing={0}
+									aria-label="Sandbox VMs"
+								>
+									<ToggleGroupItem value="keep">Keep VMs</ToggleGroupItem>
+									<ToggleGroupItem value="clean">Start clean</ToggleGroupItem>
+								</ToggleGroup>
+								<Text size="2xs" tone="muted">
+									Clean wipes the sandbox root only — never files under
+									workspaces.
+								</Text>
+							</Stack>
+							<div>
+								<Button size="sm" onClick={onInstall} disabled={applying}>
+									{applying ? "Installing…" : "Install"}
+								</Button>
+							</div>
+						</>
+					)}
+				</Stack>
+			</div>
+		</Stack>
+	);
+}
+
+/** The changes between the running build and the target, newest first, as prose. */
 function Between({ releases }: { releases: UpdateRelease[] }) {
 	return (
-		<Stack gap="xs" data-slot="release-between">
+		<Stack gap="sm" data-slot="release-between">
 			<Text size="2xs" weight="medium" tone="muted">
 				what changed in between
 			</Text>
-			<Stack gap="xs">
+			<Stack gap="md">
 				{releases.map((release) => (
 					<Stack key={release.tag} gap="2xs">
-						<Text as="span" size="xs" className="font-mono">
+						<Text as="span" size="sm" className="font-mono">
 							{release.tag}
 						</Text>
-						<Text as="span" size="xs" tone="muted">
-							{release.notes}
-						</Text>
+						{release.notes === "" ? (
+							<Text size="lg" tone="muted">
+								This release shipped no notes.
+							</Text>
+						) : (
+							<Markdown>{release.notes}</Markdown>
+						)}
 					</Stack>
 				))}
 			</Stack>
@@ -488,7 +501,11 @@ function Between({ releases }: { releases: UpdateRelease[] }) {
 	);
 }
 
-/** One row of the picker: a link to the version's page, never a control with two actions. */
+/**
+ * One row of the picker: a link to the version's page, never a control with two actions. The
+ * running build and a pre-release are marks — mono, muted, one word each — not coloured badges,
+ * and the row in view is the only one with a background step.
+ */
 function ReleaseRow({
 	release,
 	current,
@@ -505,7 +522,7 @@ function ReleaseRow({
 			onClick={() => onOpen(release.tag)}
 			className={cn(
 				"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-				current === true && "bg-accent/40",
+				current === true && "bg-muted",
 			)}
 		>
 			<div className="flex min-w-0 flex-1 flex-col">
@@ -514,13 +531,8 @@ function ReleaseRow({
 						{release.tag}
 					</Text>
 					{release.relation === "running" ? (
-						<Badge variant="soft" tone="neutral" size="sm">
-							running
-						</Badge>
-					) : null}
-					{release.prerelease ? (
 						<Text as="span" size="2xs" tone="muted" className="font-mono">
-							pre
+							running
 						</Text>
 					) : null}
 				</div>
@@ -601,6 +613,28 @@ function StateLine({
 			</Stack>
 		);
 	}
+	if (listError !== undefined) {
+		return (
+			<Stack gap="2xs" data-slot="release-state">
+				<Text size="sm" weight="semibold">
+					The release source did not answer
+				</Text>
+				<Text size="xs" tone="muted">
+					{listError}
+				</Text>
+				<Text size="2xs" tone="muted" className="font-mono">
+					{status.latest === ""
+						? `running ${status.current} · no release known yet`
+						: `running ${status.current} · last known release ${status.latest}`}
+				</Text>
+				<div>
+					<Button size="sm" variant="outline" onClick={onCheck}>
+						Check now
+					</Button>
+				</div>
+			</Stack>
+		);
+	}
 	if (status.current === "dev") {
 		return (
 			<Stack gap="2xs" data-slot="release-state">
@@ -612,9 +646,6 @@ function StateLine({
 				</Text>
 			</Stack>
 		);
-	}
-	if (status.failed !== undefined && status.failed !== "") {
-		return null;
 	}
 	if (status.available) {
 		return (
@@ -629,6 +660,7 @@ function StateLine({
 			</Stack>
 		);
 	}
+	const upToDate = status.current === status.latest;
 	return (
 		<Stack gap="2xs" data-slot="release-state">
 			<Text size="sm" weight="semibold">
@@ -636,10 +668,11 @@ function StateLine({
 			</Text>
 			<Text size="2xs" tone="muted" className="font-mono tabular-nums">
 				running {status.current}
-				{status.latest === "" ? "" : ` · newest production release ${status.latest}`}
+				{upToDate
+					? " · the newest production release"
+					: ` · newest production release ${status.latest}`}
 				{checking ? " · checking…" : ""}
 			</Text>
-			{listError === undefined ? null : <Text size="xs">{listError}</Text>}
 		</Stack>
 	);
 }

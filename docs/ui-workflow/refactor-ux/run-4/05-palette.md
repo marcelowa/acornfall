@@ -31,23 +31,30 @@ installing is deliberate (R10). Everything the surface decides follows from thos
 | The picker | the last twenty, a row per release | rows `sm`, tag mono, facts `2xs` muted |
 | Recovery | rolled back: cause, tag, **Roll back**, **Check now** | `xs` prose, `2xs` facts |
 
-- **The notes print at `base`.** They are the release's own words, and the one piece of real prose on
-  the page; everything else is a fact and stays quiet (`2xs` muted, mono for values) per run 1.
+- **The notes print at the renderer's own step (16px, the transcript's prose size).** They are the
+  release's own words, and the one piece of real prose on the page; everything else is a fact and
+  stays quiet (`2xs` muted, mono for values) per run 1. The step-06 mocks rendered them through the
+  same renderer, and the look panel's word was to keep that size and lift the "no notes" sentence
+  to match rather than drop the prose to `base`.
 - **Every tag is mono.** A version is a value, and values are comparable down a column — the picker
   only works if the tags line up.
+- **Marks are mono facts, not badges.** `running` and `pre` are one muted word each beside the tag:
+  the soft neutral badge sat just under the small-text contrast floor on its own background, and a
+  fact does not need a box. Only the page's three states keep badges, where the tone means something
+  (rolled back in danger, restart pending in warning).
 
 ## The picker row
 
 One row per release, a link to its version page, never a row with two actions (picking is not
 installing):
 
-- line 1: the tag (mono, `sm`) and two marks when they apply — **running**, and **pre** for a
-  non-production build;
+- line 1: the tag (mono, `sm`) and, when it applies, one muted mono word — `running`;
 - line 2: date · size · production or pre-release, `2xs` muted.
 
-Production readiness is a **fact, not an alarm**: the pre-release mark is muted mono (`-rc`), not a
-coloured badge, because an rc is a choice someone makes on purpose, not a failure. The running mark
-is the console's existing running state (`secondary`), not a new colour.
+Pre-release is named once per row (the tag's own `-rc.1` and the facts line): a `pre` word as well
+said the same thing three times (look panel). Production readiness is a **fact, not an alarm**. The
+row whose page is open takes the one background step (`bg-muted`); the accent was invisible against
+the card in light (measured Δ3), and the row's job is to say where you are, not to glow.
 
 ## The states the page must carry
 
@@ -56,14 +63,17 @@ Each one is a sentence, never a bare spinner (R11):
 | State | The page says |
 |---|---|
 | Checking | that a check is in flight, and it leaves the last answer on screen |
-| Up to date | that the running build is the newest GA, with the date it checked |
+| Up to date | that the running build is the newest GA, with the date it checked, and the card shows notes only — no cost, no VM choice, no Install |
 | Newer available | the target, its size, and the running build beside it |
-| Restart pending | that the files are swapped, the old process answers, and **Restart** finishes it |
+| Restart pending | one block: that the files are swapped, the old process answers, and **Restart** finishes it |
 | Restarting | that the new build is taking over, and that the page will say when it answers |
 | Lost the gateway | that it cannot reach the gateway any more, with **Check again** — no give-up timer |
 | Rolled back | the cause, the tag that failed, **Roll back**, **Check again** |
-| Refused source | which refusal it is — no token, no network, empty list — in the gateway's words |
+| Refused source | which refusal it is — no token, no network, empty list — in the gateway's words, in the state line, with the picker silent rather than captioned |
 | `dev` build | "dev build — not a release tag", with no newer or older claims |
+
+One control per job: a state that carries its own check or restart control does not get a second one
+under the picker (look panel).
 
 ## Wording
 

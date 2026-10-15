@@ -41,6 +41,7 @@ export function ReleaseMark({ status, onOpen }: ReleaseMarkProps) {
 			aria-label={
 				status.latest === "" ? "Update available" : `Update available: ${status.latest}`
 			}
+			className="max-sm:min-w-11 max-sm:[&_svg]:size-5"
 			onClick={onOpen}
 		>
 			<ArrowUp />
