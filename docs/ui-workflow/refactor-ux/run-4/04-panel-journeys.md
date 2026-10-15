@@ -4,7 +4,7 @@ Date: 2026-10-15. Three sub-agents, one per persona from `icp.md`, each handed i
 verbatim, the journeys (`03-journeys.md`), the frame and goal, and the current release surface to
 judge against. They were told not to soften. Their words are below, unedited.
 
-Status: **2 of 3 landed** — OWNER-OPERATOR and TINKERER answered; DELEGATOR is running.
+Status: **3 of 3 landed** — OWNER-OPERATOR, TINKERER and DELEGATOR answered.
 
 ## PERSONA: OWNER-OPERATOR
 
@@ -152,3 +152,79 @@ Status: **2 of 3 landed** — OWNER-OPERATOR and TINKERER answered; DELEGATOR is
     silently on Defaults (`use-platform.ts:102-105` falls back to "defaults") with no "the page
     moved" — the owner chose no redirect, so I only note that I'd think my link was wrong, not that
     the page moved.
+
+## PERSONA: DELEGATOR
+
+- **keep** — The dot/tag in the bar on every screen, reading free, Back free, and a check that
+  never installs: that is a check-in I can do in two seconds from wherever I am.
+- **cut** — "Wait for drain". As written it is "Later" wearing a promise it does not keep — cut the
+  word or make it wait.
+- **confused-by** — Who runs the show: "runs are active" is decided from the workspace I happen to
+  be looking at, while the gateway counts every workspace; and when a restart sticks, someone
+  "restarts" — I cannot find that control anywhere.
+- **would I keep using this** — Yes to read and to check. I would press Install only after I have
+  deliberately emptied the shop, and I would still keep a terminal command in my notes for the
+  stuck cases — so "no terminal" is not met for me yet.
+
+### Findings
+
+1. **The dialog's "runs are active" is not the gateway's runs.** J17 step 2 treats it as a known
+   fact. The console computes it from the conversations of the workspace in view
+   (`workspace-view.tsx:508`), the gateway refuses when any conversation in any started workspace
+   runs (`Workspaces.AnyRunning`, `workspaces.go:543-549`). With a run alive in another workspace
+   the dialog never opens, the press goes out with drain `"wait"`, and the answer is a 409
+   `ErrRunsActive` (`update/update.go:165-169`) as an error strip in the gateway's words. That is a
+   busy signal that lies in the worst direction — it says idle while my other thread is running.
+   Change: J17 must say the gate is the gateway's own answer, and R6 must cover "is anything
+   running", not only the release state. Bonus: the gateway's gate has the same 30-minute window
+   the rail dims at (`lib/clock.ts`), so a "running" conversation can read as stale in the rail —
+   the dialog should say the age, or the two must not disagree.
+2. **"Stop runs and update" is an unnamed nuke.** `AbortAll` aborts every running conversation in
+   every started workspace (`workspaces.go:528-541`); J17's dialog names nothing — no count, no
+   workspaces, no conversations. I run five threads and delegate; that button can kill all of them
+   sight unseen. Change: the dialog names what it stops (at least count and workspaces, ideally
+   conversation titles), and R10's "nothing about it is silent" gets a runs clause.
+3. **"Wait for drain" does not wait — today it is literally "Later".** The button closes the dialog
+   and calls `onLater()` → `showScreen("conversation")` (`update-section.tsx:289-297`,
+   `workspace-view.tsx:515`). Nothing queues, watches, or tells me when the last run ends. The
+   journey kept the label without fixing the meaning. Change: either it queues — the apply fires
+   when the last run drains, and the page says it is queued and when it went — or rename it "Not
+   now" and say the press is mine to re-make. Keep the word "Wait" only if it waits.
+4. **A stuck restart ends in a terminal, and has no sign outside the page.** J19 step 2 says "a
+   restart finishes it". The API is status/check/releases/apply/rollback/settings
+   (`httpapi/server.go:88-93`) — no restart control; the gateway's own comment says a failed
+   self-exec means "a human restarts instead" (`update/update.go:1189-1195`). Worse for check-ins:
+   the swap sets `current` to the new tag before the exec (`update.go:1142`), so `available` goes
+   false and the bar indicator disappears (J16 step 1) while the old process is still answering.
+   The only "restart pending" sign is on a page I now have no reason to visit. Change: J19 must
+   name how a restart is finished from the console, and restart-pending must be visible from the
+   bar — it is the thing I scan.
+5. **With no dot, I cannot get in — so "Check now" is unreachable.** J21 puts the running build and
+   auto-check in settings and Check now on the release page, and never says the doorway between
+   them. The entry points were "Indicator, a pasted URL, Settings" (`01-frame.md`), but the button
+   only exists when a newer GA is already known. Change: name the link from the install-wide
+   settings page into the release page, or the one control that finds releases I do not know about
+   yet is behind a dot that shows only when I already know.
+6. **The stopped runs have no other side.** After "Stop runs and update", J16-J21 say nothing about
+   the conversations that were killed: no journey says the rail or the conversation marks "stopped
+   by the update", so I cannot tell an update-killed run from a finished one. I looked for
+   something in the console and could not find one — say so rather than me guessing. Change: one
+   line in J17 and R10 — each conversation the install stopped says so where its run was, so a
+   check-in does not require opening the transcript.
+7. **The restart will find me wherever I went.** J16 step 4 makes Back free; J17 step 4 shows the
+   restart only to someone still on the release page. The console reloads the whole window when the
+   stream's build changes (`use-platform.ts:1037-1042`), which the swap causes before the exec. If I
+   installed and went back to type, that reload lands mid-sentence; the draft is the composer's own
+   state (`workspace-view.tsx:68`), and I cannot see anything that keeps it. Change: J17 must say
+   where the restart lands for someone who left — hold the reader until it finishes, or come back
+   where they were and say so.
+8. **My runs die before the update is known good.** The gateway stops runs first, then backs up,
+   downloads, verifies (`update/update.go:869-880`). A failed download costs my five threads and
+   buys me a rolled-back update. J17 step 3's sequence does not say when the stop lands. Change:
+   name the moment in J17 and say why; if the only reason is quiet, stop after verify, just before
+   the swap.
+9. **One thing I want signed, not just kept:** nothing installs itself. Auto-check only checks
+   (`StartLoop` → `Check`), apply is button-only (`httpapi/server.go:91`), J21 keeps an install out
+   of settings, and the pin is gone so nothing can silence the indicator. Put that in R10 as a
+   negative line — "no install without a press, ever" — because it is the one promise I am
+   counting on.
