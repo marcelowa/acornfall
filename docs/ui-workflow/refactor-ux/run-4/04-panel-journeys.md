@@ -4,7 +4,7 @@ Date: 2026-10-15. Three sub-agents, one per persona from `icp.md`, each handed i
 verbatim, the journeys (`03-journeys.md`), the frame and goal, and the current release surface to
 judge against. They were told not to soften. Their words are below, unedited.
 
-Status: **1 of 3 landed** — OWNER-OPERATOR answered; DELEGATOR and TINKERER are running.
+Status: **2 of 3 landed** — OWNER-OPERATOR and TINKERER answered; DELEGATOR is running.
 
 ## PERSONA: OWNER-OPERATOR
 
@@ -63,3 +63,92 @@ Status: **1 of 3 landed** — OWNER-OPERATOR answered; DELEGATOR and TINKERER ar
    restart watch stops polling after three delays; if the restart outlasts them, I sit on a stale
    "Restarting". R11 already promises the page only claims what the gateway answered — J17.4 should
    say the page keeps following until the gateway answers, not for N polls.
+
+## PERSONA: TINKERER
+
+- **keep** — the pin dying and the prefs leaving the release card: today `update-section.tsx` has
+  three commit models in one card (auto-check saves on toggle, pinned saves on blur/Enter, keep/clean
+  applies at install) and `setUpdatePrefs` posts the whole object; one install-wide page with
+  auto-check alone is the one thing in this draft I'd trust on sight.
+- **cut** — "Wait for drain" as a third answer in the runs dialog (J17.2): with the gateway I can
+  read, that press either does nothing or is refused — it cannot mean what the word says.
+- **confused-by** — which read is "the newest" on the page, and whether "the last twenty" contains
+  my running build: the page preselects the newest GA from the status the check found while the
+  picker is a fresh fetch, and J18.1 promises a running row I cannot see the data for.
+- **would I keep using this** — for the page itself, yes; for reaching it, no. The dot is the only
+  in-app door and it is conditional. With auto-check off, my own setting, this whole surface is a
+  URL I have to remember — which is the terminal with extra steps.
+
+### Findings
+
+1. **No permanent door to the page.** J16.1 opens the dot only while the newest GA differs; J21.1
+   gives the settings install page the running build and auto-check and nothing else; J21.3 moves
+   Check now onto the release page. `workspace-view.tsx:575-586` confirms the dot is the only in-app
+   entrance, and it exists only when `available`. Frame answer 4 counted Settings as an entrance;
+   the journeys never give it a link. Worse: the hourly check only runs when auto-check is on
+   (`gateway/internal/update/update.go` StartLoop), so with auto-check off the page is reachable by
+   typed URL alone — exactly when I'd want to pick a version by hand. Change: one permanent line on
+   the install-wide settings page ("Releases — pick a version"), then drop or soften J21.1's "the
+   only place either lives".
+2. **"Wait for drain" is a lie in the current gateway.** `gateway/internal/update/update.go:833-834`:
+   runs active and drain != "stop" returns `ErrRunsActive` — there is no deferred apply. The
+   console's middle choice calls `onLater()` (`update-section.tsx:291-294`), i.e. it closes the
+   screen and nothing happens when the runs end. J17.2 offers it as a real meaning among three and
+   J17.3 never says what follows. Change: either the gateway queues the apply and the page says
+   "queued — it starts when the runs drain", or the dialog says "Not now" and stops pretending.
+3. **Three version truths on one screen; the journeys don't rank them.** The status
+   (current/latest/notes) comes from the last check; the list is fetched fresh with no cache (the
+   gateway's own `List` comment says a stale picker is worse than a wait); the URL names a third
+   tag. J16.2 says the page opens with "the newest GA" preselected — from which read? An hour-old
+   check plus a minute-old list gives two different answers, and R6 doesn't settle it because both
+   come from the tier. Change: one sentence — on this page the list is the truth for "newest", the
+   status is the truth for "running", and say whether Check now refetches both.
+4. **The running row is the one row the data can't fill.** List rows carry
+   tag/name/notes/publishedAt/prerelease/sizes (`httpapi/update.go` `wireRelease`); the status
+   carries `current` with no date, size or prerelease flag (`client.ts` `UpdateStatus`, ~322-337).
+   J18.1 wants the running build marked and staying visible when it is older than the window —
+   spliced from the status, that row loses its date and size. J18.4 wants "the notes of every
+   release between the running build and the pick": if my running build sits below the cut, those
+   releases were never fetched. J18.4 covers a pick outside the window; it does not cover the
+   running build outside it. Change: say what the page prints when the range is cut ("from the
+   twenty most recent; older changes are not listed") and where the running row's date and size
+   come from.
+5. **"dev" and unknown tags have no stated treatment.** The gateway sets current to `dev` when
+   there is no version file and no stamped build version, and forces `available` false for it
+   (`update.go:313`, `356-364`) — so on a box built from source the dot never appears and the picker
+   must still say newer/older against a string that isn't a version. R7 and J17/J18 assume a
+   comparable tag. Change: one line on what the running line and row markers show for a build that
+   is not a release tag.
+6. **The indicator's rule is "differs", the goal's promise is "newer".** J16.1 says the dot is
+   there "while the newest GA differs from the running build"; the gateway implements exactly that
+   (`available = latest.Tag != current`). Install an rc from the picker — the switch exists for it —
+   and the bar comes back naming the older GA, with a bare dot on a phone and no words anywhere (R7
+   has nowhere to put "older" beside a dot). Change: either `available` means "latest is newer than
+   current", or the phone dot and the page's landing line both say the newest GA is older than what
+   runs.
+7. **"This visit" is undefined exactly where I use it.** J18.2 resets the switch on every arrival;
+   J18.3 picking navigates to `/update/v0.9.28`; J18.6 makes Back return to the open page. Is a tag
+   navigation an arrival? If so, Back gives me the GA-only list and my pick may be outside it. And
+   because the gateway filters pre-releases server-side (`updateReleases` reads the `prerelease`
+   query), "widens the list" is a refetch, not a filter — the rows change under my finger. Change:
+   define "visit" as first load and fresh open, not in-page tag navigation, and say the switch
+   refetches.
+8. **The restart follow gives up after 25 seconds with nothing on screen.** `update-section.tsx:327`
+   fires three fixed timers (5/12/25s) and then never re-reads. J17.4 wants the page to follow the
+   restart by itself and R11 wants the state to be the gateway's word; a slower or failed takeover
+   leaves the page on its last word forever, with no "still waiting" and no press to re-read.
+   Change: the page keeps following while restarting, or says it lost the gateway and offers Check
+   again.
+9. **Cannot see / no read found:** a tag page outside the twenty needs a by-name read (J18,
+   must-be-true), and the only by-name fetch I can find is `releaseFor` inside Apply
+   (`gateway/internal/update/worker.go:269`) — there is no GET for a single tag, only
+   `GET /api/update/releases` with a `limit` (cap 100). A link to an old tag therefore has one fetch
+   path I can see, and it isn't enough. Also cannot see: where the release page gets the list (no UI
+   code for it yet) or how it marks a target the list doesn't contain. Where the page's "switch
+   resets" is enforced I cannot tell from journeys alone.
+10. **Small churn notes, not blockers.** `settings-screen.tsx:73-75` already prints "acornfall
+    {version}" under the Settings heading, so J21.1's "only place either lives" contradicts the
+    console. And removing `/settings/updates` with no redirect means an old link in my notes lands
+    silently on Defaults (`use-platform.ts:102-105` falls back to "defaults") with no "the page
+    moved" — the owner chose no redirect, so I only note that I'd think my link was wrong, not that
+    the page moved.
