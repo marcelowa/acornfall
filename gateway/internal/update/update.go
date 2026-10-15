@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -55,7 +56,11 @@ type Release struct {
 	Name        string
 	Notes       string
 	PublishedAt string
-	Assets      []Asset
+	// Prerelease is GitHub's own flag: a build marked -rc, -testing, -pre
+	// or the like is not production ready, and the picker hides it unless
+	// someone asks for it.
+	Prerelease bool
+	Assets     []Asset
 }
 
 // Asset is one release file. ID is the API asset id: downloads go through
@@ -151,6 +156,10 @@ func releaseProblem(err error) string {
 type ApplyOptions struct {
 	CleanVMs bool
 	Drain    string
+	// Tag picks the release to install. Empty means the release the last
+	// check found: the top-bar indicator's one-click path. A tag here is
+	// the update screen's picker: any listed release, not only latest.
+	Tag string
 }
 
 // ErrRunsActive is the refusal when runs are active and drain is "wait".
@@ -167,6 +176,10 @@ type ErrRestartPending struct{}
 func (ErrRestartPending) Error() string {
 	return "restart pending: restart the gateway to finish the update, then update again"
 }
+
+// ErrReleaseNotFound names a tag the release source does not have, so a
+// picker typo or a stale list answers 404 rather than a server error.
+var ErrReleaseNotFound = errors.New("release not found")
 
 // Manager owns the update state for one install.
 type Manager struct {
@@ -398,20 +411,27 @@ func (m *Manager) StartLoop(ctx context.Context) {
 	}
 }
 
-func (m *Manager) fetch(ctx context.Context) (Release, error) {
-	url := m.latestURL
-	if url == "" {
-		url = LatestURL
-	}
+// get asks GitHub, with the install's token when it has one. Every
+// release read goes through here, so the private-repo header cannot be
+// forgotten on one path and present on another.
+func (m *Manager) get(ctx context.Context, url string) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return Release{}, err
+		return nil, err
 	}
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	response, err := m.client.Do(request)
+	return m.client.Do(request)
+}
+
+func (m *Manager) fetch(ctx context.Context) (Release, error) {
+	url := m.latestURL
+	if url == "" {
+		url = LatestURL
+	}
+	response, err := m.get(ctx, url)
 	if err != nil {
 		return Release{}, err
 	}
@@ -422,22 +442,26 @@ func (m *Manager) fetch(ctx context.Context) (Release, error) {
 	return parseRelease(response.Body)
 }
 
-func parseRelease(body io.Reader) (Release, error) {
-	var payload struct {
-		TagName     string `json:"tag_name"`
-		Name        string `json:"name"`
-		Body        string `json:"body"`
-		PublishedAt string `json:"published_at"`
-		Assets      []struct {
-			ID   int64  `json:"id"`
-			Name string `json:"name"`
-			URL  string `json:"browser_download_url"`
-			Size int64  `json:"size"`
-		} `json:"assets"`
-	}
-	if err := json.NewDecoder(body).Decode(&payload); err != nil {
-		return Release{}, fmt.Errorf("releases: cannot read answer: %w", err)
-	}
+// githubRelease is one release as GitHub answers it, the shape the single
+// release, the tag, and the list endpoints all share.
+type githubRelease struct {
+	TagName     string `json:"tag_name"`
+	Name        string `json:"name"`
+	Body        string `json:"body"`
+	PublishedAt string `json:"published_at"`
+	Draft       bool   `json:"draft"`
+	Prerelease  bool   `json:"prerelease"`
+	Assets      []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+		URL  string `json:"browser_download_url"`
+		Size int64  `json:"size"`
+	} `json:"assets"`
+}
+
+// release keeps the fields the screen reads, and refuses an answer with
+// no tag: an untagged release cannot be installed or named.
+func (payload githubRelease) release() (Release, error) {
 	if payload.TagName == "" {
 		return Release{}, fmt.Errorf("releases: answer has no tag_name")
 	}
@@ -446,11 +470,167 @@ func parseRelease(body io.Reader) (Release, error) {
 		Name:        payload.Name,
 		Notes:       payload.Body,
 		PublishedAt: payload.PublishedAt,
+		Prerelease:  payload.Prerelease,
 	}
 	for _, asset := range payload.Assets {
 		release.Assets = append(release.Assets, Asset{ID: asset.ID, Name: asset.Name, URL: asset.URL, Size: asset.Size})
 	}
 	return release, nil
+}
+
+func parseRelease(body io.Reader) (Release, error) {
+	var payload githubRelease
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return Release{}, fmt.Errorf("releases: cannot read answer: %w", err)
+	}
+	return payload.release()
+}
+
+// parseReleaseList reads the list endpoint. A draft stays out — a draft is
+// not a release yet — and an entry with no tag is skipped rather than
+// failing the whole list: one bad row must not blank the picker.
+func parseReleaseList(body io.Reader) ([]Release, error) {
+	var payload []githubRelease
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("releases: cannot read answer: %w", err)
+	}
+	releases := make([]Release, 0, len(payload))
+	for _, item := range payload {
+		if item.Draft || item.TagName == "" {
+			continue
+		}
+		release, err := item.release()
+		if err != nil {
+			return nil, err
+		}
+		releases = append(releases, release)
+	}
+	return releases, nil
+}
+
+// DefaultListLimit is what the update screen asks for: the last twenty
+// releases, as the owner chose.
+const DefaultListLimit = 20
+
+// MaxListLimit is GitHub's page cap.
+const MaxListLimit = 100
+
+// List answers the update screen's picker: the newest releases, newest
+// first by tag. Pre-releases are hidden unless includePrerelease, because
+// GA is the default channel. The fetch is on demand — the picker is a
+// place someone visits, not a poll — and there is no cache: a picker that
+// shows a stale list is worse than one that waits a moment.
+func (m *Manager) List(ctx context.Context, limit int, includePrerelease bool) ([]Release, error) {
+	if limit <= 0 {
+		limit = DefaultListLimit
+	}
+	if limit > MaxListLimit {
+		limit = MaxListLimit
+	}
+	response, err := m.get(ctx, fmt.Sprintf("%s/releases?per_page=%d", m.apiBase(), limit))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("releases: github answered %s", response.Status)
+	}
+	releases, err := parseReleaseList(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]Release, 0, len(releases))
+	for _, release := range releases {
+		if release.Prerelease && !includePrerelease {
+			continue
+		}
+		visible = append(visible, release)
+	}
+	sort.SliceStable(visible, func(i, j int) bool { return compareTags(visible[i].Tag, visible[j].Tag) > 0 })
+	return visible, nil
+}
+
+// compareTags orders release tags as versions, not as text: v0.9.33 is
+// newer than v0.9.9, and an -rc suffix sits below its own base release.
+// A tag that does not parse falls back to text, so a stray tag still
+// sorts somewhere instead of breaking the list.
+func compareTags(a, b string) int {
+	aNumbers, aPre, aOK := tagParts(a)
+	bNumbers, bPre, bOK := tagParts(b)
+	if !aOK || !bOK {
+		return strings.Compare(a, b)
+	}
+	for i := range aNumbers {
+		if aNumbers[i] != bNumbers[i] {
+			return sign(aNumbers[i] - bNumbers[i])
+		}
+	}
+	// Same base: the plain tag is the production build, any suffix is not.
+	if aPre == "" && bPre != "" {
+		return 1
+	}
+	if aPre != "" && bPre == "" {
+		return -1
+	}
+	return comparePrerelease(aPre, bPre)
+}
+
+// tagParts splits v<major>.<minor>.<patch>[-suffix] into its numbers and
+// its suffix. A tag missing the shape says so, and compareTags falls back.
+func tagParts(tag string) ([]int, string, bool) {
+	tag = strings.TrimPrefix(tag, "v")
+	pre := ""
+	if at := strings.Index(tag, "-"); at >= 0 {
+		pre = tag[at+1:]
+		tag = tag[:at]
+	}
+	segments := strings.Split(tag, ".")
+	if len(segments) != 3 {
+		return nil, "", false
+	}
+	numbers := make([]int, 0, len(segments))
+	for _, segment := range segments {
+		number, err := strconv.Atoi(segment)
+		if err != nil {
+			return nil, "", false
+		}
+		numbers = append(numbers, number)
+	}
+	return numbers, pre, true
+}
+
+// comparePrerelease orders two suffixes of the same base: rc.1 below rc.2,
+// and rc.1 below rc.1.1, as semver does. Empty beats nothing: the plain
+// tag was already handled by the caller.
+func comparePrerelease(a, b string) int {
+	aParts := strings.FieldsFunc(a, func(r rune) bool { return r == '.' || r == '-' })
+	bParts := strings.FieldsFunc(b, func(r rune) bool { return r == '.' || r == '-' })
+	for i := 0; i < len(aParts) && i < len(bParts); i++ {
+		aNumber, aErr := strconv.Atoi(aParts[i])
+		bNumber, bErr := strconv.Atoi(bParts[i])
+		if aErr == nil && bErr == nil {
+			if aNumber != bNumber {
+				return sign(aNumber - bNumber)
+			}
+			continue
+		}
+		if compared := strings.Compare(aParts[i], bParts[i]); compared != 0 {
+			return compared
+		}
+	}
+	return sign(len(aParts) - len(bParts))
+}
+
+// sign keeps a comparison to -1, 0, or 1.
+func sign(delta int) int {
+	switch {
+	case delta < 0:
+		return -1
+	case delta > 0:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // AssetFor picks the release file for this platform, or "" when the
@@ -664,7 +844,17 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	m.mu.Lock()
 	release := m.latest
 	m.mu.Unlock()
-	if release.Tag == "" {
+	switch {
+	case options.Tag != "":
+		// The picker's path: install the tag that was chosen, which need
+		// not be latest. releaseFor reuses the cached latest when it
+		// already answers.
+		picked, err := m.releaseFor(ctx, options.Tag)
+		if err != nil {
+			return err
+		}
+		release = picked
+	case release.Tag == "":
 		fetched, err := m.Check(ctx)
 		if err != nil {
 			return err

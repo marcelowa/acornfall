@@ -4,6 +4,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/update"
@@ -55,6 +57,53 @@ func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) {
 	s.updateStatus(w, r)
 }
 
+// updateReleases is the update screen's picker: the newest releases,
+// newest first. GA only, unless `prerelease` is present: the screen's
+// switch is per visit, so it rides the request rather than a setting.
+// This is a read, so it carries no role check.
+func (s *Server) updateReleases(w http.ResponseWriter, r *http.Request) {
+	if s.update == nil {
+		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	limit := update.DefaultListLimit
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			http.Error(w, "limit is a positive number", http.StatusBadRequest)
+			return
+		}
+		limit = parsed
+	}
+	releases, err := s.update.List(r.Context(), limit, r.URL.Query().Has("prerelease"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	type wireRelease struct {
+		Tag          string `json:"tag"`
+		Name         string `json:"name"`
+		Notes        string `json:"notes"`
+		PublishedAt  string `json:"publishedAt"`
+		Prerelease   bool   `json:"prerelease"`
+		DownloadSize int64  `json:"downloadSize"`
+		WorkerSize   int64  `json:"workerSize"`
+	}
+	list := make([]wireRelease, 0, len(releases))
+	for _, release := range releases {
+		list = append(list, wireRelease{
+			Tag:          release.Tag,
+			Name:         release.Name,
+			Notes:        release.Notes,
+			PublishedAt:  release.PublishedAt,
+			Prerelease:   release.Prerelease,
+			DownloadSize: update.AssetFor(release).Size,
+			WorkerSize:   update.WorkerTarballAsset(release).Size,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"releases": list})
+}
+
 func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 	if s.update == nil {
 		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
@@ -69,6 +118,7 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		CleanVMs bool   `json:"cleanVMs"`
 		Drain    string `json:"drain"`
+		Tag      string `json:"tag"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -79,9 +129,13 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `drain is "wait" or "stop"`, http.StatusBadRequest)
 		return
 	}
-	if err := s.update.Apply(r.Context(), update.ApplyOptions{CleanVMs: body.CleanVMs, Drain: body.Drain}); err != nil {
+	if err := s.update.Apply(r.Context(), update.ApplyOptions{CleanVMs: body.CleanVMs, Drain: body.Drain, Tag: strings.TrimSpace(body.Tag)}); err != nil {
 		if errors.As(err, &update.ErrRunsActive{}) || errors.As(err, &update.ErrRestartPending{}) {
 			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if errors.Is(err, update.ErrReleaseNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)

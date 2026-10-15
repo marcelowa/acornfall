@@ -54,6 +54,17 @@ Workers stop first — an orphan would serve old code past the exec and
 resurrect wiped sandboxes — and warm sandboxes stay for reattach.
 Exec failure keeps the old process and the manual path.
 
+**The update screen is a page, and the picker installs a version.** The
+screen keeps its own URL, for the same reason every other screen does:
+a reload and a shared link land where someone was. The picker lists the
+last twenty releases, newest first, and a pick installs that tag once —
+it does not pin. Pinning stays its own field, because it means "stop
+asking" and a pick that set it would stop every later prompt. A picked
+release older than the running build is marked as such, and stays
+installable for now; whether the migration record should refuse one is
+deferred until the record exists. The header says the newest GA's tag
+beside the dot when there is room, and a bare dot on a phone.
+
 **Roles now, enforced later.** Today one user, same rights. The API
 carries the role check now: `POST /api/update/apply` answers 403 for
 non-admin. Default allow.
@@ -62,10 +73,19 @@ non-admin. Default allow.
 
 - `GET /healthz` -> `{ ok: true, version }`
 - `GET /api/update/status` -> `{ current, latest, notes, pinned, checking }`
+- `GET /api/update/releases?limit=20&prerelease` ->
+  `{ releases: [{ tag, name, notes, publishedAt, prerelease, downloadSize,
+  workerSize }] }`, newest first by tag. GA only; the `prerelease`
+  parameter widens the list for one visit, because that switch is not a
+  setting. Drafts never appear. Added for the update screen's picker:
+  the last twenty releases are selectable, not only latest.
 - `POST /api/update/check` -> force a check now
-- `POST /api/update/apply` -> `{ cleanVMs, drain: "wait"|"stop" }`.
-  Drain stop aborts runs first; clean wipes the sandbox root after
-  verify, before swap. A second apply before restart refuses (409).
+- `POST /api/update/apply` -> `{ cleanVMs, drain: "wait"|"stop", tag }`.
+  An empty `tag` installs the release the check found — the indicator's
+  one-click path. A tag installs that release by name (404 when the
+  source has none). Drain stop aborts runs first; clean wipes the
+  sandbox root after verify, before swap. A second apply before restart
+  refuses (409).
 - `POST /api/update/rollback` -> restore the last good build
 - The state stream carries `{ current, latest, available, failed,
   restartRequired }`: the header dot without fetching. Per-event

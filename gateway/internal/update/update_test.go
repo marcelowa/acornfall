@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,21 @@ func versionScript(tag string) string {
 func releaseJSON(tag string, assets string) string {
 	return fmt.Sprintf(`{"tag_name":%q,"name":%q,"body":"notes for %s","published_at":"2026-10-10T00:00:00Z","assets":[%s]}`,
 		tag, tag, tag, assets)
+}
+
+// releaseEntry is one row of the releases list answer. A plain tag is a
+// production release; prerelease and draft are GitHub's own fields.
+func releaseEntry(tag string, prerelease, draft bool) string {
+	return fmt.Sprintf(`{"tag_name":%q,"name":%q,"body":"notes for %s","published_at":"2026-10-13T00:00:00Z","draft":%t,"prerelease":%t,"assets":[]}`,
+		tag, tag, tag, draft, prerelease)
+}
+
+func testTags(releases []Release) string {
+	names := make([]string, 0, len(releases))
+	for _, release := range releases {
+		names = append(names, release.Tag)
+	}
+	return strings.Join(names, ",")
 }
 
 func testManager(t *testing.T) (*Manager, string) {
@@ -68,6 +84,107 @@ func TestCheckFindsNewRelease(t *testing.T) {
 	}
 	if status.Latest != "v0.9.0" || status.Notes != "notes for v0.9.0" {
 		t.Fatalf("bad status %+v", status)
+	}
+}
+
+func TestListHidesPrereleasesAndSortsByVersion(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/o/r/releases" {
+			t.Errorf("wrong list path %q", r.URL.Path)
+		}
+		if perPage := r.URL.Query().Get("per_page"); perPage != "20" {
+			t.Errorf("per_page = %q", perPage)
+		}
+		rows := []string{
+			releaseEntry("v0.9.9", false, false),
+			releaseEntry("v0.9.34-rc.1", true, false),
+			releaseEntry("v0.9.34", false, false),
+			releaseEntry("v0.9.33", false, false),
+			releaseEntry("v0.10.0", false, true),
+		}
+		_, _ = w.Write([]byte("[" + strings.Join(rows, ",") + "]"))
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+
+	ga, err := manager.List(context.Background(), 20, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Version order, not text: v0.9.33 sits above v0.9.9.
+	if got := testTags(ga); got != "v0.9.34,v0.9.33,v0.9.9" {
+		t.Fatalf("GA list = %s", got)
+	}
+	all, err := manager.List(context.Background(), 20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The rc sits below its own base release, and above the older GA.
+	if got := testTags(all); got != "v0.9.34,v0.9.34-rc.1,v0.9.33,v0.9.9" {
+		t.Fatalf("all list = %s", got)
+	}
+}
+
+func TestCompareTagsOrdersVersionsNotText(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"v0.9.33", "v0.9.9", 1},
+		{"v0.9.9", "v0.9.33", -1},
+		{"v0.9.4", "v0.9.4", 0},
+		{"v0.10.0", "v0.9.33", 1},
+		{"v0.9.34", "v0.9.34-rc.1", 1},
+		{"v0.9.34-rc.1", "v0.9.34-rc.2", -1},
+		{"v0.9.34-rc.1", "v0.9.34-rc.1.1", -1},
+		// A tag outside vX.Y.Z falls back to text instead of breaking the list.
+		{"v0.9", "v0.9.33", -1},
+	}
+	for _, testCase := range cases {
+		if got := compareTags(testCase.a, testCase.b); got != testCase.want {
+			t.Errorf("compareTags(%q, %q) = %d, want %d", testCase.a, testCase.b, got, testCase.want)
+		}
+		if got := compareTags(testCase.b, testCase.a); got != -testCase.want {
+			t.Errorf("compareTags(%q, %q) = %d, want %d", testCase.b, testCase.a, got, -testCase.want)
+		}
+	}
+}
+
+func TestApplyInstallsPickedTag(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The picked tag is fetched by name: latest is never consulted.
+		if r.URL.Path != "/o/r/releases/tags/v0.7.0" {
+			t.Errorf("wrong release path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(releaseJSON("v0.7.0", "")))
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+
+	// The picked release publishes no binary, so Apply stops at the asset
+	// lookup and names the tag it was asked for.
+	err := manager.Apply(context.Background(), ApplyOptions{Tag: "v0.7.0"})
+	if err == nil || !strings.Contains(err.Error(), "v0.7.0") {
+		t.Fatalf("picked tag must reach the asset lookup: %v", err)
+	}
+}
+
+func TestApplyNamesMissingPickedTag(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+
+	err := manager.Apply(context.Background(), ApplyOptions{Tag: "v9.9.9"})
+	if !errors.Is(err, ErrReleaseNotFound) {
+		t.Fatalf("missing tag must answer ErrReleaseNotFound: %v", err)
 	}
 }
 
