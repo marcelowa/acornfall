@@ -228,3 +228,33 @@ Status: **3 of 3 landed** — OWNER-OPERATOR, TINKERER and DELEGATOR answered.
    of settings, and the pin is gone so nothing can silence the indicator. Put that in R10 as a
    negative line — "no install without a press, ever" — because it is the one promise I am
    counting on.
+
+## The owner's calls, 2026-10-15
+
+Every recommended default was taken, and `03-journeys.md` was rewritten to match.
+
+1. **Door:** a permanent **Releases** row on settings' install-wide page, opening `/update`.
+2. **"Wait for drain"** becomes **Not now**: nothing queues, and the press is the owner's to make
+   again. A queued apply stays a later feature.
+3. **Stopping runs** names what it will stop (count and workspaces), and moves to after the
+   download verifies, just before the swap.
+4. **A stuck restart** gets a **Restart** control on the page and a restart mark in the bar.
+5. **The indicator** means *newer*, not merely different (version compare).
+6. **The reload after an install** is stated in the UI and left as it is; keeping a half-typed
+   draft is a later item.
+
+Taken as written, no objection: one verb (Install) and one noun; one truth for newest (the list)
+and one for running (the status), with Check now refreshing both; a by-name read for an old tag and
+for the running row; the change range named when it is cut; `dev` builds named as dev with no
+newer/older claims; "visit" defined as a fresh open or reload; R10 gains "no install without a
+press, ever"; no redirect for `/settings/updates`.
+
+### What the panel forced into the build (step 09)
+
+- `GET /api/update/releases/{tag}` — the by-name read the old links and the running row need.
+- `available` becomes "the newest GA is newer than the running build" (version compare, not `!=`).
+- the runs gate must be the gateway's answer, carried to the client, not computed from one
+  workspace.
+- stop-runs names what it stops, and runs after the download verifies.
+- a restart control (`POST /api/update/restart`) and a restart-pending sign in the state summary.
+- the conversations an install stopped are marked where their run was.
