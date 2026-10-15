@@ -73,18 +73,18 @@ jobs:
     needs: binaries
     runs-on: [self-hosted, linux, x64]
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
       # The tag message is read from the repository, so the job needs the tag:
-      # a shallow checkout with tags, nothing else. Without it `git tag` has no
-      # remote to read and dies on the runner's missing credentials.
+      # a shallow checkout with tags, nothing else. It runs first because the
+      # checkout cleans the workspace, and the artifacts land in `dist` after it.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
           fetch-tags: true
           sparse-checkout: .github
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       # The checksum file is what the gateway verifies downloads against
       # before swapping or staging. No checksum file, no verify — see ADR 0019.
       - run: cd dist && sha256sum acornfall-* worker.tar.gz > sha256sums.txt && ls -la
