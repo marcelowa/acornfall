@@ -544,9 +544,6 @@ function ReleaseCard({
 									{applying ? "Installing…" : "Install"}
 								</Button>
 							</div>
-							<Text size="2xs" tone="muted">
-								The window reloads when the new build answers; a draft is not kept.
-							</Text>
 						</>
 					)}
 				</Stack>
