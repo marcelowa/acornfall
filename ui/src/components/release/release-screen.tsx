@@ -368,7 +368,7 @@ export function ReleaseScreen({
 								<Text size="2xs" tone="muted">
 									{isTag && runningRow !== undefined
 										? "From the twenty most recent. Older changes are not listed."
-										: "The twenty most recent releases. Newest first."}
+										: "The twenty most recent releases, newest first."}
 								</Text>
 							</>
 						)}
@@ -512,9 +512,7 @@ function ReleaseCard({
 					) : (
 						<Markdown>{notes[target.tag] ?? target.notes}</Markdown>
 					)}
-					{between.length > 0 ? (
-						<Between releases={between} notes={notes} running={target.relation} />
-					) : null}
+					{between.length > 0 ? <Between releases={between} notes={notes} /> : null}
 					{isRunning ? null : (
 						<>
 							<Text size="2xs" tone="muted">
@@ -567,16 +565,14 @@ function ReleaseCard({
 function Between({
 	releases,
 	notes,
-	running,
 }: {
 	releases: UpdateRelease[];
 	notes: Record<string, string>;
-	running: UpdateRelease["relation"];
 }) {
 	return (
 		<Stack gap="sm" data-slot="release-between">
 			<Text size="2xs" weight="medium" tone="muted">
-				what changed in between
+				changes in between
 			</Text>
 			<Stack gap="md">
 				{releases.map((release) => {
@@ -601,10 +597,6 @@ function Between({
 					);
 				})}
 			</Stack>
-			<Text size="2xs" tone="muted">
-				{running === "newer" ? "The releases above run between " : ""}
-				{running === "newer" ? "the running build and the target." : ""}
-			</Text>
 		</Stack>
 	);
 }

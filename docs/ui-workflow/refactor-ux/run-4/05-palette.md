@@ -73,15 +73,17 @@ Each one is a sentence, never a bare spinner (R11):
 | `dev` build | "dev build — not a release tag", with no newer or older claims |
 
 One control per job: a state that carries its own check or restart control does not get a second one
-under the picker (look panel).
+under the picker (look panel). One statement per fact: a heading or a label that already says what a
+block is does not get a sentence underneath repeating it (the owner's read of "The releases above run
+between the running build and the target", cut 2026-10-15).
 
 ## Wording
 
 Sentence case, active voice, the interface's own voice (`design.md`, Writing). One action, one name
 (R12): **Install** is the verb, everywhere the action appears; the bar's control is the **update
 mark**. **Not now** replaces "Wait for drain" because it names what the press does. **Stop runs and
-install** says what it stops. **Check now**, **Roll back**, **Restart**, **Releases** complete the
-surface's vocabulary. A refusal is the gateway's sentence where the gateway has one.
+install** says what it stops. **Check now**, **Roll back**, **Restart**, **Releases**, and the card's **changes in between** label
+complete the surface's vocabulary. A refusal is the gateway's sentence where the gateway has one.
 
 ## What this direction does not do
 

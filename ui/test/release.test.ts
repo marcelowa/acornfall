@@ -3,7 +3,7 @@ import type { UpdateRelease } from "../src/app/client";
 import { betweenReleases, notesTags } from "../src/components/release/release-screen";
 
 /**
- * The "what changed in between" selection: which releases the page lists, and
+ * The "changes in between" selection: which releases the page lists, and
  * which tags its one notes read asks for. The page must not ask for the whole
  * window when three releases sit between the running build and the target.
  */

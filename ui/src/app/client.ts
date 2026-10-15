@@ -380,7 +380,7 @@ export async function fetchReleases(
 	return body.releases;
 }
 
-/** The notes of several releases in one read: the page's "what changed in between". */
+/** The notes of several releases in one read: the page's "changes in between". */
 export async function fetchNotes(tags: string[]): Promise<Record<string, string>> {
 	if (tags.length === 0) return {};
 	const query = new URLSearchParams({ tags: tags.join(",") });
