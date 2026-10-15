@@ -11,7 +11,7 @@ func testInput(home string) Input {
 		Home:            home,
 		Current:         "v0.9.0",
 		Worker:          "v0.9.0",
-		BunPath:         filepath.Join(home, "tools", "bun-1.4.2", "bun"),
+		BunPath:         filepath.Join(home, "tools", "bun-1.4.3", "bun"),
 		BunOK:           true,
 		EngineName:      "microsandbox",
 		EngineVersion:   "0.7.6",
