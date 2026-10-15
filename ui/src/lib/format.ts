@@ -5,6 +5,16 @@ export function formatTokens(value: number): string {
 	return `${(value / 1_000_000).toFixed(1)}M tok`;
 }
 
+/**
+ * Bytes as the interface says them: 12 KB, not 12000. One formatter, because the composer's
+ * chips and the update card had grown a copy each before the release surface needed a third.
+ */
+export function formatBytes(bytes: number): string {
+	if (bytes < 1000) return `${bytes} B`;
+	if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
+	return `${Math.round((bytes / 1_000_000) * 10) / 10} MB`;
+}
+
 export function formatCost(value: number): string {
 	return `$${value.toFixed(4)}`;
 }

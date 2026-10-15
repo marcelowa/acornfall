@@ -29,7 +29,8 @@ import {
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "cn";
-import { formatSize, releaseCandidate, releases, type MockRelease } from "./release-data";
+import { formatBytes } from "@/lib/format";
+import { releaseCandidate, releases, type MockRelease } from "./release-data";
 
 export type PageState =
 	| "newer"
@@ -136,7 +137,7 @@ export function ReleaseRow({
 					<ProductionMark prerelease={release.prerelease} />
 				</div>
 				<Text as="span" size="2xs" tone="muted" className="font-mono tabular-nums">
-					{release.date} · {formatSize(release.size + release.workerSize)} ·{" "}
+					{release.date} · {formatBytes(release.size + release.workerSize)} ·{" "}
 					{release.prerelease ? "pre-release" : "production"}
 				</Text>
 			</div>
@@ -220,7 +221,7 @@ function ReleaseCard({ release, running }: { release: MockRelease; running: stri
 					</div>
 					<Text size="2xs" tone="muted" className="font-mono tabular-nums">
 						{release.date} · {older ? "older than the running build · " : ""}
-						{formatSize(release.size + release.workerSize)}
+						{formatBytes(release.size + release.workerSize)}
 					</Text>
 				</Stack>
 				{release.notes === "" ? (

@@ -9,13 +9,6 @@ export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 20;
 export const MAX_ATTACHMENTS_TOTAL_BYTES = 100 * 1024 * 1024;
 
-/** Bytes as the chips say them: 12 KB, not 12000. */
-export function formatFileSize(bytes: number): string {
-	if (bytes < 1000) return `${bytes} B`;
-	if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
-	return `${Math.round((bytes / 1_000_000) * 10) / 10} MB`;
-}
-
 export interface SizedFile {
 	size: number;
 }

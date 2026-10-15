@@ -1,12 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatFileSize, refuseAttachments } from "../src/lib/attachments";
-
-describe("formatFileSize", () => {
-	test("says bytes as the chips do", () => {
-		expect(formatFileSize(512)).toBe("512 B");
-		expect(formatFileSize(12000)).toBe("12 KB");
-	});
-});
+import { refuseAttachments } from "../src/lib/attachments";
 
 describe("refuseAttachments", () => {
 	test("lets a small batch through", () => {

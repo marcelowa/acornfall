@@ -198,10 +198,3 @@ export const releaseCandidate: MockRelease = {
 export const devBuild = "dev";
 export const rolledBackCause =
 	"migrate failed, rolled back: migrate v0.9.33: exit 1: cannot open state/state.db";
-
-/** Bytes as the page says them: 13.6 MB, not 13600000. */
-export function formatSize(bytes: number): string {
-	if (bytes < 1000) return `${bytes} B`;
-	if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
-	return `${Math.round((bytes / 1_000_000) * 10) / 10} MB`;
-}

@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
+import { formatBytes } from "@/lib/format";
 
 export interface UpdateSectionProps {
 	/** The gateway's answer, if it arrived yet. */
@@ -132,7 +133,7 @@ export function UpdateSection({
 						</Text>
 						{status.downloadSize > 0 ? (
 							<Text size="2xs" tone="muted">
-								Download {formatSize(status.downloadSize + status.workerSize)}.
+								Download {formatBytes(status.downloadSize + status.workerSize)}.
 								Restart after; the screen follows on its own.
 							</Text>
 						) : null}
@@ -315,13 +316,6 @@ export function UpdateSection({
  * on the new version without a reload. The stream drops and reconnects
  * by itself meanwhile.
  */
-/** Bytes as the screen says them: 13 MB, not 13062137. */
-function formatSize(bytes: number): string {
-	if (bytes < 1000) return `${bytes} B`;
-	if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
-	return `${Math.round((bytes / 1_000_000) * 10) / 10} MB`;
-}
-
 function Restarting({ onRefresh }: { onRefresh: () => void }) {
 	useEffect(() => {
 		const timers = [5000, 12000, 25000].map((after) => window.setTimeout(onRefresh, after));
