@@ -1,9 +1,9 @@
 # 02 — Confirm the goal (run 4)
 
-Status: **proposed to the owner, 2026-10-15** — awaiting their correction. Run 1's goal
-(2026-08-29), run 2's phone clause (2026-10-12) and run 3's providers clause (2026-10-13, paused at
-its step 06) stand; run 4 adds one surface, so the statement below is those plus the release clause,
-which is the part open to correction.
+Status: **corrected by the owner, 2026-10-15** — the pin goes away and the update prefs move to
+settings' install-wide side. Run 1's goal (2026-08-29), run 2's phone clause (2026-10-12) and run
+3's providers clause (2026-10-13, paused at its step 06) stand; run 4 adds one surface, so the
+statement below is those plus the release clause, which is the part open to correction.
 
 ## The goal statement, as a claim
 
@@ -30,8 +30,8 @@ this surface means:
 - when a specific release is wanted — newer, or older than the running build — it is findable in the
   last twenty, newest first, with the non-production builds (`-rc`, `-testing`, `-pre`) behind a
   switch that widens the list **for that visit** and is never a stored channel;
-- picking is not pinning: a pick installs once, a pin still means "stop asking", and the screen says
-  which state the install is in;
+- picking is one press and it never pins: the pin goes away — from the screen, from the prefs, and
+  from the gateway — so nothing can silence the indicator;
 - a failed update says what failed and which tag it was, and the way back — rollback — is on the
   same page rather than in a document;
 - the page is honest when the source cannot answer: a missing token, no network, an empty list each
@@ -69,11 +69,13 @@ later hosted or multi-user install reuses them instead of forking them.
 - Not a redesign of the top bar: the indicator takes the shape the owner chose — the newest GA's tag
   beside the dot on a desktop, a bare dot on a phone, the same press on both.
 
-## The one question this step carries
+## Answered by the owner, 2026-10-15
 
-With the Updates tab removed, which settings page holds `auto-check` and the pinned tag? Steps 03
-and 05 decide it; the goal only says the prefs stay in settings and remain reachable without the
-old tab's URL.
+- With the Updates tab removed, the update prefs move to settings' install-wide side — `auto-check`
+  lives there, and nothing else about updates does. The page's name is step 05's to settle.
+- The pin is not needed and goes away: the screen loses the field, the prefs lose it, and the
+  gateway loses `pinned` from its settings and from `available`, so the indicator follows the newest
+  GA with nothing to silence it. The gateway half lands with the build (step 09).
 
 ## Confirmation
 
