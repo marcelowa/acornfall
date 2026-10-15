@@ -79,6 +79,12 @@ export function ReleaseScreen({
 	const [between, setBetween] = useState<UpdateRelease[]>([]);
 	const [cleanVMs, setCleanVMs] = useState(false);
 	const [dialogOpen, setDialogOpen] = useState(false);
+	// A time base for the states that wait on the gateway: a dead apply and a slow
+	// one must not look the same (look panel).
+	const [answeredAt, setAnsweredAt] = useState(() => new Date());
+	useEffect(() => {
+		setAnsweredAt(new Date());
+	}, [status?.current, status?.restartRequired, status?.checking, applying]);
 
 	// The reads are props so stories and tests can hand in fixtures; a ref keeps
 	// them out of the effects' dependencies, where an inline loader would re-run
@@ -240,6 +246,12 @@ export function ReleaseScreen({
 						</Text>
 					</Stack>
 
+					{status?.runsActive === true ? (
+						<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+							{runsLine(runs)}
+						</Text>
+					) : null}
+
 					<StateLine
 						status={status}
 						target={target}
@@ -247,6 +259,7 @@ export function ReleaseScreen({
 						checking={status?.checking === true}
 						applying={applying}
 						listError={listError}
+						now={answeredAt}
 						onCheck={onCheck}
 						onRestart={onRestart}
 					/>
@@ -292,6 +305,7 @@ export function ReleaseScreen({
 							cleanVMs={cleanVMs}
 							onCleanVMs={setCleanVMs}
 							applying={applying}
+							swapped={status?.restartRequired === true}
 							onInstall={startUpdate}
 						/>
 					) : null}
@@ -382,6 +396,18 @@ export function ReleaseScreen({
 	);
 }
 
+/** One sentence for the runs an install would interrupt. */
+function runsLine(runs: { workspace: string; runs: number }[]): string {
+	const total = runs.reduce((sum, item) => sum + item.runs, 0);
+	const where = runs.map((item) => `${item.workspace} (${item.runs})`).join(", ");
+	return `${total === 1 ? "1 run is" : `${total} runs are`} live across ${where} · installing asks first`;
+}
+
+/** The clock, in the console's own mono fact voice. */
+function clock(at: Date): string {
+	return at.toTimeString().slice(0, 8);
+}
+
 /** The release card: the target, its notes, the changes in between, and the press. */
 function ReleaseCard({
 	target,
@@ -389,6 +415,7 @@ function ReleaseCard({
 	cleanVMs,
 	onCleanVMs,
 	applying,
+	swapped,
 	onInstall,
 }: {
 	target: UpdateRelease;
@@ -396,11 +423,13 @@ function ReleaseCard({
 	cleanVMs: boolean;
 	onCleanVMs: (clean: boolean) => void;
 	applying: boolean;
+	/** The files are swapped and the old process answers: Restart finishes it, not Install. */
+	swapped: boolean;
 	onInstall: () => void;
 }) {
 	// The running build is not offered as a target: its notes are worth reading,
-	// its cost and its press are not.
-	const isRunning = target.relation === "running";
+	// its cost and its press are not. Neither is a release already on disk.
+	const isRunning = target.relation === "running" || swapped;
 	return (
 		<Stack gap="sm" data-slot="release-card">
 			<div className="rounded-lg border border-border bg-card p-3">
@@ -557,6 +586,7 @@ function StateLine({
 	checking,
 	applying,
 	listError,
+	now,
 	onCheck,
 	onRestart,
 }: {
@@ -566,6 +596,7 @@ function StateLine({
 	checking: boolean;
 	applying: boolean;
 	listError: string | undefined;
+	now: Date;
 	onCheck: () => void;
 	onRestart: () => void;
 }) {
@@ -592,9 +623,9 @@ function StateLine({
 				<Text size="sm" weight="semibold">
 					Installing {target?.tag ?? "the release"}
 				</Text>
-				<Text size="2xs" tone="muted">
-					Backup, download, verify, then runs stop and the build swaps. The page follows
-					until the new build answers.
+				<Text size="xs">Backup, download, verify, then runs stop and the build swaps.</Text>
+				<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+					the page follows until the new build answers · asked {clock(now)}
 				</Text>
 			</Stack>
 		);

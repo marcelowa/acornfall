@@ -188,6 +188,35 @@ export const NewerRelease: Story = {
 	),
 };
 
+export const RunsAreLive: Story = {
+	render: () => (
+		<Frame
+			label="Runs are live, and the page says so before the press"
+			note="J17. The runs fact sits under the state line at the 2xs fact step: what an install would interrupt, and that installing asks first. The modal is still the gate; this is the warning before it."
+		>
+			<ReleaseScreen
+				status={status({
+					runsActive: true,
+					runs: [
+						{ workspace: "acornfall", runs: 2 },
+						{ workspace: "hello-omri", runs: 3 },
+					],
+				})}
+				tag=""
+				applying={false}
+				onOpenTag={noop}
+				onClose={noop}
+				onCheck={noop}
+				onRefresh={noop}
+				onApply={noop}
+				onRestart={noop}
+				onRollback={noop}
+				{...fixtureFor("v0.9.28")}
+			/>
+		</Frame>
+	),
+};
+
 export const PreReleaseBuild: Story = {
 	render: () => (
 		<Frame

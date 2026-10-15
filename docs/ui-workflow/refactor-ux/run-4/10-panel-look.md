@@ -5,7 +5,8 @@ the four release files, `design.md` and the direction, the measured numbers, and
 They judged computed sizes, control boxes and composited colours — not rendering by eye, and the
 document says so below. Their words are unedited.
 
-Status: **2 of 3 landed** — TINKERER and OWNER-OPERATOR answered; DELEGATOR is running.
+Status: **3 of 3 landed**, round 1 — TINKERER, OWNER-OPERATOR and DELEGATOR answered; their own
+findings are marked fixed in the table at the end, and the panel re-runs on the fixed build.
 
 ## TINKERER
 
@@ -143,6 +144,59 @@ fat-finger the VM choice — that costs me a second look every visit.
     at the lowest ratio, twenty rows of it. (b) The phone gutter here is 24px while Settings uses
     16px: `/update` content starts at x=24, `/settings/install` at x=16.
 
+
+## DELEGATOR
+
+I judged the code, `/tmp/look-metrics.txt`, and the live page as rendered (headless Chromium over
+CDP, computed styles and geometry at 1280 and 390, light and dark — no image: every number below is
+measured).
+
+**keep** — the quiet mark (arrow + 11px mono tag, 88×32) and the calm two-line state line: a
+check-in costs one look, and nothing moves.
+
+**cut** — the second Restart notice and its twin button, the second Check now in the
+gateway-silent state, and the "dev build — not a release tag" line that prints before the gateway
+has answered.
+
+**confused-by** — the bare amber `RotateCw` in the bar (reload or restart?), two identical Restart
+buttons, "Installing…" that never changes, and 16px release notes burying the press.
+
+**would I keep using this** — the page, yes; the bar as my "does anything need me?" check-in, no —
+not while the one state that needs me is a 2.97:1 unlabelled icon.
+
+### Findings, worst first
+
+1. **Nothing in the look says my runs are live before I press Install.** `runs`/`runsActive` are
+   read only inside `startUpdate` and the dialog; the state line, card and bar never mention runs.
+   The direction claims the page answers "what runs" — it doesn't. Change: a run fact in the state
+   line at the `2xs` fact step; the modal stays the gate.
+2. **Restart pending shows twice** — two headings 40px apart, two Restart buttons.
+3. **In restart-pending the accent is on the wrong control**: the card still renders an enabled
+   bronze Install while Restart is outline and the warning is an 11px pill. Change: drop Install
+   while `restartRequired`.
+4. **The bar's restart mark is the least legible sign on the screen**: `text-warning` in light is
+   2.97:1, under 3:1 for a graphic; icon-only at both widths, the words only in the aria-label.
+   Change: a darker warning step and a visible word at ≥sm.
+5. **The mark wears no accent, and the direction says it should** — but primary on the light bar
+   measures 2.2:1, so doing what the doc says would make it fainter. Change: settle it in
+   `design.md`, or add a legible accent step; don't just add `text-primary`.
+6. **On a phone the check-in is a bare arrow**: 36×44 with the tag hidden; the width is under the
+   ladder's own 44. Change: a 44×44 target.
+7. **The sentence that says runs stop is the smallest, faintest text on the page** (`2xs` muted,
+   the same step as dates). Change: one step up and not muted.
+8. **"Installing" has no time base**: a dead apply and a slow one look identical. Change: a moving
+   fact — stage, or "last answered 12:04:31" — at `2xs`.
+9. **The first seconds lie**: the header prints "dev build" while the state line says the gateway
+   has not answered, with two Check now buttons. Change: no build line until `status` exists, and
+   one check control.
+10. **Phone ladder hole: every Toggle stays 32px** (measured live at 390 and in the stories).
+    `design.md` promises one rule with no exceptions. Change: `toggleVariants` takes the step.
+11. **Notes print at 16px, against the direction's `base`** — Install sat at y≈1927 on an 844px
+    phone, 2.3 screens of prose before the press. Change: pick one — the table or the CSS.
+
+Passing, for the record: muted facts 4.62:1 light / 7.57:1 dark; warning badge 8.58:1; Install
+8.65:1 on bronze; no horizontal overflow anywhere; picker rows 47/50px; no motion to fight.
+
 ## What changed after round 1
 
 Fixed, with the numbers to prove it (all re-measured in the browser, both themes):
@@ -161,6 +215,13 @@ Fixed, with the numbers to prove it (all re-measured in the browser, both themes
 | The running mark | Mono muted word, not a badge: off the 4.39:1 background and back on the page's 4.62:1 |
 | The phone gutter | `Measure padding="lg"`, the same step Settings uses: measured x=16 |
 | The stories drawing their own bar | They render the app's bar (`h-(--bar-height) px-1`) |
+| Runs were invisible until the modal | A runs fact under the state line at `2xs`: "5 runs are live across acornfall (2), hello-omri (3) · installing asks first" |
+| Install still offered while a swap waits | The card drops its cost band and press when `restartRequired`: Restart above is the action |
+| The restart mark read 2.97:1 in light | `text-warning-subtle-foreground` — 3.49:1 light, 9.17:1 dark, both over the graphic floor — and the word "Restart" shows at ≥sm |
+| The mark's accent was `--primary` | `text-primary-subtle-foreground`: measured 1.48:1 for primary on the light bar, 3.17:1 for this step (9.85:1 dark) |
+| "Installing" had no time base | The line carries the last answer's clock, at the fact step, and stops waiting on nothing |
+| The first seconds printed "dev build" | No build line before `status` exists, and the gateway-silent state owns the only check control |
+| The runs-stopping sentence was the faintest text | One step up, foreground |
 
 Deliberate calls, for the record: the release page's `running` stays a mono word rather than the
 rail's bronze dot — that dot is a *run* alive, this word is a *build* that is what is running, and
