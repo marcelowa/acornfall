@@ -57,6 +57,24 @@ pre-releases, a picked version, the phone, the mark, and the install-wide sectio
   annotation; `/update`, `/update/v0.9.28`, and `/update/v0.9.4` (outside the twenty) all render
   their cards, and `/update/v9.9.9` says no such release. Nothing scrolls sideways at 390.
 
+## The live drill, from the new screen (2026-10-15)
+
+The owner pressed **Install** on the review install, and it ran end to end: backup, download, verify,
+stop runs (none), swap, self-restart. `/healthz` then named `v0.9.33` — the released binary took the
+review binary's place on disk, and the branch build sits beside it as `acornfall-review.bak`.
+
+Two things they saw, both explained and neither a defect:
+
+- **The page reloaded under them.** The console reloads the window when the stream's build changes
+  (that behaviour predates this run; `use-platform.ts`'s `trackBuild`). The address stayed where it
+  was; nothing in the release page redirects.
+- **`/update` then fell back to the conversation.** The new binary is the released v0.9.33, whose
+  embedded interface predates the release page entirely, so that address names no page in the bundle
+  it serves. The review install cannot show the new surface after it updates itself — that is what a
+  real install does.
+
+The review install was rebuilt from the branch with a fresh data dir afterwards, back on v0.9.20.
+
 ## What is left for step 10 and 11
 
 - The owners' panel on the shipped look, and the owner's own notes.
