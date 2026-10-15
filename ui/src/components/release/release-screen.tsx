@@ -1,0 +1,749 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft } from "lucide-react";
+import {
+	fetchNotes,
+	fetchRelease,
+	fetchReleases,
+	type UpdateRelease,
+	type UpdateStatus,
+} from "@/app/client";
+import { Measure } from "@/components/layout/measure";
+import { Stack } from "@/components/layout/stack";
+import { Text } from "@/components/typography/text";
+import { Markdown } from "@/components/transcript/markdown";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Toggle } from "@/components/ui/toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { formatBytes } from "@/lib/format";
+import { betweenReleases, notesTags } from "./between";
+import { cn } from "cn";
+
+export interface ReleaseScreenProps {
+	/** The gateway's own answer, from the stream summary filled by a fetch. */
+	status: UpdateStatus | undefined;
+	/** The release the URL names; empty means the newest production release. */
+	tag: string;
+	/** An apply is in flight: the button says so until it settles. */
+	applying: boolean;
+	/** Open a release's own page. */
+	onOpenTag: (tag: string) => void;
+	/** Back to the conversation behind the screen. */
+	onClose: () => void;
+	onCheck: () => void;
+	onRefresh: () => void;
+	onApply: (tag: string, cleanVMs: boolean, drain: "wait" | "stop") => void;
+	onRestart: () => void;
+	onRollback: () => void;
+	/** The reads the page owns. Tests and stories hand in fixtures; the app omits them. */
+	loadReleases?: typeof fetchReleases | undefined;
+	loadRelease?: typeof fetchRelease | undefined;
+	loadNotes?: typeof fetchNotes | undefined;
+}
+
+/**
+ * The release page: running → offered → changed → cost → the press (J16–J19).
+ *
+ * It owns the reads the status does not carry — the list, the target's notes, the running row's
+ * facts when it is older than the list, and the notes in between — because they are the page's
+ * own content and nobody else reads them. Every version it shows says what it is next to the
+ * running build, and it decides none of that itself: the gateway's `relation` says it (R6, R7).
+ *
+ * One control per job, and one statement per fact: the running build is marked once per list, the
+ * restart has one block and one button, and a state that carries its own control does not get a
+ * second one under the picker.
+ */
+export function ReleaseScreen({
+	status,
+	tag,
+	applying,
+	onOpenTag,
+	onClose,
+	onCheck,
+	onRefresh,
+	onApply,
+	onRestart,
+	onRollback,
+	loadReleases = fetchReleases,
+	loadRelease = fetchRelease,
+	loadNotes = fetchNotes,
+}: ReleaseScreenProps) {
+	const [prereleases, setPrereleases] = useState(false);
+	const [releases, setReleases] = useState<UpdateRelease[] | undefined>(undefined);
+	const [listError, setListError] = useState<string | undefined>(undefined);
+	const [target, setTarget] = useState<UpdateRelease | undefined>(undefined);
+	const [targetError, setTargetError] = useState<string | undefined>(undefined);
+	const [runningRow, setRunningRow] = useState<UpdateRelease | undefined>(undefined);
+	const [notes, setNotes] = useState<Record<string, string>>({});
+	const [readingNotes, setReadingNotes] = useState(false);
+	const [cleanVMs, setCleanVMs] = useState(false);
+	const [dialogOpen, setDialogOpen] = useState(false);
+	// A time base for the states that wait on the gateway: a dead apply and a slow
+	// one must not look the same (look panel).
+	const [answeredAt, setAnsweredAt] = useState(() => new Date());
+	useEffect(() => {
+		setAnsweredAt(new Date());
+	}, [status?.current, status?.restartRequired, status?.checking, applying]);
+
+	// The reads are props so stories and tests can hand in fixtures; a ref keeps
+	// them out of the effects' dependencies, where an inline loader would re-run
+	// the effect on every render.
+	const loaders = useRef({ loadReleases, loadRelease, loadNotes });
+	loaders.current = { loadReleases, loadRelease, loadNotes };
+
+	const current = status?.current ?? "";
+	const isTag = current !== "" && current !== "dev";
+	const newestGa = releases?.find((release) => !release.prerelease)?.tag ?? "";
+	const targetTag = tag !== "" ? tag : newestGa !== "" ? newestGa : (status?.latest ?? "");
+
+	// The list: one fetch on open, and one per switch turn — the filter is the
+	// server's, so turning the switch refetches rather than hiding rows.
+	useEffect(() => {
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const next = await loaders.current.loadReleases(prereleases);
+				if (cancelled) return;
+				setReleases(next);
+				setListError(undefined);
+			} catch (error) {
+				if (!cancelled)
+					setListError(error instanceof Error ? error.message : String(error));
+			}
+		};
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [prereleases]);
+
+	// The target's own read: notes, date, size, relation. The list carries no
+	// notes — GitHub bodies are null for every release so far — so the page asks
+	// by name.
+	useEffect(() => {
+		if (targetTag === "") return;
+		let cancelled = false;
+		void loaders.current.loadRelease(targetTag).then(
+			(release) => {
+				if (!cancelled) {
+					setTarget(release);
+					setTargetError(undefined);
+				}
+			},
+			(error: unknown) => {
+				if (!cancelled)
+					setTargetError(error instanceof Error ? error.message : String(error));
+			},
+		);
+		return () => {
+			cancelled = true;
+		};
+	}, [targetTag]);
+
+	// The running build, when it is older than the list: its own row, by name.
+	// Once the list holds it, this row goes — the list's own row is the one that
+	// stays, so the picker never prints the same release twice.
+	useEffect(() => {
+		if (!isTag) {
+			setRunningRow(undefined);
+			return;
+		}
+		if (releases !== undefined && releases.some((release) => release.tag === current)) {
+			setRunningRow(undefined);
+			return;
+		}
+		let cancelled = false;
+		void loaders.current.loadRelease(current).then(
+			(release) => {
+				if (!cancelled) setRunningRow(release);
+			},
+			() => undefined,
+		);
+		return () => {
+			cancelled = true;
+		};
+	}, [current, isTag, releases]);
+
+	// The changes in between: every release newer than the running build but not
+	// the target, inside the fetched window, newest first — so a jump of several
+	// versions reads as one list of changes. The rows come from the list at once;
+	// their notes arrive in one read, which is what used to take five seconds.
+	const between = useMemo(
+		() => betweenReleases(releases, targetTag, target?.relation === "newer"),
+		[releases, targetTag, target?.relation],
+	);
+	// The target's own notes ride its by-name read; this one read is for the
+	// releases in between, and it is keyed by the tags themselves so a re-render
+	// cannot ask again.
+	const betweenNotesTags = useMemo(() => notesTags(between), [between]);
+	const notesKey = betweenNotesTags.join(",");
+	useEffect(() => {
+		if (notesKey === "") {
+			return;
+		}
+		let cancelled = false;
+		setReadingNotes(true);
+		void loaders.current.loadNotes(notesKey.split(",")).then(
+			(loaded) => {
+				if (!cancelled) {
+					setNotes((current) => ({ ...current, ...loaded }));
+					setReadingNotes(false);
+				}
+			},
+			() => {
+				if (!cancelled) setReadingNotes(false);
+			},
+		);
+		return () => {
+			cancelled = true;
+		};
+	}, [notesKey]);
+
+	// Follow the swap and the restart until the gateway answers with the new
+	// build: any amount of waiting, and no give-up timer deciding what the page
+	// claims (R11). Once the running build is the target, there is nothing to
+	// follow.
+	const watching = applying || status?.restartRequired === true;
+	useEffect(() => {
+		if (!watching) return;
+		if (current !== "" && current === targetTag) return;
+		const timer = window.setInterval(onRefresh, 3000);
+		return () => window.clearInterval(timer);
+	}, [watching, current, targetTag, onRefresh]);
+
+	const startUpdate = (): void => {
+		if (status?.runsActive === true) {
+			setDialogOpen(true);
+			return;
+		}
+		onApply(targetTag, cleanVMs, "wait");
+	};
+
+	const runs = status?.runs ?? [];
+	const runCount = runs.reduce((total, item) => total + item.runs, 0);
+	const workspaces = runs.map((item) => item.workspace).join(", ");
+	const failed = status?.failed !== undefined && status.failed !== "";
+	// A state that carries its own control does not get a second one below it.
+	const ownsCheck =
+		listError !== undefined ||
+		targetError !== undefined ||
+		failed ||
+		status?.restartRequired === true;
+
+	return (
+		<div data-slot="release-screen" className="min-h-0 flex-1 overflow-y-auto">
+			<Measure size="page" padding="lg">
+				<Stack gap="lg">
+					<Stack gap="2xs">
+						<Button
+							variant="ghost"
+							size="xs"
+							className="self-start"
+							aria-label="Back to the conversation"
+							onClick={onClose}
+						>
+							<ChevronLeft />
+							Back to the conversation
+						</Button>
+						<Text as="h1" size="xl" weight="semibold">
+							Update
+						</Text>
+						<Text size="2xs" tone="muted" className="font-mono">
+							{isTag ? `acornfall ${current}` : "dev build — not a release tag"}
+						</Text>
+					</Stack>
+
+					{status?.runsActive === true ? (
+						<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+							{runsLine(runs)}
+						</Text>
+					) : null}
+
+					<StateLine
+						status={status}
+						target={target}
+						tag={tag}
+						checking={status?.checking === true}
+						applying={applying}
+						listError={listError}
+						now={answeredAt}
+						onCheck={onCheck}
+						onRestart={onRestart}
+					/>
+
+					{failed ? (
+						<Stack gap="2xs" data-slot="release-rolled-back">
+							<Badge variant="soft" tone="danger" size="sm">
+								Rolled back
+							</Badge>
+							<Text size="xs">{status?.failed}</Text>
+							<Text size="2xs" tone="muted">
+								{current} is running. Check the next release, or roll back by hand.
+							</Text>
+							<div className="flex gap-2">
+								<Button size="sm" variant="outline" onClick={onCheck}>
+									Check again
+								</Button>
+								<Button size="sm" variant="ghost" onClick={onRollback}>
+									Roll back
+								</Button>
+							</div>
+						</Stack>
+					) : null}
+
+					{targetError !== undefined ? (
+						<Stack gap="2xs" data-slot="release-missing">
+							<Text size="sm" weight="semibold">
+								No such release
+							</Text>
+							<Text size="xs">{targetError}</Text>
+							<div className="flex gap-2">
+								<Button size="sm" variant="outline" onClick={onCheck}>
+									Check now
+								</Button>
+							</div>
+						</Stack>
+					) : null}
+
+					{target !== undefined && targetError === undefined && !failed ? (
+						<ReleaseCard
+							target={target}
+							between={between}
+							notes={notes}
+							readingNotes={readingNotes}
+							cleanVMs={cleanVMs}
+							onCleanVMs={setCleanVMs}
+							applying={applying}
+							swapped={status?.restartRequired === true}
+							onInstall={startUpdate}
+						/>
+					) : null}
+
+					{ownsCheck ? null : (
+						<Button size="xs" variant="ghost" className="self-start" onClick={onCheck}>
+							{status?.checking === true ? "Checking…" : "Check now"}
+						</Button>
+					)}
+
+					<Stack gap="sm" data-slot="release-picker">
+						<div className="flex items-center justify-between gap-2">
+							<Text size="sm" weight="semibold">
+								Releases
+							</Text>
+							<Toggle
+								aria-label="Pre-release builds"
+								size="sm"
+								variant="outline"
+								pressed={prereleases}
+								onPressedChange={setPrereleases}
+							>
+								Pre-release builds
+							</Toggle>
+						</div>
+						{listError !== undefined ? null : (
+							<>
+								<div className="flex flex-col gap-0.5">
+									{isTag && runningRow !== undefined ? (
+										<ReleaseRow release={runningRow} onOpen={onOpenTag} />
+									) : null}
+									{(releases ?? []).map((release) => (
+										<ReleaseRow
+											key={release.tag}
+											release={release}
+											current={release.tag === targetTag}
+											onOpen={onOpenTag}
+										/>
+									))}
+								</div>
+								{isTag && runningRow !== undefined ? (
+									<Text size="2xs" tone="muted">
+										From the twenty most recent. Older changes are not listed.
+									</Text>
+								) : null}
+							</>
+						)}
+					</Stack>
+				</Stack>
+			</Measure>
+
+			<Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>Runs are active</DialogTitle>
+						<DialogDescription>
+							{runCount > 0
+								? `${runCount} runs are active across ${workspaces}. An update restarts the gateway.`
+								: "Runs are active. An update restarts the gateway."}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button variant="ghost" onClick={() => setDialogOpen(false)}>
+							Cancel
+						</Button>
+						<Button
+							variant="outline"
+							onClick={() => {
+								setDialogOpen(false);
+								onClose();
+							}}
+						>
+							Not now
+						</Button>
+						<Button
+							disabled={applying}
+							onClick={() => {
+								setDialogOpen(false);
+								onApply(targetTag, cleanVMs, "stop");
+							}}
+						>
+							{applying ? "Installing…" : "Stop runs and install"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+		</div>
+	);
+}
+
+/** One sentence for the runs an install would interrupt. */
+function runsLine(runs: { workspace: string; runs: number }[]): string {
+	const total = runs.reduce((sum, item) => sum + item.runs, 0);
+	const where = runs.map((item) => `${item.workspace} (${item.runs})`).join(", ");
+	return `${total === 1 ? "1 run is" : `${total} runs are`} live across ${where} · installing asks first`;
+}
+
+/** The clock, in the console's own mono fact voice. */
+function clock(at: Date): string {
+	return at.toTimeString().slice(0, 8);
+}
+
+/** The release card: the target, its notes, the changes in between, and the press. */
+function ReleaseCard({
+	target,
+	between,
+	notes,
+	readingNotes,
+	cleanVMs,
+	onCleanVMs,
+	applying,
+	swapped,
+	onInstall,
+}: {
+	target: UpdateRelease;
+	between: UpdateRelease[];
+	notes: Record<string, string>;
+	readingNotes: boolean;
+	cleanVMs: boolean;
+	onCleanVMs: (clean: boolean) => void;
+	applying: boolean;
+	/** The files are swapped and the old process answers: Restart finishes it, not Install. */
+	swapped: boolean;
+	onInstall: () => void;
+}) {
+	// The running build is not offered as a target: its notes are worth reading,
+	// its cost and its press are not. Neither is a release already on disk.
+	const isRunning = target.relation === "running" || swapped;
+	return (
+		<Stack gap="sm" data-slot="release-card">
+			<div className="rounded-lg border border-border bg-card p-3">
+				<Stack gap="sm">
+					<Stack gap="2xs">
+						<div className="flex items-center gap-2">
+							<Text as="span" size="sm" weight="semibold" className="font-mono">
+								{target.tag}
+							</Text>
+							{target.prerelease ? (
+								<Text as="span" size="2xs" tone="muted" className="font-mono">
+									pre
+								</Text>
+							) : null}
+						</div>
+						<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+							{target.publishedAt.slice(0, 10)}
+							{isRunning ? " · running" : ""}
+							{target.relation === "older" ? " · older than the running build" : ""}
+							{target.relation === "unknown" ? " · not a release tag" : ""}
+							{" · "}
+							{formatBytes(target.downloadSize + target.workerSize)}
+						</Text>
+					</Stack>
+					{notes[target.tag] === undefined && readingNotes ? (
+						<Text size="lg" tone="muted">
+							Reading the release notes…
+						</Text>
+					) : (notes[target.tag] ?? target.notes) === "" ? (
+						<Text size="lg" tone="muted">
+							This release shipped no notes.
+						</Text>
+					) : (
+						<Markdown>{notes[target.tag] ?? target.notes}</Markdown>
+					)}
+					{between.length > 0 ? <Between releases={between} notes={notes} /> : null}
+					{isRunning ? null : (
+						<>
+							<Stack gap="2xs">
+								<Text size="2xs" tone="muted">
+									sandbox VMs
+								</Text>
+								<ToggleGroup
+									type="single"
+									value={cleanVMs ? "clean" : "keep"}
+									onValueChange={(next) => {
+										if (next === "keep") onCleanVMs(false);
+										if (next === "clean") onCleanVMs(true);
+									}}
+									variant="outline"
+									size="sm"
+									spacing={0}
+									aria-label="Sandbox VMs"
+								>
+									<ToggleGroupItem value="keep">Keep VMs</ToggleGroupItem>
+									<ToggleGroupItem value="clean">Start clean</ToggleGroupItem>
+								</ToggleGroup>
+								<Text size="2xs" tone="muted">
+									Clean wipes the sandbox root only — never files under
+									workspaces.
+								</Text>
+							</Stack>
+							<div>
+								<Button size="sm" onClick={onInstall} disabled={applying}>
+									{applying ? "Installing…" : "Install"}
+								</Button>
+							</div>
+						</>
+					)}
+				</Stack>
+			</div>
+		</Stack>
+	);
+}
+
+/**
+ * The changes between the running build and the target, newest first: the rows are
+ * the list's own, so they are there at once, and each one's notes fill in when the
+ * single notes read answers.
+ */
+function Between({
+	releases,
+	notes,
+}: {
+	releases: UpdateRelease[];
+	notes: Record<string, string>;
+}) {
+	return (
+		<Stack gap="sm" data-slot="release-between">
+			<Text size="2xs" weight="medium" tone="muted">
+				changes in between
+			</Text>
+			<Stack gap="md">
+				{releases.map((release) => {
+					const note = notes[release.tag];
+					return (
+						<Stack key={release.tag} gap="2xs">
+							<Text as="span" size="sm" className="font-mono">
+								{release.tag}
+							</Text>
+							{note === undefined ? (
+								<Text size="lg" tone="muted">
+									Reading the notes…
+								</Text>
+							) : note === "" ? (
+								<Text size="lg" tone="muted">
+									This release shipped no notes.
+								</Text>
+							) : (
+								<Markdown>{note}</Markdown>
+							)}
+						</Stack>
+					);
+				})}
+			</Stack>
+		</Stack>
+	);
+}
+
+/**
+ * One row of the picker: a link to the version's page, never a control with two actions. The
+ * running build and a pre-release are marks — mono, muted, one word each — not coloured badges,
+ * and the row in view is the only one with a background step.
+ */
+function ReleaseRow({
+	release,
+	current,
+	onOpen,
+}: {
+	release: UpdateRelease;
+	current?: boolean | undefined;
+	onOpen: (tag: string) => void;
+}) {
+	return (
+		<button
+			type="button"
+			data-slot="release-row"
+			onClick={() => onOpen(release.tag)}
+			className={cn(
+				"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+				current === true && "bg-primary/10",
+			)}
+		>
+			<div className="flex min-w-0 flex-1 flex-col">
+				<div className="flex min-w-0 items-center gap-1.5">
+					<Text as="span" size="sm" className="font-mono">
+						{release.tag}
+					</Text>
+					{release.relation === "running" ? (
+						<Text as="span" size="2xs" tone="muted" className="font-mono">
+							running
+						</Text>
+					) : null}
+				</div>
+				<Text as="span" size="2xs" tone="muted" className="font-mono tabular-nums">
+					{release.publishedAt.slice(0, 10)} ·{" "}
+					{formatBytes(release.downloadSize + release.workerSize)} ·{" "}
+					{release.prerelease ? "pre-release" : "production"}
+				</Text>
+			</div>
+		</button>
+	);
+}
+
+/** The state line, always a sentence, never a spinner alone (R11). */
+function StateLine({
+	status,
+	target,
+	tag,
+	checking,
+	applying,
+	listError,
+	now,
+	onCheck,
+	onRestart,
+}: {
+	status: UpdateStatus | undefined;
+	target: UpdateRelease | undefined;
+	tag: string;
+	checking: boolean;
+	applying: boolean;
+	listError: string | undefined;
+	now: Date;
+	onCheck: () => void;
+	onRestart: () => void;
+}) {
+	if (status === undefined) {
+		return (
+			<Stack gap="2xs" data-slot="release-state">
+				<Text size="sm" weight="semibold">
+					The gateway has not answered yet
+				</Text>
+				<Text size="2xs" tone="muted">
+					The release page reads its state from the gateway. Check again in a moment.
+				</Text>
+				<div>
+					<Button size="sm" variant="outline" onClick={onCheck}>
+						Check now
+					</Button>
+				</div>
+			</Stack>
+		);
+	}
+	if (applying) {
+		return (
+			<Stack gap="2xs" data-slot="release-state">
+				<Text size="sm" weight="semibold">
+					Installing {target?.tag ?? "the release"}
+				</Text>
+				<Text size="xs">Backup, download, verify, then runs stop and the build swaps.</Text>
+				<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+					the page follows until the new build answers · asked {clock(now)}
+				</Text>
+			</Stack>
+		);
+	}
+	if (status.restartRequired === true) {
+		return (
+			<Stack gap="2xs" data-slot="release-state">
+				<Text size="sm" weight="semibold">
+					Restart pending
+				</Text>
+				<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+					running {status.current} · the files are swapped, the old process still answers
+				</Text>
+				<div>
+					<Button size="sm" variant="outline" onClick={onRestart}>
+						Restart
+					</Button>
+				</div>
+			</Stack>
+		);
+	}
+	if (listError !== undefined) {
+		return (
+			<Stack gap="2xs" data-slot="release-state">
+				<Text size="sm" weight="semibold">
+					The release source did not answer
+				</Text>
+				<Text size="xs" tone="muted">
+					{listError}
+				</Text>
+				<Text size="2xs" tone="muted" className="font-mono">
+					{status.latest === ""
+						? `running ${status.current} · no release known yet`
+						: `running ${status.current} · last known release ${status.latest}`}
+				</Text>
+				<div>
+					<Button size="sm" variant="outline" onClick={onCheck}>
+						Check now
+					</Button>
+				</div>
+			</Stack>
+		);
+	}
+	if (status.current === "dev") {
+		return (
+			<Stack gap="2xs" data-slot="release-state">
+				<Text size="sm" weight="semibold">
+					dev build
+				</Text>
+				<Text size="2xs" tone="muted">
+					Not a release tag. Releases can still be installed by hand; nothing prompts.
+				</Text>
+			</Stack>
+		);
+	}
+	if (status.available) {
+		return (
+			<Stack gap="2xs" data-slot="release-state">
+				<Text size="sm" weight="semibold">
+					Newer release: {target?.tag ?? status.latest}
+				</Text>
+				<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+					running {status.current} · newest production release {status.latest}
+					{checking ? " · checking…" : ""}
+				</Text>
+			</Stack>
+		);
+	}
+	const upToDate = status.current === status.latest;
+	return (
+		<Stack gap="2xs" data-slot="release-state">
+			<Text size="sm" weight="semibold">
+				{tag === "" ? "Up to date" : `Version ${tag}`}
+			</Text>
+			<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+				running {status.current}
+				{upToDate
+					? " · the newest production release"
+					: ` · newest production release ${status.latest}`}
+				{checking ? " · checking…" : ""}
+			</Text>
+		</Stack>
+	);
+}

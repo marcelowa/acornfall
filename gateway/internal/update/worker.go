@@ -274,21 +274,13 @@ func (m *Manager) releaseFor(ctx context.Context, tag string) (Release, error) {
 		return cached, nil
 	}
 	url := m.apiBase() + "/releases/tags/" + tag
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return Release{}, err
-	}
-	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
-	response, err := m.client.Do(request)
+	response, err := m.get(ctx, url)
 	if err != nil {
 		return Release{}, err
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return Release{}, fmt.Errorf("releases: no release %s (%s)", tag, response.Status)
+		return Release{}, fmt.Errorf("releases: no release %s (%s): %w", tag, response.Status, ErrReleaseNotFound)
 	}
 	// Never cached: latest stays what the check found, or the dot lies.
 	return parseRelease(response.Body)

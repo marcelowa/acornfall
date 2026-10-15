@@ -12,7 +12,8 @@ test("the workspaces list is no longer an address", () => {
 		screen: "conversation",
 		workspace: "",
 		conversation: "",
-		settingsTab: "defaults",
+		settingsTab: "general",
+		updateTag: "",
 	});
 });
 
@@ -21,7 +22,8 @@ test("a conversation URL keeps its workspace and its id", () => {
 		screen: "conversation",
 		workspace: "acornfall",
 		conversation: "abcd-1234",
-		settingsTab: "defaults",
+		settingsTab: "general",
+		updateTag: "",
 	});
 });
 
@@ -30,7 +32,8 @@ test("a workspace URL is a conversation with no id yet", () => {
 		screen: "conversation",
 		workspace: "spikes",
 		conversation: "",
-		settingsTab: "defaults",
+		settingsTab: "general",
+		updateTag: "",
 	});
 });
 
@@ -40,9 +43,39 @@ test("settings keeps its page and the workspace it was about", () => {
 		workspace: "spikes",
 		conversation: "",
 		settingsTab: "providers",
+		updateTag: "",
 	});
 });
 
-test("an unknown settings page lands on defaults", () => {
-	expect(routeFromUrl("/settings/nope", "").settingsTab).toBe("defaults");
+test("an unknown settings page lands on general", () => {
+	expect(routeFromUrl("/settings/nope", "").settingsTab).toBe("general");
+});
+
+// The release page replaced the Updates tab, and the owner chose no redirect: an old link
+// lands on the install page's sibling, defaults, like any unknown settings page.
+test("the old defaults, updates and install pages are gone, with no redirect", () => {
+	for (const page of ["defaults", "updates", "install"]) {
+		expect(routeFromUrl(`/settings/${page}`, "").settingsTab).toBe("general");
+	}
+});
+
+test("the release page is its own address, and a version has its own too", () => {
+	expect(routeFromUrl("/update", "?workspace=spikes")).toEqual({
+		screen: "update",
+		workspace: "spikes",
+		conversation: "",
+		settingsTab: "general",
+		updateTag: "",
+	});
+	expect(routeFromUrl("/update/v0.9.28", "?workspace=spikes")).toEqual({
+		screen: "update",
+		workspace: "spikes",
+		conversation: "",
+		settingsTab: "general",
+		updateTag: "v0.9.28",
+	});
+});
+
+test("the general settings page has its own URL", () => {
+	expect(routeFromUrl("/settings/general", "?workspace=spikes").settingsTab).toBe("general");
 });

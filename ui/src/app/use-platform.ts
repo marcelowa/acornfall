@@ -18,6 +18,7 @@ import {
 	openStream,
 	refreshProviders,
 	removeWorkspace as removeWorkspaceRequest,
+	restartUpdate,
 	renameConversation,
 	rollbackUpdate,
 	sendMessage,
@@ -89,20 +90,25 @@ interface Route {
 	conversation: string;
 	/** Which settings page is open. Only the settings screen reads it. */
 	settingsTab: SettingsTab;
+	/** Which release the update page is on; empty means the newest. */
+	updateTag: string;
 }
 
 /** The screens the URL can name. A conversation is one of them, because it has a URL too. The
  * workspaces list is not: it is a layer over the conversation, and it keeps no URL of its own
  * (step 06), so no address can land on it. */
-export type Screen = "conversation" | "settings";
+export type Screen = "conversation" | "settings" | "update";
 
-/** The settings pages, each with its own URL under /settings. */
-export type SettingsTab = "defaults" | "providers" | "updates";
+/** The settings pages, each with its own URL under /settings. `general` is the install-wide
+ * page: what runs and how it keeps itself current, the defaults a new conversation starts from,
+ * and the theme. The old `defaults`, `updates` and `install` pages kept no redirect — the
+ * release page has its own address now, and an unknown page lands on general. */
+export type SettingsTab = "general" | "providers";
 
-const SETTINGS_TABS: SettingsTab[] = ["defaults", "providers", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "providers"];
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
-	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "defaults";
+	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "general";
 }
 
 /**
@@ -136,6 +142,18 @@ export function routeFromUrl(path: string, search: string): Route {
 			workspace: new URLSearchParams(search).get("workspace") ?? "",
 			conversation: "",
 			settingsTab: settingsTabFrom(settings[1]),
+			updateTag: "",
+		};
+	}
+	// The release page: /update is the newest release, /update/<tag> a version page.
+	const update = /^\/update(?:\/([^/]+))?\/?$/.exec(path);
+	if (update !== null) {
+		return {
+			screen: "update",
+			workspace: new URLSearchParams(search).get("workspace") ?? "",
+			conversation: "",
+			settingsTab: "general",
+			updateTag: update[1] === undefined ? "" : decodeURIComponent(update[1]),
 		};
 	}
 	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(path);
@@ -144,7 +162,8 @@ export function routeFromUrl(path: string, search: string): Route {
 			screen: "conversation",
 			workspace: decodeURIComponent(conversation[1] ?? ""),
 			conversation: decodeURIComponent(conversation[2] ?? ""),
-			settingsTab: "defaults",
+			settingsTab: "general",
+			updateTag: "",
 		};
 	}
 	const workspace = /^\/w\/([^/]+)\/?$/.exec(path);
@@ -153,10 +172,17 @@ export function routeFromUrl(path: string, search: string): Route {
 			screen: "conversation",
 			workspace: decodeURIComponent(workspace[1] ?? ""),
 			conversation: "",
-			settingsTab: "defaults",
+			settingsTab: "general",
+			updateTag: "",
 		};
 	}
-	return { screen: "conversation", workspace: "", conversation: "", settingsTab: "defaults" };
+	return {
+		screen: "conversation",
+		workspace: "",
+		conversation: "",
+		settingsTab: "general",
+		updateTag: "",
+	};
 }
 
 function fromUrl(): Route {
@@ -200,7 +226,7 @@ export interface Platform {
 	/** The screen in view: a conversation or settings. The workspaces list is a level of the rail
 	 * over the conversations, not a screen (`workspacesOpen`). */
 	screen: Screen;
-	showScreen: (screen: Screen) => void;
+	showScreen: (screen: "conversation" | "settings") => void;
 	/** The workspaces list, the level above the conversations in the rail: it keeps no URL, so Back
 	 * goes back to the conversations instead of leaving the console. The rail stays where it is. */
 	workspacesOpen: boolean;
@@ -208,7 +234,11 @@ export interface Platform {
 	closeWorkspaces: () => void;
 	/** The settings page in view, with its own URL. */
 	settingsTab: SettingsTab;
+	/** Which release the update page is on, from the URL; empty means the newest. */
+	updateTag: string;
 	showSettingsTab: (tab: SettingsTab) => void;
+	/** The release page, at its own URL, optionally on one version. */
+	showUpdate: (tag?: string) => void;
 	/** A conversation belongs to a workspace for life, so switching means starting over: the
 	 * transcript is cleared and the next one arrives with the workspace. */
 	selectWorkspace: (name: string) => void;
@@ -262,7 +292,9 @@ export interface Platform {
 	/** Force a release check now. */
 	checkUpdateNow: () => void;
 	/** Back up, download, verify, swap. Refusals land in `failure`. */
-	applyUpdateNow: (cleanVMs: boolean, drain: "wait" | "stop") => void;
+	applyUpdateNow: (tag: string, cleanVMs: boolean, drain: "wait" | "stop") => void;
+	/** Finish a pending update: the process replaces itself. */
+	restartUpdateNow: () => void;
 	/** Restore the last good build. */
 	rollbackUpdateNow: () => void;
 	/** The Updates tab: channel, auto-check, pinned tag. */
@@ -695,7 +727,8 @@ export function usePlatform(): Platform {
 				screen: "conversation",
 				workspace: name,
 				conversation: id,
-				settingsTab: "defaults",
+				settingsTab: "general",
+				updateTag: "",
 			});
 		},
 		[state, workspace],
@@ -705,7 +738,7 @@ export function usePlatform(): Platform {
 	 * shared link land where someone was. The workspaces list is not one of them: it is a level of
 	 * the rail and keeps no address. */
 	const showScreen = useCallback(
-		(screen: Screen) => {
+		(screen: "conversation" | "settings") => {
 			if (screen === "conversation") {
 				const name = state?.workspace?.name ?? workspace;
 				const id = state?.conversation?.id ?? activeId;
@@ -761,6 +794,23 @@ export function usePlatform(): Platform {
 				`/settings/${tab}?workspace=${encodeURIComponent(workspace)}`,
 			);
 			setRoute((current) => ({ ...current, screen: "settings", settingsTab: tab }));
+		},
+		[workspace],
+	);
+
+	/** The release page: /update is the newest release, /update/<tag> a version page. It is one of
+	 * the screens, so Back returns to whatever the press came from, and a shared link lands on the
+	 * release it named. */
+	const showUpdate = useCallback(
+		(tag?: string) => {
+			const tail = tag === undefined || tag === "" ? "" : `/${encodeURIComponent(tag)}`;
+			window.history.pushState(
+				null,
+				"",
+				`/update${tail}?workspace=${encodeURIComponent(workspace)}`,
+			);
+			setRoute((current) => ({ ...current, screen: "update", updateTag: tag ?? "" }));
+			setRailOpen(false);
 		},
 		[workspace],
 	);
@@ -869,7 +919,8 @@ export function usePlatform(): Platform {
 			screen: "conversation",
 			workspace: name,
 			conversation: "",
-			settingsTab: "defaults",
+			settingsTab: "general",
+			updateTag: "",
 		});
 	}, []);
 
@@ -894,7 +945,8 @@ export function usePlatform(): Platform {
 					screen: "conversation",
 					workspace: name,
 					conversation: "",
-					settingsTab: "defaults",
+					settingsTab: "general",
+					updateTag: "",
 				});
 			});
 		},
@@ -913,7 +965,8 @@ export function usePlatform(): Platform {
 						screen: "conversation",
 						workspace: "general",
 						conversation: "",
-						settingsTab: "defaults",
+						settingsTab: "general",
+						updateTag: "",
 					});
 					return;
 				}
@@ -1017,7 +1070,6 @@ export function usePlatform(): Platform {
 					current: state.update.current,
 					latest: state.update.latest ?? "",
 					notes: "",
-					pinned: "",
 					channel: "",
 					autoCheck: false,
 					checking: false,
@@ -1027,6 +1079,10 @@ export function usePlatform(): Platform {
 					backups: [],
 					downloadSize: 0,
 					workerSize: 0,
+					// The runs gate is the gateway's own answer, and the stream
+					// summary does not carry it: the page's fetch does.
+					runsActive: false,
+					runs: [],
 				};
 	const update = fetchedUpdate ?? updateFromState;
 	// The build this page first saw: an apply or rollback restarts the server
@@ -1072,8 +1128,8 @@ export function usePlatform(): Platform {
 	}, [act]);
 	const [applyingUpdate, setApplyingUpdate] = useState(false);
 	const applyUpdateNow = useCallback(
-		(cleanVMs: boolean, drain: "wait" | "stop"): void => {
-			const request = applyUpdate(cleanVMs, drain);
+		(tag: string, cleanVMs: boolean, drain: "wait" | "stop"): void => {
+			const request = applyUpdate(cleanVMs, drain, tag);
 			// Immediate and single: the button disables on this render, so a
 			// second tap has nothing to press. Settles either way, so a
 			// refusal re-enables instead of sticking disabled.
@@ -1084,6 +1140,11 @@ export function usePlatform(): Platform {
 		},
 		[act],
 	);
+	const restartUpdateNow = useCallback((): void => {
+		// The gateway answers before it becomes the new binary; the stream drops
+		// and reconnects on its own, and the page follows the build from there.
+		act(restartUpdate().then(setFetchedUpdate));
+	}, [act]);
 	const rollbackUpdateNow = useCallback((): void => {
 		act(rollbackUpdate().then(setFetchedUpdate));
 	}, [act]);
@@ -1114,7 +1175,8 @@ export function usePlatform(): Platform {
 					screen: "conversation",
 					workspace,
 					conversation: id,
-					settingsTab: "defaults",
+					settingsTab: "general",
+					updateTag: "",
 				});
 			})
 			.catch(reportError);
@@ -1205,6 +1267,8 @@ export function usePlatform(): Platform {
 		showScreen,
 		settingsTab: route.settingsTab,
 		showSettingsTab,
+		updateTag: route.updateTag,
+		showUpdate,
 		newConversation,
 		composerFocusToken,
 		select,
@@ -1238,6 +1302,7 @@ export function usePlatform(): Platform {
 		applyingUpdate,
 		checkUpdateNow,
 		applyUpdateNow,
+		restartUpdateNow,
 		rollbackUpdateNow,
 		setUpdatePrefs,
 	};

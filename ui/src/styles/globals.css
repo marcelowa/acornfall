@@ -209,8 +209,6 @@
 			--text-xs: var(--base-font-size-sm);
 			--text-sm: var(--base-font-size-base);
 			--text-base: 15px;
-			/* The bar grows with the targets it holds: 44px of button plus its own padding. */
-			--bar-height: 56px;
 		}
 	}
 

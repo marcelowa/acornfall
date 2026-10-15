@@ -552,6 +552,34 @@ func (w *Workspaces) AnyRunning() bool {
 	return false
 }
 
+// RunningWorkspace names one started workspace with runs, and how many, so the
+// install dialog can say what stopping runs would stop instead of saying "runs".
+type RunningWorkspace struct {
+	Workspace string `json:"workspace"`
+	Runs      int    `json:"runs"`
+}
+
+// RunningSummary answers what a drain-stop would stop: every started workspace
+// with running conversations, and the count in each, by name. The registry lock
+// is released before the controls are asked, so the lock order stays registry
+// before control.
+func (w *Workspaces) RunningSummary() []RunningWorkspace {
+	w.mu.RLock()
+	named := make(map[string]*Control, len(w.controls))
+	for name, control := range w.controls {
+		named[name] = control
+	}
+	w.mu.RUnlock()
+	summary := make([]RunningWorkspace, 0, len(named))
+	for name, control := range named {
+		if runs := len(control.RunningIDs()); runs > 0 {
+			summary = append(summary, RunningWorkspace{Workspace: name, Runs: runs})
+		}
+	}
+	sort.Slice(summary, func(i, j int) bool { return summary[i].Workspace < summary[j].Workspace })
+	return summary
+}
+
 // noneOffer reports whether no started workspace offers this model. With none started there
 // is nothing to check against, and refusing would make the first thing anyone does fail.
 func (w *Workspaces) noneOffer(provider, modelID string) bool {

@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -55,7 +56,11 @@ type Release struct {
 	Name        string
 	Notes       string
 	PublishedAt string
-	Assets      []Asset
+	// Prerelease is GitHub's own flag: a build marked -rc, -testing, -pre
+	// or the like is not production ready, and the picker hides it unless
+	// someone asks for it.
+	Prerelease bool
+	Assets     []Asset
 }
 
 // Asset is one release file. ID is the API asset id: downloads go through
@@ -68,12 +73,12 @@ type Asset struct {
 	Size int64
 }
 
-// Settings are the Updates tab: channel, auto-check, pinned tag.
-// Pinned means no prompts.
+// Settings are the install-wide settings page: channel and auto-check.
+// There is no pin: the indicator follows the newest production release
+// with nothing able to silence it, and a pick installs once.
 type Settings struct {
 	Channel   string `json:"channel"`
 	AutoCheck bool   `json:"autoCheck"`
-	Pinned    string `json:"pinned"`
 }
 
 // DefaultSettings is what a fresh install gets.
@@ -81,19 +86,28 @@ func DefaultSettings() Settings {
 	return Settings{Channel: "releases", AutoCheck: true}
 }
 
+// Running is one started workspace with runs, for the install dialog: it
+// says what "stop runs" would stop. Counted by the control plane and handed
+// in through Running, so this tier still knows nothing about conversations.
+type Running struct {
+	Workspace string `json:"workspace"`
+	Runs      int    `json:"runs"`
+}
+
 // Status is what GET /api/update/status answers.
 type Status struct {
 	Current  string `json:"current"`
 	Latest   string `json:"latest"`
 	Notes    string `json:"notes"`
-	Pinned   string `json:"pinned"`
 	Channel  string `json:"channel"`
 	Checking bool   `json:"checking"`
 	// Download sizes in bytes, for the screen's size line. Zero when the
 	// release names no file for this platform.
 	DownloadSize int64 `json:"downloadSize"`
 	WorkerSize   int64 `json:"workerSize"`
-	// Available is one dot, not a list: a newer tag exists and nothing pins it.
+	// Available means the newest production release is newer than the
+	// running build — newer, not merely different: an rc installed from the
+	// picker must not leave the bar pointing at an older GA.
 	Available bool `json:"available"`
 	// Failed carries the last rollback cause, so the screen can say it.
 	Failed string `json:"failed,omitempty"`
@@ -151,6 +165,10 @@ func releaseProblem(err error) string {
 type ApplyOptions struct {
 	CleanVMs bool
 	Drain    string
+	// Tag picks the release to install. Empty means the release the last
+	// check found: the top-bar indicator's one-click path. A tag here is
+	// the update screen's picker: any listed release, not only latest.
+	Tag string
 }
 
 // ErrRunsActive is the refusal when runs are active and drain is "wait".
@@ -168,6 +186,10 @@ func (ErrRestartPending) Error() string {
 	return "restart pending: restart the gateway to finish the update, then update again"
 }
 
+// ErrReleaseNotFound names a tag the release source does not have, so a
+// picker typo or a stale list answers 404 rather than a server error.
+var ErrReleaseNotFound = errors.New("release not found")
+
 // Manager owns the update state for one install.
 type Manager struct {
 	home       string
@@ -182,8 +204,15 @@ type Manager struct {
 	current  string
 	latest   Release
 	checking bool
-	failed   string
-	restart  bool
+
+	// notesMu guards the notes cache: a tag's notes never change, so one read
+	// per process is enough, and the page's "what changed in between" asks
+	// once for several tags instead of one read each (the owner: five
+	// seconds of nothing while the list filled in).
+	notesMu    sync.Mutex
+	notesCache map[string]string
+	failed     string
+	restart    bool
 
 	// RunsActive reports whether any conversation is running. Injected so
 	// tests need no control plane.
@@ -201,6 +230,10 @@ type Manager struct {
 	// IsAdmin decides POST /api/update/apply. Default allow: single user
 	// now, admin later. Return false to get the 403 path today.
 	IsAdmin func(r *http.Request) bool
+	// Running names the started workspaces with runs, for the install dialog:
+	// it says what stopping runs would stop. Injected, so this tier stays
+	// free of the control plane.
+	Running func() []Running
 }
 
 // New builds a Manager. Empty binPath means the current executable.
@@ -320,11 +353,21 @@ func (m *Manager) SaveSettings(settings Settings) error {
 	return os.WriteFile(m.settingsPath(), append(payload, '\n'), 0o600)
 }
 
-// Settings reads the Updates tab.
+// Settings reads the install-wide settings page.
 func (m *Manager) Settings() Settings {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.settings
+}
+
+// Runs answers what a drain-stop would stop: the started workspaces with
+// running conversations, and how many in each. Nil means nothing can
+// answer, which reads as none.
+func (m *Manager) Runs() []Running {
+	if m.Running == nil {
+		return nil
+	}
+	return m.Running()
 }
 
 // SetCurrentVersion records the running tag.
@@ -339,21 +382,13 @@ func (m *Manager) SetCurrentVersion(tag string) error {
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	available := m.latest.Tag != "" && m.latest.Tag != m.current &&
-		m.current != "dev" && m.settings.Pinned == ""
-	// A dev build never knows its tag, so it never prompts: showing a dot
-	// for a build that cannot name itself would be a lie.
-	if m.current == "dev" {
-		available = false
-	}
 	return Status{
 		Current:         m.current,
 		Latest:          m.latest.Tag,
 		Notes:           m.latest.Notes,
-		Pinned:          m.settings.Pinned,
 		Channel:         m.settings.Channel,
 		Checking:        m.checking,
-		Available:       available,
+		Available:       newerThan(m.latest.Tag, m.current),
 		Failed:          m.failed,
 		RestartRequired: m.restart,
 		DownloadSize:    AssetFor(m.latest).Size,
@@ -361,8 +396,7 @@ func (m *Manager) Status() Status {
 	}
 }
 
-// Check forces a release check now. Pinned tags still fetch (so the screen
-// can name the release) but never prompt.
+// Check forces a release check now.
 func (m *Manager) Check(ctx context.Context) (Release, error) {
 	m.mu.Lock()
 	m.checking = true
@@ -398,20 +432,27 @@ func (m *Manager) StartLoop(ctx context.Context) {
 	}
 }
 
-func (m *Manager) fetch(ctx context.Context) (Release, error) {
-	url := m.latestURL
-	if url == "" {
-		url = LatestURL
-	}
+// get asks GitHub, with the install's token when it has one. Every
+// release read goes through here, so the private-repo header cannot be
+// forgotten on one path and present on another.
+func (m *Manager) get(ctx context.Context, url string) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return Release{}, err
+		return nil, err
 	}
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	response, err := m.client.Do(request)
+	return m.client.Do(request)
+}
+
+func (m *Manager) fetch(ctx context.Context) (Release, error) {
+	url := m.latestURL
+	if url == "" {
+		url = LatestURL
+	}
+	response, err := m.get(ctx, url)
 	if err != nil {
 		return Release{}, err
 	}
@@ -419,25 +460,177 @@ func (m *Manager) fetch(ctx context.Context) (Release, error) {
 	if response.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("releases: github answered %s", response.Status)
 	}
-	return parseRelease(response.Body)
+	release, err := parseRelease(response.Body)
+	if err != nil {
+		return Release{}, err
+	}
+	// The check's own release gets its notes resolved too: the status carries
+	// them, and the page should not need a second read to say what changed.
+	m.resolveNotes(ctx, &release)
+	return release, nil
 }
 
-func parseRelease(body io.Reader) (Release, error) {
-	var payload struct {
-		TagName     string `json:"tag_name"`
-		Name        string `json:"name"`
-		Body        string `json:"body"`
-		PublishedAt string `json:"published_at"`
-		Assets      []struct {
-			ID   int64  `json:"id"`
-			Name string `json:"name"`
-			URL  string `json:"browser_download_url"`
-			Size int64  `json:"size"`
-		} `json:"assets"`
+// Release answers one release by tag, notes resolved: the update page's
+// read for a version outside the list and for the running row. A tag the
+// source does not have answers ErrReleaseNotFound.
+func (m *Manager) Release(ctx context.Context, tag string) (Release, error) {
+	release, err := m.releaseFor(ctx, tag)
+	if err != nil {
+		return Release{}, err
 	}
-	if err := json.NewDecoder(body).Decode(&payload); err != nil {
-		return Release{}, fmt.Errorf("releases: cannot read answer: %w", err)
+	m.resolveNotes(ctx, &release)
+	return release, nil
+}
+
+// NotesConcurrency is how many releases the notes read resolves at once: a picker
+// open must not burst the API flat, and three calls per tag is the cost here.
+const NotesConcurrency = 8
+
+// Notes resolves the notes of several releases at once, by tag. The page's
+// "what changed in between" needs a handful of them, and one read per release
+// over three API calls each was the five seconds the owner waited through.
+// Each tag is resolved at most once per process — notes never change — and a
+// tag that cannot be read is simply absent from the answer, while a tag with
+// no notes at all answers with an empty string.
+func (m *Manager) Notes(ctx context.Context, tags []string) map[string]string {
+	notes := make(map[string]string, len(tags))
+	var missing []string
+	m.notesMu.Lock()
+	if m.notesCache == nil {
+		m.notesCache = make(map[string]string, len(tags))
 	}
+	for _, tag := range tags {
+		if cached, ok := m.notesCache[tag]; ok {
+			notes[tag] = cached
+			continue
+		}
+		missing = append(missing, tag)
+	}
+	m.notesMu.Unlock()
+
+	resolved := make([]string, len(missing))
+	read := make([]bool, len(missing))
+	var wait sync.WaitGroup
+	lanes := make(chan struct{}, NotesConcurrency)
+	for index, tag := range missing {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			lanes <- struct{}{}
+			defer func() { <-lanes }()
+			release, err := m.Release(ctx, tag)
+			if err != nil {
+				return
+			}
+			resolved[index] = release.Notes
+			read[index] = true
+		}()
+	}
+	wait.Wait()
+
+	m.notesMu.Lock()
+	if len(m.notesCache) > 200 {
+		// A tag's notes never change, so the cache only grows; a cap keeps a
+		// long-lived process honest rather than clever.
+		m.notesCache = make(map[string]string, len(tags))
+	}
+	for index, tag := range missing {
+		// A read that happened is cached even when it found no notes: the
+		// answer says "no notes", not "could not read", and it says it once.
+		// A read that failed is not cached, so the next visit tries again.
+		if !read[index] {
+			continue
+		}
+		m.notesCache[tag] = resolved[index]
+		notes[tag] = resolved[index]
+	}
+	m.notesMu.Unlock()
+	return notes
+}
+
+// resolveNotes fills an empty body from the tag annotation. GitHub release
+// bodies are null for every release cut before the workflow started filling
+// them, and the notes live in the tag message (`git tag -a`) — which is why
+// the page's "what changed" had no source until this read. Best effort: a
+// release whose notes cannot be read still installs, it just says there are
+// none.
+func (m *Manager) resolveNotes(ctx context.Context, release *Release) {
+	if release.Notes != "" {
+		return
+	}
+	response, err := m.get(ctx, m.apiBase()+"/git/ref/tags/"+release.Tag)
+	if err != nil {
+		return
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return
+	}
+	var ref struct {
+		Object struct {
+			SHA  string `json:"sha"`
+			Type string `json:"type"`
+		} `json:"object"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&ref); err != nil {
+		return
+	}
+	// A lightweight tag has no annotation to read: the object is the commit.
+	if ref.Object.Type != "tag" || ref.Object.SHA == "" {
+		return
+	}
+	tagged, err := m.get(ctx, m.apiBase()+"/git/tags/"+ref.Object.SHA)
+	if err != nil {
+		return
+	}
+	defer func() { _ = tagged.Body.Close() }()
+	if tagged.StatusCode != http.StatusOK {
+		return
+	}
+	var object struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(tagged.Body).Decode(&object); err != nil {
+		return
+	}
+	release.Notes = strings.TrimSpace(object.Message)
+	m.cacheNotes(release.Tag, release.Notes)
+}
+
+// cacheNotes remembers a tag's notes: they never change, so one read per tag is
+// enough, and the page's batch read can answer from here.
+func (m *Manager) cacheNotes(tag, notes string) {
+	if tag == "" {
+		return
+	}
+	m.notesMu.Lock()
+	defer m.notesMu.Unlock()
+	if m.notesCache == nil {
+		m.notesCache = make(map[string]string)
+	}
+	m.notesCache[tag] = notes
+}
+
+// githubRelease is one release as GitHub answers it, the shape the single
+// release, the tag, and the list endpoints all share.
+type githubRelease struct {
+	TagName     string `json:"tag_name"`
+	Name        string `json:"name"`
+	Body        string `json:"body"`
+	PublishedAt string `json:"published_at"`
+	Draft       bool   `json:"draft"`
+	Prerelease  bool   `json:"prerelease"`
+	Assets      []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+		URL  string `json:"browser_download_url"`
+		Size int64  `json:"size"`
+	} `json:"assets"`
+}
+
+// release keeps the fields the screen reads, and refuses an answer with
+// no tag: an untagged release cannot be installed or named.
+func (payload githubRelease) release() (Release, error) {
 	if payload.TagName == "" {
 		return Release{}, fmt.Errorf("releases: answer has no tag_name")
 	}
@@ -446,11 +639,201 @@ func parseRelease(body io.Reader) (Release, error) {
 		Name:        payload.Name,
 		Notes:       payload.Body,
 		PublishedAt: payload.PublishedAt,
+		Prerelease:  payload.Prerelease,
 	}
 	for _, asset := range payload.Assets {
 		release.Assets = append(release.Assets, Asset{ID: asset.ID, Name: asset.Name, URL: asset.URL, Size: asset.Size})
 	}
 	return release, nil
+}
+
+func parseRelease(body io.Reader) (Release, error) {
+	var payload githubRelease
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return Release{}, fmt.Errorf("releases: cannot read answer: %w", err)
+	}
+	return payload.release()
+}
+
+// parseReleaseList reads the list endpoint. A draft stays out — a draft is
+// not a release yet — and an entry with no tag is skipped rather than
+// failing the whole list: one bad row must not blank the picker.
+func parseReleaseList(body io.Reader) ([]Release, error) {
+	var payload []githubRelease
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("releases: cannot read answer: %w", err)
+	}
+	releases := make([]Release, 0, len(payload))
+	for _, item := range payload {
+		if item.Draft || item.TagName == "" {
+			continue
+		}
+		release, err := item.release()
+		if err != nil {
+			return nil, err
+		}
+		releases = append(releases, release)
+	}
+	return releases, nil
+}
+
+// DefaultListLimit is what the update screen asks for: the last twenty
+// releases, as the owner chose.
+const DefaultListLimit = 20
+
+// MaxListLimit is GitHub's page cap.
+const MaxListLimit = 100
+
+// List answers the update screen's picker: the newest releases, newest
+// first by tag. Pre-releases are hidden unless includePrerelease, because
+// GA is the default channel. The fetch is on demand — the picker is a
+// place someone visits, not a poll — and there is no cache: a picker that
+// shows a stale list is worse than one that waits a moment.
+func (m *Manager) List(ctx context.Context, limit int, includePrerelease bool) ([]Release, error) {
+	if limit <= 0 {
+		limit = DefaultListLimit
+	}
+	if limit > MaxListLimit {
+		limit = MaxListLimit
+	}
+	response, err := m.get(ctx, fmt.Sprintf("%s/releases?per_page=%d", m.apiBase(), limit))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("releases: github answered %s", response.Status)
+	}
+	releases, err := parseReleaseList(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]Release, 0, len(releases))
+	for _, release := range releases {
+		if release.Prerelease && !includePrerelease {
+			continue
+		}
+		visible = append(visible, release)
+	}
+	sort.SliceStable(visible, func(i, j int) bool { return compareTags(visible[i].Tag, visible[j].Tag) > 0 })
+	return visible, nil
+}
+
+// compareTags orders release tags as versions, not as text: v0.9.33 is
+// newer than v0.9.9, and an -rc suffix sits below its own base release.
+// A tag that does not parse falls back to text, so a stray tag still
+// sorts somewhere instead of breaking the list.
+func compareTags(a, b string) int {
+	aNumbers, aPre, aOK := tagParts(a)
+	bNumbers, bPre, bOK := tagParts(b)
+	if !aOK || !bOK {
+		return strings.Compare(a, b)
+	}
+	return compareParsed(aNumbers, aPre, bNumbers, bPre)
+}
+
+// newerThan reports whether a is a release newer than b. Two tags that do
+// not parse are never "newer": a mark that cannot say what it compares is a
+// lie, and the update page still lists every release by name.
+func newerThan(a, b string) bool {
+	aNumbers, aPre, aOK := tagParts(a)
+	bNumbers, bPre, bOK := tagParts(b)
+	if !aOK || !bOK {
+		return false
+	}
+	return compareParsed(aNumbers, aPre, bNumbers, bPre) > 0
+}
+
+// Relation says what a release is next to the running build, in the words the
+// page shows: "running", "newer", "older", or "unknown" when one of the two
+// tags does not parse (a dev build, a stray tag). It is answered here so the
+// interface never derives a second version truth of its own.
+func Relation(current, tag string) string {
+	switch {
+	case tag == current:
+		return "running"
+	case newerThan(tag, current):
+		return "newer"
+	case newerThan(current, tag):
+		return "older"
+	default:
+		return "unknown"
+	}
+}
+
+// compareParsed compares two parsed tags: the numbers first, then the
+// suffix, where a plain tag is the production build.
+func compareParsed(aNumbers []int, aPre string, bNumbers []int, bPre string) int {
+	for i := range aNumbers {
+		if aNumbers[i] != bNumbers[i] {
+			return sign(aNumbers[i] - bNumbers[i])
+		}
+	}
+	if aPre == "" && bPre != "" {
+		return 1
+	}
+	if aPre != "" && bPre == "" {
+		return -1
+	}
+	return comparePrerelease(aPre, bPre)
+}
+
+// tagParts splits v<major>.<minor>.<patch>[-suffix] into its numbers and
+// its suffix. A tag missing the shape says so, and compareTags falls back.
+func tagParts(tag string) ([]int, string, bool) {
+	tag = strings.TrimPrefix(tag, "v")
+	pre := ""
+	if at := strings.Index(tag, "-"); at >= 0 {
+		pre = tag[at+1:]
+		tag = tag[:at]
+	}
+	segments := strings.Split(tag, ".")
+	if len(segments) != 3 {
+		return nil, "", false
+	}
+	numbers := make([]int, 0, len(segments))
+	for _, segment := range segments {
+		number, err := strconv.Atoi(segment)
+		if err != nil {
+			return nil, "", false
+		}
+		numbers = append(numbers, number)
+	}
+	return numbers, pre, true
+}
+
+// comparePrerelease orders two suffixes of the same base: rc.1 below rc.2,
+// and rc.1 below rc.1.1, as semver does. Empty beats nothing: the plain
+// tag was already handled by the caller.
+func comparePrerelease(a, b string) int {
+	aParts := strings.FieldsFunc(a, func(r rune) bool { return r == '.' || r == '-' })
+	bParts := strings.FieldsFunc(b, func(r rune) bool { return r == '.' || r == '-' })
+	for i := 0; i < len(aParts) && i < len(bParts); i++ {
+		aNumber, aErr := strconv.Atoi(aParts[i])
+		bNumber, bErr := strconv.Atoi(bParts[i])
+		if aErr == nil && bErr == nil {
+			if aNumber != bNumber {
+				return sign(aNumber - bNumber)
+			}
+			continue
+		}
+		if compared := strings.Compare(aParts[i], bParts[i]); compared != 0 {
+			return compared
+		}
+	}
+	return sign(len(aParts) - len(bParts))
+}
+
+// sign keeps a comparison to -1, 0, or 1.
+func sign(delta int) int {
+	switch {
+	case delta < 0:
+		return -1
+	case delta > 0:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // AssetFor picks the release file for this platform, or "" when the
@@ -664,7 +1047,17 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	m.mu.Lock()
 	release := m.latest
 	m.mu.Unlock()
-	if release.Tag == "" {
+	switch {
+	case options.Tag != "":
+		// The picker's path: install the tag that was chosen, which need
+		// not be latest. releaseFor reuses the cached latest when it
+		// already answers.
+		picked, err := m.releaseFor(ctx, options.Tag)
+		if err != nil {
+			return err
+		}
+		release = picked
+	case release.Tag == "":
 		fetched, err := m.Check(ctx)
 		if err != nil {
 			return err
@@ -676,15 +1069,6 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 		return fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
 	}
 	worker := WorkerTarballAsset(release)
-	// Drain stop means it: runs end before anything else moves.
-	if active {
-		if m.StopRuns == nil {
-			return fmt.Errorf("update: runs are active and nothing can stop them")
-		}
-		if err := m.StopRuns(ctx); err != nil {
-			return fmt.Errorf("update: cannot stop runs: %w", err)
-		}
-	}
 	if _, err := m.Backup(); err != nil {
 		return fmt.Errorf("backup failed, update stopped: %w", err)
 	}
@@ -720,6 +1104,21 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 		}
 		if err := writeData(m.workerPending(), tarball); err != nil {
 			return err
+		}
+	}
+	// Runs end here: after everything verified, and before anything moves.
+	// A failed download must not cost runs, and a run that started while the
+	// download was in flight must not be swapped under — so the gate is read
+	// again, at the moment it matters, not only when Apply was asked.
+	if m.RunsActive != nil && m.RunsActive() {
+		if options.Drain != "stop" {
+			return ErrRunsActive{}
+		}
+		if m.StopRuns == nil {
+			return fmt.Errorf("update: runs are active and nothing can stop them")
+		}
+		if err := m.StopRuns(ctx); err != nil {
+			return fmt.Errorf("update: cannot stop runs: %w", err)
 		}
 	}
 	// Start-clean wipes last, after everything verified: a failed download

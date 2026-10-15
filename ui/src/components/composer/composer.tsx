@@ -11,8 +11,8 @@ import { Measure } from "@/components/layout/measure";
 import { Text } from "@/components/typography/text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { formatFileSize } from "@/lib/attachments";
-import { formatContext } from "@/lib/format";
+
+import { formatBytes, formatContext } from "@/lib/format";
 import { COARSE_POINTER, matchesQuery, usePhone } from "@/lib/media";
 import { cn } from "cn";
 import { stepSlashIndex } from "./slash-menu";
@@ -415,7 +415,7 @@ export function Composer({
 													: entry.name}
 											</Text>
 											<Text size="2xs" tone="muted" className="shrink-0">
-												{formatFileSize(entry.size)}
+												{formatBytes(entry.size)}
 											</Text>
 											<button
 												type="button"

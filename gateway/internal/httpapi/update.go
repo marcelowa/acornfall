@@ -4,6 +4,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/update"
@@ -26,11 +28,11 @@ func (s *Server) updateStatus(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	status := s.update.Status()
+	runs := s.update.Runs()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"current":         status.Current,
 		"latest":          status.Latest,
 		"notes":           status.Notes,
-		"pinned":          status.Pinned,
 		"channel":         status.Channel,
 		"autoCheck":       s.update.Settings().AutoCheck,
 		"checking":        status.Checking,
@@ -40,6 +42,8 @@ func (s *Server) updateStatus(w http.ResponseWriter, _ *http.Request) {
 		"failed":          status.Failed,
 		"restartRequired": status.RestartRequired,
 		"backups":         s.update.Backups(),
+		"runsActive":      len(runs) > 0,
+		"runs":            runs,
 	})
 }
 
@@ -53,6 +57,106 @@ func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.updateStatus(w, r)
+}
+
+// updateReleases is the update screen's picker: the newest releases,
+// newest first. GA only, unless `prerelease` is present: the screen's
+// switch is per visit, so it rides the request rather than a setting.
+// This is a read, so it carries no role check.
+func (s *Server) updateReleases(w http.ResponseWriter, r *http.Request) {
+	if s.update == nil {
+		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	limit := update.DefaultListLimit
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			http.Error(w, "limit is a positive number", http.StatusBadRequest)
+			return
+		}
+		limit = parsed
+	}
+	releases, err := s.update.List(r.Context(), limit, r.URL.Query().Has("prerelease"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	list := make([]wireRelease, 0, len(releases))
+	for _, release := range releases {
+		list = append(list, wireReleaseOf(release, s.update.Status().Current))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"releases": list})
+}
+
+// wireRelease is one release as the update page reads it: the facts of the
+// list row, the sizes for this machine, and what it is next to the running
+// build.
+type wireRelease struct {
+	Tag          string `json:"tag"`
+	Name         string `json:"name"`
+	Notes        string `json:"notes"`
+	PublishedAt  string `json:"publishedAt"`
+	Prerelease   bool   `json:"prerelease"`
+	DownloadSize int64  `json:"downloadSize"`
+	WorkerSize   int64  `json:"workerSize"`
+	Relation     string `json:"relation"`
+}
+
+func wireReleaseOf(release update.Release, current string) wireRelease {
+	return wireRelease{
+		Tag:          release.Tag,
+		Name:         release.Name,
+		Notes:        release.Notes,
+		PublishedAt:  release.PublishedAt,
+		Prerelease:   release.Prerelease,
+		DownloadSize: update.AssetFor(release).Size,
+		WorkerSize:   update.WorkerTarballAsset(release).Size,
+		Relation:     update.Relation(current, release.Tag),
+	}
+}
+
+// updateRelease answers one release by name. The version page and the
+// running row need it: a tag older than the twenty, or the one that is
+// running, still has a date, a size and notes.
+func (s *Server) updateRelease(w http.ResponseWriter, r *http.Request) {
+	if s.update == nil {
+		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	release, err := s.update.Release(r.Context(), r.PathValue("tag"))
+	if err != nil {
+		if errors.Is(err, update.ErrReleaseNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, wireReleaseOf(release, s.update.Status().Current))
+}
+
+// updateRestart finishes a pending update: the files are swapped and the old
+// process still answers, so the process replaces itself with the binary on
+// disk. One click, same args, same environment.
+func (s *Server) updateRestart(w http.ResponseWriter, r *http.Request) {
+	if s.update == nil {
+		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if !s.update.IsAdmin(r) {
+		http.Error(w, "contact admin: only an admin can restart an update", http.StatusForbidden)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"restarting": true})
+	// The answer is on its way before the process becomes the new binary.
+	// The stream drops and the client reconnects on its own.
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		if err := s.update.Restart(); err != nil {
+			log.Printf("update: restart failed: %v", err)
+		}
+	}()
 }
 
 func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +173,7 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		CleanVMs bool   `json:"cleanVMs"`
 		Drain    string `json:"drain"`
+		Tag      string `json:"tag"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -79,9 +184,13 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `drain is "wait" or "stop"`, http.StatusBadRequest)
 		return
 	}
-	if err := s.update.Apply(r.Context(), update.ApplyOptions{CleanVMs: body.CleanVMs, Drain: body.Drain}); err != nil {
+	if err := s.update.Apply(r.Context(), update.ApplyOptions{CleanVMs: body.CleanVMs, Drain: body.Drain, Tag: strings.TrimSpace(body.Tag)}); err != nil {
 		if errors.As(err, &update.ErrRunsActive{}) || errors.As(err, &update.ErrRestartPending{}) {
 			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if errors.Is(err, update.ErrReleaseNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -124,7 +233,6 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Channel   *string `json:"channel"`
 		AutoCheck *bool   `json:"autoCheck"`
-		Pinned    *string `json:"pinned"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -142,12 +250,36 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	if body.AutoCheck != nil {
 		settings.AutoCheck = *body.AutoCheck
 	}
-	if body.Pinned != nil {
-		settings.Pinned = *body.Pinned
-	}
 	if err := s.update.SaveSettings(settings); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.updateStatus(w, r)
+}
+
+// updateNotes resolves several releases' notes in one read: the page's "what
+// changed in between" needs a handful, and a read per release was five seconds
+// of waiting. `tags` is a comma-separated list, capped at the list limit.
+func (s *Server) updateNotes(w http.ResponseWriter, r *http.Request) {
+	if s.update == nil {
+		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("tags"))
+	if raw == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"notes": map[string]string{}})
+		return
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > update.MaxListLimit {
+		http.Error(w, "too many tags", http.StatusBadRequest)
+		return
+	}
+	tags := make([]string, 0, len(parts))
+	for _, tag := range parts {
+		if trimmed := strings.TrimSpace(tag); trimmed != "" {
+			tags = append(tags, trimmed)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"notes": s.update.Notes(r.Context(), tags)})
 }

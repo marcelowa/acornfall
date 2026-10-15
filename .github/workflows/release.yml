@@ -80,6 +80,11 @@ jobs:
       # The checksum file is what the gateway verifies downloads against
       # before swapping or staging. No checksum file, no verify — see ADR 0019.
       - run: cd dist && sha256sum acornfall-* worker.tar.gz > sha256sums.txt && ls -la
+      # The release body is the tag message, which is what the update page
+      # reads as "what changed". Every release before this step shipped a null
+      # body, so the gateway falls back to the tag annotation for those.
+      - run: git fetch --force --tags origin && git tag -l --format='%(contents)' "${{ github.ref_name }}" > release-notes.md
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body_path: release-notes.md

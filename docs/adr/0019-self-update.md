@@ -54,6 +54,17 @@ Workers stop first — an orphan would serve old code past the exec and
 resurrect wiped sandboxes — and warm sandboxes stay for reattach.
 Exec failure keeps the old process and the manual path.
 
+**The update screen is a page, and the picker installs a version.** The
+screen keeps its own URL, for the same reason every other screen does:
+a reload and a shared link land where someone was. The picker lists the
+last twenty releases, newest first, and a pick installs that tag once —
+it does not pin. Pinning stays its own field, because it means "stop
+asking" and a pick that set it would stop every later prompt. A picked
+release older than the running build is marked as such, and stays
+installable for now; whether the migration record should refuse one is
+deferred until the record exists. The header says the newest GA's tag
+beside the dot when there is room, and a bare dot on a phone.
+
 **Roles now, enforced later.** Today one user, same rights. The API
 carries the role check now: `POST /api/update/apply` answers 403 for
 non-admin. Default allow.
@@ -62,10 +73,29 @@ non-admin. Default allow.
 
 - `GET /healthz` -> `{ ok: true, version }`
 - `GET /api/update/status` -> `{ current, latest, notes, pinned, checking }`
+- `GET /api/update/releases?limit=20&prerelease` ->
+  `{ releases: [{ tag, name, notes, publishedAt, prerelease, downloadSize,
+  workerSize }] }`, newest first by tag. GA only; the `prerelease`
+  parameter widens the list for one visit, because that switch is not a
+  setting. Drafts never appear. Added for the update screen's picker:
+  the last twenty releases are selectable, not only latest.
+- `GET /api/update/releases/{tag}` -> one release, by name, notes
+  resolved: the version page outside the twenty, and the running row.
+  `404` when the source has no such release.
 - `POST /api/update/check` -> force a check now
-- `POST /api/update/apply` -> `{ cleanVMs, drain: "wait"|"stop" }`.
-  Drain stop aborts runs first; clean wipes the sandbox root after
-  verify, before swap. A second apply before restart refuses (409).
+- `POST /api/update/apply` -> `{ cleanVMs, drain: "wait"|"stop", tag }`.
+  An empty `tag` installs the release the check found — the indicator's
+  one-click path. A tag installs that release by name (404 when the
+  source has none). Drain stop aborts runs; the stop lands after the
+  download verifies and before anything moves, so a failed download
+  costs no runs, and the gate is read again there. A second apply before
+  restart refuses (409).
+- `POST /api/update/restart` -> finish a pending update: the files are
+  swapped and the old process still answers, so the process replaces
+  itself with the binary on disk. 403 for non-admins.
+- `GET /api/update/status` also carries `runsActive` and `runs
+  [{ workspace, runs }]`: what stopping runs would stop, from the
+  gateway, not from the workspace in view.
 - `POST /api/update/rollback` -> restore the last good build
 - The state stream carries `{ current, latest, available, failed,
   restartRequired }`: the header dot without fetching. Per-event
@@ -91,13 +121,25 @@ covers the common case; clean covers format changes.
 - Gateway: `internal/update` owns version file, check job, backup set,
   migrate runner, health-gated switch, rollback. Boot runs pending
   migrations before serving.
-- UI: header dot (count 1), update screen (current tag, new tag, notes,
-  size/risk, backup note), blocking-runs dialog (wait default, stop,
-  cancel), Settings > Updates tab (channel, auto-check, pinned tag).
-- Docs: README runbook + pin policy.
-- Tests: check parsing, backup rotation, migrate fail stops boot,
-  rollback restores, health gate, role 403, UI renders with and
-  without an update.
+- UI: the bar's update mark (the newest GA's tag beside it on a desktop, the
+  mark alone on a phone, restart pending in the same spot), the release page
+  at `/update` and `/update/<tag>` (running build, target, notes, the changes
+  in between, size/risk, backup note, the keep/clean choice, Install), the
+  picker of the last twenty with a per-visit pre-release switch, the runs
+  dialog (Not now, stop runs and install, cancel — with what stopping would
+  stop named), and settings' install-wide page (running build, auto-check,
+  and the Releases door). The Updates tab and the pin are gone: the indicator
+  follows the newest GA with nothing able to silence it, and a pick installs
+  once.
+- Notes: the release body is the tag message (the workflow writes it); a null
+  body — every release cut before 2026-10-15 — falls back to the tag
+  annotation (`/git/ref/tags/<tag>` then `/git/tags/<sha>`), so "what changed"
+  has a source for every release.
+- Docs: README runbook.
+- Tests: check parsing, backup rotation, migrate fail stops boot, rollback
+  restores, health gate, role 403, release list and by-name reads, notes from
+  the tag annotation, runs stop after the download verifies, UI renders with
+  and without an update.
 
 ## Open (asked, not decided)
 

@@ -86,8 +86,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 
 	mux.HandleFunc("GET /api/update/status", s.updateStatus)
+	mux.HandleFunc("GET /api/update/releases", s.updateReleases)
+	mux.HandleFunc("GET /api/update/releases/{tag}", s.updateRelease)
+	mux.HandleFunc("GET /api/update/notes", s.updateNotes)
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
+	mux.HandleFunc("POST /api/update/restart", s.updateRestart)
 	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
 	mux.HandleFunc("POST /api/update/settings", s.updateSettings)
 
@@ -102,6 +106,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /c/{ws}/{id}", s.page)
 	mux.HandleFunc("GET /c/{id}", s.page)
 	mux.HandleFunc("GET /w/{ws}", s.page)
+	mux.HandleFunc("GET /update", s.page)
+	mux.HandleFunc("GET /update/{tag}", s.page)
 	mux.HandleFunc("GET /settings", s.page)
 	mux.HandleFunc("GET /settings/", s.page)
 	mux.HandleFunc("GET /workspaces", s.page)
