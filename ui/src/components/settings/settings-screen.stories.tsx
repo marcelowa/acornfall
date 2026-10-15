@@ -5,7 +5,7 @@ import { Picker } from "@/components/composer/picker";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProvidersSection } from "./providers-section";
 import { SettingsScreen } from "./settings-screen";
-import { UpdateSection } from "./update-section";
+import { InstallSection } from "@/components/release/install-section";
 
 const meta = {
 	title: "Screens/Settings",
@@ -107,29 +107,24 @@ const providers: ProviderSummary[] = [
 	},
 ];
 
-const updates = (
-	<UpdateSection
+const install = (
+	<InstallSection
 		status={{
-			current: "v0.8.0",
-			latest: "v0.9.0",
-			notes: "Faster sandbox boot.",
-			pinned: "",
+			current: "v0.9.33",
+			latest: "v0.9.33",
+			notes: "",
 			channel: "releases",
 			autoCheck: true,
 			checking: false,
-			available: true,
+			available: false,
 			backups: [],
-			downloadSize: 13000000,
-			workerSize: 70000,
+			downloadSize: 13_600_000,
+			workerSize: 81_000,
+			runsActive: false,
+			runs: [],
 		}}
-		runsActive={false}
-		applying={false}
-		onCheck={noop}
-		onRefresh={noop}
-		onApply={noop}
-		onRollback={noop}
 		onSavePrefs={noop}
-		onLater={noop}
+		onOpenReleases={noop}
 	/>
 );
 
@@ -141,7 +136,7 @@ export const Default: Story = {
 		onThemeChange: noop,
 		defaults,
 		providers: <ProvidersSection providers={providers} />,
-		updates,
+		install,
 		version: "v0.9.2",
 		onClose: noop,
 	},
@@ -163,38 +158,7 @@ export const Phone: Story = {
 	globals: { viewport: { value: "phone" } },
 };
 
-/** The updates page: one release, one click. */
-export const Updates: Story = {
-	args: { ...Default.args, tab: "updates" },
-};
-
-const updatesApplying = (
-	<UpdateSection
-		status={{
-			current: "v0.8.0",
-			latest: "v0.9.0",
-			notes: "Faster sandbox boot.",
-			pinned: "",
-			channel: "releases",
-			autoCheck: true,
-			checking: false,
-			available: true,
-			backups: [],
-			downloadSize: 13000000,
-			workerSize: 70000,
-		}}
-		runsActive={false}
-		applying
-		onCheck={noop}
-		onRefresh={noop}
-		onApply={noop}
-		onRollback={noop}
-		onSavePrefs={noop}
-		onLater={noop}
-	/>
-);
-
-/** Mid-apply: the button says so and stays pressed-disabled until the call settles. */
-export const UpdatesApplying: Story = {
-	args: { ...Default.args, tab: "updates", updates: updatesApplying },
+/** The install page: the running build, auto-check, and the door to the releases. */
+export const Install: Story = {
+	args: { ...Default.args, tab: "install" },
 };

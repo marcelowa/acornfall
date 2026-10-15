@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, PanelRight, Plus, Settings, X } from "lucide-react";
+import { PanelRight, Plus, Settings, X } from "lucide-react";
 import type { DefaultScope, ProviderAuthType, UploadedAttachment } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { MAX_ATTACHMENT_BYTES, refuseAttachments } from "@/lib/attachments";
@@ -20,13 +20,14 @@ import { ErrorStrip } from "@/components/ui/error-strip";
 import { ChoiceControl } from "@/components/composer/choice-control";
 import { Picker } from "@/components/composer/picker";
 import { SettingsScreen } from "@/components/settings/settings-screen";
-import { UpdateSection } from "@/components/settings/update-section";
+import { InstallSection } from "@/components/release/install-section";
+import { ReleaseMark } from "@/components/release/release-mark";
+import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesPanel } from "@/components/workspace/workspaces-panel";
 import { WorkspaceButton } from "@/components/workspace/workspace-button";
 import { Transcript } from "@/components/transcript/transcript";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { CompactDialog } from "@/components/ui/compact-dialog";
@@ -500,19 +501,28 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 		</Stack>
 	);
 
-	// The update screen: one dot, one screen, one click. Runs block it, and the
-	// dialog asks: wait for drain, stop and update, or cancel.
-	const updates = (
-		<UpdateSection
+	// The release page: running → offered → changed → cost → the press. It owns the
+	// reads the status does not carry (the list, the notes, the running row).
+	const releases = (
+		<ReleaseScreen
 			status={platform.update}
-			runsActive={platform.conversations.some((conversation) => conversation.running)}
+			tag={platform.updateTag}
 			applying={platform.applyingUpdate}
+			onOpenTag={platform.showUpdate}
+			onClose={() => platform.showScreen("conversation")}
 			onCheck={platform.checkUpdateNow}
 			onRefresh={platform.refreshUpdate}
 			onApply={platform.applyUpdateNow}
+			onRestart={platform.restartUpdateNow}
 			onRollback={platform.rollbackUpdateNow}
+		/>
+	);
+
+	const install = (
+		<InstallSection
+			status={platform.update}
 			onSavePrefs={platform.setUpdatePrefs}
-			onLater={() => platform.showScreen("conversation")}
+			onOpenReleases={() => platform.showUpdate()}
 		/>
 	);
 
@@ -561,38 +571,28 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 				onThemeChange={platform.setThemeChoice}
 				defaults={defaults}
 				providers={providers}
-				updates={updates}
+				install={install}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}
 			/>
+		) : platform.screen === "update" ? (
+			releases
 		) : undefined;
 
 	// The full-width bar: the brand, then the active name, then the pane control.
 	// No rail buttons here from `lg`: the rail head closes it and the collapsed strip
 	// opens it. Below `lg` Split puts the drawer toggle beside the brand.
-	// The update dot: one button, count 1, straight to the Updates tab. It sits
-	// in the top bar so it shows on every screen, conversation or settings.
-	const updateDot =
-		platform.update?.available === true ? (
-			<Button
-				type="button"
-				variant="ghost"
-				size="icon-sm"
-				aria-label="Update ready"
-				onClick={() => platform.showSettingsTab("updates")}
-			>
-				<ArrowUp />
-				<Badge variant="soft" tone="info" size="sm">
-					1
-				</Badge>
-			</Button>
-		) : null;
+	// The update mark: one control, two widths. It sits in the top bar so it shows on
+	// every screen, conversation or settings; restart pending rides the same spot.
+	const updateMark = (
+		<ReleaseMark status={platform.update} onOpen={() => platform.showUpdate()} />
+	);
 
 	const topbar = (
 		<>
 			{brand}
 			<div className="flex min-w-0 flex-1 items-center">{barTitle}</div>
-			{updateDot}
+			{updateMark}
 			{screen === undefined ? inspectorToggle : null}
 		</>
 	);

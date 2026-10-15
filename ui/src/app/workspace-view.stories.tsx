@@ -255,6 +255,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		toggleRail: noop,
 		settingsTab: "defaults",
 		showSettingsTab: noop,
+		updateTag: "",
+		showUpdate: noop,
 		providers: [
 			{
 				id: "opencode-go",
@@ -273,6 +275,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		logoutProvider: noop,
 		refreshProviders: noop,
 		update: undefined,
+		restartUpdateNow: noop,
 		refreshUpdate: noop,
 		applyingUpdate: false,
 		checkUpdateNow: noop,

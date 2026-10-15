@@ -1,0 +1,52 @@
+import { ArrowUp, RotateCw } from "lucide-react";
+import type { UpdateStatus } from "@/app/client";
+import { Text } from "@/components/typography/text";
+import { Button } from "@/components/ui/button";
+
+export interface ReleaseMarkProps {
+	status: UpdateStatus | undefined;
+	onOpen: () => void;
+}
+
+/**
+ * The bar's update mark: one control, two widths (R12, J16, J20).
+ *
+ * A desktop shows the newest production release's tag beside the arrow; a phone shows the arrow
+ * alone, and its accessible name carries the target — a bare mark cannot say a version, but it
+ * can say one to a screen reader. Restart pending takes the same spot in the warning tone: it is
+ * the one state that needs the owner and cannot wait for a page visit.
+ */
+export function ReleaseMark({ status, onOpen }: ReleaseMarkProps) {
+	if (status === undefined) return null;
+	if (status.restartRequired === true) {
+		return (
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon-sm"
+				className="text-warning"
+				aria-label="Restart pending: the new build is on disk"
+				onClick={onOpen}
+			>
+				<RotateCw />
+			</Button>
+		);
+	}
+	if (!status.available) return null;
+	return (
+		<Button
+			type="button"
+			variant="ghost"
+			size="sm"
+			aria-label={
+				status.latest === "" ? "Update available" : `Update available: ${status.latest}`
+			}
+			onClick={onOpen}
+		>
+			<ArrowUp />
+			<Text as="span" size="2xs" tone="muted" className="font-mono max-sm:hidden">
+				{status.latest}
+			</Text>
+		</Button>
+	);
+}

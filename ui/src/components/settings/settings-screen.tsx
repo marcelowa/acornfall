@@ -22,8 +22,8 @@ export interface SettingsScreenProps {
 	defaults: ReactNode;
 	/** The providers section: global keys, so it never sits under workspace tabs. */
 	providers: ReactNode;
-	/** The update screen: release card on top, prefs below. */
-	updates: ReactNode;
+	/** The install-wide section: the running build, auto-check, and the door to the releases. */
+	install: ReactNode;
 	/** The running build, when the gateway answered: shown under the title. */
 	version?: string | undefined;
 	/** Back to the conversation that was in view. */
@@ -48,7 +48,7 @@ export function SettingsScreen({
 	onThemeChange,
 	defaults,
 	providers,
-	updates,
+	install,
 	version,
 	onClose,
 }: SettingsScreenProps) {
@@ -80,14 +80,14 @@ export function SettingsScreen({
 					<Tabs
 						value={tab}
 						onValueChange={(next) => {
-							if (next === "defaults" || next === "providers" || next === "updates")
+							if (next === "defaults" || next === "providers" || next === "install")
 								onTabChange(next);
 						}}
 					>
 						<TabsList aria-label="Settings pages">
 							<TabsTrigger value="defaults">Defaults</TabsTrigger>
 							<TabsTrigger value="providers">Providers</TabsTrigger>
-							<TabsTrigger value="updates">Updates</TabsTrigger>
+							<TabsTrigger value="install">Install</TabsTrigger>
 						</TabsList>
 					</Tabs>
 
@@ -138,7 +138,7 @@ export function SettingsScreen({
 
 					{tab === "providers" ? providers : null}
 
-					{tab === "updates" ? updates : null}
+					{tab === "install" ? install : null}
 				</Stack>
 			</Measure>
 		</div>

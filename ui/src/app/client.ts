@@ -318,12 +318,11 @@ export function cancelAuthFlow(workspace: string, authId: string): Promise<void>
 	return post(workspacePath(workspace, "/auth/cancel"), { authId });
 }
 
-/** The update screen, as the gateway reports it. `available` is one dot, not a list. */
+/** The release page, as the gateway reports it. `available` means the newest GA is newer. */
 export interface UpdateStatus {
 	current: string;
 	latest: string;
 	notes: string;
-	pinned: string;
 	channel: string;
 	autoCheck: boolean;
 	checking: boolean;
@@ -334,6 +333,22 @@ export interface UpdateStatus {
 	failed?: string | undefined;
 	restartRequired?: boolean | undefined;
 	backups: string[];
+	/** The gateway's own runs gate, and what stopping would stop. */
+	runsActive: boolean;
+	runs: { workspace: string; runs: number }[];
+}
+
+/** One release, as the picker and the version page read it. */
+export interface UpdateRelease {
+	tag: string;
+	name: string;
+	notes: string;
+	publishedAt: string;
+	prerelease: boolean;
+	downloadSize: number;
+	workerSize: number;
+	/** What it is next to the running build: running, newer, older, unknown. */
+	relation: "running" | "newer" | "older" | "unknown";
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -352,14 +367,43 @@ export async function fetchUpdateStatus(): Promise<UpdateStatus> {
 	return (await response.json()) as UpdateStatus;
 }
 
+/** The last twenty releases, newest first. `prerelease` widens the list for one visit. */
+export async function fetchReleases(
+	includePrerelease: boolean,
+	limit = 20,
+): Promise<UpdateRelease[]> {
+	const query = new URLSearchParams({ limit: String(limit) });
+	if (includePrerelease) query.set("prerelease", "1");
+	const response = await fetch(`/api/update/releases?${query}`);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	const body = (await response.json()) as { releases: UpdateRelease[] };
+	return body.releases;
+}
+
+/** One release by name: a version outside the twenty, and the running row. */
+export async function fetchRelease(tag: string): Promise<UpdateRelease> {
+	const response = await fetch(`/api/update/releases/${encodeURIComponent(tag)}`);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as UpdateRelease;
+}
+
 /** Force a release check now. */
 export function checkUpdate(): Promise<UpdateStatus> {
 	return postJson<UpdateStatus>("/api/update/check", {});
 }
 
 /** Back up, download, verify, swap. The process stays old until it restarts. */
-export function applyUpdate(cleanVMs: boolean, drain: "wait" | "stop"): Promise<UpdateStatus> {
-	return postJson<UpdateStatus>("/api/update/apply", { cleanVMs, drain });
+export function applyUpdate(
+	cleanVMs: boolean,
+	drain: "wait" | "stop",
+	tag = "",
+): Promise<UpdateStatus> {
+	return postJson<UpdateStatus>("/api/update/apply", { cleanVMs, drain, tag });
+}
+
+/** Finish a pending update: the process replaces itself with the binary on disk. */
+export function restartUpdate(): Promise<UpdateStatus> {
+	return postJson<UpdateStatus>("/api/update/restart", {});
 }
 
 /** Restore the last good build. */
@@ -370,10 +414,9 @@ export function rollbackUpdate(): Promise<UpdateStatus> {
 export interface UpdatePrefs {
 	channel?: string;
 	autoCheck?: boolean;
-	pinned?: string;
 }
 
-/** The Updates tab: channel, auto-check, pinned tag. Pinned means no prompts. */
+/** The install-wide settings page: channel and auto-check. There is no pin. */
 export function setUpdatePrefs(prefs: UpdatePrefs): Promise<UpdateStatus> {
 	return postJson<UpdateStatus>("/api/update/settings", prefs);
 }

@@ -105,6 +105,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /c/{ws}/{id}", s.page)
 	mux.HandleFunc("GET /c/{id}", s.page)
 	mux.HandleFunc("GET /w/{ws}", s.page)
+	mux.HandleFunc("GET /update", s.page)
+	mux.HandleFunc("GET /update/{tag}", s.page)
 	mux.HandleFunc("GET /settings", s.page)
 	mux.HandleFunc("GET /settings/", s.page)
 	mux.HandleFunc("GET /workspaces", s.page)
