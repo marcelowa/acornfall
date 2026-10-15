@@ -5,7 +5,7 @@ the four release files, `design.md` and the direction, the measured numbers, and
 They judged computed sizes, control boxes and composited colours — not rendering by eye, and the
 document says so below. Their words are unedited.
 
-Status: **1 of 3 landed** — TINKERER answered; OWNER-OPERATOR and DELEGATOR are running.
+Status: **2 of 3 landed** — TINKERER and OWNER-OPERATOR answered; DELEGATOR is running.
 
 ## TINKERER
 
@@ -87,3 +87,83 @@ columns are not the page's title and state title — the CDP probe found the fir
 document is Storybook's own "No Preview" (14px), and `state` measured the slot's inherited body
 size. The page's h1 is `xl` = 20px and the state title is 13px/14px, as the focused block says. No
 horizontal overflow anywhere, which the panel reproduced.
+
+## OWNER-OPERATOR
+
+**keep**: The spine of the page — state line, the offered release with its notes, the cost
+paragraph, Install, then the picker — and the rows: mono tags down one column, date/size/channel at
+2xs, whole-row 50px targets on the phone, and no sideways scroll in any of the thirteen stories or
+on the four live URLs at 1280/390.
+
+**cut**: The joined "Keep VMs | Start clean" pair on a phone — 94×32 and 101×32, touching, no gap,
+and the one that wipes VMs sits flush against its opposite; and the "current row" tint that is
+1.02:1 in light, because a mark I cannot see is worse than none.
+
+**confused-by**: Which mark does what in the bar — the update mark is a plain foreground arrow with
+an 11px muted "v0.9.33" (no accent anywhere), and the restart mark is a bare `RotateCw`, which reads
+like "reload"; and "running" is a grey pill on the release page while the rail's running dot is
+bronze — same word, two looks, and a third in `design.md`.
+
+**would I keep using this**: Yes, this is the one page I would open instead of a terminal. But in
+light theme I would wonder why nothing on it looks selected or pressable, and on a phone I would
+fat-finger the VM choice — that costs me a second look every visit.
+
+### Findings, worst first
+
+1. **The update mark is not the accent the direction promised.** `release-mark.tsx` renders
+   `variant="ghost"` with no colour class; the live arrow computes to the text foreground while
+   `--primary` is the bronze. 05-palette: "The mark is the only accent, and it is the same
+   `primary`". Change: `text-primary` on the arrow (tag stays muted).
+2. **Selection is invisible in light, and weaker than hover in dark.** `ReleaseRow` current =
+   `bg-accent/40`; live dark 1.19:1, live light 1.02:1; plain hover (`bg-muted`) is 1.33:1 dark /
+   1.05:1 light; the armed segment of "Keep VMs" (`bg-accent` opaque) is 1.46:1 / 1.05:1, and
+   `/settings/install`'s selected "on" measures barely off the page. `design.md` gives "selection"
+   to `--primary`. Change: current row and armed segment take `primary`.
+3. **The one thumb ladder misses the toggles.** `button.tsx` writes `max-sm:h-11` for every size,
+   `toggle.tsx` has no phone step: live at 390 Keep VMs 94×32, Start clean 101×32, Pre-release
+   builds 139×32, on/off 43×32, and the Settings tabs 32 tall. Change: give both the phone step.
+4. **The phone mark is off the ladder.** Live 390: the available mark is 36×44 with a 16px arrow;
+   the restart mark in the same slot is 44×44 with a 20px arrow. Change: a 44×44 square with the
+   20px arrow.
+5. **The phone bar is 48px, not the 56px the direction says.** `tokens.css` sets `--bar-height:
+   48px` unlayered; `globals.css`'s phone override lives in `@layer base`, so the unlayered value
+   wins. The stories hide it because they draw their own `h-14` bar. Change: get the 56px step to
+   apply for real, and have the stories render the app's bar.
+6. **The notes print at `lg`, not the directed `base`.** `.markdown` sets `--text-lg` (16px at both
+   widths) while 05-palette said `base`. Change: pick one and record it.
+7. **The in-between notes are prose set in the fact tone.** `Between` used `Text size="xs"
+   tone="muted"` for whole sentences — the muted step is for ids, timestamps and cost, never prose —
+   and the block ran 1201px at 390. Change: prose in the foreground, or one line each.
+8. **"running" wears a different colour from running.** The card and row used a neutral badge while
+   the rail's running dot is bronze. Change: one running treatment.
+9. **The running row got added twice on the live page.** At 1.2s after load, 21 picker rows with
+   v0.9.20 at the top and again in place; at 4s, 20 rows. Change: drop the running row when the list
+   holds it, and give it its own mark rather than the current-row tint.
+10. **Two smaller ones.** (a) In light the 11px facts sit at 4.62:1 — AA-pass but the smallest text
+    at the lowest ratio, twenty rows of it. (b) The phone gutter here is 24px while Settings uses
+    16px: `/update` content starts at x=24, `/settings/install` at x=16.
+
+## What changed after round 1
+
+Fixed, with the numbers to prove it (all re-measured in the browser, both themes):
+
+| Finding | What changed |
+|---|---|
+| The picker's duplicate running row, twice-accented | `runningRow` is cleared once the list holds the current build; the pinned row no longer takes the current-row tint; the row in view takes `bg-primary/10` |
+| Two Restart blocks | One: the state line's, with one button |
+| Toggles 32px on the phone | `toggle.tsx` takes `max-sm:h-11` (and the Settings tabs `max-sm:h-11`): measured 44 |
+| The phone mark 36 wide | A 44×44 square with the 20px arrow: measured 44×44, `text-primary` |
+| The phone bar 48px | The 56px step moved into `tokens.css` where the token lives: measured 56 on the phone, 48 on the desktop |
+| The inert up-to-date card | Notes only: no backup note, no VM choice, no Install |
+| The refusal in the normal voice, the lying caption, two check controls | The refusal is the state line, in the gateway's words; the picker is silent; a state that owns a control gets no second one |
+| The in-between notes raw and in the fact tone | Rendered through `Markdown`, in the foreground |
+| The notes size | Kept at the renderer's 16px — TINKERER's word — and the direction and the "no notes" sentence now say so |
+| The running mark | Mono muted word, not a badge: off the 4.39:1 background and back on the page's 4.62:1 |
+| The phone gutter | `Measure padding="lg"`, the same step Settings uses: measured x=16 |
+| The stories drawing their own bar | They render the app's bar (`h-(--bar-height) px-1`) |
+
+Deliberate calls, for the record: the release page's `running` stays a mono word rather than the
+rail's bronze dot — that dot is a *run* alive, this word is a *build* that is what is running, and
+sharing the colour would say they are the same fact. The in-between list stays full prose rather
+than one line each: it is what you read before taking a jump of several versions; if it is too long
+in practice, the owner's pass is the place to cut it.

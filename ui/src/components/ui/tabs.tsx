@@ -29,7 +29,7 @@ const tabsListVariants = cva(
 	// pushing the page wide, with no scrollbar — the half tab at the edge is what says there is
 	// more of it. `w-fit` keeps it as wide as its content where there is room, and `max-w-full`
 	// is what stops the overflow from becoming the page's.
-	"group/tabs-list scrollbar-none inline-flex w-fit max-w-full items-center justify-start gap-1 overflow-x-auto rounded-lg p-0.5 text-muted-foreground group-data-[orientation=horizontal]/tabs:h-9 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col data-[variant=line]:rounded-none",
+	"group/tabs-list scrollbar-none inline-flex w-fit max-w-full items-center justify-start gap-1 overflow-x-auto rounded-lg p-0.5 text-muted-foreground group-data-[orientation=horizontal]/tabs:h-9 max-sm:group-data-[orientation=horizontal]/tabs:h-11 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col data-[variant=line]:rounded-none",
 	{
 		variants: {
 			variant: {

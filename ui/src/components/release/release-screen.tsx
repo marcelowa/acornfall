@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { fetchRelease, fetchReleases, type UpdateRelease, type UpdateStatus } from "@/app/client";
+import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Text } from "@/components/typography/text";
 import { Markdown } from "@/components/transcript/markdown";
@@ -218,127 +219,129 @@ export function ReleaseScreen({
 
 	return (
 		<div data-slot="release-screen" className="min-h-0 flex-1 overflow-y-auto">
-			<Stack gap="lg" padding="lg" className="mx-auto w-full max-w-page">
-				<Stack gap="2xs">
-					<Button
-						variant="ghost"
-						size="xs"
-						className="self-start"
-						aria-label="Back to the conversation"
-						onClick={onClose}
-					>
-						<ChevronLeft />
-						Back to the conversation
-					</Button>
-					<Text as="h1" size="xl" weight="semibold">
-						Update
-					</Text>
-					<Text size="2xs" tone="muted" className="font-mono">
-						{isTag ? `acornfall ${current}` : "dev build — not a release tag"}
-					</Text>
-				</Stack>
-
-				<StateLine
-					status={status}
-					target={target}
-					tag={tag}
-					checking={status?.checking === true}
-					applying={applying}
-					listError={listError}
-					onCheck={onCheck}
-					onRestart={onRestart}
-				/>
-
-				{failed ? (
-					<Stack gap="2xs" data-slot="release-rolled-back">
-						<Badge variant="soft" tone="danger" size="sm">
-							Rolled back
-						</Badge>
-						<Text size="xs">{status?.failed}</Text>
-						<Text size="2xs" tone="muted">
-							{current} is running. Check the next release, or roll back by hand.
-						</Text>
-						<div className="flex gap-2">
-							<Button size="sm" variant="outline" onClick={onCheck}>
-								Check again
-							</Button>
-							<Button size="sm" variant="ghost" onClick={onRollback}>
-								Roll back
-							</Button>
-						</div>
-					</Stack>
-				) : null}
-
-				{targetError !== undefined ? (
-					<Stack gap="2xs" data-slot="release-missing">
-						<Text size="sm" weight="semibold">
-							No such release
-						</Text>
-						<Text size="xs">{targetError}</Text>
-						<div className="flex gap-2">
-							<Button size="sm" variant="outline" onClick={onCheck}>
-								Check now
-							</Button>
-						</div>
-					</Stack>
-				) : null}
-
-				{target !== undefined && targetError === undefined && !failed ? (
-					<ReleaseCard
-						target={target}
-						between={between}
-						cleanVMs={cleanVMs}
-						onCleanVMs={setCleanVMs}
-						applying={applying}
-						onInstall={startUpdate}
-					/>
-				) : null}
-
-				{ownsCheck ? null : (
-					<Button size="xs" variant="ghost" className="self-start" onClick={onCheck}>
-						{status?.checking === true ? "Checking…" : "Check now"}
-					</Button>
-				)}
-
-				<Stack gap="sm" data-slot="release-picker">
-					<div className="flex items-center justify-between gap-2">
-						<Text size="sm" weight="semibold">
-							Releases
-						</Text>
-						<Toggle
-							aria-label="Pre-release builds"
-							size="sm"
-							variant="outline"
-							pressed={prereleases}
-							onPressedChange={setPrereleases}
+			<Measure size="page" padding="lg">
+				<Stack gap="lg">
+					<Stack gap="2xs">
+						<Button
+							variant="ghost"
+							size="xs"
+							className="self-start"
+							aria-label="Back to the conversation"
+							onClick={onClose}
 						>
-							Pre-release builds
-						</Toggle>
-					</div>
-					{listError !== undefined ? null : (
-						<>
-							<div className="flex flex-col gap-0.5">
-								{isTag && runningRow !== undefined ? (
-									<ReleaseRow release={runningRow} onOpen={onOpenTag} />
-								) : null}
-								{(releases ?? []).map((release) => (
-									<ReleaseRow
-										key={release.tag}
-										release={release}
-										current={release.tag === targetTag}
-										onOpen={onOpenTag}
-									/>
-								))}
-							</div>
+							<ChevronLeft />
+							Back to the conversation
+						</Button>
+						<Text as="h1" size="xl" weight="semibold">
+							Update
+						</Text>
+						<Text size="2xs" tone="muted" className="font-mono">
+							{isTag ? `acornfall ${current}` : "dev build — not a release tag"}
+						</Text>
+					</Stack>
+
+					<StateLine
+						status={status}
+						target={target}
+						tag={tag}
+						checking={status?.checking === true}
+						applying={applying}
+						listError={listError}
+						onCheck={onCheck}
+						onRestart={onRestart}
+					/>
+
+					{failed ? (
+						<Stack gap="2xs" data-slot="release-rolled-back">
+							<Badge variant="soft" tone="danger" size="sm">
+								Rolled back
+							</Badge>
+							<Text size="xs">{status?.failed}</Text>
 							<Text size="2xs" tone="muted">
-								{isTag && runningRow !== undefined
-									? "From the twenty most recent. Older changes are not listed."
-									: "The twenty most recent releases. Newest first."}
+								{current} is running. Check the next release, or roll back by hand.
 							</Text>
-						</>
+							<div className="flex gap-2">
+								<Button size="sm" variant="outline" onClick={onCheck}>
+									Check again
+								</Button>
+								<Button size="sm" variant="ghost" onClick={onRollback}>
+									Roll back
+								</Button>
+							</div>
+						</Stack>
+					) : null}
+
+					{targetError !== undefined ? (
+						<Stack gap="2xs" data-slot="release-missing">
+							<Text size="sm" weight="semibold">
+								No such release
+							</Text>
+							<Text size="xs">{targetError}</Text>
+							<div className="flex gap-2">
+								<Button size="sm" variant="outline" onClick={onCheck}>
+									Check now
+								</Button>
+							</div>
+						</Stack>
+					) : null}
+
+					{target !== undefined && targetError === undefined && !failed ? (
+						<ReleaseCard
+							target={target}
+							between={between}
+							cleanVMs={cleanVMs}
+							onCleanVMs={setCleanVMs}
+							applying={applying}
+							onInstall={startUpdate}
+						/>
+					) : null}
+
+					{ownsCheck ? null : (
+						<Button size="xs" variant="ghost" className="self-start" onClick={onCheck}>
+							{status?.checking === true ? "Checking…" : "Check now"}
+						</Button>
 					)}
+
+					<Stack gap="sm" data-slot="release-picker">
+						<div className="flex items-center justify-between gap-2">
+							<Text size="sm" weight="semibold">
+								Releases
+							</Text>
+							<Toggle
+								aria-label="Pre-release builds"
+								size="sm"
+								variant="outline"
+								pressed={prereleases}
+								onPressedChange={setPrereleases}
+							>
+								Pre-release builds
+							</Toggle>
+						</div>
+						{listError !== undefined ? null : (
+							<>
+								<div className="flex flex-col gap-0.5">
+									{isTag && runningRow !== undefined ? (
+										<ReleaseRow release={runningRow} onOpen={onOpenTag} />
+									) : null}
+									{(releases ?? []).map((release) => (
+										<ReleaseRow
+											key={release.tag}
+											release={release}
+											current={release.tag === targetTag}
+											onOpen={onOpenTag}
+										/>
+									))}
+								</div>
+								<Text size="2xs" tone="muted">
+									{isTag && runningRow !== undefined
+										? "From the twenty most recent. Older changes are not listed."
+										: "The twenty most recent releases. Newest first."}
+								</Text>
+							</>
+						)}
+					</Stack>
 				</Stack>
-			</Stack>
+			</Measure>
 
 			<Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
 				<DialogContent className="sm:max-w-md">
@@ -522,7 +525,7 @@ function ReleaseRow({
 			onClick={() => onOpen(release.tag)}
 			className={cn(
 				"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-				current === true && "bg-muted",
+				current === true && "bg-primary/10",
 			)}
 		>
 			<div className="flex min-w-0 flex-1 flex-col">

@@ -277,8 +277,10 @@
 	 * where the screen has it (2xl). */
 	--rail-width: 280px;
 	/* The bar that spans the top on both widths: the layers below it start exactly there, so
-	 * the bar's own toggle stays reachable while one is open. One value, and the phone step
-	 * for it lives with the rest of the phone ladder in `globals.css`. */
+	 * the bar's own toggle stays reachable while one is open. The phone step is at the end of
+	 * this file, not in `globals.css`'s ladder: this file is unlayered, and an unlayered value
+	 * beats every layer — the 56px step lived in `@layer base` and never applied (look panel,
+	 * run 4). */
 	--bar-height: 48px;
 	/* A collapsed rail is the toggle and nothing else. */
 	--rail-collapsed-width: 40px;
@@ -329,6 +331,13 @@
 @media (max-width: 639px) {
 	:root {
 		--connect-body-min: 256px;
+	}
+}
+
+/* The bar grows with the targets it holds: 44px of button plus the phone's own padding. */
+@media (max-width: 639px) {
+	:root {
+		--bar-height: 56px;
 	}
 }
 

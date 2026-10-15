@@ -31,6 +31,10 @@ from the tag annotation.
   claim a restart before the gateway says the files are swapped (R11).
 - **The in-between list renders only when the target is newer** than the running build; an older
   pick shows its own notes and the facts line says so.
+- **The notes print at the markdown renderer's own step (16px)**, not the `base` the direction
+  named: `.markdown` sets `--text-lg` outside the utility layer, so no call site can re-step it.
+  The look panel's word was to keep the size — it is the size the transcript already reads at — so
+  the direction and the "no notes" sentence were raised to match instead.
 
 ## The mocks are gone
 

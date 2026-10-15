@@ -412,7 +412,7 @@ export const ThePhone: Story = {
 			note="J20, R9. The same page at 390px, and the bar's mark without its tag."
 		>
 			<div className="flex flex-col">
-				<div className="flex h-14 items-center gap-2 border-b border-border px-3">
+				<div className="flex h-(--bar-height) items-center gap-2 border-b border-border px-1">
 					<Text as="span" size="sm" weight="semibold">
 						acornfall
 					</Text>
@@ -453,14 +453,14 @@ export const TheMark: Story = {
 					</Text>
 				</Stack>
 				<div className="flex flex-col gap-2 rounded-lg border border-border">
-					<div className="flex h-14 items-center gap-2 border-b border-border px-3">
+					<div className="flex h-(--bar-height) items-center gap-2 border-b border-border px-1">
 						<Text as="span" size="sm" weight="semibold">
 							acornfall
 						</Text>
 						<div className="min-w-0 flex-1" />
 						<ReleaseMark status={status()} onOpen={noop} />
 					</div>
-					<div className="flex h-14 items-center gap-2 border-b border-border px-3">
+					<div className="flex h-(--bar-height) items-center gap-2 border-b border-border px-1">
 						<Text as="span" size="sm" weight="semibold">
 							acornfall
 						</Text>
