@@ -92,7 +92,11 @@ jobs:
       # reads as "what changed". Every release before this step shipped a null
       # body, so the gateway falls back to the tag annotation for those.
       - run: git tag -l --format='%(contents)' "${{ github.ref_name }}" > release-notes.md
+      # A hyphen tag (`v0.9.35-rc.1`) is a pre-release: GitHub's own flag,
+      # which the update page's picker reads, and which keeps the newest-GA
+      # mark pointed at production.
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           body_path: release-notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
