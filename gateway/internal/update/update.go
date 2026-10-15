@@ -649,6 +649,23 @@ func newerThan(a, b string) bool {
 	return compareParsed(aNumbers, aPre, bNumbers, bPre) > 0
 }
 
+// Relation says what a release is next to the running build, in the words the
+// page shows: "running", "newer", "older", or "unknown" when one of the two
+// tags does not parse (a dev build, a stray tag). It is answered here so the
+// interface never derives a second version truth of its own.
+func Relation(current, tag string) string {
+	switch {
+	case tag == current:
+		return "running"
+	case newerThan(tag, current):
+		return "newer"
+	case newerThan(current, tag):
+		return "older"
+	default:
+		return "unknown"
+	}
+}
+
 // compareParsed compares two parsed tags: the numbers first, then the
 // suffix, where a plain tag is the production build.
 func compareParsed(aNumbers []int, aPre string, bNumbers []int, bPre string) int {

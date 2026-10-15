@@ -249,6 +249,24 @@ func TestNotesComeFromTheTagAnnotation(t *testing.T) {
 	}
 }
 
+func TestRelationNamesWhatAReleaseIs(t *testing.T) {
+	cases := []struct {
+		current, tag, want string
+	}{
+		{"v0.9.28", "v0.9.28", "running"},
+		{"v0.9.28", "v0.9.33", "newer"},
+		{"v0.9.33", "v0.9.20", "older"},
+		{"v0.9.34-rc.1", "v0.9.33", "older"},
+		{"dev", "v0.9.33", "unknown"},
+		{"v0.9.28", "nightly", "unknown"},
+	}
+	for _, testCase := range cases {
+		if got := Relation(testCase.current, testCase.tag); got != testCase.want {
+			t.Errorf("Relation(%q, %q) = %q, want %q", testCase.current, testCase.tag, got, testCase.want)
+		}
+	}
+}
+
 func TestApplyFailedDownloadLeavesRunsAlone(t *testing.T) {
 	manager, _ := testManager(t)
 	stopped := false

@@ -84,13 +84,14 @@ func (s *Server) updateReleases(w http.ResponseWriter, r *http.Request) {
 	}
 	list := make([]wireRelease, 0, len(releases))
 	for _, release := range releases {
-		list = append(list, wireReleaseOf(release))
+		list = append(list, wireReleaseOf(release, s.update.Status().Current))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"releases": list})
 }
 
 // wireRelease is one release as the update page reads it: the facts of the
-// list row, and the sizes for this machine.
+// list row, the sizes for this machine, and what it is next to the running
+// build.
 type wireRelease struct {
 	Tag          string `json:"tag"`
 	Name         string `json:"name"`
@@ -99,9 +100,10 @@ type wireRelease struct {
 	Prerelease   bool   `json:"prerelease"`
 	DownloadSize int64  `json:"downloadSize"`
 	WorkerSize   int64  `json:"workerSize"`
+	Relation     string `json:"relation"`
 }
 
-func wireReleaseOf(release update.Release) wireRelease {
+func wireReleaseOf(release update.Release, current string) wireRelease {
 	return wireRelease{
 		Tag:          release.Tag,
 		Name:         release.Name,
@@ -110,6 +112,7 @@ func wireReleaseOf(release update.Release) wireRelease {
 		Prerelease:   release.Prerelease,
 		DownloadSize: update.AssetFor(release).Size,
 		WorkerSize:   update.WorkerTarballAsset(release).Size,
+		Relation:     update.Relation(current, release.Tag),
 	}
 }
 
@@ -130,7 +133,7 @@ func (s *Server) updateRelease(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, http.StatusOK, wireReleaseOf(release))
+	writeJSON(w, http.StatusOK, wireReleaseOf(release, s.update.Status().Current))
 }
 
 // updateRestart finishes a pending update: the files are swapped and the old
