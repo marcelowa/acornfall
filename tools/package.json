@@ -4,6 +4,6 @@
   "type": "module",
   "description": "Development checks that need a browser.",
   "devDependencies": {
-    "puppeteer-core": "^25.12.0"
+    "puppeteer-core": "^25.14.0"
   }
 }
