@@ -179,6 +179,16 @@ func serve(argv []string) error {
 	updates.RunsActive = workspaces.AnyRunning
 	updates.StopRuns = workspaces.AbortAll
 	updates.StopWorkers = workspaces.StopWorkers
+	updates.Running = func() []update.Running {
+		// The dialog names what stopping runs would stop, so the counts cross
+		// the layer boundary as this tier's own shape.
+		summary := workspaces.RunningSummary()
+		runs := make([]update.Running, 0, len(summary))
+		for _, item := range summary {
+			runs = append(runs, update.Running{Workspace: item.Workspace, Runs: item.Runs})
+		}
+		return runs
+	}
 	updates.CleanVMs = func(ctx context.Context) error {
 		// Paths, not names: engine sandbox names derive from the folder.
 		var names []string

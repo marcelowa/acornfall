@@ -188,7 +188,7 @@ func TestApplyNamesMissingPickedTag(t *testing.T) {
 	}
 }
 
-func TestPinnedTagMeansNoPrompts(t *testing.T) {
+func TestAvailableMeansNewerNotDifferent(t *testing.T) {
 	manager, _ := testManager(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
@@ -197,14 +197,88 @@ func TestPinnedTagMeansNoPrompts(t *testing.T) {
 	manager.latestURL = server.URL
 	manager.client = server.Client()
 
-	if err := manager.SaveSettings(Settings{Channel: "releases", AutoCheck: true, Pinned: "v0.8.0"}); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := manager.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	// Running v0.8.0, newest v0.9.0: newer, so the mark is there.
+	if status := manager.Status(); !status.Available {
+		t.Fatal("a newer release must prompt")
+	}
+	// An rc that is above the newest GA must not leave the bar pointing at
+	// an older release: available means newer, not merely different.
+	if err := manager.SetCurrentVersion("v0.9.1-rc.1"); err != nil {
+		t.Fatal(err)
+	}
 	if status := manager.Status(); status.Available {
-		t.Fatal("pinned installs must not prompt")
+		t.Fatal("an rc above the newest GA must not prompt at it")
+	}
+	// A dev build never knows its tag, so it never prompts.
+	if err := manager.SetCurrentVersion("dev"); err != nil {
+		t.Fatal(err)
+	}
+	if status := manager.Status(); status.Available {
+		t.Fatal("a dev build must not prompt")
+	}
+}
+
+func TestNotesComeFromTheTagAnnotation(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/o/r/releases/tags/v0.9.0":
+			// The release body is null, as every release cut so far answers.
+			_, _ = w.Write([]byte(`{"tag_name":"v0.9.0","name":"v0.9.0","body":null,"assets":[]}`))
+		case "/o/r/git/ref/tags/v0.9.0":
+			_, _ = w.Write([]byte(`{"object":{"sha":"abc123","type":"tag"}}`))
+		case "/o/r/git/tags/abc123":
+			_, _ = w.Write([]byte(`{"message":"The tag message is the notes.\n"}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+
+	release, err := manager.Release(context.Background(), "v0.9.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if release.Notes != "The tag message is the notes." {
+		t.Fatalf("notes = %q", release.Notes)
+	}
+}
+
+func TestApplyFailedDownloadLeavesRunsAlone(t *testing.T) {
+	manager, _ := testManager(t)
+	stopped := false
+	manager.RunsActive = func() bool { return true }
+	manager.StopRuns = func(context.Context) error {
+		stopped = true
+		return nil
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/o/r/releases/tags/v0.9.0":
+			_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
+		case "/o/r/releases/assets/0":
+			http.Error(w, "nope", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+
+	// The release names no binary at all, so Apply refuses before stopping
+	// anything: a failed download must not cost runs.
+	err := manager.Apply(context.Background(), ApplyOptions{Tag: "v0.9.0", Drain: "stop"})
+	if err == nil {
+		t.Fatal("a release with no binary must refuse")
+	}
+	if stopped {
+		t.Fatal("runs must not be stopped before the download is known good")
 	}
 }
 

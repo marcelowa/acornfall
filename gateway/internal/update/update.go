@@ -73,12 +73,12 @@ type Asset struct {
 	Size int64
 }
 
-// Settings are the Updates tab: channel, auto-check, pinned tag.
-// Pinned means no prompts.
+// Settings are the install-wide settings page: channel and auto-check.
+// There is no pin: the indicator follows the newest production release
+// with nothing able to silence it, and a pick installs once.
 type Settings struct {
 	Channel   string `json:"channel"`
 	AutoCheck bool   `json:"autoCheck"`
-	Pinned    string `json:"pinned"`
 }
 
 // DefaultSettings is what a fresh install gets.
@@ -86,19 +86,28 @@ func DefaultSettings() Settings {
 	return Settings{Channel: "releases", AutoCheck: true}
 }
 
+// Running is one started workspace with runs, for the install dialog: it
+// says what "stop runs" would stop. Counted by the control plane and handed
+// in through Running, so this tier still knows nothing about conversations.
+type Running struct {
+	Workspace string `json:"workspace"`
+	Runs      int    `json:"runs"`
+}
+
 // Status is what GET /api/update/status answers.
 type Status struct {
 	Current  string `json:"current"`
 	Latest   string `json:"latest"`
 	Notes    string `json:"notes"`
-	Pinned   string `json:"pinned"`
 	Channel  string `json:"channel"`
 	Checking bool   `json:"checking"`
 	// Download sizes in bytes, for the screen's size line. Zero when the
 	// release names no file for this platform.
 	DownloadSize int64 `json:"downloadSize"`
 	WorkerSize   int64 `json:"workerSize"`
-	// Available is one dot, not a list: a newer tag exists and nothing pins it.
+	// Available means the newest production release is newer than the
+	// running build — newer, not merely different: an rc installed from the
+	// picker must not leave the bar pointing at an older GA.
 	Available bool `json:"available"`
 	// Failed carries the last rollback cause, so the screen can say it.
 	Failed string `json:"failed,omitempty"`
@@ -214,6 +223,10 @@ type Manager struct {
 	// IsAdmin decides POST /api/update/apply. Default allow: single user
 	// now, admin later. Return false to get the 403 path today.
 	IsAdmin func(r *http.Request) bool
+	// Running names the started workspaces with runs, for the install dialog:
+	// it says what stopping runs would stop. Injected, so this tier stays
+	// free of the control plane.
+	Running func() []Running
 }
 
 // New builds a Manager. Empty binPath means the current executable.
@@ -333,11 +346,21 @@ func (m *Manager) SaveSettings(settings Settings) error {
 	return os.WriteFile(m.settingsPath(), append(payload, '\n'), 0o600)
 }
 
-// Settings reads the Updates tab.
+// Settings reads the install-wide settings page.
 func (m *Manager) Settings() Settings {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.settings
+}
+
+// Runs answers what a drain-stop would stop: the started workspaces with
+// running conversations, and how many in each. Nil means nothing can
+// answer, which reads as none.
+func (m *Manager) Runs() []Running {
+	if m.Running == nil {
+		return nil
+	}
+	return m.Running()
 }
 
 // SetCurrentVersion records the running tag.
@@ -352,21 +375,13 @@ func (m *Manager) SetCurrentVersion(tag string) error {
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	available := m.latest.Tag != "" && m.latest.Tag != m.current &&
-		m.current != "dev" && m.settings.Pinned == ""
-	// A dev build never knows its tag, so it never prompts: showing a dot
-	// for a build that cannot name itself would be a lie.
-	if m.current == "dev" {
-		available = false
-	}
 	return Status{
 		Current:         m.current,
 		Latest:          m.latest.Tag,
 		Notes:           m.latest.Notes,
-		Pinned:          m.settings.Pinned,
 		Channel:         m.settings.Channel,
 		Checking:        m.checking,
-		Available:       available,
+		Available:       newerThan(m.latest.Tag, m.current),
 		Failed:          m.failed,
 		RestartRequired: m.restart,
 		DownloadSize:    AssetFor(m.latest).Size,
@@ -374,8 +389,7 @@ func (m *Manager) Status() Status {
 	}
 }
 
-// Check forces a release check now. Pinned tags still fetch (so the screen
-// can name the release) but never prompt.
+// Check forces a release check now.
 func (m *Manager) Check(ctx context.Context) (Release, error) {
 	m.mu.Lock()
 	m.checking = true
@@ -440,6 +454,66 @@ func (m *Manager) fetch(ctx context.Context) (Release, error) {
 		return Release{}, fmt.Errorf("releases: github answered %s", response.Status)
 	}
 	return parseRelease(response.Body)
+}
+
+// Release answers one release by tag, notes resolved: the update page's
+// read for a version outside the list and for the running row. A tag the
+// source does not have answers ErrReleaseNotFound.
+func (m *Manager) Release(ctx context.Context, tag string) (Release, error) {
+	release, err := m.releaseFor(ctx, tag)
+	if err != nil {
+		return Release{}, err
+	}
+	m.resolveNotes(ctx, &release)
+	return release, nil
+}
+
+// resolveNotes fills an empty body from the tag annotation. GitHub release
+// bodies are null for every release cut before the workflow started filling
+// them, and the notes live in the tag message (`git tag -a`) — which is why
+// the page's "what changed" had no source until this read. Best effort: a
+// release whose notes cannot be read still installs, it just says there are
+// none.
+func (m *Manager) resolveNotes(ctx context.Context, release *Release) {
+	if release.Notes != "" {
+		return
+	}
+	response, err := m.get(ctx, m.apiBase()+"/git/ref/tags/"+release.Tag)
+	if err != nil {
+		return
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return
+	}
+	var ref struct {
+		Object struct {
+			SHA  string `json:"sha"`
+			Type string `json:"type"`
+		} `json:"object"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&ref); err != nil {
+		return
+	}
+	// A lightweight tag has no annotation to read: the object is the commit.
+	if ref.Object.Type != "tag" || ref.Object.SHA == "" {
+		return
+	}
+	tagged, err := m.get(ctx, m.apiBase()+"/git/tags/"+ref.Object.SHA)
+	if err != nil {
+		return
+	}
+	defer func() { _ = tagged.Body.Close() }()
+	if tagged.StatusCode != http.StatusOK {
+		return
+	}
+	var object struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(tagged.Body).Decode(&object); err != nil {
+		return
+	}
+	release.Notes = strings.TrimSpace(object.Message)
 }
 
 // githubRelease is one release as GitHub answers it, the shape the single
@@ -560,12 +634,29 @@ func compareTags(a, b string) int {
 	if !aOK || !bOK {
 		return strings.Compare(a, b)
 	}
+	return compareParsed(aNumbers, aPre, bNumbers, bPre)
+}
+
+// newerThan reports whether a is a release newer than b. Two tags that do
+// not parse are never "newer": a mark that cannot say what it compares is a
+// lie, and the update page still lists every release by name.
+func newerThan(a, b string) bool {
+	aNumbers, aPre, aOK := tagParts(a)
+	bNumbers, bPre, bOK := tagParts(b)
+	if !aOK || !bOK {
+		return false
+	}
+	return compareParsed(aNumbers, aPre, bNumbers, bPre) > 0
+}
+
+// compareParsed compares two parsed tags: the numbers first, then the
+// suffix, where a plain tag is the production build.
+func compareParsed(aNumbers []int, aPre string, bNumbers []int, bPre string) int {
 	for i := range aNumbers {
 		if aNumbers[i] != bNumbers[i] {
 			return sign(aNumbers[i] - bNumbers[i])
 		}
 	}
-	// Same base: the plain tag is the production build, any suffix is not.
 	if aPre == "" && bPre != "" {
 		return 1
 	}
@@ -866,15 +957,6 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 		return fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
 	}
 	worker := WorkerTarballAsset(release)
-	// Drain stop means it: runs end before anything else moves.
-	if active {
-		if m.StopRuns == nil {
-			return fmt.Errorf("update: runs are active and nothing can stop them")
-		}
-		if err := m.StopRuns(ctx); err != nil {
-			return fmt.Errorf("update: cannot stop runs: %w", err)
-		}
-	}
 	if _, err := m.Backup(); err != nil {
 		return fmt.Errorf("backup failed, update stopped: %w", err)
 	}
@@ -910,6 +992,21 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 		}
 		if err := writeData(m.workerPending(), tarball); err != nil {
 			return err
+		}
+	}
+	// Runs end here: after everything verified, and before anything moves.
+	// A failed download must not cost runs, and a run that started while the
+	// download was in flight must not be swapped under — so the gate is read
+	// again, at the moment it matters, not only when Apply was asked.
+	if m.RunsActive != nil && m.RunsActive() {
+		if options.Drain != "stop" {
+			return ErrRunsActive{}
+		}
+		if m.StopRuns == nil {
+			return fmt.Errorf("update: runs are active and nothing can stop them")
+		}
+		if err := m.StopRuns(ctx); err != nil {
+			return fmt.Errorf("update: cannot stop runs: %w", err)
 		}
 	}
 	// Start-clean wipes last, after everything verified: a failed download

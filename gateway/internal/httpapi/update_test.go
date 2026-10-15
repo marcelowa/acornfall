@@ -43,7 +43,7 @@ func TestUpdateStatusNamesCurrentAndLatest(t *testing.T) {
 	if body["current"] != "v0.8.0" {
 		t.Fatalf("current = %v", body["current"])
 	}
-	for _, field := range []string{"available", "latest", "notes", "pinned", "checking", "backups"} {
+	for _, field := range []string{"available", "latest", "notes", "checking", "backups", "runsActive", "runs"} {
 		if _, ok := body[field]; !ok {
 			t.Fatalf("status must carry %q", field)
 		}
@@ -147,6 +147,28 @@ func TestUpdateApplyNamesAMissingPickedTag(t *testing.T) {
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusNotFound && recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("missing picked tag = %d, want 404 (or 500 offline)", recorder.Code)
+	}
+}
+
+func TestUpdateReleaseNamesAMissingTag(t *testing.T) {
+	server, _ := updateServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/update/releases/vnope-v0.0.0", nil)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	// 404 when the source answers, 502 only when it cannot be reached.
+	if recorder.Code != http.StatusNotFound && recorder.Code != http.StatusBadGateway {
+		t.Fatalf("missing tag = %d, want 404 (or 502 offline)", recorder.Code)
+	}
+}
+
+func TestUpdateRestartRefusesNonAdmin(t *testing.T) {
+	server, manager := updateServer(t)
+	manager.IsAdmin = func(*http.Request) bool { return false }
+	request := httptest.NewRequest(http.MethodPost, "/api/update/restart", strings.NewReader("{}"))
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("restart as non-admin = %d, want 403", recorder.Code)
 	}
 }
 
