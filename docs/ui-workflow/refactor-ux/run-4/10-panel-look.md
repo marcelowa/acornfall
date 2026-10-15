@@ -5,8 +5,11 @@ the four release files, `design.md` and the direction, the measured numbers, and
 They judged computed sizes, control boxes and composited colours — not rendering by eye, and the
 document says so below. Their words are unedited.
 
-Status: **3 of 3 landed**, round 1 — TINKERER, OWNER-OPERATOR and DELEGATOR answered; their own
-findings are marked fixed in the table at the end, and the panel re-runs on the fixed build.
+Status: **round 1 complete; round 2 could not run as a panel.** The session hit its child limit
+(six of four), so the fixed build was checked item by item **in this session**, by measurement —
+weaker than the reviewers, and written down as such below (the same limit run 1 recorded in its
+step 10). The owner's own pass (step 11) is the remaining human gate, and a real round 2 belongs in
+a later session.
 
 ## TINKERER
 
@@ -228,3 +231,35 @@ rail's bronze dot — that dot is a *run* alive, this word is a *build* that is 
 sharing the colour would say they are the same fact. The in-between list stays full prose rather
 than one line each: it is what you read before taking a jump of several versions; if it is too long
 in practice, the owner's pass is the place to cut it.
+
+
+## Round 2 — checked in this session, not by the panel
+
+The harness refused the three sub-agents (`6 children of max-children 4`), so the fix table above was
+verified by hand, with measurements, and each round-1 finding re-tested. This is weaker than the
+reviewers' pass and says so; run 1 recorded the same limit once.
+
+| Was | Round-1 finding | Re-measured now |
+|---|---|---|
+| 1 | The picker's duplicate running row | Live `/update`: 20 rows, 0 duplicate tags; the running row clears when the list holds it |
+| 2 | Two Restart blocks and buttons | The `restart-pending` story: 1 Restart button, no second notice |
+| 3 | Toggles 32px on the phone | `up-to-date` story at 390: toggles `[44]`; live Settings tabs 44 |
+| 4 | The phone mark 36 wide | Live 390: `44x44`; the arrow at the phone step |
+| 5 | The notes' size against the direction | Live and stories: 16px, the renderer's step; the direction and the placeholder now say so |
+| 6 | In-between notes raw, in the fact tone | Stories: `release-between` renders 4 markdown paragraphs, foreground |
+| 7 | The current-row tint invisible in light | Row tint is `primary/10`: `oklab(0.75 … / 0.1)` over `oklch(0.985 …)` in light |
+| 8 | The refusal in the normal voice, the lying caption, two check controls | Live `/update/v9.9.9`: "No such release" + the gateway's 404 sentence, one check control, no caption |
+| 9 | The inert up-to-date card | `up-to-date` story: no Install, no VM choice |
+| 10 | "running" as a badge under the floor | A mono muted word, on the page's own background |
+| OWNER 1, DELEGATOR 5 | The mark's colour | `primary-subtle-foreground`: measured 3.17:1 light, 9.85:1 dark on the bar |
+| OWNER 3, DELEGATOR 10 | The phone ladder's toggles and tabs | 44 measured in both |
+| OWNER 5 | The phone bar 48px | Live `--bar-height` 56px at 390, 48px at 1280 |
+| OWNER 10b | The phone gutter | Live: content starts at x=16, as Settings does |
+| DELEGATOR 1 | Runs invisible before the press | The `RunsAreLive` story: "5 runs are live across acornfall (2), hello-omri (3) · installing asks first" |
+| DELEGATOR 4 | The restart mark 2.97:1, no word | `warning-subtle-foreground`: 3.49:1 light, 9.17:1 dark; the word "Restart" shows at ≥sm |
+| DELEGATOR 7 | The runs-stopping sentence faintest | One step up, foreground |
+| DELEGATOR 8 | "Installing" with no time base | The `Installing` story: "…asked 18:54:11" |
+| DELEGATOR 9 | The first seconds printing "dev build" | Live at 400ms: no build line, one check control |
+
+What this session did **not** do: a second opinion from the three personas, an a11y addon pass, or a
+look on a real phone. Those belong to a later session, after the owner's own notes.
