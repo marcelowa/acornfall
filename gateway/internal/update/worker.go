@@ -28,7 +28,7 @@ import (
 // BunVersion is the one bun the gateway runs workers with. Upgrading it is
 // a code change with a test run, not a float: a new runtime under old
 // sources is how installs break differently per machine.
-const BunVersion = "1.4.2"
+const BunVersion = "1.4.3"
 
 // WorkerTarball is the release asset holding the worker sources:
 // package.json, bun.lock, and src/, with the top directory stripped.
