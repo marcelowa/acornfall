@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1128,9 +1129,14 @@ func TestApplyStopsWorkersBeforeWipe(t *testing.T) {
 
 func TestNotesResolvesSeveralTagsAndCachesThem(t *testing.T) {
 	manager, _ := testManager(t)
+	// Eight lanes mean concurrent handlers, so the counter needs its own lock:
+	// the race detector caught the bare map here, not in the code under test.
+	var hitsMu sync.Mutex
 	hits := map[string]int{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitsMu.Lock()
 		hits[r.URL.Path]++
+		hitsMu.Unlock()
 		switch r.URL.Path {
 		case "/o/r/releases/tags/v0.9.0", "/o/r/releases/tags/v0.9.1":
 			tag := strings.TrimPrefix(r.URL.Path, "/o/r/releases/tags/")
@@ -1157,10 +1163,15 @@ func TestNotesResolvesSeveralTagsAndCachesThem(t *testing.T) {
 		t.Fatalf("notes = %v", notes)
 	}
 	// The second visit is answered from the cache: a tag's notes never change.
+	hitsMu.Lock()
 	before := len(hits)
+	hitsMu.Unlock()
 	again := manager.Notes(context.Background(), []string{"v0.9.0", "v0.9.1"})
-	if len(hits) != before {
-		t.Fatalf("the cache must answer, hits went from %d to %d", before, len(hits))
+	hitsMu.Lock()
+	after := len(hits)
+	hitsMu.Unlock()
+	if after != before {
+		t.Fatalf("the cache must answer, hits went from %d to %d", before, after)
 	}
 	if again["v0.9.0"] != "notes for v0.9.0" {
 		t.Fatalf("notes = %v", again)
