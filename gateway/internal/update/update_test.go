@@ -267,6 +267,32 @@ func TestRelationNamesWhatAReleaseIs(t *testing.T) {
 	}
 }
 
+func TestCheckResolvesNotesFromTheTagAnnotation(t *testing.T) {
+	manager, _ := testManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/o/r/releases/latest":
+			_, _ = w.Write([]byte(`{"tag_name":"v0.9.0","name":"v0.9.0","body":null,"assets":[]}`))
+		case "/o/r/git/ref/tags/v0.9.0":
+			_, _ = w.Write([]byte(`{"object":{"sha":"abc123","type":"tag"}}`))
+		case "/o/r/git/tags/abc123":
+			_, _ = w.Write([]byte(`{"message":"The tag message is the notes.\n"}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	manager.latestURL = server.URL + "/o/r/releases/latest"
+	manager.client = server.Client()
+
+	if _, err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if status := manager.Status(); status.Notes != "The tag message is the notes." {
+		t.Fatalf("status notes = %q", status.Notes)
+	}
+}
+
 func TestApplyFailedDownloadLeavesRunsAlone(t *testing.T) {
 	manager, _ := testManager(t)
 	stopped := false

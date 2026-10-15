@@ -453,7 +453,14 @@ func (m *Manager) fetch(ctx context.Context) (Release, error) {
 	if response.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("releases: github answered %s", response.Status)
 	}
-	return parseRelease(response.Body)
+	release, err := parseRelease(response.Body)
+	if err != nil {
+		return Release{}, err
+	}
+	// The check's own release gets its notes resolved too: the status carries
+	// them, and the page should not need a second read to say what changed.
+	m.resolveNotes(ctx, &release)
+	return release, nil
 }
 
 // Release answers one release by tag, notes resolved: the update page's
