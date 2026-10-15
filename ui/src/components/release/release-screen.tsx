@@ -365,11 +365,11 @@ export function ReleaseScreen({
 										/>
 									))}
 								</div>
-								<Text size="2xs" tone="muted">
-									{isTag && runningRow !== undefined
-										? "From the twenty most recent. Older changes are not listed."
-										: "The twenty most recent releases, newest first."}
-								</Text>
+								{isTag && runningRow !== undefined ? (
+									<Text size="2xs" tone="muted">
+										From the twenty most recent. Older changes are not listed.
+									</Text>
+								) : null}
 							</>
 						)}
 					</Stack>
@@ -515,11 +515,6 @@ function ReleaseCard({
 					{between.length > 0 ? <Between releases={between} notes={notes} /> : null}
 					{isRunning ? null : (
 						<>
-							<Text size="2xs" tone="muted">
-								Backs up config, state DB, and workspace list first (last 3 kept).
-								VM disks are not backed up. The update stops if backup fails. The
-								window reloads when the new build answers; a draft is not kept.
-							</Text>
 							<Stack gap="2xs">
 								<Text size="2xs" tone="muted">
 									sandbox VMs
@@ -549,6 +544,9 @@ function ReleaseCard({
 									{applying ? "Installing…" : "Install"}
 								</Button>
 							</div>
+							<Text size="2xs" tone="muted">
+								The window reloads when the new build answers; a draft is not kept.
+							</Text>
 						</>
 					)}
 				</Stack>
