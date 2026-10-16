@@ -69,6 +69,7 @@ reply quoting the request. `make dev` uses it.
 | T15 | Files and images ride with a message: uploads stage under the workspace's hidden `.attachments` folder, the model gets image parts, inline text, or a sandbox path, and the transcript names every file. 10 MB per file, 20 files and 100 MB per message; the upload endpoint allows 12 MB while JSON stays at 1 MB. | `TestAttachmentsRideAlong`, `TestAttachmentsRefuseOversize` + `worker/test/attachments.test.ts` + `ui/test/attachments.test.ts` + `Conversation/Composer/WithAttachments` |
 | T16 | Amber brand system: bronze primary, blue secondary, ember warning on warm bark neutrals, both themes. Dark-mode brand mark, theme-aware favicon. Stop is destructive, Steer primary, Queue secondary; dark text on fills in light, white in dark. | `bun run check:system` + `Foundations/Palette`, `Foundations/Colour`, `Screens/Workspace/Running` |
 | T17 | A reply can wear a form before it explains itself: `> [!WARNING]` draws a tinted callout, `- [x]` a checklist with its count, and a marker with words on its line stays a quote. Both go through the same sanitiser as prose — the box is a span, never a control. | `ui/test/render-markdown.test.ts` + `Conversation/Markdown/CalloutsAndChecklists` + `make ui` |
+| T18 | A reply can draw a plan: a `steps` fence renders a dot per step — done, doing (ringed), blocked, todo — beside the model's own words, and a line that names no state keeps its whole line. | `ui/test/render-markdown.test.ts` + `Conversation/Markdown/Steps` + `make ui` |
 
 ## Defaults
 

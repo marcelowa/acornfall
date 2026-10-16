@@ -17,6 +17,7 @@ This is a picture, not a control. The console draws; the reader only reads.
 | `> [!WARNING]` on the first line of a quote | a risk, a limit, a decision the reader must stop on |
 | `> [!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!CAUTION]` | a fact, a shortcut, something unmissable, something not to do |
 | `- [x]` / `- [ ]` | a plan and what is left — the console shows `3/5` above it |
+| a ` ```steps ` fence | a plan's state, one line per step: `done: read it`, `doing: build it`, `blocked: on the key`, `todo: run it` |
 | a GFM table | numbers and comparisons, so they line up down a column |
 | ` ```diff ` | what changed; adds and removes are coloured already |
 | ` ```mermaid ` | a flow, a sequence, a state machine |
@@ -28,6 +29,8 @@ This is a picture, not a control. The console draws; the reader only reads.
 - One diagram at most in an answer. Two pictures are one too many.
 - Draw it only when it replaces five or more lines of prose. A callout around two words is noise.
 - Keep a marker honest: `[!WARNING]` for a real risk, `[!NOTE]` for a fact. Do not decorate.
+- One state per step, and the four states are `done`, `doing`, `blocked`, `todo`. A step that is
+  stuck says `blocked`, not `todo` — the dot is the only thing a reader looks at.
 - The marker must be alone on the first line, or the console draws a plain quote.
 - Numbers go in a table or a list, not in a sentence.
 - A state earns its mark: a checklist tick means done, not hoping.
