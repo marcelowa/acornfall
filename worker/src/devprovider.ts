@@ -146,10 +146,9 @@ function matchRule(script: Script, request: string): ScriptRule | undefined {
 	return script.fallback;
 }
 
-/** The answer a request mentioning a diagram gets: a drawable fence and a fence whose language is
- * not Mermaid, which stays a code block. This provider exists so the interface can be exercised
- * without a model, and a Markdown pane that draws is part of the interface — `tools/check-ui.mjs`
- * leans on this sentence. */
+/** A diagram reply, and a reply wearing the other two forms a message can ask for: a callout and
+ * a checklist. The fences a request mentions decide the answer; this provider exists so the
+ * interface can be exercised without a model, and `tools/check-ui.mjs` leans on both sentences. */
 const DIAGRAM_REPLY = [
 	"Here is the shape of it:",
 	"",
@@ -166,13 +165,31 @@ const DIAGRAM_REPLY = [
 	"```",
 ].join("\n");
 
+/** The answer a request mentioning a checklist gets: a warning a reader sees before the words, and
+ * a plan a reader counts. */
+const VISUAL_REPLY = [
+	"A visual reply says what to look out for before it says anything else:",
+	"",
+	"> [!WARNING]",
+	"> The dev provider is a fake; nothing here ran anywhere.",
+	"",
+	"And a plan is read by its count:",
+	"",
+	"- [x] say it in a callout",
+	"- [ ] count what is left",
+].join("\n");
+
 const defaultRespond: FauxResponseFactory = (context) => {
 	const messages = context.messages as readonly { role: string; content: unknown }[];
 	const request = lastUserText(messages);
 
-	// Before the tool call: a diagram needs no workspace to draw.
+	// Before the tool call: neither a diagram nor a callout needs a workspace.
 	if (/diagram/i.test(request)) {
 		return fauxAssistantMessage([fauxText(DIAGRAM_REPLY)]);
+	}
+
+	if (/visual form|checklist/i.test(request)) {
+		return fauxAssistantMessage([fauxText(VISUAL_REPLY)]);
 	}
 
 	if (!answeredSinceLastUser(messages)) {

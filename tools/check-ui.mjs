@@ -786,6 +786,66 @@ try {
 			check("the diagram was not refused", refused === null, refused ?? "");
 		}
 
+		// 4. A callout and a checklist. The renderer's unit tests own the HTML; this is the proof
+		// that the stylesheet paints it, which no jsdom test can see: a tint behind a warning, a
+		// box per item, and the count a plan is read by.
+		const asked = await page
+			.evaluate(async () => {
+				try {
+					const match = /^\/c\/([^/]+)\/([^/]+)/.exec(window.location.pathname);
+					if (match === null) return false;
+					const url =
+						"/api/workspaces/" +
+							match[1] +
+							"/conversations/" +
+							match[2] +
+							"/messages";
+					const response = await fetch(url, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({
+							text: "show the visual forms",
+							whenBusy: "followUp",
+						}),
+					});
+					return response.ok;
+				} catch {
+					return false;
+				}
+			})
+			.catch(() => false);
+		check("a message asking for the visual forms can be sent", asked);
+		if (asked) {
+			await page
+				.waitForFunction(
+					() => document.querySelector("[data-slot=transcript] .task-list .task-box") !== null,
+					{ timeout: 60000, polling: 100 },
+				)
+				.catch(() => undefined);
+			const painted = await page.evaluate(() => {
+				const callout = document.querySelector("[data-slot=transcript] .callout-warning");
+				const box = document.querySelector("[data-slot=transcript] .task-list .task-box.is-done");
+				const count = document.querySelector("[data-slot=transcript] .task-list .task-count");
+				if (callout === null || box === null || count === null) return null;
+				return {
+					height: Math.round(callout.getBoundingClientRect().height),
+					background: getComputedStyle(callout).backgroundColor,
+					box: getComputedStyle(box).backgroundColor,
+					count: (count.textContent ?? "").trim(),
+				};
+			});
+			check(
+				"a callout is drawn and tinted",
+				painted !== null && painted.height > 20 && painted.background !== "rgba(0, 0, 0, 0)",
+				painted === null ? "no callout on screen" : `${painted.height}px, background ${painted.background}`,
+			);
+			check(
+				"a checklist is drawn, boxed and counted",
+				painted !== null && painted.box !== "rgba(0, 0, 0, 0)" && painted.count === "1/2",
+				painted === null ? "no checklist on screen" : `boxes ${painted.box}, count "${painted.count}"`,
+			);
+		}
+
 		const clipped = await page.evaluate(() =>
 			[...document.querySelectorAll("[data-slot=tool]")].map((card) => ({
 				card: Math.round(card.getBoundingClientRect().height),

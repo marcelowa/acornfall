@@ -83,6 +83,108 @@
 	color: var(--muted-foreground);
 }
 
+/* A quote that opens with an alert marker. The tint says how loud it is and the label says what
+ * it is, so the reader knows whether to stop without reading the sentence — the one thing a
+ * paragraph of text cannot do. */
+.markdown .callout {
+	margin: 0 0 var(--spacing-2);
+	padding: var(--spacing-2) var(--spacing-3);
+	border-radius: var(--radius-md);
+	background: var(--muted);
+}
+
+.markdown .callout > :last-child {
+	margin-bottom: 0;
+}
+
+.markdown .callout-label {
+	display: block;
+	margin-bottom: var(--spacing-1);
+	color: var(--muted-foreground);
+	font-size: var(--text-2xs);
+	font-weight: var(--font-weight-semibold);
+	letter-spacing: var(--tracking-wide);
+	text-transform: uppercase;
+}
+
+.markdown .callout-tip {
+	background: var(--primary-subtle);
+}
+
+.markdown .callout-tip .callout-label {
+	color: var(--primary-subtle-foreground);
+}
+
+.markdown .callout-important {
+	background: var(--info-subtle);
+}
+
+.markdown .callout-important .callout-label {
+	color: var(--info-subtle-foreground);
+}
+
+.markdown .callout-warning {
+	background: var(--warning-subtle);
+}
+
+.markdown .callout-warning .callout-label {
+	color: var(--warning-subtle-foreground);
+}
+
+.markdown .callout-caution {
+	background: var(--destructive-subtle);
+}
+
+.markdown .callout-caution .callout-label {
+	color: var(--destructive-subtle-foreground);
+}
+
+/* A checklist: no bullets, a box per item, and the count above it, because that count is how a
+ * plan is read. */
+.markdown .task-list {
+	margin: 0 0 var(--spacing-2);
+}
+
+.markdown .task-list ul,
+.markdown .task-list ol {
+	margin: 0;
+	padding-inline-start: 0;
+}
+
+.markdown .task-list li {
+	list-style: none;
+}
+
+.markdown .task-count {
+	display: block;
+	margin-bottom: var(--spacing-1);
+	color: var(--muted-foreground);
+	font-family: var(--font-mono);
+	font-size: var(--text-2xs);
+}
+
+/* The box a state is read by: empty for a todo, filled and ticked for done. */
+.markdown .task-box {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	inline-size: 14px;
+	block-size: 14px;
+	margin-inline-end: var(--spacing-1);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: transparent;
+	font-size: var(--text-2xs);
+	line-height: 1;
+	vertical-align: text-bottom;
+}
+
+.markdown .task-box.is-done {
+	border-color: var(--primary);
+	background: var(--primary-subtle);
+	color: var(--primary-subtle-foreground);
+}
+
 .markdown hr {
 	margin: var(--spacing-4) 0;
 	border: 0;

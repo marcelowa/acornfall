@@ -60,4 +60,43 @@ describe("the markdown renderer", () => {
 	test("images are refused", () => {
 		expect(renderMarkdown("![alt](https://example.com/x.png)")).not.toContain("<img");
 	});
+
+	test("an alert marker becomes a callout, and the marker itself is gone", () => {
+		const html = renderMarkdown("> [!WARNING]\n> careful **now**");
+		expect(html).toContain('class="callout callout-warning"');
+		expect(html).toContain("Warning");
+		expect(html).toContain("<strong>now</strong>");
+		expect(html).not.toContain("[!");
+	});
+
+	test("a quote without a marker is still a quote", () => {
+		expect(renderMarkdown("> just a quote")).toContain("<blockquote>");
+	});
+
+	test("a marker with words on its line is a quote, not an alert", () => {
+		const html = renderMarkdown("> [!WARNING] careful");
+		expect(html).toContain("<blockquote>");
+		expect(html).not.toContain("callout");
+	});
+
+	test("a callout body is sanitised like any other text", () => {
+		const html = renderMarkdown("> [!CAUTION]\n> <script>alert(1)</script>");
+		expect(html).toContain("callout-caution");
+		expect(html).not.toContain("<script");
+	});
+
+	test("a checklist keeps a box per item and a count", () => {
+		const html = renderMarkdown("- [x] done\n- [ ] waiting");
+		expect(html).toContain('class="task-list"');
+		expect(html).toContain("1/2");
+		expect(html).toContain('class="task-box is-done"');
+		expect(html).toContain('class="task-box"');
+		expect(html).not.toContain("<input");
+	});
+
+	test("a list that is only partly tasks is a list, with its boxes inline", () => {
+		const html = renderMarkdown("- [x] a task\n- just an item");
+		expect(html).not.toContain("task-list");
+		expect(html).toContain('class="task-box is-done"');
+	});
 });
