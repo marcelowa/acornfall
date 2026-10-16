@@ -722,11 +722,38 @@ type state struct {
 	} `json:"sandbox"`
 	Defaults []layerTrace   `json:"defaults"`
 	Resolved map[string]any `json:"resolved"`
+	Draft    *draft         `json:"draft"`
+}
+
+// draft is one room's unsent message, as the state carries it.
+type draft struct {
+	Text        string `json:"text"`
+	UpdatedAt   int64  `json:"updatedAt"`
+	Attachments []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+		MIME string `json:"mime"`
+	} `json:"attachments"`
 }
 
 type layerTrace struct {
 	Layer string `json:"layer"`
 	Path  string `json:"path"`
+}
+
+// saveDraft is the composer's own write: the unsent message of one room.
+func (c *client) saveDraft(workspace, id, text string) {
+	c.t.Helper()
+	c.post(c.conversationPath(workspace, id)+"/draft", map[string]any{"text": text}, nil)
+}
+
+// draftIn reads one room's draft, whatever conversation the install happens to be on.
+func (c *client) draftIn(workspace, id string) *draft {
+	c.t.Helper()
+	var out state
+	c.get("/api/workspaces/"+workspace+"/state?conversation="+id, &out)
+	return out.Draft
 }
 
 func (c *client) state(workspace string) state {

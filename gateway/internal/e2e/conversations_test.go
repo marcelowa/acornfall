@@ -440,6 +440,44 @@ func TestAttachmentsRefuseOversize(t *testing.T) {
 	}
 }
 
+// A half-typed message is the workspace's, not the browser's. It waits in the room it was
+// written in — after a reload, after a switch, and on the other machine — and a message that
+// was sent leaves nothing behind, which is what every machine watching that room is told.
+func TestADraftWaitsInTheRoomItWasWrittenIn(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(scriptRule{Match: "send me", Reply: "sent."}))
+	c := s.client()
+
+	root := c.waitForConversation("general")
+	other := c.create("general")
+
+	c.saveDraft("general", root, "half a thought")
+	if got := c.draftIn("general", root); got == nil || got.Text != "half a thought" {
+		t.Fatalf("the room should keep the half-typed message, got %+v", got)
+	}
+	if got := c.draftIn("general", other.ID); got != nil && got.Text != "" {
+		t.Errorf("a draft belongs to one room, got %+v", got)
+	}
+
+	// Sending consumes it: the words are in the transcript now, not in the composer.
+	c.prompt("general", root, "send me")
+	c.waitForText("general", root, "sent.")
+	if got := c.draftIn("general", root); got != nil && (got.Text != "" || len(got.Attachments) != 0) {
+		t.Errorf("a sent message should leave no draft behind, got %+v", got)
+	}
+
+	// A refused send is not a send: what was typed stays where it was.
+	c.saveDraft("general", other.ID, "still mine")
+	status, payload := c.postStatus(c.conversationPath("general", other.ID)+"/messages", map[string]any{"text": ""})
+	if status == http.StatusAccepted {
+		t.Fatal("an empty message should be refused")
+	}
+	if got := c.draftIn("general", other.ID); got == nil || got.Text != "still mine" {
+		t.Errorf("a refused send keeps the draft (status %d %s), got %+v", status, truncate([]byte(payload), 120), got)
+	}
+}
+
 // A prompt produces a transcript the client can read: the user's message, the prompt that
 // was sent, the assistant's answer, and spend that is attributed to this conversation.
 func TestPromptRoundTrip(t *testing.T) {

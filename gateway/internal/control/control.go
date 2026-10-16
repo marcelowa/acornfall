@@ -53,6 +53,10 @@ type Options struct {
 	Model string
 	// SettingsPath persists the active conversation and per-conversation agents.
 	SettingsPath string
+	// DraftsPath persists the unsent message of each conversation. Beside the settings, and
+	// a file of its own: a draft changes with every keystroke, the settings rarely, and one
+	// file that holds both would rewrite the choices every time someone typed.
+	DraftsPath string
 	// Registry lists the install's workspaces, so a client can switch between them.
 	Registry func() []Workspace
 	// WorkspacesDir is where new workspaces are created, so the interface can say so.
@@ -175,6 +179,10 @@ type State struct {
 	Subagent bool `json:"subagent"`
 	// Policy is what this conversation may do with other conversations.
 	Policy json.RawMessage `json:"policy,omitempty"`
+	// Draft is the active conversation's unsent message, if it ever had one. It rides the
+	// state so every machine shows the same half-thought in the composer, and so a reload
+	// lands on what was typed a second ago rather than on an empty card.
+	Draft *Draft `json:"draft,omitempty"`
 	// WorkerUp is false when the harness process is gone. Without it a dead backend is
 	// indistinguishable from an idle one, because everything here is served from cache.
 	WorkerUp    bool   `json:"workerUp"`
@@ -291,6 +299,9 @@ type Control struct {
 	// clients watching different conversations is what makes browser tabs work.
 	subscriberConversation map[int]string
 	attachments            map[string]int
+	// drafts holds one unsent message per conversation, keyed by the harness's own id.
+	// Loaded at open, persisted on every save: a draft outlives the process that took it.
+	drafts map[string]Draft
 }
 
 // cachedView is the last full view per conversation, so switching back is instant
@@ -317,6 +328,7 @@ func New(opts Options) *Control {
 		policies:               map[string]json.RawMessage{},
 		promptedAt:             map[string]int64{},
 		actionAt:               map[string]int64{},
+		drafts:                 map[string]Draft{},
 	}
 }
 
@@ -330,6 +342,9 @@ func New(opts Options) *Control {
 func (c *Control) Open(ctx context.Context) {
 	// Values are kept, cancellation is not: the caller may be a request that is about to end.
 	c.lifetime, c.stop = context.WithCancel(context.WithoutCancel(ctx))
+	// The drafts are this workspace's own words: read before the worker is asked for
+	// anything, so a state is complete from the first client that asks.
+	c.loadDrafts()
 	if err := c.attachToWorker(ctx); err != nil {
 		c.mu.Lock()
 		c.workerUp = false
@@ -917,6 +932,12 @@ func (c *Control) StateFor(conversationID string) State {
 		Providers: c.providers,
 		Seq:       c.views[active].seq,
 		Policy:    c.policies[active],
+	}
+	// The draft travels with the state, not with the transcript: it is the composer's, and
+	// the conversation it belongs to is the one this state is about. A copy, so the client
+	// reads a value rather than a map that a keystroke on another machine can change under it.
+	if draft, found := c.drafts[active]; found {
+		state.Draft = &draft
 	}
 	// The conversation this call asked for, not the one the worker happens to be attached
 	// to. They are the same only once the attach has landed, and a client that asks about a
@@ -2025,6 +2046,9 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 			if err != nil {
 				return err
 			}
+			// The invocation was a message like any other: whatever was being typed for this
+			// room has been said, and every machine should hear that it is gone.
+			c.clearDraft(conversationID)
 			c.publish(protocol.Frame{Type: "state"})
 			return nil
 		} else if expanded.Command != "" {
@@ -2043,6 +2067,9 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 	c.mu.Lock()
 	c.promptedAt[conversationID] = time.Now().UnixMilli()
 	c.mu.Unlock()
+	// The words have landed: the room's draft is what is left to type, which is nothing.
+	// The clear is announced by the publish below, to every machine watching the room.
+	c.clearDraft(conversationID)
 	// The grace starts now, and attached tabs hear state moves as signals, not on the
 	// next poll: without this a second tab keeps a stale rail for up to three seconds
 	// behind the click. Like every other mutation here, the prompt announces.
