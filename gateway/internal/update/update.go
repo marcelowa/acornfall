@@ -513,9 +513,7 @@ func (m *Manager) Notes(ctx context.Context, tags []string) map[string]string {
 	var wait sync.WaitGroup
 	lanes := make(chan struct{}, NotesConcurrency)
 	for index, tag := range missing {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
+		wait.Go(func() {
 			lanes <- struct{}{}
 			defer func() { <-lanes }()
 			release, err := m.Release(ctx, tag)
@@ -524,7 +522,7 @@ func (m *Manager) Notes(ctx context.Context, tags []string) map[string]string {
 			}
 			resolved[index] = release.Notes
 			read[index] = true
-		}()
+		})
 	}
 	wait.Wait()
 
