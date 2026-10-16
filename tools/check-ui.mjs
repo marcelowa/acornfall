@@ -1205,6 +1205,113 @@ try {
 		await page.keyboard.press("Backspace");
 	}
 
+	// 6b. The draft is the room's, not the page's: a half-typed message is written where the
+	// conversation lives, so a reload lands mid-sentence, and leaving the room neither carries
+	// the words into the next one nor loses them in the one they belong to.
+	const composerText = () =>
+		page.$eval("[data-slot=composer] textarea", (field) => field.value).catch(() => "");
+	const draftRoom = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+	await page.click("[data-slot=composer] textarea");
+	// The room may already hold a draft — this runs against a real install too — so the check
+	// starts from an empty composer and says so.
+	await page.keyboard.down("Control");
+	await page.keyboard.press("KeyA");
+	await page.keyboard.up("Control");
+	await page.keyboard.press("Backspace");
+	await page.waitForFunction(
+		() => document.querySelector("[data-slot=composer] textarea")?.value === "",
+		{ timeout: 5000, polling: 100 },
+	);
+	await page.type("[data-slot=composer] textarea", "half a thought");
+	// The write is batched: wait for the server, or a fast reload would test the batching
+	// rather than the draft.
+	const written = await page
+		.waitForFunction(
+			async () => {
+				const id = window.location.pathname.split("/").at(-1) ?? "";
+				const state = await (
+					await fetch(`/api/state?conversation=${id}`)
+				).json();
+				return state.draft?.text === "half a thought";
+			},
+			{ timeout: 5000, polling: 100 },
+		)
+		.then(() => true)
+		.catch(() => false);
+	check("a half-typed message is written down where the room is", written);
+
+	await page.reload({ waitUntil: "domcontentloaded" });
+	const afterReload = await page
+		.waitForFunction(
+			() =>
+				document.querySelector("[data-slot=composer] textarea")?.value ===
+				"half a thought",
+			{ timeout: 15000, polling: 100 },
+		)
+		.then(() => true)
+		.catch(() => false);
+	check("a reload lands on the half-typed message", afterReload, await composerText());
+
+	// Moving away and back: the words wait in their own room, and they do not follow into
+	// another one. The room this makes is tombstoned after it, like the suite's own.
+	const beforeMove = page.url();
+	await press(page, "button[aria-label='New conversation']");
+	const moved = await page
+		.waitForFunction(
+			(previous) => window.location.pathname !== previous,
+			{ timeout: 15000, polling: 100 },
+			beforeMove,
+		)
+		.then(() => true)
+		.catch(() => false);
+	const otherRoom = moved
+		? await inPage(page, () => window.location.pathname.split("/").at(-1) ?? "")
+		: "";
+	// The room opens as the URL changes, a frame before the state for it lands, so the check is
+	// that the words leave — a draft that followed would sit there and never clear.
+	const cleared = moved
+		? await page
+				.waitForFunction(
+					() => document.querySelector("[data-slot=composer] textarea")?.value === "",
+					{ timeout: 5000, polling: 100 },
+				)
+				.then(() => true)
+				.catch(() => false)
+		: false;
+	check("the draft does not follow into another room", cleared, await composerText());
+	if (otherRoom !== "" && otherRoom !== undefined) {
+		await page
+			.waitForSelector(`[data-slot=conversation-select][data-conversation="${draftRoom}"]`, {
+				timeout: 10000,
+			})
+			.catch(() => null);
+		await press(page, `[data-slot=conversation-select][data-conversation="${draftRoom}"]`);
+		const back = await page
+			.waitForFunction(
+				() =>
+					document.querySelector("[data-slot=composer] textarea")?.value ===
+					"half a thought",
+				{ timeout: 10000, polling: 100 },
+			)
+			.then(() => true)
+			.catch(() => false);
+		check("coming back lands on the draft again", back, await composerText());
+		await page.evaluate(async (id) => {
+			await fetch(`/api/workspaces/general/conversations/${id}/hide`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ hidden: true }),
+			});
+		}, otherRoom);
+	}
+
+	// Leave the room as it was found: the next run should not open on this suite's half-thought.
+	await page.click("[data-slot=composer] textarea");
+	await page.keyboard.down("Control");
+	await page.keyboard.press("KeyA");
+	await page.keyboard.up("Control");
+	await page.keyboard.press("Backspace");
+
 	// 7. The inspector: an overlay behind the header toggle in the top-right corner, closed
 	// by default, and not remembered — opening it is a question asked now, not a preference.
 	await page.setViewport({ width: 1400, height: 900 });

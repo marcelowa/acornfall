@@ -37,6 +37,23 @@ export interface WireConversation {
 	createdBy?: string | undefined;
 }
 
+/** One staged file riding a draft: the id a message will carry, and the chip's words. */
+export interface WireDraftAttachment {
+	id: string;
+	name: string;
+	size: number;
+	mime: string;
+}
+
+/** One room's unsent message, as the workspace holds it. The stamp is taken by the gateway: it
+ * orders one machine's save against another's, so a console can tell its own echo from a write
+ * it did not make. */
+export interface WireDraft {
+	text?: string | undefined;
+	attachments?: WireDraftAttachment[] | undefined;
+	updatedAt?: number | undefined;
+}
+
 /** The self-update summary, as the state stream carries it. */
 export interface WireUpdateSummary {
 	current: string;
@@ -168,6 +185,9 @@ export interface WireState {
 	workspaces: WireWorkspace[];
 	conversation?: WireConversation | undefined;
 	conversations: WireConversation[];
+	/** The conversation's unsent message, if it ever had one. It is the workspace's, not the
+	 * browser's: a half-typed line waits in the room on every machine. */
+	draft?: WireDraft | undefined;
 	workerUp: boolean;
 	workerError?: string | undefined;
 	sandbox: WireSandbox;

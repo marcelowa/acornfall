@@ -2,6 +2,8 @@ import type { SlashCommand } from "./view-models";
 import type {
 	WireAuthEvent,
 	WireCommands,
+	WireDraft,
+	WireDraftAttachment,
 	WireFrame,
 	WireSender,
 	WireState,
@@ -85,6 +87,30 @@ export function sendMessage(
 			attachments,
 		},
 	);
+}
+
+/**
+ * Record one conversation's unsent message: the words, and the staged files riding them.
+ * `keepalive` is for the write that has to leave while the page does — a reload mid-sentence
+ * is the reload the draft exists for. The answer is what was stored, stamp included.
+ */
+export async function saveDraft(
+	workspace: string,
+	conversation: string,
+	draft: { text: string; attachments: WireDraftAttachment[] },
+	keepalive = false,
+): Promise<WireDraft> {
+	const response = await fetch(
+		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/draft`),
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(draft),
+			keepalive,
+		},
+	);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as WireDraft;
 }
 
 export function renameConversation(

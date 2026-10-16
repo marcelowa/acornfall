@@ -249,6 +249,9 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		send: () => Promise.resolve(),
 		upload: () =>
 			Promise.resolve({ id: "a-1", name: "shot.png", size: 12000, mime: "image/png" }),
+		// The room's draft is the platform's, and empty until a story gives it words or files.
+		draft: { conversation: streamConversation.id, text: "", attachments: [] },
+		setDraft: noop,
 		abort: noop,
 		setRailWidth: noop,
 		setRailOpen: noop,
@@ -314,9 +317,13 @@ export const Running: Story = {
 		platform: makePlatform({
 			entries: runningEntries,
 			active: { ...streamConversation, running: true },
+			// A draft in progress: steer and queue stay enabled, as in the hand.
+			draft: {
+				conversation: streamConversation.id,
+				text: "and the lock file",
+				attachments: [],
+			},
 		}),
-		// A draft in progress: steer and queue stay enabled, as in the hand.
-		initialDraft: "and the lock file",
 	},
 };
 

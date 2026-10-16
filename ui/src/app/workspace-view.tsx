@@ -42,8 +42,30 @@ import type { Platform } from "./use-platform";
 
 export interface WorkspaceViewProps {
 	platform: Platform;
-	/** The draft to start with; stories use it to show the composer mid-thought. */
-	initialDraft?: string | undefined;
+}
+
+/** The files that can ride a message, as the server knows them: staged, with their ids. */
+function rideable(chips: DraftAttachment[]): UploadedAttachment[] {
+	return chips
+		.filter((entry) => entry.status === "ready" && entry.id !== undefined)
+		.map((entry) => ({
+			id: entry.id as string,
+			name: entry.name,
+			size: entry.size,
+			mime: entry.mime,
+		}));
+}
+
+/** A chip for a file the room's draft already holds: staged on another visit, or another machine. */
+function chipOf(file: UploadedAttachment): DraftAttachment {
+	return {
+		key: `saved-${file.id}`,
+		name: file.name,
+		size: file.size,
+		mime: file.mime,
+		status: "ready",
+		id: file.id,
+	};
 }
 
 /** True at 2xl, where the inspector docks beside the transcript instead of overlaying it. */
@@ -66,8 +88,9 @@ function useWide(): boolean {
  * applied to the dumb screen. `App` is this plus the hook, and Storybook renders this with
  * literals — which is what keeps the catalogue and the product the same picture.
  *
- * The draft and the busy-action choice are the composer's own state, not the platform's: they
- * exist for one visit to one conversation and nothing else needs them.
+ * The draft is the workspace's, so it waits in the room across a switch, a reload, and the
+ * other machine; the fold and the busy-action choice are this visit's, and live here because
+ * the composer unmounts when a screen shows.
  */
 /** A file picked in the composer: uploading, stored, or refused with its reason. */
 export interface DraftAttachment {
@@ -80,10 +103,9 @@ export interface DraftAttachment {
 	error?: string | undefined;
 }
 
-export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProps) {
-	const [draft, setDraft] = useState(initialDraft);
+export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	/** The composer's fold, the phone's rest state. It lives here, above the composer, so the
-	 * draft and the fold survive the composer unmounting when a screen shows (step 04, panel). */
+	 * fold survives the composer unmounting when a screen shows (step 04, panel). */
 	const [composerFolded, setComposerFolded] = useState(true);
 	const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
 	const attachmentKey = useRef(0);
@@ -95,6 +117,47 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 	/** The inspector, asked or not: a dialog below 2xl, a docked column where it fits. */
 	const [inspectorOpen, setInspectorOpen] = useState(false);
 	const wide = useWide();
+
+	// The draft belongs to the room, not to this visit: the workspace keeps the words, and the
+	// composer shows them with whatever this machine has typed on top. Switching rooms starts
+	// from the room's own draft, and a reload lands on what was typed a second ago.
+	const saved = platform.draft;
+	const draft = saved?.text ?? "";
+	/** What the composer is holding. An upload answers in a promise, and the words it must ride
+	 * with are the ones on screen when it lands, not the ones from the render that asked. */
+	const held = useRef({ text: draft, chips: attachments });
+	useEffect(() => {
+		held.current = { text: draft, chips: attachments };
+	}, [draft, attachments]);
+
+	/** Record the draft: what the person sees is what the workspace is told, in one write. */
+	const remember = (text: string, chips: DraftAttachment[]): void => {
+		held.current = { text, chips };
+		platform.setDraft(text, rideable(chips));
+	};
+	const edit = (text: string): void => remember(text, held.current.chips);
+
+	// The room's own files arrive with it, and a draft that moved elsewhere — another machine's
+	// edit, or the clear after a message sent from one — rebuilds the ready chips. Files
+	// mid-upload or refused stay: they are this machine's, and the server has never seen them.
+	const room = saved?.conversation;
+	const savedIds = (saved?.attachments ?? []).map((file) => file.id).join(" ");
+	const lastRoom = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		const arrived = lastRoom.current !== room;
+		lastRoom.current = room;
+		setAttachments((current) => {
+			if (arrived) return (saved?.attachments ?? []).map(chipOf);
+			const ready = rideable(current)
+				.map((file) => file.id)
+				.join(" ");
+			if (ready === savedIds) return current;
+			return [
+				...(saved?.attachments ?? []).map(chipOf),
+				...current.filter((entry) => entry.status !== "ready"),
+			];
+		});
+	}, [room, saved, savedIds]);
 
 	// A draft that is one slash word is a command being typed: the menu lists what the server
 	// knows, Enter completes the word, and the expansion itself happens server-side.
@@ -108,12 +171,8 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 	const slashKey = slashWord?.[1] ?? null;
 	const [slashIndex, setSlashIndex] = useState(0);
 	const [slashHiddenFor, setSlashHiddenFor] = useState<string | null>(null);
-	// The draft belongs to one visit to one conversation: switching conversations starts a
-	// new visit, not a delivery of the old half-thought into the new room.
 	const activeId = platform.active?.id;
 	useEffect(() => {
-		setDraft("");
-		setAttachments([]);
 		setSlashIndex(0);
 	}, [activeId]);
 
@@ -149,41 +208,50 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 			setAttachments((current) => [...current, pending]);
 			void platform.upload(file).then(
 				(done: UploadedAttachment) => {
-					setAttachments((current) =>
-						current.map((entry) =>
-							entry.key === key
-								? {
-										...entry,
-										status: "ready" as const,
-										id: done.id,
-										name: done.name,
-										size: done.size,
-										mime: done.mime,
-									}
-								: entry,
-						),
+					const next = held.current.chips.map((entry) =>
+						entry.key === key
+							? {
+									...entry,
+									status: "ready" as const,
+									id: done.id,
+									name: done.name,
+									size: done.size,
+									mime: done.mime,
+								}
+							: entry,
 					);
+					setAttachments(next);
+					// The file can ride now, and the draft says so: the chip comes back ready after a
+					// reload rather than gone.
+					remember(held.current.text, next);
 				},
 				(cause: unknown) => {
-					setAttachments((current) =>
-						current.map((entry) =>
-							entry.key === key
-								? {
-										...entry,
-										status: "failed" as const,
-										error:
-											cause instanceof Error ? cause.message : String(cause),
-									}
-								: entry,
-						),
+					const next = held.current.chips.map((entry) =>
+						entry.key === key
+							? {
+									...entry,
+									status: "failed" as const,
+									error: cause instanceof Error ? cause.message : String(cause),
+								}
+							: entry,
 					);
+					setAttachments(next);
+					// A refused file is not a draft: the server never sees the chip, and it stays
+					// this machine's until it is removed.
+					held.current = { ...held.current, chips: next };
 				},
 			);
 		}
 	};
 
 	const removeAttachment = (key: string): void => {
-		setAttachments((current) => current.filter((entry) => entry.key !== key));
+		const removed = held.current.chips.find((entry) => entry.key === key);
+		const next = held.current.chips.filter((entry) => entry.key !== key);
+		setAttachments(next);
+		// Only a staged file was part of the draft: a chip mid-upload or refused changes nothing
+		// the server knows about.
+		if (removed?.status === "ready") remember(held.current.text, next);
+		else held.current = { ...held.current, chips: next };
 	};
 	// Stop stays a button and goes quiet while the abort lands: a slow abort invites
 	// repeated clicks, and repeated clicks are repeated abort calls. The run ending, a
@@ -205,35 +273,32 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 	const clampedSlash =
 		visibleSlash.length === 0 ? 0 : Math.min(slashIndex, visibleSlash.length - 1);
 
-	const readyAttachments = attachments.filter(
-		(entry) => entry.status === "ready" && entry.id !== undefined,
-	);
-	const uploadingAttachments = attachments.some((entry) => entry.status === "uploading");
-
 	const sendText = (action: "steer" | "followUp"): void => {
 		const text = draft.trim();
-		if (text === "" && readyAttachments.length === 0) return;
-		if (uploadingAttachments) return;
+		const staged = rideable(held.current.chips);
+		if (text === "" && staged.length === 0) return;
+		if (held.current.chips.some((entry) => entry.status === "uploading")) return;
 		if (platform.active === undefined) return;
-		const ids = readyAttachments.map((entry) => entry.id as string);
-		setDraft("");
+		const ids = staged.map((file) => file.id);
+		// The message is on its way, so the room's shelf is empty: the send clears the draft on
+		// every machine, and this one does not wait to hear it back.
 		setAttachments([]);
+		platform.setDraft("", []);
 		// A refused send keeps what was typed: the draft comes back if nothing else does.
 		// The chips stay either way — staged files survive a refusal to ride the retry.
 		void platform.send(text, action, ids.length === 0 ? undefined : ids).catch(() => {
-			setDraft((current) => (current === "" ? text : current));
-			setAttachments((current) =>
-				current.length === 0 ? readyAttachments.map((entry) => ({ ...entry })) : current,
-			);
+			const chips = staged.map(chipOf);
+			setAttachments((current) => (current.length === 0 ? chips : current));
+			remember(text, chips);
 		});
 	};
 
 	const submit = (): void => {
 		const text = draft.trim();
-		if (text === "" && readyAttachments.length === 0) return;
+		if (text === "" && rideable(held.current.chips).length === 0) return;
 		const first = visibleSlash[clampedSlash];
 		if (first !== undefined) {
-			setDraft(`/${first.name} `);
+			edit(`/${first.name} `);
 			return;
 		}
 		sendText("steer");
@@ -639,7 +704,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 					screen === undefined ? (
 						<Composer
 							value={draft}
-							onChange={setDraft}
+							onChange={edit}
 							onSend={submit}
 							folded={composerFolded}
 							onFoldedChange={setComposerFolded}
@@ -674,7 +739,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 										commands={visibleSlash}
 										highlighted={clampedSlash}
 										onHighlight={setSlashIndex}
-										onSelect={setDraft}
+										onSelect={edit}
 									/>
 								)
 							}
@@ -683,7 +748,7 @@ export function WorkspaceView({ platform, initialDraft = "" }: WorkspaceViewProp
 							onSlashIndexChange={setSlashIndex}
 							onSlashPick={(index) => {
 								const match = visibleSlash[index];
-								if (match !== undefined) setDraft(`/${match.name} `);
+								if (match !== undefined) edit(`/${match.name} `);
 							}}
 							onSlashDismiss={() => setSlashHiddenFor(slashKey)}
 							ambient={
