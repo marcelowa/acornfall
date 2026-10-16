@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -566,9 +567,7 @@ type RunningWorkspace struct {
 func (w *Workspaces) RunningSummary() []RunningWorkspace {
 	w.mu.RLock()
 	named := make(map[string]*Control, len(w.controls))
-	for name, control := range w.controls {
-		named[name] = control
-	}
+	maps.Copy(named, w.controls)
 	w.mu.RUnlock()
 	summary := make([]RunningWorkspace, 0, len(named))
 	for name, control := range named {

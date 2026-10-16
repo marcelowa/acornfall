@@ -19,8 +19,9 @@ OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
 # not a silent pass.
 GOBIN := $(shell go env GOPATH)/bin
 STATICCHECK := $(GOBIN)/staticcheck
-# modernize lives inside gopls, so the path looks wrong and is not: it is the analyzer gopls
-# serves to editors, published as a vet tool. Installing it pulls the toolchain gopls needs.
+# modernize is the analyzer gopls serves to editors, with a command published as a vet tool.
+# x/tools v0.52.0 moved it out of gopls and into go/analysis/passes; gopls v0.24.0 no longer
+# carries the old path, which is what stopped the daily workflow installing it.
 MODERNIZE := $(GOBIN)/modernize
 # The language version the gateway is written against, from its own go.mod. The linters must
 # be built with at least it: a staticcheck built by an older Go refuses to read newer sources
@@ -71,7 +72,7 @@ lint: ui-build typecheck ## the static rules; fails on the first one broken
 # than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a
 # loop, not a wrong answer. It is a prompt, not a gate, and a daily workflow prompts with it.
 modernize: ## the idiom analyzer; a daily workflow runs it, `make lint` does not
-	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest
 	cd gateway && go vet -vettool=$(MODERNIZE) ./... && echo "modernize: clean"
 
 commits: ## check commit messages (RANGE=origin/main..HEAD by default)

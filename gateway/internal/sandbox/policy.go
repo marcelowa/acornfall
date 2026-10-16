@@ -144,8 +144,8 @@ func base(path string) string {
 	if trimmed == "" {
 		return "workspace"
 	}
-	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
-		return trimmed[index+1:]
+	if _, after, ok := strings.CutLast(trimmed, "/"); ok {
+		return after
 	}
 	return trimmed
 }
