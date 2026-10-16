@@ -11,17 +11,18 @@
  * a render on half a diagram.
  */
 
-export type DrawnKind = "mermaid" | "chart";
+export type DrawnKind = "mermaid" | "chart" | "spark";
 
 export type MarkdownSegment =
 	| { kind: "text"; text: string }
 	| { kind: "mermaid"; source: string }
-	| { kind: "chart"; source: string };
+	| { kind: "chart"; source: string }
+	| { kind: "spark"; source: string };
 
 /** The languages the console draws, and nothing else. A plain info string only: `mermaid` with
  * options belongs to that diagram type, and `chart` with a title on it is a title the drawing has
  * no place for, so both stay code blocks rather than a guess. */
-const DRAWN: Record<string, DrawnKind> = { mermaid: "mermaid", chart: "chart" };
+const DRAWN: Record<string, DrawnKind> = { mermaid: "mermaid", chart: "chart", spark: "spark" };
 
 /** An opening fence: up to three spaces, three or more backticks or tildes, then the info string. */
 const OPENING = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\n]*)$/;

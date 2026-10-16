@@ -1,0 +1,22 @@
+/* A sparkline: the shape of the numbers, one line wide, with a value at each end. */
+.spark-block {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing-2);
+	margin: 0 0 var(--spacing-2);
+}
+
+.spark-line {
+	flex: 1 1 auto;
+	min-inline-size: 0;
+	block-size: 24px;
+	color: var(--primary);
+}
+
+.spark-end {
+	flex: none;
+}
+
+.spark-note {
+	margin: var(--spacing-1) 0 0;
+}

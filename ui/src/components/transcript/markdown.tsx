@@ -4,6 +4,7 @@ import { Chart } from "./chart";
 import { renderMarkdown } from "./render-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { splitBlocks } from "./markdown-blocks";
+import { Spark } from "./spark";
 import "highlight.js/styles/github-dark.css";
 import "./markdown.css";
 
@@ -31,6 +32,8 @@ export function Markdown({ children, className, streaming = false }: MarkdownPro
 					<MermaidDiagram key={index} source={segment.source} />
 				) : segment.kind === "chart" ? (
 					<Chart key={index} source={segment.source} />
+				) : segment.kind === "spark" ? (
+					<Spark key={index} source={segment.source} />
 				) : (
 					<MarkdownText key={index} text={segment.text} />
 				),

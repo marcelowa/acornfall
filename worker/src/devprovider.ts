@@ -214,6 +214,12 @@ const VISUAL_REPLY = [
 	"ui/src/chart.tsx",
 	"ui/src/chart.css",
 	"```",
+	"",
+	"And how it moved:",
+	"",
+	"```spark",
+	"3 5 4 9 8 12",
+	"```",
 ].join("\n");
 
 const defaultRespond: FauxResponseFactory = (context) => {
