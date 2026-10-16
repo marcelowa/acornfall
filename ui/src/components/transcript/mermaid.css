@@ -1,0 +1,15 @@
+/* The diagram block, which belongs to `mermaid-diagram.tsx` rather than to the markdown styles:
+ * a drawing is a component, and it looks the same wherever a reply puts it. */
+.mermaid-block {
+	margin: 0 0 var(--spacing-2);
+	overflow-x: auto;
+}
+
+.mermaid-drawing svg {
+	max-width: 100%;
+	height: auto;
+}
+
+.mermaid-note {
+	margin: 0 0 var(--spacing-2);
+}

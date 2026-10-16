@@ -39,7 +39,7 @@ export function AssistantMessage({ entry, defaultRaw = false }: AssistantMessage
 	if (entry.live === true) {
 		return (
 			<div data-slot="assistant" data-live="true" className="w-full">
-				{entry.markdown === "" ? null : <Markdown>{entry.markdown}</Markdown>}
+				{entry.markdown === "" ? null : <Markdown streaming>{entry.markdown}</Markdown>}
 				<div data-slot="thinking" className="py-2">
 					<ThinkingDots label="Responding" />
 				</div>

@@ -724,6 +724,68 @@ try {
 		);
 		check("the transcript renders its markdown", rendered > 0, "no rendered markdown on screen");
 
+		// 3. A Mermaid fence becomes a drawing. The fence is sent in a message and comes back in the
+		// answer: your own words are shown as typed, and the default dev provider quotes the request,
+		// so the transcript's markdown path is the one that draws. The drawing is the proof that the
+		// lazy Mermaid chunk arrives through the real bundle, that its labels survive the walk over
+		// the SVG, and that it paints with a size rather than as a zero-height element.
+		const sent = await page
+			.evaluate(async () => {
+				try {
+					const match = /^\/c\/([^/]+)\/([^/]+)/.exec(window.location.pathname);
+					if (match === null) return false;
+					const url =
+						"/api/workspaces/" +
+							match[1] +
+							"/conversations/" +
+							match[2] +
+							"/messages";
+					const response = await fetch(url, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({
+							text: "draw the diagram",
+							whenBusy: "followUp",
+						}),
+					});
+					return response.ok;
+				} catch {
+					return false;
+				}
+			})
+			.catch(() => false);
+		check("a message with a diagram in it can be sent", sent);
+		if (sent) {
+			const drawn = await page
+				.waitForFunction(
+					() => {
+						const svg = document.querySelector("[data-slot=transcript] .mermaid-drawing svg");
+						if (svg === null) return false;
+						return svg.getBoundingClientRect().height > 20 && (svg.textContent ?? "").trim().length > 0;
+					},
+					{ timeout: 60000, polling: 100 },
+				)
+				.then(() => true)
+				.catch(() => false);
+			const echoed = await page.evaluate(() =>
+				[...document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]")].some((pane) =>
+					(pane.textContent ?? "").includes("Ask --> Draw"),
+				),
+			);
+			check(
+				"a Mermaid fence is drawn, with its labels",
+				drawn,
+				!echoed
+					? "the answer did not carry the fence; run the gateway with the default dev provider"
+					: "the fence came back but no drawing appeared within 60s",
+			);
+			const refused = await page.evaluate(() => {
+				const block = document.querySelector("[data-slot=transcript] .mermaid-block[data-state=refused]");
+				return block === null ? null : (block.textContent ?? "").trim();
+			});
+			check("the diagram was not refused", refused === null, refused ?? "");
+		}
+
 		const clipped = await page.evaluate(() =>
 			[...document.querySelectorAll("[data-slot=tool]")].map((card) => ({
 				card: Math.round(card.getBoundingClientRect().height),

@@ -150,3 +150,18 @@
 	background: var(--muted);
 	font-weight: var(--font-weight-semibold);
 }
+
+/* A reply is text segments and diagrams, and `markdown.tsx` wraps each text segment because
+ * `dangerouslySetInnerHTML` cannot share an element with React children. `display: contents` keeps
+ * that wrapper out of the layout, so every rule above still sees its children as the children of
+ * `.markdown`. */
+.markdown .markdown-part {
+	display: contents;
+}
+
+/* A node label is a `<p>` inside a `<foreignObject>`, and the prose rule above would give every one
+ * of them a paragraph's margin. This one selector is scoped to `.markdown` for the specificity it
+ * needs to win; the rest of the diagram's styles belong to the component and live in mermaid.css. */
+.markdown .mermaid-block p {
+	margin: 0;
+}
