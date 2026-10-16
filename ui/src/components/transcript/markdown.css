@@ -307,6 +307,125 @@
 	background: var(--warning);
 }
 
+/* A grid of results: the row's name, then a cell per column, each tinted by the word in it, so a
+ * reader finds the failures by looking down a column rather than by reading every cell. */
+.markdown .matrix {
+	display: flex;
+	flex-direction: column;
+	gap: var(--spacing-1);
+	margin: 0 0 var(--spacing-2);
+}
+
+.markdown .matrix-row {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing-1);
+}
+
+.markdown .matrix-label {
+	flex: 0 0 40%;
+	overflow: hidden;
+	color: var(--muted-foreground);
+	font-size: var(--text-sm);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.markdown .matrix-cell {
+	flex: 1 1 0;
+	min-inline-size: 0;
+	overflow: hidden;
+	padding: 2px var(--spacing-1);
+	border-radius: var(--radius-sm);
+	font-size: var(--text-2xs);
+	text-align: center;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.markdown .cell-ok {
+	background: var(--success-subtle);
+	color: var(--success-subtle-foreground);
+}
+
+.markdown .cell-warn {
+	background: var(--warning-subtle);
+	color: var(--warning-subtle-foreground);
+}
+
+.markdown .cell-fail {
+	background: var(--destructive-subtle);
+	color: var(--destructive-subtle-foreground);
+}
+
+.markdown .cell-unknown {
+	background: var(--muted);
+	color: var(--muted-foreground);
+}
+
+/* The head row holds names, not states: quiet text with no tint behind it. */
+.markdown .matrix-head .matrix-cell {
+	background: none;
+	color: var(--muted-foreground);
+	font-weight: var(--font-weight-semibold);
+}
+
+/* A row of facts: the names small and quiet, the values mono and comparable. */
+.markdown .stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--spacing-1) var(--spacing-3);
+	margin: 0 0 var(--spacing-2);
+}
+
+.markdown .stat {
+	display: flex;
+	flex-direction: column;
+	min-inline-size: 0;
+}
+
+.markdown .stat-label {
+	color: var(--muted-foreground);
+	font-size: var(--text-2xs);
+	letter-spacing: var(--tracking-wide);
+	text-transform: uppercase;
+}
+
+.markdown .stat-value {
+	color: var(--foreground);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+}
+
+/* A file tree: mono, one path per line, and an indent guide, which is the whole shape. */
+.markdown .tree {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 0 0 var(--spacing-2);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+}
+
+.markdown .tree-children {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-inline-start: 4px;
+	padding-inline-start: var(--spacing-2);
+	border-inline-start: 1px solid var(--border);
+}
+
+.markdown .tree-node {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.markdown .tree-dir {
+	color: var(--muted-foreground);
+}
+
 /* A reply is text segments and diagrams, and `markdown.tsx` wraps each text segment because
  * `dangerouslySetInnerHTML` cannot share an element with React children. `display: contents` keeps
  * that wrapper out of the layout, so every rule above still sees its children as the children of

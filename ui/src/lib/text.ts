@@ -6,3 +6,16 @@ export function stripAnsi(text: string): string {
 		"",
 	);
 }
+
+/** Text on its way into HTML: a fence's words are the model's, and they are not markup. */
+export function escapeHtml(value: string): string {
+	return value.replace(/[&<>"']/g, (char) => ENTITIES[char] ?? char);
+}
+
+const ENTITIES: Record<string, string> = {
+	"&": "&amp;",
+	"<": "&lt;",
+	">": "&gt;",
+	'"': "&quot;",
+	"'": "&#39;",
+};

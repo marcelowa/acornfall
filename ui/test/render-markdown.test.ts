@@ -129,4 +129,53 @@ describe("the markdown renderer", () => {
 	test("an empty steps fence stays a code block", () => {
 		expect(renderMarkdown("```steps\n```")).toContain("code-block");
 	});
+
+	test("a matrix draws a tinted cell per state, under its column names", () => {
+		const html = renderMarkdown(
+			"```matrix\ntarget | unit | e2e\nlinux | pass | fail\nmac | skip | pass\n```",
+		);
+		expect(html).toContain('class="matrix"');
+		expect(html).toContain('class="matrix-row matrix-head"');
+		expect(html).toContain('cell-ok">pass');
+		expect(html).toContain('cell-fail">fail');
+		expect(html).toContain('cell-warn">skip');
+		expect(html).not.toContain("code-block");
+	});
+
+	test("a matrix that does not line up, or names no state, stays a code block", () => {
+		for (const fence of [
+			"```matrix\na | b\nlinux | pass | fail\n```",
+			"```matrix\na | b\nlinux | sluggish\n```",
+			"```matrix\na | b\n```",
+		]) {
+			expect(renderMarkdown(fence)).toContain("code-block");
+		}
+	});
+
+	test("a stats fence draws a tile per fact, and a value may hold anything", () => {
+		const html = renderMarkdown("```stats\ncommit: 244e804\nfiles: 12\ndiff: +414 −75\n```");
+		expect(html).toContain('class="stats"');
+		expect(html).toContain('stat-label">commit');
+		expect(html).toContain("+414 −75");
+	});
+
+	test("a stats fence with an empty side stays a code block", () => {
+		expect(renderMarkdown("```stats\ncommit:\n```")).toContain("code-block");
+		expect(renderMarkdown("```stats\nno colon here\n```")).toContain("code-block");
+	});
+
+	test("a tree draws the shape of the paths, not the paths", () => {
+		const html = renderMarkdown(
+			"```tree\nui/src/chart.tsx\nui/src/chart.css\nworker/src/main.ts\n```",
+		);
+		expect(html).toContain('class="tree"');
+		expect(html).toContain('tree-dir" title="ui/">ui/');
+		expect(html).toContain('tree-file" title="chart.tsx">chart.tsx');
+		// Two files under one directory: the shared segment is written once.
+		expect(html.split(">ui/").length - 1).toBe(1);
+	});
+
+	test("a tree of paths with nothing in common is still a tree of names", () => {
+		expect(renderMarkdown("```tree\nREADME.md\n```")).toContain('tree-file" title="README.md"');
+	});
 });
