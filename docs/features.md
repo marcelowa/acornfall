@@ -73,6 +73,7 @@ reply quoting the request. `make dev` uses it.
 | T19 | A reply can draw numbers: a `chart` fence renders a bar per line, scaled to the longest, with each value beside its bar. A fence that does not read whole — a line that is not `name: number`, a count of more than 24 bars — stays a code block rather than dropping a line. | `ui/test/markdown-blocks.test.ts`, `ui/test/chart-source.test.ts` + `Conversation/Chart` + `make ui` |
 | T20 | A reply can show a grid, its facts and its files: a `matrix` fence tints a cell per state (and refuses a grid that does not line up), a `stats` fence draws one tile per `name: value`, and a `tree` fence writes each shared directory once with its children under it. | `ui/test/render-markdown.test.ts` + `Conversation/Markdown/WithMatrixAndTree` + `make ui` |
 | T21 | A reply can draw a shape: a `spark` fence turns three to sixty numbers into a line, with the first and the last value printed at its ends. A fence that is not all numbers stays a code block. | `ui/test/markdown-blocks.test.ts`, `ui/test/spark-source.test.ts` + `Conversation/Spark` + `make ui` |
+| T22 | A half-typed message waits in the room it was written in: the workspace holds it, so a switch, a reload, and the other machine show the same words, and a message that was sent clears it everywhere. Staged files ride along; a file still uploading does not. | `TestADraftWaitsInTheRoomItWasWrittenIn`, `gateway/internal/control/draft_test.go` + `ui/test/draft.test.ts` + `make ui` |
 
 ## Defaults
 

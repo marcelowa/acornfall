@@ -413,6 +413,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		UserHome:         w.opts.UserHome,
 		StoragePath:      filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
 		SettingsPath:     filepath.Join(w.opts.Home, "state", name, "settings.json"),
+		DraftsPath:       filepath.Join(w.opts.Home, "state", name, "drafts.json"),
 		Sandbox:          w.opts.Sandbox,
 		WorkerCommand:    w.opts.WorkerCommand,
 		WorkerDir:        w.opts.WorkerDir,

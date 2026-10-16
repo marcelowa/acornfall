@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.compactConversation)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/compact-preview", s.compactPreview)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.messages)
+		mux.HandleFunc("POST "+base+"/conversations/{id}/draft", s.draft)
 		mux.HandleFunc("POST "+base+"/attachments", s.attachments)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.abort)
 		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.agent)
@@ -423,6 +424,31 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+// draft is the composer's own write: the unsent message of one conversation, saved so the
+// same words wait there on every machine and on the next reload. Empty words and no files
+// clear it; the answer is what was stored, stamp included, so the client can tell its own
+// echo from another machine's write.
+func (s *Server) draft(w http.ResponseWriter, r *http.Request) {
+	ctl, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	var body struct {
+		Text        string                    `json:"text"`
+		Attachments []control.DraftAttachment `json:"attachments"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	stored, err := ctl.SetDraft(r.PathValue("id"), body.Text, body.Attachments)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, stored)
 }
 
 func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
