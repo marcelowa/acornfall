@@ -29,6 +29,7 @@ Two more rules, both already true of the renderer:
 | Matrix | a ` ```matrix ` fence, `label | cell | cell` per line, column names first | one tinted cell per state, so a column can be read at a glance |
 | Stats | a ` ```stats ` fence, one `name: value` per line | a tile per fact: a small quiet name over a mono value |
 | Tree | a ` ```tree ` fence, one path per line | the directories written once, with the paths under them and an indent guide |
+| Spark | a ` ```spark ` fence, three to sixty numbers | the shape they make, with the first and last value printed at its ends |
 
 The prose forms are renderer hooks in `render-markdown.ts` and `markdown.css`: a `blockquote` hook,
 a `checkbox` hook, and a `list` hook that wraps a list whose every item is a task. The fences that
@@ -36,11 +37,11 @@ are still HTML to look at — `steps`, `matrix`, `stats`, `tree` — are drawn b
 file's `code` hook, and each of them returns nothing when the fence does not read whole, which
 leaves the source as the code block it would have been.
 
-A chart and a Mermaid diagram cannot be HTML strings — one is a component, the other has to run and
-be inserted as a node — so both are split out of the reply before the parse (`markdown-blocks.ts`)
-and drawn by their own component (`chart.tsx`, `mermaid-diagram.tsx`). The chart needs no guard:
-the renderer builds its bars and labels, so the model's words are React text and there is no second
-sanitiser in the path.
+A chart, a sparkline and a Mermaid diagram cannot be HTML strings — a component draws the first
+two, and the third has to run and be inserted as a node — so they are split out of the reply before
+the parse (`markdown-blocks.ts`) and drawn by their own component (`chart.tsx`, `spark.tsx`,
+`mermaid-diagram.tsx`). Neither chart needs a guard: the renderers build their own bars and their
+own line, so the model's words are React text and there is no second sanitiser in the path.
 
 Four limits keep the forms honest, all tested:
 
@@ -59,6 +60,8 @@ Four limits keep the forms honest, all tested:
   `fail`, and a handful of synonyms for each). Eight columns and twelve rows are the most it draws;
   a stats fence draws twelve facts, and a tree forty paths. Past any of those the drawing is no
   longer a glance, and the source is the better answer.
+- A spark fence is numbers all the way through, at least three and at most sixty. A line drawn from
+a fence the console could not read would be a shape nobody wrote.
 
 ## The rest of the vocabulary
 
@@ -91,21 +94,24 @@ Not built, and what each would cost:
 - **A fold inside a reply.** It is a control, not a picture, so it is out by the rule above — and it
   is why a JSON fence is not one either: pretty-printed JSON is already a code block with its own
   colours, and a tree of it would be a fold.
-- **A sparkline or a line chart.** The next thing on this list: bars carry a comparison, a line
-  carries a shape, and a spell carries the numbers that are not worth either.
+- **A line chart with axes.** A sparkline is the same numbers without them, and axes mean ticks, a
+  scale and a size the pane does not know it has.
 
 ## Evidence
 
 - `ui/test/render-markdown.test.ts` — the marker rules, the boxes, the count, the plan's dots, the
   grid, the tiles, the tree, and the sanitiser on a callout body and on a step.
-- `ui/test/markdown-blocks.test.ts` and `ui/test/chart-source.test.ts` — where the split happens,
-  and which fence is a chart at all.
+- `ui/test/markdown-blocks.test.ts`, `ui/test/chart-source.test.ts` and
+  `ui/test/spark-source.test.ts` — where the split happens, and which fence is a chart or a
+  sparkline at all.
 - `Conversation/Markdown/CalloutsAndChecklists`, `Conversation/Markdown/Steps`,
-  `Conversation/Markdown/WithChart`, `Conversation/Markdown/WithMatrixAndTree` and
-  `Conversation/Chart` — the stories: all five labels, a plan with its count, a plan with a blocked
-  step, a drawn chart and a refused one, a grid with its failures tinted, a row of facts, and a tree.
+  `Conversation/Markdown/WithChart`, `Conversation/Markdown/WithSpark`,
+  `Conversation/Markdown/WithMatrixAndTree`, `Conversation/Chart` and `Conversation/Spark` — the
+  stories: all five labels, a plan with its count, a plan with a blocked step, a drawn chart and a
+  refused one, a rising line, a falling one, a flat one, a grid with its failures tinted, a row of
+  facts, and a tree.
 - `tools/check-ui.mjs` — "a callout is drawn and tinted", "a checklist is drawn, boxed and
   counted", "a plan is drawn down its dots, with the one in hand ringed", "a chart draws a bar per
   number, scaled to the longest", "a matrix tints its failures", "a stats fence draws its facts as
-  tiles", "a tree draws the directories once", and the dev provider sentence that answers a request
-  for the visual forms.
+  tiles", "a tree draws the directories once", "a spark draws a line through its numbers, with its
+  ends named", and the dev provider sentence that answers a request for the visual forms.

@@ -78,3 +78,21 @@ describe("splitting a reply at the fences the console draws", () => {
 		]);
 	});
 });
+
+describe("the fences that are drawn, not printed", () => {
+	test("a spark fence is a segment of its own", () => {
+		expect(splitBlocks("```spark\n1 4 2 8\n```")).toEqual([
+			{ kind: "spark", source: "1 4 2 8" },
+		]);
+	});
+
+	test("a spark fence that is still open stays text", () => {
+		const source = "prose\n\n```spark\n1 4";
+		expect(splitBlocks(source)).toEqual([{ kind: "text", text: source }]);
+	});
+
+	test("a fence the console does not draw is left where it is", () => {
+		const source = '```json\n{"a": 1}\n```';
+		expect(splitBlocks(source)).toEqual([{ kind: "text", text: source }]);
+	});
+});

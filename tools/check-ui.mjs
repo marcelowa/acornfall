@@ -816,17 +816,31 @@ try {
 			.catch(() => false);
 		check("a message asking for the visual forms can be sent", asked);
 		if (asked) {
-			// Wait for the answer itself: a reply is a pane, and the transcript already holds the
-			// ones from earlier runs, so what this looks for is one more pane than before.
-			const panes = () =>
-				document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]").length;
-			const before = await page.evaluate(panes);
+			// Wait for the answer itself: a reply is a pane, and the transcript already holds the ones
+			// from earlier runs. A live pane renders as plain text, so this waits for a *settled*
+			// one more than before — the forms only exist once the turn has committed.
+			const settled = () =>
+				[
+					...document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]"),
+				].filter((pane) => !pane.hasAttribute("data-live")).length;
+			const before = await page.evaluate(settled);
 			await page
-				.waitForFunction((count) => document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]").length > count, { timeout: 60000, polling: 100 }, before)
+				.waitForFunction(
+					(count) =>
+						[
+							...document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]"),
+						].filter((pane) => !pane.hasAttribute("data-live")).length > count,
+					{ timeout: 60000, polling: 100 },
+					before,
+				)
 				.catch(() => undefined);
 			const painted = await page.evaluate(() => {
-				// The newest answer, which is the one this run asked for.
-				const pane = [...document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]")].pop();
+				// The newest answer that has settled, which is the one this run asked for.
+				const pane = [
+					...document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]"),
+				]
+					.filter((one) => !one.hasAttribute("data-live"))
+					.pop();
 				const seen = (selector) => pane?.querySelector(selector) ?? null;
 				const callout = seen(".callout-warning");
 				const box = seen(".task-list .task-box.is-done");
@@ -856,6 +870,20 @@ try {
 					stat: (seen(".stats .stat-value")?.textContent ?? "").trim(),
 					dirs: pane === undefined ? 0 : pane.querySelectorAll(".tree .tree-dir").length,
 					files: pane === undefined ? 0 : pane.querySelectorAll(".tree .tree-file").length,
+					spark:
+						pane === undefined
+							? null
+							: (() => {
+									const line = pane.querySelector(".spark-line polyline");
+									if (line === null) return null;
+									return {
+										points: (line.getAttribute("points") ?? "").split(" ").length,
+										width: Math.round(line.getBoundingClientRect().width),
+										ends: [...pane.querySelectorAll(".spark-end")].map((end) =>
+											(end.textContent ?? "").trim(),
+										),
+									};
+								})(),
 					dot:
 						doing === null
 							? null
@@ -903,6 +931,14 @@ try {
 				"a tree draws the directories once",
 				painted.dirs === 2 && painted.files === 2,
 				`${painted.dirs} directories, ${painted.files} files`,
+			);
+			check(
+				"a spark draws a line through its numbers, with its ends named",
+				painted.spark !== null &&
+					painted.spark.points === 6 &&
+					painted.spark.width > 40 &&
+					painted.spark.ends.join(" ") === "3 12",
+				JSON.stringify(painted.spark),
 			);
 		}
 

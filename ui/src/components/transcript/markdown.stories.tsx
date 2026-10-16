@@ -139,6 +139,25 @@ export const WithChart: Story = {
 	),
 };
 
+/** A sparkline is drawn from its fence, between the paragraphs that surround it. */
+export const WithSpark: Story = {
+	render: () => (
+		<div className="w-full max-w-2xl bg-background p-6">
+			<Markdown>
+				{[
+					"The spend per day this week:",
+					"",
+					"```spark",
+					"3 5 4 9 8 12 11",
+					"```",
+					"",
+					"And the prose after it is still prose.",
+				].join("\n")}
+			</Markdown>
+		</div>
+	),
+};
+
 /** A grid of results, a row of facts, and the shape of the paths, in one reply. */
 export const WithMatrixAndTree: Story = {
 	render: () => (
