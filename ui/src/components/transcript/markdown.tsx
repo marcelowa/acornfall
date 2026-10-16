@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import { cn } from "cn";
+import { Chart } from "./chart";
 import { renderMarkdown } from "./render-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
-import { splitMermaid } from "./mermaid-source";
+import { splitBlocks } from "./markdown-blocks";
 import "highlight.js/styles/github-dark.css";
 import "./markdown.css";
 
@@ -17,7 +18,7 @@ export interface MarkdownProps {
 
 export function Markdown({ children, className, streaming = false }: MarkdownProps) {
 	const segments = useMemo(
-		() => (streaming ? [{ kind: "text" as const, text: children }] : splitMermaid(children)),
+		() => (streaming ? [{ kind: "text" as const, text: children }] : splitBlocks(children)),
 		[children, streaming],
 	);
 
@@ -28,6 +29,8 @@ export function Markdown({ children, className, streaming = false }: MarkdownPro
 			{segments.map((segment, index) =>
 				segment.kind === "mermaid" ? (
 					<MermaidDiagram key={index} source={segment.source} />
+				) : segment.kind === "chart" ? (
+					<Chart key={index} source={segment.source} />
 				) : (
 					<MarkdownText key={index} text={segment.text} />
 				),

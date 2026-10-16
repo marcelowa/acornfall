@@ -1,21 +1,29 @@
 /**
- * A reply split at its Mermaid fences.
+ * A reply split at the fences the console draws itself.
  *
- * The transcript parses markdown into one HTML string, and a diagram cannot be a string: Mermaid
- * has to load, run, and be inserted as a node. Splitting the source before the parse is the
- * smallest way to have both — the prose still goes through `marked` unchanged, and each diagram
- * arrives as its own component.
+ * The transcript parses markdown into one HTML string, and a drawing cannot be a string: Mermaid
+ * has to load, run, and be inserted as a node, and a chart is a component. Splitting the source
+ * before the parse is the smallest way to have both — the prose still goes through `marked`
+ * unchanged, and each block arrives as its own component.
  *
- * A fence that is still open is not a diagram yet, it is what the reply is writing, so it stays
+ * A fence that is still open is not a block yet, it is what the reply is writing, so it stays
  * text. That is what makes a streaming reply show "```mermaid" until it closes instead of starting
  * a render on half a diagram.
  */
 
-export type MarkdownSegment = { kind: "text"; text: string } | { kind: "mermaid"; source: string };
+export type DrawnKind = "mermaid" | "chart";
 
-/** An opening fence: up to three spaces, three or more backticks or tildes, then the info string.
- * Only a plain `mermaid` info string counts — `mermaid` with options belongs to that diagram type,
- * and drawing it as the default type would be a guess. */
+export type MarkdownSegment =
+	| { kind: "text"; text: string }
+	| { kind: "mermaid"; source: string }
+	| { kind: "chart"; source: string };
+
+/** The languages the console draws, and nothing else. A plain info string only: `mermaid` with
+ * options belongs to that diagram type, and `chart` with a title on it is a title the drawing has
+ * no place for, so both stay code blocks rather than a guess. */
+const DRAWN: Record<string, DrawnKind> = { mermaid: "mermaid", chart: "chart" };
+
+/** An opening fence: up to three spaces, three or more backticks or tildes, then the info string. */
 const OPENING = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\n]*)$/;
 
 /** A closing fence: the same character as the opener, at least as long, and nothing after it. */
@@ -56,7 +64,7 @@ function closingLine(lines: readonly Line[], from: number, fence: string): numbe
 	return -1;
 }
 
-export function splitMermaid(source: string): MarkdownSegment[] {
+export function splitBlocks(source: string): MarkdownSegment[] {
 	const lines = linesOf(source);
 	const segments: MarkdownSegment[] = [];
 	/** The first line of the text run being collected; -1 when there is none. */
@@ -89,13 +97,16 @@ export function splitMermaid(source: string): MarkdownSegment[] {
 			break;
 		}
 
-		if ((opening?.[2] ?? "").trim().toLowerCase() === "mermaid") {
+		const kind = DRAWN[(opening?.[2] ?? "").trim().toLowerCase()];
+		if (kind !== undefined) {
 			flush(line.start);
 			const body = lines
 				.slice(index + 1, end)
 				.map((body) => body.text)
-				.filter((body) => !DIRECTIVE.test(body));
-			segments.push({ kind: "mermaid", source: body.join("\n") });
+				// A Mermaid directive configures Mermaid, and the console configures Mermaid from its
+				// own tokens; a chart has no directives at all.
+				.filter((line) => kind !== "mermaid" || !DIRECTIVE.test(line));
+			segments.push({ kind, source: body.join("\n") });
 		} else if (first < 0) {
 			// Another language's block, held as text in one piece: a `mermaid` line inside it is
 			// that block's content, not a diagram.

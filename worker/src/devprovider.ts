@@ -185,6 +185,13 @@ const VISUAL_REPLY = [
 	"doing: prove the stylesheet paints it",
 	"todo: write it down",
 	"```",
+	"",
+	"And numbers as bars:",
+	"",
+	"```chart",
+	"passed: 184",
+	"failed: 6",
+	"```",
 ].join("\n");
 
 const defaultRespond: FauxResponseFactory = (context) => {

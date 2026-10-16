@@ -845,6 +845,13 @@ try {
 					box: box === null ? null : getComputedStyle(box).backgroundColor,
 					count: count === null ? null : (count.textContent ?? "").trim(),
 					steps: pane === undefined ? 0 : pane.querySelectorAll(".steps .step").length,
+					bars:
+						pane === undefined
+							? []
+							: [...pane.querySelectorAll(".chart-row")].map((row) => ({
+									value: (row.querySelector(".chart-value")?.textContent ?? "").trim(),
+									width: Math.round(row.querySelector(".chart-bar")?.getBoundingClientRect().width ?? 0),
+								})),
 					dot:
 						doing === null
 							? null
@@ -869,6 +876,14 @@ try {
 				"a plan is drawn down its dots, with the one in hand ringed",
 				painted.steps === 3 && painted.dot !== null && painted.dot.width === 8 && painted.dot.ring !== "none",
 				`${painted.steps} steps, dot ${JSON.stringify(painted.dot)} of ${where}`,
+			);
+			check(
+				"a chart draws a bar per number, scaled to the longest",
+				painted.bars.length === 2 &&
+					painted.bars[0].value === "184" &&
+					painted.bars[0].width > painted.bars[1].width &&
+					painted.bars[1].width > 0,
+				JSON.stringify(painted.bars),
 			);
 		}
 
