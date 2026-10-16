@@ -75,3 +75,25 @@ export const RightToLeft: Story = {
 		</div>
 	),
 };
+
+/** A diagram is drawn from its fence, between the paragraphs that surround it. */
+export const WithDiagram: Story = {
+	render: () => (
+		<div className="w-full max-w-2xl bg-background p-6">
+			<Markdown>
+				{[
+					"How a reply is drawn:",
+					"",
+					"```mermaid",
+					"graph TD",
+					"  A[Reply] --> B{Fence?}",
+					"  B -->|mermaid| C[Draw]",
+					"  B -->|other| D[Code block]",
+					"```",
+					"",
+					"And the prose after it is still prose.",
+				].join("\n")}
+			</Markdown>
+		</div>
+	),
+};

@@ -146,9 +146,34 @@ function matchRule(script: Script, request: string): ScriptRule | undefined {
 	return script.fallback;
 }
 
+/** The answer a request mentioning a diagram gets: a drawable fence and a fence whose language is
+ * not Mermaid, which stays a code block. This provider exists so the interface can be exercised
+ * without a model, and a Markdown pane that draws is part of the interface — `tools/check-ui.mjs`
+ * leans on this sentence. */
+const DIAGRAM_REPLY = [
+	"Here is the shape of it:",
+	"",
+	"```mermaid",
+	"graph TD",
+	"  Ask --> Draw",
+	"  Draw --> Read",
+	"```",
+	"",
+	"And a fence with another language stays a code block:",
+	"",
+	"```notmermaid",
+	"still text",
+	"```",
+].join("\n");
+
 const defaultRespond: FauxResponseFactory = (context) => {
 	const messages = context.messages as readonly { role: string; content: unknown }[];
 	const request = lastUserText(messages);
+
+	// Before the tool call: a diagram needs no workspace to draw.
+	if (/diagram/i.test(request)) {
+		return fauxAssistantMessage([fauxText(DIAGRAM_REPLY)]);
+	}
 
 	if (!answeredSinceLastUser(messages)) {
 		return fauxAssistantMessage(

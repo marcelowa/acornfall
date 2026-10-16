@@ -1,0 +1,109 @@
+/**
+ * A reply split at its Mermaid fences.
+ *
+ * The transcript parses markdown into one HTML string, and a diagram cannot be a string: Mermaid
+ * has to load, run, and be inserted as a node. Splitting the source before the parse is the
+ * smallest way to have both — the prose still goes through `marked` unchanged, and each diagram
+ * arrives as its own component.
+ *
+ * A fence that is still open is not a diagram yet, it is what the reply is writing, so it stays
+ * text. That is what makes a streaming reply show "```mermaid" until it closes instead of starting
+ * a render on half a diagram.
+ */
+
+export type MarkdownSegment = { kind: "text"; text: string } | { kind: "mermaid"; source: string };
+
+/** An opening fence: up to three spaces, three or more backticks or tildes, then the info string.
+ * Only a plain `mermaid` info string counts — `mermaid` with options belongs to that diagram type,
+ * and drawing it as the default type would be a guess. */
+const OPENING = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\n]*)$/;
+
+/** A closing fence: the same character as the opener, at least as long, and nothing after it. */
+const CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+
+/** A directive line: `%%{init: {"theme": "dark"}}%%`. Mermaid reads configuration from these, and
+ * the console configures Mermaid itself from its own tokens, so they are dropped rather than
+ * handed over. */
+const DIRECTIVE = /^[ \t]*%%\{.*\}%%[ \t]*$/;
+
+/** A line with where it starts in the source, so a segment is a slice of the reply rather than a
+ * re-join that loses the newlines around a diagram. */
+interface Line {
+	text: string;
+	start: number;
+}
+
+function linesOf(source: string): Line[] {
+	const lines: Line[] = [];
+	let start = 0;
+	for (const text of source.split("\n")) {
+		lines.push({ text, start });
+		start += text.length + 1;
+	}
+	return lines;
+}
+
+/** The index of the line that closes the fence opened with `fence`, or -1 when the reply has not
+ * written one yet. A block opened with four backticks can hold a three-backtick line, so the run
+ * has to be at least as long as the one that opened it. */
+function closingLine(lines: readonly Line[], from: number, fence: string): number {
+	const char = fence.charAt(0);
+	for (let index = from; index < lines.length; index += 1) {
+		const run = CLOSING.exec(lines[index]?.text ?? "")?.[1];
+		if (run === undefined || run.charAt(0) !== char || run.length < fence.length) continue;
+		return index;
+	}
+	return -1;
+}
+
+export function splitMermaid(source: string): MarkdownSegment[] {
+	const lines = linesOf(source);
+	const segments: MarkdownSegment[] = [];
+	/** The first line of the text run being collected; -1 when there is none. */
+	let first = -1;
+	let index = 0;
+
+	const flush = (until: number) => {
+		if (first < 0) return;
+		segments.push({ kind: "text", text: source.slice(lines[first]?.start ?? 0, until) });
+		first = -1;
+	};
+
+	while (index < lines.length) {
+		const line = lines[index];
+		if (line === undefined) break;
+		const opening = OPENING.exec(line.text);
+		const fence = opening?.[1];
+		if (fence === undefined) {
+			if (first < 0) first = index;
+			index += 1;
+			continue;
+		}
+
+		const end = closingLine(lines, index + 1, fence);
+		if (end === -1) {
+			// The model is still writing it. Everything left is text, and the next delta gets
+			// another look at the whole reply.
+			if (first < 0) first = index;
+			index = lines.length;
+			break;
+		}
+
+		if ((opening?.[2] ?? "").trim().toLowerCase() === "mermaid") {
+			flush(line.start);
+			const body = lines
+				.slice(index + 1, end)
+				.map((body) => body.text)
+				.filter((body) => !DIRECTIVE.test(body));
+			segments.push({ kind: "mermaid", source: body.join("\n") });
+		} else if (first < 0) {
+			// Another language's block, held as text in one piece: a `mermaid` line inside it is
+			// that block's content, not a diagram.
+			first = index;
+		}
+		index = end + 1;
+	}
+
+	flush(source.length);
+	return segments;
+}
