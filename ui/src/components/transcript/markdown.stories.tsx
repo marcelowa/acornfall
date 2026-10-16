@@ -119,6 +119,26 @@ export const Steps: Story = {
 	),
 };
 
+/** A chart is drawn from its fence, between the paragraphs that surround it. */
+export const WithChart: Story = {
+	render: () => (
+		<div className="w-full max-w-2xl bg-background p-6">
+			<Markdown>
+				{[
+					"What the suite found:",
+					"",
+					"```chart",
+					"passed: 184",
+					"failed: 6",
+					"```",
+					"",
+					"And the prose after it is still prose.",
+				].join("\n")}
+			</Markdown>
+		</div>
+	),
+};
+
 /** The two forms a reply wears when the point is not the words: a marker a reader stops on, and a
  * plan a reader counts. `> [!KIND]` is GitHub's alert syntax; `- [x]` is GFM's task list. */
 export const CalloutsAndChecklists: Story = {
