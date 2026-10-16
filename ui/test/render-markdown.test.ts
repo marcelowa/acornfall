@@ -99,4 +99,34 @@ describe("the markdown renderer", () => {
 		expect(html).not.toContain("task-list");
 		expect(html).toContain('class="task-box is-done"');
 	});
+
+	test("a steps fence draws a plan, and the fence itself is gone", () => {
+		const html = renderMarkdown(
+			"```steps\ndone: read it\ndoing: build it\nblocked: on the key\ntodo: run it\n```",
+		);
+		expect(html).toContain('class="steps"');
+		for (const kind of ["done", "doing", "blocked", "todo"]) {
+			expect(html).toContain(`step-${kind}`);
+		}
+		expect(html).not.toContain("code-block");
+	});
+
+	test("a step without a known state keeps its own words", () => {
+		const html = renderMarkdown("```steps\nwaiting: on the key\n```");
+		expect(html).toContain("step-todo");
+		expect(html).toContain("waiting: on the key");
+	});
+
+	test("a step holds inline markdown, and a hostile one is escaped", () => {
+		const html = renderMarkdown(
+			"```steps\ndoing: run `make test`\ntodo: <script>alert(1)</script>\n```",
+		);
+		expect(html).toContain("<code>make test</code>");
+		expect(html).not.toContain("<script");
+		expect(html).toContain("&lt;script&gt;");
+	});
+
+	test("an empty steps fence stays a code block", () => {
+		expect(renderMarkdown("```steps\n```")).toContain("code-block");
+	});
 });

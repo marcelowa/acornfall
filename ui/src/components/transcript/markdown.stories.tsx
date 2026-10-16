@@ -98,6 +98,27 @@ export const WithDiagram: Story = {
 	),
 };
 
+/** A plan, drawn down its dots: the state of every step, including the one that is stuck. */
+export const Steps: Story = {
+	render: () => (
+		<div className="w-full max-w-2xl bg-background p-6">
+			<Markdown>
+				{[
+					"Where the release is:",
+					"",
+					"```steps",
+					"done: the patch line is merged",
+					"done: the worker runtime is pinned",
+					"doing: the release notes",
+					"blocked: the signing key is not on this machine",
+					"todo: tag `v0.9.36` and push",
+					"```",
+				].join("\n")}
+			</Markdown>
+		</div>
+	),
+};
+
 /** The two forms a reply wears when the point is not the words: a marker a reader stops on, and a
  * plan a reader counts. `> [!KIND]` is GitHub's alert syntax; `- [x]` is GFM's task list. */
 export const CalloutsAndChecklists: Story = {
