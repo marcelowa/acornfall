@@ -19,6 +19,9 @@ This is a picture, not a control. The console draws; the reader only reads.
 | `- [x]` / `- [ ]` | a plan and what is left — the console shows `3/5` above it |
 | a ` ```steps ` fence | a plan's state, one line per step: `done: read it`, `doing: build it`, `blocked: on the key`, `todo: run it` |
 | a ` ```chart ` fence | numbers to compare: one `name: number` per line, and the console draws a bar per line — the longest is the longest |
+| a ` ```matrix ` fence | where the same checks landed on several targets: column names on the first line, then `label \| pass \| fail`, and the cell's word sets its colour |
+| a ` ```stats ` fence | the facts of an answer — a commit, a size, a count — one `name: value` per line, drawn as tiles |
+| a ` ```tree ` fence | where files live: one path per line, and the console writes each shared directory once |
 | a GFM table | numbers and comparisons, so they line up down a column |
 | ` ```diff ` | what changed; adds and removes are coloured already |
 | ` ```mermaid ` | a flow, a sequence, a state machine |
@@ -35,6 +38,11 @@ This is a picture, not a control. The console draws; the reader only reads.
 - A chart is for numbers a reader compares: counts of things, not money or duration. Two bars, or
   six; twenty-four is the last the console draws. A number the reader only needs once is a
   sentence.
+- A matrix is for the same two or three checks on two or three targets, not for a table of prose.
+  Its cells are `pass` (or `ok`, `done`), `skip` (or `warn`, `flaky`), `fail` (or `error`), and `-`
+  when there is nothing to say — a grid that does not line up is shown as code instead.
+- A `stats` fence is not a table: a table compares rows, tiles are the facts an answer would
+  otherwise bury in a sentence. Four or five of them, all of the same kind.
 - The marker must be alone on the first line, or the console draws a plain quote.
 - Numbers go in a table or a list, not in a sentence.
 - A state earns its mark: a checklist tick means done, not hoping.

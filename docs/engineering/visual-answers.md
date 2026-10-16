@@ -26,10 +26,15 @@ Two more rules, both already true of the renderer:
 | Checklist | `- [x] done` / `- [ ] waiting` | a box per item, and the count (`1/2`) above the list |
 | Steps | a ` ```steps ` fence, one `state: text` per line | a dot per step — `done`, `doing` (ringed), `blocked`, `todo` — with the model's words beside it |
 | Chart | a ` ```chart ` fence, one `name: number` per line | a bar per line, scaled to the longest, with its number beside it |
+| Matrix | a ` ```matrix ` fence, `label | cell | cell` per line, column names first | one tinted cell per state, so a column can be read at a glance |
+| Stats | a ` ```stats ` fence, one `name: value` per line | a tile per fact: a small quiet name over a mono value |
+| Tree | a ` ```tree ` fence, one path per line | the directories written once, with the paths under them and an indent guide |
 
-The two prose forms are renderer hooks in `render-markdown.ts` and `markdown.css`: a `blockquote`
-hook, a `checkbox` hook, and a `list` hook that wraps a list whose every item is a task. A `steps`
-fence is drawn by that file's `code` hook, because rows of text are still HTML.
+The prose forms are renderer hooks in `render-markdown.ts` and `markdown.css`: a `blockquote` hook,
+a `checkbox` hook, and a `list` hook that wraps a list whose every item is a task. The fences that
+are still HTML to look at — `steps`, `matrix`, `stats`, `tree` — are drawn by `fences.ts` from that
+file's `code` hook, and each of them returns nothing when the fence does not read whole, which
+leaves the source as the code block it would have been.
 
 A chart and a Mermaid diagram cannot be HTML strings — one is a component, the other has to run and
 be inserted as a node — so both are split out of the reply before the parse (`markdown-blocks.ts`)
@@ -50,6 +55,10 @@ Four limits keep the forms honest, all tested:
 - A chart fence has to read whole: a line that is not `name: number`, a value that is not a count,
   and a fence with more than 24 lines all stay code blocks. A chart that drops a line is a chart
   that lies, and a fence with a hundred bars is a table.
+- A matrix has to line up, and every cell has to be a state the console knows (`pass`, `skip`,
+  `fail`, and a handful of synonyms for each). Eight columns and twelve rows are the most it draws;
+  a stats fence draws twelve facts, and a tree forty paths. Past any of those the drawing is no
+  longer a glance, and the source is the better answer.
 
 ## The rest of the vocabulary
 
@@ -79,20 +88,24 @@ story in Storybook, and, when it is the stylesheet that makes the form readable,
 
 Not built, and what each would cost:
 
-- **A fold inside a reply.** It is a control, not a picture, so it is out by the rule above.
-- **`matrix` of ok / warn / fail cells, `stats` tiles, `json` and `tree` folds, a sparkline or a
-  line chart.** All the same shape of work as the chart, none of them asked for yet.
+- **A fold inside a reply.** It is a control, not a picture, so it is out by the rule above — and it
+  is why a JSON fence is not one either: pretty-printed JSON is already a code block with its own
+  colours, and a tree of it would be a fold.
+- **A sparkline or a line chart.** The next thing on this list: bars carry a comparison, a line
+  carries a shape, and a spell carries the numbers that are not worth either.
 
 ## Evidence
 
-- `ui/test/render-markdown.test.ts` — the marker rules, the boxes, the count, the plan's dots, and
-  the sanitiser on a callout body and on a step.
+- `ui/test/render-markdown.test.ts` — the marker rules, the boxes, the count, the plan's dots, the
+  grid, the tiles, the tree, and the sanitiser on a callout body and on a step.
 - `ui/test/markdown-blocks.test.ts` and `ui/test/chart-source.test.ts` — where the split happens,
   and which fence is a chart at all.
 - `Conversation/Markdown/CalloutsAndChecklists`, `Conversation/Markdown/Steps`,
-  `Conversation/Markdown/WithChart` and `Conversation/Chart` — the stories: all five labels, a plan
-  with its count, a plan with a blocked step, a drawn chart and a refused one.
+  `Conversation/Markdown/WithChart`, `Conversation/Markdown/WithMatrixAndTree` and
+  `Conversation/Chart` — the stories: all five labels, a plan with its count, a plan with a blocked
+  step, a drawn chart and a refused one, a grid with its failures tinted, a row of facts, and a tree.
 - `tools/check-ui.mjs` — "a callout is drawn and tinted", "a checklist is drawn, boxed and
   counted", "a plan is drawn down its dots, with the one in hand ringed", "a chart draws a bar per
-  number, scaled to the longest", and the dev provider sentence that answers a request for the
-  visual forms.
+  number, scaled to the longest", "a matrix tints its failures", "a stats fence draws its facts as
+  tiles", "a tree draws the directories once", and the dev provider sentence that answers a request
+  for the visual forms.
