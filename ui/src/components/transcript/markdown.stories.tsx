@@ -97,3 +97,36 @@ export const WithDiagram: Story = {
 		</div>
 	),
 };
+
+/** The two forms a reply wears when the point is not the words: a marker a reader stops on, and a
+ * plan a reader counts. `> [!KIND]` is GitHub's alert syntax; `- [x]` is GFM's task list. */
+export const CalloutsAndChecklists: Story = {
+	render: () => (
+		<div className="w-full max-w-2xl bg-background p-6">
+			<Markdown>
+				{[
+					"> [!NOTE]",
+					"> A note is quiet: it tells you something is true.",
+					"",
+					"> [!TIP]",
+					"> A tip is the way to do it sooner.",
+					"",
+					"> [!IMPORTANT]",
+					"> An important line is one the reader cannot skip.",
+					"",
+					"> [!WARNING]",
+					"> A warning is a risk: `make release` tags origin/main.",
+					"",
+					"> [!CAUTION]",
+					"> A caution is what not to do.",
+					"",
+					"The plan, as a plan:",
+					"",
+					"- [x] write the callout",
+					"- [x] tick what is done",
+					"- [ ] count what is left",
+				].join("\n")}
+			</Markdown>
+		</div>
+	),
+};

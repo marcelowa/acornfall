@@ -1,6 +1,6 @@
 import DOMPurify, { type Config } from "dompurify";
 import hljs from "highlight.js/lib/common";
-import { Marked } from "marked";
+import { Marked, type Token } from "marked";
 import { stripAnsi } from "@/lib/text";
 
 /**
@@ -26,12 +26,67 @@ function escapeHtml(value: string): string {
 	return value.replace(/[&<>"']/g, (char) => ENTITIES[char] ?? char);
 }
 
+/** GitHub's alert syntax: a quote whose first line is one of these markers. */
+const ALERT_MARKER = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/i;
+
+/**
+ * A quote that opens with an alert marker, as the marker's kind and title and the tokens that
+ * follow it. The marker is a paragraph of its own, which is GitHub's rule; the paragraph it
+ * opened stays only when it still has words after the marker, so the reader never sees the
+ * marker itself.
+ */
+function alert(
+	tokens: readonly Token[],
+): { kind: string; title: string; body: Token[] } | undefined {
+	const [first, ...rest] = tokens;
+	if (first?.type !== "paragraph") return undefined;
+	const [marker, ...inline] = first.tokens ?? [];
+	const kind =
+		marker?.type === "text" ? ALERT_MARKER.exec(marker.text)?.[1]?.toLowerCase() : undefined;
+	if (kind === undefined) return undefined;
+	// The line break after the marker is its own token, and it has nothing left to break.
+	const body = inline[0]?.type === "br" ? inline.slice(1) : inline;
+	return {
+		kind,
+		title: kind.charAt(0).toUpperCase() + kind.slice(1),
+		body: body.length === 0 ? rest : [{ ...first, tokens: body }, ...rest],
+	};
+}
+
 marked.use({
 	renderer: {
 		// Raw HTML is escaped instead of rendered, so a reply cannot inject markup that the
 		// sanitiser then has to be clever about.
 		html(token) {
 			return escapeHtml(token.raw);
+		},
+		// A quote with an alert marker is a callout: the one mark the console gives a warning,
+		// a limit, or a tip, without a single word of prose around it.
+		blockquote({ tokens }) {
+			const found = alert(tokens);
+			if (found === undefined)
+				return `<blockquote>\n${this.parser.parse(tokens)}</blockquote>\n`;
+			return `<div class="callout callout-${found.kind}"><span class="callout-label">${found.title}</span>\n${this.parser.parse(found.body)}</div>\n`;
+		},
+		// A task list is a plan, and a plan is read by its count. Every item has to be a task;
+		// a mixed list is a list, and its boxes stay inline in it.
+		list(token) {
+			const items = token.items.map((item) => this.listitem(item)).join("");
+			const type = token.ordered ? "ol" : "ul";
+			const start =
+				token.ordered && token.start !== 1 && token.start !== ""
+					? ` start="${String(token.start)}"`
+					: "";
+			const html = `<${type}${start}>\n${items}</${type}>\n`;
+			if (token.items.length < 2 || token.items.some((item) => !item.task)) return html;
+			const done = token.items.filter((item) => item.checked === true).length;
+			return `<div class="task-list"><span class="task-count">${done}/${token.items.length}</span>${html}</div>`;
+		},
+		// DOMPurify refuses `input`, so the box the checklist is read by is a span. It is an
+		// icon with a label rather than a control: nothing here is clickable.
+		checkbox({ checked }) {
+			const done = checked === true;
+			return `<span class="task-box${done ? " is-done" : ""}" role="img" aria-label="${done ? "Done" : "Not done"}">✓</span> `;
 		},
 		code(token) {
 			const language = (token.lang ?? "").trim().split(/\s+/)[0] ?? "";

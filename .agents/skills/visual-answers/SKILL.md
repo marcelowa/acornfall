@@ -1,0 +1,34 @@
+---
+name: visual-answers
+description: Shape an answer as a picture before a paragraph — callouts, checklists, tables, diffs, diagrams — when the user reads it in the acornfall console. Use when wording a reply, a report, or a plan for the owner.
+---
+
+# Visual answers
+
+The owner reads your reply in the console. Reading a wall of text is slow. Say the thing in the
+shape that fits, then the words that are left.
+
+This is a picture, not a control. The console draws; the reader only reads.
+
+## The forms, and what each is for
+
+| Write | For |
+|---|---|
+| `> [!WARNING]` on the first line of a quote | a risk, a limit, a decision the reader must stop on |
+| `> [!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!CAUTION]` | a fact, a shortcut, something unmissable, something not to do |
+| `- [x]` / `- [ ]` | a plan and what is left — the console shows `3/5` above it |
+| a GFM table | numbers and comparisons, so they line up down a column |
+| ` ```diff ` | what changed; adds and removes are coloured already |
+| ` ```mermaid ` | a flow, a sequence, a state machine |
+| `##` and `>` | structure a long reply is read by |
+
+## Rules
+
+- Answer in the first line. Detail after it.
+- One diagram at most in an answer. Two pictures are one too many.
+- Draw it only when it replaces five or more lines of prose. A callout around two words is noise.
+- Keep a marker honest: `[!WARNING]` for a real risk, `[!NOTE]` for a fact. Do not decorate.
+- The marker must be alone on the first line, or the console draws a plain quote.
+- Numbers go in a table or a list, not in a sentence.
+- A state earns its mark: a checklist tick means done, not hoping.
+- When a form says the same thing as a clear sentence, keep the sentence.
