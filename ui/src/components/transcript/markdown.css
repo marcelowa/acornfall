@@ -253,6 +253,60 @@
 	font-weight: var(--font-weight-semibold);
 }
 
+/* A plan: a dot per step and the words the model wrote. The dot carries the state — settled,
+ * happening, stuck, not started — so a plan is read down the dots, not through the sentences. */
+.markdown .steps {
+	display: flex;
+	flex-direction: column;
+	gap: var(--spacing-1);
+	margin: 0 0 var(--spacing-2);
+}
+
+.markdown .step {
+	display: flex;
+	align-items: start;
+	gap: var(--spacing-2);
+}
+
+.markdown .step-dot {
+	flex: none;
+	inline-size: 8px;
+	block-size: 8px;
+	margin-block-start: 0.45em;
+	border: 1px solid var(--muted-foreground);
+	border-radius: 9999px;
+}
+
+.markdown .step-done {
+	color: var(--muted-foreground);
+}
+
+.markdown .step-done .step-dot {
+	border-color: var(--success);
+	background: var(--success);
+}
+
+.markdown .step-doing {
+	font-weight: var(--font-weight-medium);
+}
+
+.markdown .step-doing .step-dot {
+	border-color: var(--primary);
+	background: var(--primary);
+	/* The halo is what says "this is the one happening": still a picture, not a pulse. */
+	box-shadow: 0 0 0 3px var(--primary-subtle);
+}
+
+.markdown .step-blocked {
+	color: var(--warning-subtle-foreground);
+	font-weight: var(--font-weight-medium);
+}
+
+.markdown .step-blocked .step-dot {
+	border-color: var(--warning);
+	background: var(--warning);
+}
+
 /* A reply is text segments and diagrams, and `markdown.tsx` wraps each text segment because
  * `dangerouslySetInnerHTML` cannot share an element with React children. `display: contents` keeps
  * that wrapper out of the layout, so every rule above still sees its children as the children of

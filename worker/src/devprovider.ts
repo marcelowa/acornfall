@@ -165,8 +165,8 @@ const DIAGRAM_REPLY = [
 	"```",
 ].join("\n");
 
-/** The answer a request mentioning a checklist gets: a warning a reader sees before the words, and
- * a plan a reader counts. */
+/** The answer a request mentioning a checklist gets: a warning a reader sees before the words, a
+ * plan a reader counts, and a plan a reader reads down its dots. */
 const VISUAL_REPLY = [
 	"A visual reply says what to look out for before it says anything else:",
 	"",
@@ -177,6 +177,14 @@ const VISUAL_REPLY = [
 	"",
 	"- [x] say it in a callout",
 	"- [ ] count what is left",
+	"",
+	"Or down its dots:",
+	"",
+	"```steps",
+	"done: draw the form",
+	"doing: prove the stylesheet paints it",
+	"todo: write it down",
+	"```",
 ].join("\n");
 
 const defaultRespond: FauxResponseFactory = (context) => {

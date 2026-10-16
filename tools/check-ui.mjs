@@ -816,33 +816,59 @@ try {
 			.catch(() => false);
 		check("a message asking for the visual forms can be sent", asked);
 		if (asked) {
+			// Wait for the answer itself: a reply is a pane, and the transcript already holds the
+			// ones from earlier runs, so what this looks for is one more pane than before.
+			const panes = () =>
+				document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]").length;
+			const before = await page.evaluate(panes);
 			await page
-				.waitForFunction(
-					() => document.querySelector("[data-slot=transcript] .task-list .task-box") !== null,
-					{ timeout: 60000, polling: 100 },
-				)
+				.waitForFunction((count) => document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]").length > count, { timeout: 60000, polling: 100 }, before)
 				.catch(() => undefined);
 			const painted = await page.evaluate(() => {
-				const callout = document.querySelector("[data-slot=transcript] .callout-warning");
-				const box = document.querySelector("[data-slot=transcript] .task-list .task-box.is-done");
-				const count = document.querySelector("[data-slot=transcript] .task-list .task-count");
-				if (callout === null || box === null || count === null) return null;
+				// The newest answer, which is the one this run asked for.
+				const pane = [...document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]")].pop();
+				const seen = (selector) => pane?.querySelector(selector) ?? null;
+				const callout = seen(".callout-warning");
+				const box = seen(".task-list .task-box.is-done");
+				const count = seen(".task-list .task-count");
+				const doing = seen(".step-doing .step-dot");
 				return {
-					height: Math.round(callout.getBoundingClientRect().height),
-					background: getComputedStyle(callout).backgroundColor,
-					box: getComputedStyle(box).backgroundColor,
-					count: (count.textContent ?? "").trim(),
+					panes: document.querySelectorAll("[data-slot=transcript] [data-slot=assistant]").length,
+					text: (pane?.textContent ?? "").slice(0, 60),
+					callout:
+						callout === null
+							? null
+							: {
+									height: Math.round(callout.getBoundingClientRect().height),
+									background: getComputedStyle(callout).backgroundColor,
+								},
+					box: box === null ? null : getComputedStyle(box).backgroundColor,
+					count: count === null ? null : (count.textContent ?? "").trim(),
+					steps: pane === undefined ? 0 : pane.querySelectorAll(".steps .step").length,
+					dot:
+						doing === null
+							? null
+							: {
+									width: Math.round(doing.getBoundingClientRect().width),
+									ring: getComputedStyle(doing).boxShadow,
+								},
 				};
 			});
+			const where = `${painted.panes} panes, last "${painted.text}"`;
 			check(
 				"a callout is drawn and tinted",
-				painted !== null && painted.height > 20 && painted.background !== "rgba(0, 0, 0, 0)",
-				painted === null ? "no callout on screen" : `${painted.height}px, background ${painted.background}`,
+				painted.callout !== null && painted.callout.height > 20 && painted.callout.background !== "rgba(0, 0, 0, 0)",
+				`callout ${JSON.stringify(painted.callout)} of ${where}`,
 			);
 			check(
 				"a checklist is drawn, boxed and counted",
-				painted !== null && painted.box !== "rgba(0, 0, 0, 0)" && painted.count === "1/2",
-				painted === null ? "no checklist on screen" : `boxes ${painted.box}, count "${painted.count}"`,
+				painted.box !== null && painted.box !== "rgba(0, 0, 0, 0)" && painted.count === "1/2",
+				`box ${painted.box}, count ${painted.count} of ${where}`,
+			);
+			check(
+				"a plan is drawn down its dots, with the one in hand ringed",
+				painted.steps === 3 && painted.dot !== null && painted.dot.width === 8 && painted.dot.ring !== "none",
+				`${painted.steps} steps, dot ${JSON.stringify(painted.dot)} of ${where}`,
 			);
 		}
 
