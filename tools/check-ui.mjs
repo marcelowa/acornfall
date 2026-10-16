@@ -852,6 +852,10 @@ try {
 									value: (row.querySelector(".chart-value")?.textContent ?? "").trim(),
 									width: Math.round(row.querySelector(".chart-bar")?.getBoundingClientRect().width ?? 0),
 								})),
+					failure: seen(".matrix .cell-fail") === null ? null : getComputedStyle(seen(".matrix .cell-fail")).backgroundColor,
+					stat: (seen(".stats .stat-value")?.textContent ?? "").trim(),
+					dirs: pane === undefined ? 0 : pane.querySelectorAll(".tree .tree-dir").length,
+					files: pane === undefined ? 0 : pane.querySelectorAll(".tree .tree-file").length,
 					dot:
 						doing === null
 							? null
@@ -884,6 +888,21 @@ try {
 					painted.bars[0].width > painted.bars[1].width &&
 					painted.bars[1].width > 0,
 				JSON.stringify(painted.bars),
+			);
+			check(
+				"a matrix tints its failures",
+				painted.failure !== null && painted.failure !== "rgba(0, 0, 0, 0)",
+				`the failing cell's background is ${painted.failure}`,
+			);
+			check(
+				"a stats fence draws its facts as tiles",
+				painted.stat === "12",
+				`the first value reads "${painted.stat}"`,
+			);
+			check(
+				"a tree draws the directories once",
+				painted.dirs === 2 && painted.files === 2,
+				`${painted.dirs} directories, ${painted.files} files`,
 			);
 		}
 

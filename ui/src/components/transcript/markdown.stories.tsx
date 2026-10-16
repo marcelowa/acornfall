@@ -139,6 +139,38 @@ export const WithChart: Story = {
 	),
 };
 
+/** A grid of results, a row of facts, and the shape of the paths, in one reply. */
+export const WithMatrixAndTree: Story = {
+	render: () => (
+		<div className="w-full max-w-2xl bg-background p-6">
+			<Markdown>
+				{[
+					"Where it passed, what it cost, and where it lives:",
+					"",
+					"```matrix",
+					"target | unit | e2e | lint",
+					"linux | pass | fail | pass",
+					"mac | skip | pass | pass",
+					"windows | fail | fail | pass",
+					"```",
+					"",
+					"```stats",
+					"files: 12",
+					"added: +414",
+					"removed: −75",
+					"```",
+					"",
+					"```tree",
+					"ui/src/chart.tsx",
+					"ui/src/chart.css",
+					"worker/src/devprovider.ts",
+					"```",
+				].join("\n")}
+			</Markdown>
+		</div>
+	),
+};
+
 /** The two forms a reply wears when the point is not the words: a marker a reader stops on, and a
  * plan a reader counts. `> [!KIND]` is GitHub's alert syntax; `- [x]` is GFM's task list. */
 export const CalloutsAndChecklists: Story = {

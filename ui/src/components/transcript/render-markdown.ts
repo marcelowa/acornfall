@@ -1,7 +1,8 @@
 import DOMPurify, { type Config } from "dompurify";
 import hljs from "highlight.js/lib/common";
 import { Lexer, Marked, type Token } from "marked";
-import { stripAnsi } from "@/lib/text";
+import { escapeHtml, stripAnsi } from "@/lib/text";
+import { type InlineMarkdown, matrixFence, statsFence, stepsFence, treeFence } from "./fences";
 
 /**
  * The markdown renderer, separate from the component so it can be tested without a bundler:
@@ -14,23 +15,17 @@ import { stripAnsi } from "@/lib/text";
  */
 const marked = new Marked({ gfm: true, breaks: true });
 
-const ENTITIES: Record<string, string> = {
-	"&": "&amp;",
-	"<": "&lt;",
-	">": "&gt;",
-	'"': "&quot;",
-	"'": "&#39;",
-};
-
-function escapeHtml(value: string): string {
-	return value.replace(/[&<>"']/g, (char) => ENTITIES[char] ?? char);
-}
-
 /** GitHub's alert syntax: a quote whose first line is one of these markers. */
 const ALERT_MARKER = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/i;
 
-/** A plan's state, one step per line: `doing: build it`. */
-const STEP = /^(done|doing|blocked|todo):[ \t]*(.*)$/i;
+/** The fences the console draws as HTML. Each returns nothing when the fence does not read whole,
+ * and then the code hook below shows the source as the code block it would have been. */
+const FENCES: Record<string, (source: string, inline: InlineMarkdown) => string | undefined> = {
+	steps: stepsFence,
+	matrix: matrixFence,
+	stats: statsFence,
+	tree: treeFence,
+};
 
 /**
  * A quote that opens with an alert marker, as the marker's kind and title and the tokens that
@@ -54,27 +49,6 @@ function alert(
 		title: kind.charAt(0).toUpperCase() + kind.slice(1),
 		body: body.length === 0 ? rest : [{ ...first, tokens: body }, ...rest],
 	};
-}
-
-/**
- * A plan, as the state of each of its steps: `<div class="steps">` with a dot and a line per
- * step. A line that does not name a state is a step that has not started, and it keeps its own
- * words — the console does not guess what the model meant. Undefined when the fence is empty:
- * there is nothing to draw, so the caller leaves it a code block.
- */
-function steps(source: string, inline: (text: string) => string): string | undefined {
-	const lines = source
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line !== "");
-	if (lines.length === 0) return undefined;
-	const rows = lines.map((line) => {
-		const match = STEP.exec(line);
-		const kind = match?.[1]?.toLowerCase() ?? "todo";
-		const body = match?.[2] ?? line;
-		return `<span class="step step-${kind}"><span class="step-dot" aria-hidden="true"></span>${inline(body)}</span>`;
-	});
-	return `<div class="steps">${rows.join("")}</div>`;
 }
 
 marked.use({
@@ -114,8 +88,9 @@ marked.use({
 		},
 		code(token) {
 			const language = (token.lang ?? "").trim().split(/\s+/)[0] ?? "";
-			if (language.toLowerCase() === "steps") {
-				const drawn = steps(token.text, (line) =>
+			const fence = FENCES[language.toLowerCase()];
+			if (fence !== undefined) {
+				const drawn = fence(token.text, (line) =>
 					this.parser.parseInline(Lexer.lexInline(line, this.parser.options)),
 				);
 				if (drawn !== undefined) return drawn;
