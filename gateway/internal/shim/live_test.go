@@ -1,4 +1,4 @@
-package shim
+package shim_test
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/shim"
 )
 
 // Live: the container layer against a real runtime, inside a machine. It is gated rather than
@@ -19,19 +20,19 @@ import (
 // without them says so instead of failing three calls later.
 //
 //	ACORNFALL_LXC=1 go test ./internal/shim -run Live -v
-func liveShim(t *testing.T) *Client {
+func liveShim(t *testing.T) *shim.Client {
 	t.Helper()
 	if os.Getenv("ACORNFALL_LXC") == "" {
 		t.Skip("set ACORNFALL_LXC=1 to drive a real container runtime")
 	}
-	server := &Server{Version: "test", Log: t.Logf}
-	client, shim := net.Pipe()
+	server := &shim.Server{Version: "test", Log: t.Logf}
+	client, machine := net.Pipe()
 	go func() {
-		if err := server.Serve(shim); err != nil {
+		if err := server.Serve(machine); err != nil {
 			t.Logf("serve: %v", err)
 		}
 	}()
-	live := NewClient(client)
+	live := shim.NewClient(client)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	answer, err := live.Hello(ctx)
@@ -103,14 +104,18 @@ func TestLiveTheShimDrivesAWorkspaceContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Create(ctx, CreatePayload{
+	if err := client.Create(ctx, shim.CreatePayload{
 		Name:   name,
 		Image:  "debian:stable-slim",
 		Dir:    dir,
 		Config: string(config),
-		Binds:  []Bind{{Source: share, Target: share}},
+		Binds:  []shim.Bind{{Source: share, Target: share}},
 		Owner:  1000,
 		Group:  1000,
+		// The rootfs belongs to the container's mapped root (uid 0 inside), not to the share's
+		// owner: a container whose own filesystem is someone else's cannot write it.
+		RootfsOwner: 100000,
+		RootfsGroup: 100000,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,9 +147,15 @@ func TestLiveTheShimDrivesAWorkspaceContainer(t *testing.T) {
 		t.Errorf("memory.max = %q, want the policy's 1 GiB", strings.TrimSpace(string(limits)))
 	}
 
+	// The container's own root can write its own filesystem, which is what the rootfs owner buys:
+	// without it an image's package manager is the first thing to fail.
+	if _, err := client.Exec(ctx, shim.ExecPayload{Name: name, Argv: []string{"sh", "-c", "touch /root/owned"}, UID: 0, GID: 0}, nil); err != nil {
+		t.Fatal(err)
+	}
+
 	// A command runs in it, as the user the workspace belongs to.
 	var seen strings.Builder
-	exit, err := client.Exec(ctx, ExecPayload{
+	exit, err := client.Exec(ctx, shim.ExecPayload{
 		Name: name,
 		Argv: []string{"sh", "-c", "cat /etc/os-release; id -u; cat " + filepath.Join(share, "marker.txt")},
 		Cwd:  share,
@@ -165,7 +176,7 @@ func TestLiveTheShimDrivesAWorkspaceContainer(t *testing.T) {
 
 	// Writing in the share lands as the user, which is what "the workspace belongs to the
 	// person" means once the container is in the way.
-	if _, err := client.Exec(ctx, ExecPayload{
+	if _, err := client.Exec(ctx, shim.ExecPayload{
 		Name: name,
 		Argv: []string{"sh", "-c", "echo written > " + filepath.Join(share, "written.txt")},
 		UID:  1000,
@@ -190,7 +201,7 @@ func TestLiveTheShimDrivesAWorkspaceContainer(t *testing.T) {
 	}()
 	// `tail` and not `sleep`: the container's own init is a sleep, and a check that cannot tell
 	// the command from the init would report the kill as broken or as a success by accident.
-	exit, err = client.Exec(stopped, ExecPayload{Name: name, Argv: []string{"tail", "-f", "/dev/null"}, UID: 1000, GID: 1000}, nil)
+	exit, err = client.Exec(stopped, shim.ExecPayload{Name: name, Argv: []string{"tail", "-f", "/dev/null"}, UID: 1000, GID: 1000}, nil)
 	cancelExec()
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +211,7 @@ func TestLiveTheShimDrivesAWorkspaceContainer(t *testing.T) {
 	}
 	// Every process inside the container, by the name the kernel knows them by.
 	var names strings.Builder
-	if _, err := client.Exec(ctx, ExecPayload{
+	if _, err := client.Exec(ctx, shim.ExecPayload{
 		Name: name,
 		Argv: []string{"sh", "-c", "for p in /proc/[0-9]*; do cat $p/comm 2>/dev/null; done"},
 	}, func(_ string, data []byte) { names.Write(data) }); err != nil {

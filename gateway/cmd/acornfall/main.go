@@ -63,7 +63,7 @@ func serve(argv []string) error {
 	dataDir := flags.String("data-dir", "", "alias for --home")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
-	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor) or host (no isolation)")
+	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor), lxc (containers in one machine), or host (no isolation)")
 	migrateDir := flags.String("migrate-dir", "", "release migrate scripts directory (default: the scripts baked into the binary)")
 	disableVMNesting := flags.Bool("disable-vm-nesting", false, "keep a workspace's sandbox from nesting virtual machines; by default a sandbox nests when the engine and the machine can, and a workspace's own setting wins")
 	model := flags.String("model", "", "default model as provider/modelId")

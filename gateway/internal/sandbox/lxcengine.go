@@ -1,0 +1,386 @@
+package sandbox
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/acornfall/acornfall/gateway/internal/shim"
+)
+
+// The engine ADR 0021 describes: one microVM per install, and a container per workspace inside
+// it. The machine is the pinned engine's (machine.go); the containers are LXC's, driven through
+// the shim (internal/shim) over the door the machine publishes — a unix socket the gateway
+// listens on, which the engine bridges to the vsock port the shim dials (measured, both
+// directions of that sentence: docs/engineering/container-shim.md).
+//
+// Everything above it sees the usual Driver: create, start, stop, remove, and list mean what
+// they mean on a microVM, and the difference is that a workspace costs a container.
+
+// DefaultDoorPort is the machine's vsock port. Every machine has its own vsock device and its
+// own host socket, so this number only has to agree with itself on both sides of one machine.
+const DefaultDoorPort = 7411
+
+// LXC is the container engine.
+type LXC struct {
+	engine  *Microsandbox
+	machine *MachineEngine
+	// door is the host path the gateway listens on, and port the machine's vsock port bridged
+	// to it. The listener has to exist before the machine is made: measured, a machine created
+	// first dials out into nothing.
+	door string
+	port int
+	// binary is the acornfall binary the machine runs the shim from — this same binary, so the
+	// gateway and its shim cannot be different versions — and dir is where a container lives
+	// inside the machine.
+	binary string
+	dir    string
+	// privileged runs every container as root in the machine. That is ADR 0021's sharpest trade,
+	// and whether a *workspace* may ask for it is one of its open questions: until that is
+	// settled the engine runs one profile, and it is the unprivileged one the ADR proposes.
+	privileged bool
+	// listener and client are the door and the conversation through it, both guarded: several
+	// workspaces start at once, and the shim connects on its own schedule.
+	mu       sync.Mutex
+	listener net.Listener
+	client   *shim.Client
+	// dial is how the gateway reaches the shim. Nil accepts on the listener, which is what a
+	// machine does; a test injects its own connection.
+	dial func(ctx context.Context) (net.Conn, error)
+	// log reports what the engine does. Nil silences the engine's own lines, not the manager's.
+	log func(string, ...any)
+}
+
+// NewLXC builds the engine over the pinned engine's store and install folder. door is where the
+// gateway listens for the shim (one unix socket per install); binary is the acornfall executable
+// the machine runs it from.
+func NewLXC(engine *Microsandbox, machine Machine, door, binary string) *LXC {
+	return &LXC{
+		engine:  engine,
+		machine: NewMachineEngine(engine, machine, filepath.Dir(door)),
+		door:    door,
+		port:    DefaultDoorPort,
+		binary:  binary,
+		dir:     "/var/lib/lxc",
+	}
+}
+
+// WithShimConnection replaces how the gateway reaches the shim, which is how the engine is
+// tested without a machine.
+func (x *LXC) WithShimConnection(dial func(ctx context.Context) (net.Conn, error)) *LXC {
+	x.dial = dial
+	return x
+}
+
+// WithPrivileged runs containers as root in the machine instead of in a user namespace, for the
+// workspaces that need mount, iptables, or a device node.
+func (x *LXC) WithPrivileged(privileged bool) *LXC {
+	x.privileged = privileged
+	return x
+}
+
+// WithContainerDir moves where containers live inside the machine. It is the runtime's own
+// layout; only a differently built image, or a test, moves it.
+func (x *LXC) WithContainerDir(dir string) *LXC {
+	x.dir = dir
+	return x
+}
+
+// WithLog reports what the engine does between calls — a shim that ended, a machine that had to
+// be made.
+func (x *LXC) WithLog(log func(string, ...any)) *LXC {
+	x.log = log
+	return x
+}
+
+func (x *LXC) Name() string    { return "lxc" }
+func (x *LXC) Version() string { return x.engine.Version() }
+
+// Isolated reports that a container separates a workspace from the host: the container is the
+// boundary inside the machine, and the machine is the boundary outside it.
+func (x *LXC) Isolated() bool { return true }
+
+func (x *LXC) InstallDir() string { return x.engine.InstallDir() }
+func (x *LXC) StateDir() string   { return x.engine.StateDir() }
+func (x *LXC) Env() []string      { return x.engine.Env() }
+func (x *LXC) Installed() bool    { return x.engine.Installed() }
+
+func (x *LXC) Install(ctx context.Context, log func(string, ...any)) error {
+	return x.engine.Install(ctx, log)
+}
+
+// Usable is the engine's half of the question: a machine to boot, and a hypervisor to boot it
+// in. What the machine itself has — the container runtime, the id ranges to map — is answered by
+// the first call that reaches it, because a machine does not exist until a workspace needs one.
+func (x *LXC) Usable() error { return x.engine.Usable() }
+
+// Nesting is the machine's answer, not a container's: the containers are where a workspace's own
+// virtual machines would run, and the device has to exist in the machine for any of them.
+func (x *LXC) Nesting(ctx context.Context) NestingSupport { return x.engine.Nesting(ctx) }
+
+// EnsureMachine opens the door and makes sure the machine is there and booted. MachineLayer.
+func (x *LXC) EnsureMachine(ctx context.Context) error {
+	if err := x.listen(); err != nil {
+		return err
+	}
+	return x.machine.EnsureMachine(ctx)
+}
+
+func (x *LXC) listen() error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.listener != nil {
+		return nil
+	}
+	if strings.TrimSpace(x.door) == "" {
+		return errors.New("sandbox: this engine has no shim door: the gateway has nowhere to listen")
+	}
+	if err := os.Remove(x.door); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(x.door), 0o755); err != nil {
+		return err
+	}
+	listener, err := net.Listen("unix", x.door)
+	if err != nil {
+		return fmt.Errorf("sandbox: cannot listen for the container shim at %s: %w", x.door, err)
+	}
+	// What connects through this socket comes through the engine's bridge, which is a local
+	// process's business: the door is not open to other users of the machine.
+	if err := os.Chmod(x.door, 0o600); err != nil {
+		listener.Close()
+		return err
+	}
+	x.listener = listener
+	return nil
+}
+
+// shimClient is the live connection to the shim, connecting one or starting the shim when there
+// is none: a machine boots without it, and the first call to need one delivers it.
+func (x *LXC) shimClient(ctx context.Context) (*shim.Client, error) {
+	x.mu.Lock()
+	if x.client != nil {
+		select {
+		case <-x.client.Closed():
+			x.client = nil
+		default:
+			client := x.client
+			x.mu.Unlock()
+			return client, nil
+		}
+	}
+	x.mu.Unlock()
+
+	conn, err := x.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	client := shim.NewClient(conn)
+	hello, err := client.Hello(ctx)
+	if err != nil {
+		client.Close()
+		return nil, err
+	}
+	if hello.Runtime == "" {
+		client.Close()
+		return nil, fmt.Errorf("%w: the machine has no container runtime: its image needs one (lxc), which is what the appliance image is for", ErrUnavailable)
+	}
+	x.mu.Lock()
+	x.client = client
+	x.mu.Unlock()
+	return client, nil
+}
+
+// connect waits for the shim to dial in, and starts it inside the machine when nothing does:
+// the gateway puts its own binary there and runs the shim from it. One copy and one exec per
+// machine, because after that the shim reconnects by itself.
+func (x *LXC) connect(ctx context.Context) (net.Conn, error) {
+	if err := x.listen(); err != nil {
+		return nil, err
+	}
+	if conn, err := x.accept(ctx, 2*time.Second); err == nil {
+		return conn, nil
+	}
+	if err := x.startShim(ctx); err != nil {
+		return nil, err
+	}
+	return x.accept(ctx, 30*time.Second)
+}
+
+func (x *LXC) accept(ctx context.Context, within time.Duration) (net.Conn, error) {
+	if x.dial != nil {
+		return x.dial(ctx)
+	}
+	x.mu.Lock()
+	listener := x.listener
+	x.mu.Unlock()
+	if listener == nil {
+		return nil, errors.New("sandbox: the shim door is not open")
+	}
+	type accepted struct {
+		conn net.Conn
+		err  error
+	}
+	ready := make(chan accepted, 1)
+	go func() {
+		conn, err := listener.Accept()
+		ready <- accepted{conn, err}
+	}()
+	timer := time.NewTimer(within)
+	defer timer.Stop()
+	select {
+	case got := <-ready:
+		if got.err != nil {
+			return nil, got.err
+		}
+		return got.conn, nil
+	case <-timer.C:
+		return nil, fmt.Errorf("sandbox: nothing connected to the shim door at %s within %s", x.door, within)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (x *LXC) startShim(ctx context.Context) error {
+	if strings.TrimSpace(x.binary) == "" {
+		return errors.New("sandbox: this engine does not know which binary to run the shim from")
+	}
+	if _, err := os.Stat(x.binary); err != nil {
+		return fmt.Errorf("sandbox: the binary to run the shim from is not there: %w", err)
+	}
+	name := x.machine.Name()
+	target := "/usr/local/bin/acornfall"
+	if _, err := x.engine.run(ctx, "copy", x.binary, name+":"+target); err != nil {
+		return fmt.Errorf("sandbox: putting the shim into %s: %w", name, err)
+	}
+	// The shim stays up inside the machine and dials out; the command that started it is only
+	// its supervisor, so it is started and left running rather than waited for. Its output goes
+	// to the machine's own console: the shim reports through the protocol, and the gateway's log
+	// is not where a machine's noise belongs.
+	command := exec.CommandContext(ctx, x.engine.binary(), "exec", name, "--", target, "shim", "--vsock", fmt.Sprint(x.port))
+	command.Env = append(os.Environ(), x.engine.Env()...)
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("sandbox: starting the shim in %s: %w", name, err)
+	}
+	go func() {
+		if err := command.Wait(); err != nil && x.log != nil {
+			x.log("the shim in %s ended: %v", name, err)
+		}
+	}()
+	return nil
+}
+
+// List is every container this install has, and nothing of the engine's own store: the machine
+// is not a workspace, and it must never be reported as one.
+func (x *LXC) List(ctx context.Context) ([]Instance, error) {
+	client, err := x.shimClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	containers, err := client.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	instances := make([]Instance, 0, len(containers))
+	for _, container := range containers {
+		instances = append(instances, Instance{Name: container.Name, Status: container.Status})
+	}
+	return instances, nil
+}
+
+// Create makes one workspace's container: the rootfs from the workspace's image, the
+// configuration the policy maps to, and the mounts the policy names — and nothing else.
+func (x *LXC) Create(ctx context.Context, policy Policy, policyDir string) error {
+	container, settings, err := x.container(policy)
+	if err != nil {
+		return err
+	}
+	config, err := container.LXCConfig(settings)
+	if err != nil {
+		return err
+	}
+	if err := x.EnsureMachine(ctx); err != nil {
+		return err
+	}
+	if strings.TrimSpace(policyDir) == "" {
+		return errors.New("sandbox: no directory for the container's configuration")
+	}
+	if err := os.MkdirAll(policyDir, 0o755); err != nil {
+		return err
+	}
+	// A person reads what the workspace's container is allowed to be, the way a microVM
+	// sandbox's policy file is readable.
+	if err := os.WriteFile(filepath.Join(policyDir, "container.conf"), config, 0o644); err != nil {
+		return err
+	}
+	client, err := x.shimClient(ctx)
+	if err != nil {
+		return err
+	}
+	payload := shim.CreatePayload{
+		Name:        container.Name,
+		Image:       policy.Image,
+		Dir:         settings.Dir,
+		Config:      string(config),
+		Owner:       settings.UID,
+		Group:       settings.GID,
+		RootfsOwner: settings.RootfsOwner(),
+		RootfsGroup: settings.RootfsGroup(),
+	}
+	for _, bind := range container.Binds {
+		payload.Binds = append(payload.Binds, shim.Bind{Source: bind.Source, Target: bind.Target, File: bind.File})
+	}
+	return client.Create(ctx, payload)
+}
+
+func (x *LXC) Start(ctx context.Context, name string) error {
+	client, err := x.shimClient(ctx)
+	if err != nil {
+		return err
+	}
+	return client.Start(ctx, name)
+}
+
+func (x *LXC) Stop(ctx context.Context, name string) error {
+	client, err := x.shimClient(ctx)
+	if err != nil {
+		return err
+	}
+	return client.Stop(ctx, name)
+}
+
+func (x *LXC) Remove(ctx context.Context, name string) error {
+	client, err := x.shimClient(ctx)
+	if err != nil {
+		return err
+	}
+	return client.Remove(ctx, name)
+}
+
+// container maps a workspace's policy onto a container and its settings, refusing what cannot
+// be a container rather than making one that cannot work.
+func (x *LXC) container(policy Policy) (Container, LXCSettings, error) {
+	container, err := policy.Container(x.machine.Machine().ShareRoot)
+	if err != nil {
+		return Container{}, LXCSettings{}, err
+	}
+	settings := LXCSettings{
+		Dir:          filepath.Join(x.dir, container.Name),
+		Unprivileged: !x.privileged,
+		UID:          currentOwner().uid,
+		GID:          currentOwner().gid,
+	}
+	// The containers are where a workspace's own virtual machines would run, so the device goes
+	// in when the workspace allows nesting and the machine can grant it.
+	if !policy.DisableVMNesting && x.engine.hostNesting().Available {
+		settings.KVM = true
+	}
+	return container, settings, nil
+}

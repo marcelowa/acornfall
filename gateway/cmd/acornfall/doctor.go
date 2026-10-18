@@ -20,7 +20,7 @@ func doctorCommand(argv []string) {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "data directory")
 	home := flags.String("home", "", "the acornfall folder (default: ~/.acornfall)")
-	sandboxEngine := flags.String("sandbox-engine", "", "which engine to report: microsandbox (default) or host")
+	sandboxEngine := flags.String("sandbox-engine", "", "which engine to report: microsandbox (default), lxc (containers in one machine), or host")
 	asJSON := flags.Bool("json", false, "print the report as JSON")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)

@@ -3,6 +3,8 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 )
 
 // Host is the engine that does not sandbox anything: commands and file operations happen on
@@ -75,7 +77,18 @@ func Engine(home, state, name string) (Driver, error) {
 		return driver, nil
 	case "host":
 		return NewHost(), nil
+	case "lxc":
+		// The machine-and-containers engine of ADR 0021: one VM per install, a container per
+		// workspace inside it. Its share root is not chosen yet (the ADR leaves that open), so
+		// it refuses to make a workspace until one is named in the machine's settings rather
+		// than binding a folder nobody picked.
+		engine := NewMicrosandbox(home)
+		if state != "" {
+			engine = engine.WithStateDir(state)
+		}
+		binary, _ := os.Executable()
+		return NewLXC(engine, Machine{}, filepath.Join(home, "state", "machine.sock"), binary), nil
 	default:
-		return nil, errors.New("sandbox: unknown engine " + name + " (microsandbox, host)")
+		return nil, errors.New("sandbox: unknown engine " + name + " (microsandbox, lxc, host)")
 	}
 }
