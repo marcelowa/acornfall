@@ -1,11 +1,14 @@
 # ADR 0021 — One microVM per machine, workspaces as LXC containers
 
 Status: draft, not accepted — the owner's sketch, written down on 2026-10-17 so it stops
-being lost. Nothing here is built, and no code reads this file; one step of the seam it
-describes exists (`gateway/internal/sandbox/layers.go`: the machine layer and the
-policy-to-container mapping, with tests), and nothing calls it yet. The spike it asked for as
-its first step has run on Linux/KVM: [docs/engineering/lxc-spike.md](../engineering/lxc-spike.md),
-and what it measured is in "What the spike measured" below. The decision is still open.
+being lost. Nothing here is decided; the parts that exist in code are the seam it describes
+(`gateway/internal/sandbox/layers.go`: the machine layer and the policy-to-container mapping),
+the machine itself (`machine.go`: one VM per install, created once, sized by config, with a
+live test), and the container's own configuration (`lxc.go`: the two profiles, as the spike
+measured them). Nothing calls them from the product yet: the container lifecycle waits for
+the transport, and who speaks to LXC is still open. The spike it asked for as its first step
+has run on Linux/KVM: [docs/engineering/lxc-spike.md](../engineering/lxc-spike.md), and what
+it measured is in "What the spike measured" below. The decision is still open.
 Date: 2026-10-17
 
 ## Context
@@ -137,6 +140,21 @@ What the table changes:
 - **File ownership needs one more check.** A container's write landed owned by the container's
   uid (100000) in the guest's view; who the *host* then says owns it, and whether the user can
   edit it, is the first follow-up. The workspace is supposed to belong to the person.
+
+And four facts the container's own configuration turned out to have, found when the same
+configuration was written in Go (`gateway/internal/sandbox/lxc.go`) and run again the same way:
+
+- **A mount target is relative to the container's rootfs.** An absolute one is taken as a path
+  outside the container and skipped — silently, because the entry is optional — so a workspace
+  would come up with no door at all and no error.
+- **The parent folders have to exist in the image.** `create=dir` makes the leaf only, and
+  `create=auto` makes nothing at all; a bind whose parent is missing is another silent skip.
+  Whoever creates a container makes those paths first.
+- **A file is not a folder.** The install's `config.json` is a file among the mounts, and the
+  runtime has to be told which kind of target to make.
+- **`/dev/kvm` needs three things together**: the device readable in the guest, the device rule
+  in the container's cgroup, and the bind. Two of the three is a container that starts without
+  KVM.
 
 ## Alternatives
 

@@ -105,3 +105,18 @@ layered overlay (not the flat root disk the ADR suggests for Docker).
 3. The same script on a Mac, and on a flat root disk: two facts, two runs.
 4. Whether `iptables` and `mount` work inside the privileged container (the ADR's sharpest
    trade lists them; this run did not try them).
+
+## Where it went next
+
+The same configuration is now written in Go — `gateway/internal/sandbox/lxc.go`, one function
+per profile — and was run the same way: a real LXC 6.0.4 container in a guest started from the
+rendered config, took its cgroup limits, bound the share root at the paths the policy named, and
+created a KVM VM. Writing it down twice is what found the four facts the ADR now carries: a
+mount target is relative to the container's rootfs (an absolute one is skipped, silently), a
+bind's parent folders have to exist in the image, a file target is not a directory, and KVM
+needs the device mode, the device rule, and the bind together.
+
+The machine the containers live in is built too (`machine.go`: one VM per install, created once,
+`--root-disk flat:` and all), and it has a live test in the sandbox tier: on Linux/KVM it
+creates a real machine VM, leaves it alone the second time, and boots it again after a stop —
+measured inside an acornfall workspace's own sandbox, so a nested microVM.
