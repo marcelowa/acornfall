@@ -158,3 +158,17 @@ func idMap(kind string, id int) string {
 func hasSpace(value string) bool {
 	return strings.ContainsAny(value, " \t\n")
 }
+
+// RootfsOwner is who owns a container's rootfs: the uid its own root maps to. An unprivileged
+// container's root is lxcIDShift in the machine; a privileged one's is the machine's root. The
+// difference is not a detail — a container whose filesystem belongs to somebody else starts and
+// then cannot write it, which an image's package manager finds first.
+func (s LXCSettings) RootfsOwner() int {
+	if s.Unprivileged {
+		return lxcIDShift
+	}
+	return 0
+}
+
+// RootfsGroup is RootfsOwner's group, which is the same number: the map shifts both.
+func (s LXCSettings) RootfsGroup() int { return s.RootfsOwner() }

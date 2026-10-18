@@ -115,11 +115,17 @@ type CreatePayload struct {
 	// not there, silently (measured). Source is a path in the machine, Target the path inside
 	// the container.
 	Binds []Bind `json:"binds,omitempty"`
-	// Owner is the uid that owns the created targets, for an unprivileged container: a target
-	// its root cannot write is a mount it cannot use. Zero leaves them as root's.
+	// Owner is the uid that owns the created bind targets, for an unprivileged container: a
+	// target its root cannot write is a mount it cannot use. Zero leaves them as root's.
 	Owner int `json:"owner,omitempty"`
 	// Group is the gid for Owner.
 	Group int `json:"group,omitempty"`
+	// RootfsOwner and RootfsGroup are who owns the rootfs itself: the *mapped* uid for an
+	// unprivileged container, not the share's owner. Get it wrong and the container starts and
+	// then cannot write its own filesystem — an image's package manager is the first thing to
+	// find out. Zero leaves the rootfs as the image made it.
+	RootfsOwner int `json:"rootfsOwner,omitempty"`
+	RootfsGroup int `json:"rootfsGroup,omitempty"`
 }
 
 // Bind is one mount's two ends, enough for the shim to prepare the target.

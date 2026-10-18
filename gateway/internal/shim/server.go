@@ -408,6 +408,12 @@ func (t *session) create(message Message, payload CreatePayload) error {
 		return fmt.Errorf("shim: making the rootfs of %s: %w", payload.Name, err)
 	}
 	rootfs := filepath.Join(payload.Dir, "rootfs")
+	// The folder is made here as well as by the runtime: a fake runtime, and an image that ships
+	// a pre-made container, both leave it missing, and a configuration with nowhere to go is a
+	// create that fails after the work of pulling an image.
+	if err := os.MkdirAll(payload.Dir, 0o755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(payload.Dir, "config"), []byte(payload.Config), 0o644); err != nil {
 		return err
 	}
@@ -416,8 +422,10 @@ func (t *session) create(message Message, payload CreatePayload) error {
 			return err
 		}
 	}
-	if payload.Owner > 0 {
-		if err := chownTree(rootfs, payload.Owner, payload.Group); err != nil {
+	// The rootfs belongs to the container's own root, not to the share's owner: a container whose
+	// filesystem is someone else's can start and then not write it.
+	if payload.RootfsOwner > 0 {
+		if err := chownTree(rootfs, payload.RootfsOwner, payload.RootfsGroup); err != nil {
 			return err
 		}
 		if err := os.Chmod(payload.Dir, 0o755); err != nil {
