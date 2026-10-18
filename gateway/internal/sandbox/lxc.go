@@ -88,6 +88,10 @@ func (c Container) LXCConfig(s LXCSettings) ([]byte, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "lxc.uts.name = %s\n", c.Name)
 	fmt.Fprintf(&b, "lxc.rootfs.path = dir:%s\n", filepath.Join(s.Dir, "rootfs"))
+	// The runtime's own words about this container, kept beside it: a start that fails is
+	// otherwise a state and a shrug, and the person who has to fix it has no log to read.
+	fmt.Fprintf(&b, "lxc.log.file = %s\n", filepath.Join(s.Dir, "lxc.log"))
+	b.WriteString("lxc.log.level = ERROR\n")
 	// No network: a container's egress is the piece the ADR says needs a second look, and
 	// saying nothing would hand it the VM's own network.
 	b.WriteString("lxc.net.0.type = none\n")
