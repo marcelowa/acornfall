@@ -269,3 +269,63 @@ func TestOpenRefusesWithoutADriverOrHome(t *testing.T) {
 		t.Error("a manager with no home has nowhere to install anything")
 	}
 }
+
+// layeredDriver is an engine with a machine: one VM for the install, containers inside it.
+// The manager must ensure the VM before it asks for a container, and must not create the
+// container when the VM cannot boot.
+type layeredDriver struct {
+	fakeDriver
+	ensured int
+	bootErr error
+}
+
+func (l *layeredDriver) EnsureMachine(context.Context) error {
+	l.calls = append(l.calls, "ensure-machine")
+	l.ensured++
+	return l.bootErr
+}
+
+func TestTheMachineIsEnsuredBeforeASandboxIsCreated(t *testing.T) {
+	driver := &layeredDriver{}
+	if _, err := openWith(t, driver).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if driver.ensured == 0 {
+		t.Fatal("a container needs the machine it lives in")
+	}
+	ensure, create := -1, -1
+	for index, call := range driver.calls {
+		switch call {
+		case "ensure-machine":
+			ensure = index
+		case "create":
+			create = index
+		}
+	}
+	if ensure > create {
+		t.Errorf("the machine has to be ensured first, got %v", driver.calls)
+	}
+}
+
+func TestASandboxIsNotCreatedWhenTheMachineCannotBoot(t *testing.T) {
+	driver := &layeredDriver{bootErr: errors.New("the VM disk is full")}
+	_, err := openWith(t, driver).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "disk is full") {
+		t.Fatalf("want the boot failure, got %v", err)
+	}
+	if driver.ran("create") || driver.ran("start") {
+		t.Errorf("nothing should be asked of a machine that is not up: %v", driver.calls)
+	}
+}
+
+// An engine without a machine layer keeps working exactly as before: today's engines have no
+// VM of their own to ensure, and asking them for one would be a method they do not have.
+func TestAnEngineWithoutAMachineNeedsNoEnsuring(t *testing.T) {
+	driver := &fakeDriver{}
+	if _, err := openWith(t, driver).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if !driver.ran("create") {
+		t.Errorf("a flat engine still creates its sandbox: %v", driver.calls)
+	}
+}

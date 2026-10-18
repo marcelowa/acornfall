@@ -251,6 +251,14 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 	if err := m.ensure(ctx); err != nil {
 		return "", err
 	}
+	// The machine layer, where the engine has one: a container cannot start inside a VM that is
+	// not there. The VM is the install's, so this is idempotent and repeated on every start
+	// rather than remembered — an idle policy may have stopped it since.
+	if layer, ok := m.driver.(MachineLayer); ok {
+		if err := layer.EnsureMachine(ctx); err != nil {
+			return "", err
+		}
+	}
 	if strings.TrimSpace(policy.Workspace) == "" {
 		return "", errors.New("sandbox: policy has no workspace")
 	}
