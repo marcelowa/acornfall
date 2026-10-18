@@ -20,10 +20,17 @@ func shimCommand(argv []string) {
 	flags := flag.NewFlagSet("acornfall shim", flag.ContinueOnError)
 	socket := flags.String("socket", "/run/acornfall-shim.sock", "unix socket to listen on inside the machine")
 	pipe := flags.Bool("stdio", false, "serve one connection on stdin and stdout instead of a socket")
+	vsock := flags.Int("vsock", 0, "dial the host on this vsock port and serve the connection (the door the engine publishes)")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
 	server := &shim.Server{Version: update.BuildVersion, Log: log.Printf}
+	if *vsock > 0 {
+		if err := server.ServeVSock(*vsock); err != nil {
+			log.Fatalf("acornfall shim: %v", err)
+		}
+		return
+	}
 	if *pipe {
 		if err := server.Serve(stdio{reader: os.Stdin, writer: os.Stdout}); err != nil {
 			log.Fatalf("acornfall shim: %v", err)
