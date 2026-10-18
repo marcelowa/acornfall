@@ -121,7 +121,6 @@ func TestTheMachineWritesItsPolicyAndItsDiskFlag(t *testing.T) {
 		Memory:    "12G",
 		Disk:      "flat:40G",
 		ShareRoot: "/home/me/work",
-		Egress:    true,
 	}, dir)
 	if err := machine.EnsureMachine(context.Background()); err != nil {
 		t.Fatal(err)
@@ -209,5 +208,29 @@ func TestMachineNameIsStableAndApartFromWorkspaces(t *testing.T) {
 	}
 	if !strings.HasPrefix(first, "acornfall-machine-") {
 		t.Errorf("name = %q, want it readable", first)
+	}
+}
+
+// The door is part of the machine's own configuration: the engine publishes a host socket on a
+// vsock port inside it, and that port is the only way in. A machine made without it is a machine
+// nothing outside can speak to, which is how this was found (the shim dialed into nothing and
+// the machine sat there).
+func TestTheMachineCarriesItsDoor(t *testing.T) {
+	runner := &machineRunner{}
+	machine := NewMachineEngine(machineDriver(t, runner), Machine{}, t.TempDir()).
+		WithDoor("/home/me/.acornfall/state/machine.sock", DefaultDoorPort)
+	if err := machine.EnsureMachine(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(runner.createArgs(), " "); !strings.Contains(args, "--vsock /home/me/.acornfall/state/machine.sock:7411") {
+		t.Errorf("the machine should carry its door, got %q", args)
+	}
+
+	plain := &machineRunner{}
+	if err := NewMachineEngine(machineDriver(t, plain), Machine{}, t.TempDir()).EnsureMachine(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(plain.createArgs(), " "); strings.Contains(args, "--vsock") {
+		t.Errorf("a machine with no door should not be given one, got %q", args)
 	}
 }

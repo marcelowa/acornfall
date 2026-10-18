@@ -162,6 +162,11 @@ configuration was written in Go (`gateway/internal/sandbox/lxc.go`) and run agai
 - **`/dev/kvm` needs three things together**: the device readable in the guest, the device rule
   in the container's cgroup, and the bind. Two of the three is a container that starts without
   KVM.
+- **The machine's image has to carry the container runtime.** Measured while wiring the engine:
+  a long install through the engine's exec loses its session and leaves dpkg interrupted, because
+  that exec is for lifecycle calls and not for work (ADR 0012 measured the same split). So the
+  appliance image carries lxc, skopeo, umoci, jq, and the id ranges — and the engine refuses a
+  machine without them with a sentence instead of failing three calls later.
 
 ## Alternatives
 

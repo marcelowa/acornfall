@@ -51,6 +51,11 @@ type LXC struct {
 	mu       sync.Mutex
 	listener net.Listener
 	client   *shim.Client
+	// incoming is what the listener has accepted: one loop accepts for the life of the door, and
+	// a connection that arrives while nobody is waiting stays here. Waiting per call was a bug
+	// that took a connection with it when the wait timed out — the shim had connected, and the
+	// gateway never saw it.
+	incoming chan net.Conn
 	// dial is how the gateway reaches the shim. Nil accepts on the listener, which is what a
 	// machine does; a test injects its own connection.
 	dial func(ctx context.Context) (net.Conn, error)
@@ -64,7 +69,7 @@ type LXC struct {
 func NewLXC(engine *Microsandbox, machine Machine, door, binary string) *LXC {
 	return &LXC{
 		engine:  engine,
-		machine: NewMachineEngine(engine, machine, filepath.Dir(door)),
+		machine: NewMachineEngine(engine, machine, filepath.Dir(door)).WithDoor(door, DefaultDoorPort),
 		door:    door,
 		port:    DefaultDoorPort,
 		binary:  binary,
@@ -152,6 +157,19 @@ func (x *LXC) listen() error {
 	if err != nil {
 		return fmt.Errorf("sandbox: cannot listen for the container shim at %s: %w", x.door, err)
 	}
+	x.incoming = make(chan net.Conn, 4)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			if x.log != nil {
+				x.log("the shim connected to %s", x.door)
+			}
+			x.incoming <- conn
+		}
+	}()
 	// What connects through this socket comes through the engine's bridge, which is a local
 	// process's business: the door is not open to other users of the machine.
 	if err := os.Chmod(x.door, 0o600); err != nil {
@@ -211,7 +229,10 @@ func (x *LXC) connect(ctx context.Context) (net.Conn, error) {
 	if err := x.startShim(ctx); err != nil {
 		return nil, err
 	}
-	return x.accept(ctx, 30*time.Second)
+	// Patiently: the machine may be booting, the copy is 19MB, and the shim has to start and
+	// dial. Measured, thirty seconds was not enough on a machine that had just come up, and the
+	// failure looked like a door that does not work rather than a shim still arriving.
+	return x.accept(ctx, 3*time.Minute)
 }
 
 func (x *LXC) accept(ctx context.Context, within time.Duration) (net.Conn, error) {
@@ -219,29 +240,20 @@ func (x *LXC) accept(ctx context.Context, within time.Duration) (net.Conn, error
 		return x.dial(ctx)
 	}
 	x.mu.Lock()
-	listener := x.listener
+	incoming := x.incoming
 	x.mu.Unlock()
-	if listener == nil {
+	if incoming == nil {
 		return nil, errors.New("sandbox: the shim door is not open")
 	}
-	type accepted struct {
-		conn net.Conn
-		err  error
-	}
-	ready := make(chan accepted, 1)
-	go func() {
-		conn, err := listener.Accept()
-		ready <- accepted{conn, err}
-	}()
 	timer := time.NewTimer(within)
 	defer timer.Stop()
 	select {
-	case got := <-ready:
-		if got.err != nil {
-			return nil, got.err
-		}
-		return got.conn, nil
+	case conn := <-incoming:
+		return conn, nil
 	case <-timer.C:
+		if x.log != nil {
+			x.log("nothing connected to %s within %s", x.door, within)
+		}
 		return nil, fmt.Errorf("sandbox: nothing connected to the shim door at %s within %s", x.door, within)
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -257,14 +269,25 @@ func (x *LXC) startShim(ctx context.Context) error {
 	}
 	name := x.machine.Name()
 	target := "/usr/local/bin/acornfall"
+	log := "/var/log/acornfall-shim.log"
 	if _, err := x.engine.run(ctx, "copy", x.binary, name+":"+target); err != nil {
-		return fmt.Errorf("sandbox: putting the shim into %s: %w", name, err)
+		// A copy onto a running binary is refused ("text file busy"), and that is the shim already
+		// being there: the copy is only how it arrives the first time.
+		if !strings.Contains(err.Error(), "busy") {
+			return fmt.Errorf("sandbox: putting the shim into %s: %w", name, err)
+		}
+		if x.log != nil {
+			x.log("the shim is already in %s; leaving it alone", name)
+		}
 	}
 	// The shim stays up inside the machine and dials out; the command that started it is only
 	// its supervisor, so it is started and left running rather than waited for. Its output goes
 	// to the machine's own console: the shim reports through the protocol, and the gateway's log
 	// is not where a machine's noise belongs.
-	command := exec.CommandContext(ctx, x.engine.binary(), "exec", name, "--", target, "shim", "--vsock", fmt.Sprint(x.port))
+	// Its own log inside the machine, appended: a shim that cannot reach the door is otherwise a
+	// machine that sits there, and the gateway has no console to read.
+	script := fmt.Sprintf("exec %s shim --vsock %d >> %s 2>&1", target, x.port, log)
+	command := exec.CommandContext(ctx, x.engine.binary(), "exec", name, "--", "sh", "-c", script)
 	command.Env = append(os.Environ(), x.engine.Env()...)
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("sandbox: starting the shim in %s: %w", name, err)

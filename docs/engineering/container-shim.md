@@ -110,6 +110,12 @@ ADR 0021 leaves the choice open, so a workspace cannot be made until one is name
 profile** (unprivileged by default, `WithPrivileged` for the workspaces that need root in the
 machine — the per-workspace flag is still open).
 
+One thing the machine's image has to carry: **the container runtime**. The engine will not
+install it, and the measurement says why — a long install through the engine's exec loses its
+session and leaves `dpkg` interrupted, because that exec is for lifecycle calls, not for work
+(ADR 0012 measured the same split for commands). The appliance image is the piece that carries
+lxc, skopeo, umoci, jq, and the id ranges the unprivileged profile maps.
+
 ## Testing
 
 - `make test` covers the protocol, the calls each op makes, the kill, the refusals, and the
@@ -126,6 +132,18 @@ machine — the per-workspace flag is still open).
   writes in the share, kills a command and checks that it died while the container's init lived,
   and removes the container. Gated rather than a tier because the runtime is installed by hand
   today; it joins `make test-sandbox` when the appliance image makes it always true.
+
+- Live, the engine whole (machine, shim, door, handshake):
+
+  ```sh
+  ACORNFALL_LXC=1 go test ./internal/sandbox -run LiveLXC -v
+  ```
+
+  It builds the binary the machine runs the shim from, makes the machine, waits for the shim to
+  dial in, and checks the handshake. Where it stops is the runtime: the machine's image has to
+  carry it, so with the default image the test says that and skips. Point
+  `ACORNFALL_MACHINE_IMAGE` at an image that carries lxc and the whole chain runs — create,
+  start, list, stop, remove through the engine.
 
 The worker's client — the second definition of this protocol, in TypeScript — arrives with the
 worker's exec moving inside a container.

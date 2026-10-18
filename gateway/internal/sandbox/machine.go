@@ -35,9 +35,12 @@ type Machine struct {
 	// choice open), and a machine without one mounts nothing: its containers then have no door
 	// at all, which is the safe direction for a guess.
 	ShareRoot string
-	// Egress is whether the VM itself may reach the network. A container's own network is a
-	// separate question, and not built.
-	Egress bool
+	// NoEgress takes the machine off the network. It is off by default because the machine needs
+	// the network for its own work — pulling the image a workspace.s container is made of is the
+	// first thing it does — and a workspace.s own reach is a different question entirely: a
+	// container is made with no network of its own (lxc.go), so what the machine can reach is not
+	// what a workspace can.
+	NoEgress bool
 	// IdleTimeout is when the engine stops the VM for being idle. The owner's call of
 	// 2026-10-19: the machine never stops. It has to outlive every workspace's container, and a
 	// stopped machine is every workspace at once; NoIdleStop is how the policy says so (measured
@@ -79,7 +82,7 @@ func (m Machine) Policy() Policy {
 		Image:       m.Image,
 		CPUs:        m.CPUs,
 		Memory:      m.Memory,
-		Egress:      m.Egress,
+		Egress:      !m.NoEgress,
 		Workspace:   m.ShareRoot,
 		IdleTimeout: m.IdleTimeout,
 	}
@@ -102,6 +105,11 @@ type MachineEngine struct {
 	// dir is where the machine's own policy file is written, so a person can read what the VM
 	// is allowed to be.
 	dir string
+	// door is the host path the engine publishes to the machine, and doorPort the machine's vsock
+	// port bridged to it: the way anything outside the machine reaches anything inside it. Empty
+	// means no door, which is what a machine nobody speaks to looks like.
+	door     string
+	doorPort int
 }
 
 // NewMachineEngine wires the machine to the pinned engine. dir is a folder of the install's
@@ -111,6 +119,16 @@ func NewMachineEngine(engine *Microsandbox, machine Machine, dir string) *Machin
 }
 
 // Name is the machine's sandbox name, for callers that need to look it up or report it.
+// WithDoor publishes a host socket to the machine over the engine's vsock bridge: what the
+// gateway listens on and what the shim inside dials out to (docs/engineering/container-shim.md).
+// It has to be set before the machine is created — the bridge is part of the machine's own
+// configuration — and the listener has to be up first, or the machine dials into nothing.
+func (x *MachineEngine) WithDoor(path string, port int) *MachineEngine {
+	x.door = path
+	x.doorPort = port
+	return x
+}
+
 func (x *MachineEngine) Name() string { return MachineName(x.engine.home) }
 
 // Machine is what this install asked the VM to be.
@@ -145,6 +163,15 @@ func (x *MachineEngine) create(ctx context.Context, name string) error {
 	if strings.TrimSpace(x.dir) == "" {
 		return errors.New("sandbox: nowhere to write the machine's policy file")
 	}
+	// The engine puts its runtime sockets under its store, and a Unix socket path has a hard
+	// limit the engine's own layout eats most of: the same sentence the per-workspace path
+	// gives, before the engine's own error arrives with the machine half-made.
+	if len(x.engine.StateDir()) > statePathLimit {
+		return fmt.Errorf(
+			"%w: the machine's state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornfall cannot be installed this deep: use a shorter --home",
+			ErrUnavailable, len(x.engine.StateDir()), x.engine.StateDir(), statePathLimit,
+		)
+	}
 	path := filepath.Join(x.dir, "machine", "sandbox.yaml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -156,6 +183,11 @@ func (x *MachineEngine) create(ctx context.Context, name string) error {
 	// A flat root disk, so the containers inside are not an overlay on the VM's own overlay.
 	if x.machine.Disk != "" {
 		args = append(args, "--root-disk", x.machine.Disk)
+	}
+	// The door: the engine publishes this host socket on a vsock port inside the machine, and
+	// that port is the only way in.
+	if x.door != "" {
+		args = append(args, "--vsock", fmt.Sprintf("%s:%d", x.door, x.doorPort))
 	}
 	// The machine asks for nesting wherever the machine can grant it, because the containers
 	// inside are the ones that want a /dev/kvm; whether any workspace gets the device is its

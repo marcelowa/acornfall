@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/shim"
 )
@@ -251,4 +252,31 @@ func idMapFor(t *testing.T) string {
 		return fmt.Sprintf("lxc.idmap = u %d %d 1", uid, uid)
 	}
 	return "lxc.idmap = u 0 100000 65536"
+}
+
+// The door's queue, on its own: a connection that arrives while nobody is waiting has to be
+// handed to the next wait. The live run found the alternative — the accept loop logged the shim
+// connecting and the wait still timed out — and this is the smallest test that says which.
+func TestAConnectionThatArrivesWhileNobodyWaitsIsNotLost(t *testing.T) {
+	home := shortTempDir(t)
+	engine := NewMicrosandbox(home).WithRunner(&machineRunner{})
+	engine.installed = true
+	door := filepath.Join(t.TempDir(), "machine.sock")
+	driver := NewLXC(engine, Machine{}, door, "/bin/true")
+	if err := driver.listen(); err != nil {
+		t.Fatal(err)
+	}
+	// It arrives before anybody waits.
+	shimSide, err := net.Dial("unix", door)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shimSide.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := driver.accept(ctx, 2*time.Second)
+	if err != nil {
+		t.Fatalf("a queued connection should be handed over: %v", err)
+	}
+	conn.Close()
 }
