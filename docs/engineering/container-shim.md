@@ -22,21 +22,30 @@ were measured against it (`docs/engineering/lxc-spike.md`):
 
 The shim runs inside the machine. It serves:
 
-- `--stdio` — one connection on stdin and stdout. How the live test runs it, and how a person can
-  speak the protocol by hand.
-- `--socket <path>` (default `/run/acornfall-shim.sock`) — a unix socket inside the machine, one
-  goroutine per connection, so two installs sharing a machine do not stop each other's commands.
+- `--stdio` — one connection on stdin and stdout. How a person can speak the protocol by hand.
+- `--socket <path>` — a unix socket inside the machine, one goroutine per connection, so two
+  installs sharing a machine do not stop each other's commands.
+- `--vsock <port>` — **the door the gateway uses**: it dials the host and serves that connection,
+  and dials again when it ends.
 
-The gateway reaches that socket through the engine: `msb create --vsock HOST_PATH:PORT` publishes
-a host local-IPC endpoint on a guest vsock port, which is the machine-to-host door the engine
-offers. **The direction of that door has not been verified on the pin yet** — it is the first
-thing to check when the machine is wired to the shim, and until then the tests use a socket or a
-pipe.
+The direction is measured, not assumed. `msb create --vsock HOST_PATH:PORT` publishes a host
+local-IPC endpoint on a guest-to-host vsock port, so the **gateway listens on a unix socket** and
+the **machine dials out** to it. Three things that measurement settled the hard way:
+
+- **the listener has to exist before the machine is created.** A machine made first dials into
+  nothing and times out.
+- **the address is `struct sockaddr_vm`, byte for byte** — family(2) reserved(2) port(4) cid(4)
+  flags(1) zero(3). A first version put the port two bytes early and the dial timed out with
+  nobody on the other end; nothing said "wrong address".
+- **Go's `net` cannot wrap the socket.** `net.FileConn` asks the kernel for the address and
+  AF_VSOCK is not a family it knows (`address family not supported by protocol`), so the
+  connection is written out by hand, deadlines included (`door_linux.go`).
 
 The shim is a subcommand of the same binary the gateway already ships: linux/amd64 and
-linux/arm64 are two of the release's own platforms, and one binary cannot drift from itself. How
-it gets *into* the machine — baked into the appliance image, or copied in by the gateway — is
-still open; both work with the same artifact.
+linux/arm64 are two of the release's own platforms, and one binary cannot drift from itself.
+The gateway puts *its own* executable into the machine with the engine's copy command and starts
+the shim from it (`sandbox.LXC`), one copy and one exec per machine — so the image does not have
+to carry acornfall, and the shim is never a different version from the gateway that started it.
 
 ## The protocol
 
@@ -88,10 +97,24 @@ Each of these was a failure in the spike before it was a step in `create`:
 - an exec in a container that is not running is refused by name, and a `start` whose container is
   not running afterwards is a refusal too, not a success the next call discovers.
 
+## The engine that uses it
+
+`sandbox.LXC` (`gateway/internal/sandbox/lxcengine.go`) is the engine ADR 0021 describes: its
+`Driver` calls are containers, its `MachineLayer` call is the one machine (`machine.go`), and the
+machine's vsock port is what the door above carries. Above it nothing changed shape: create,
+start, stop, remove, and list mean what they meant for a microVM, and a workspace now costs a
+container.
+
+Two settings it refuses to invent: **the share root** (the one host folder the machine mounts —
+ADR 0021 leaves the choice open, so a workspace cannot be made until one is named) and **the
+profile** (unprivileged by default, `WithPrivileged` for the workspaces that need root in the
+machine — the per-workspace flag is still open).
+
 ## Testing
 
-- `make test` covers the protocol, the calls each op makes, the kill, and the refusals, against a
-  faked runtime: no runtime, no kernel, no root.
+- `make test` covers the protocol, the calls each op makes, the kill, the refusals, and the
+  engine above it (a policy becoming a container, the door opening before the machine, a share
+  root nobody chose being refused), against a faked runtime: no runtime, no kernel, no root.
 - Live, in a machine that has the runtime and the id ranges (`root:100000:65536` in
   `/etc/subuid` and `/etc/subgid` — what the appliance image will carry):
 

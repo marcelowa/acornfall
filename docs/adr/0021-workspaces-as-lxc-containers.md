@@ -4,11 +4,13 @@ Status: draft, not accepted — the owner's sketch, written down on 2026-10-17 s
 being lost. Nothing here is decided by this file; the parts that exist in code are the seam it
 describes (`gateway/internal/sandbox/layers.go`: the machine layer and the policy-to-container
 mapping), the machine itself (`machine.go`: one VM per install, created once, sized by config),
-the container's own configuration (`lxc.go`: the two profiles, as the spike measured them), and
-the shim the gateway will drive the runtime with (`gateway/internal/shim`, run as
-`acornfall shim`; [docs/engineering/container-shim.md](../engineering/container-shim.md)). The
-container lifecycle is the piece still missing, so nothing is wired to the product yet. The
-spike it asked for as its first step has run on Linux/KVM:
+the container's own configuration (`lxc.go`: the two profiles, as the spike measured them), the
+shim the gateway drives the runtime with (`gateway/internal/shim`, run as `acornfall shim`;
+[docs/engineering/container-shim.md](../engineering/container-shim.md)), and the engine that
+puts them together (`lxcengine.go`: `Driver` calls are containers, `MachineLayer` is the one
+machine, registered as `--sandbox-engine lxc`). What the engine refuses to invent is the
+share root and the profile — the two open questions below — so it will not make a workspace
+until one of each is named. The spike it asked for as its first step has run on Linux/KVM:
 [docs/engineering/lxc-spike.md](../engineering/lxc-spike.md), and what it measured is in "What
 the spike measured" below. The decision is still open.
 Date: 2026-10-17
@@ -188,7 +190,9 @@ configuration was written in Go (`gateway/internal/sandbox/lxc.go`) and run agai
   to LXC — a small **shim in the guest, written in Go**, part of the same binary and reached over
   one socket (`internal/shim`, `docs/engineering/container-shim.md`). The reasons are measured:
   the engine's exec leaves a killed command running inside its container, and making a container
-  is a handful of steps whose failures are text when nobody inside owns them. Still open: what
-  the share root is (the workspaces folder? the home?) and who chooses it; whether a workspace
-  may ask for a privileged container; and the direction of the engine's vsock door, which is how
-  the gateway will reach the shim once the machine is wired.
+  is a handful of steps whose failures are text when nobody inside owns them. The door was
+  measured too: the gateway listens on a unix socket, the machine dials out to it over the
+  vsock port the engine publishes, and the shim reconnects by itself (the listener has to exist
+  before the machine is created, or the dial goes nowhere). Still open: what
+  the share root is (the workspaces folder? the home?) and who chooses it, and whether a
+  workspace may ask for a privileged container — the two things the engine refuses to invent.
