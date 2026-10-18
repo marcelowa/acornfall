@@ -40,6 +40,10 @@ func main() {
 		doctorCommand(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "shim" {
+		shimCommand(os.Args[2:])
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		versionCommand(os.Args[2:])
 		return
