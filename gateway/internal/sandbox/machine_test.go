@@ -134,12 +134,16 @@ func TestTheMachineWritesItsPolicyAndItsDiskFlag(t *testing.T) {
 		"image: acornfall-appliance:0.1",
 		"cpus: 6",
 		"memory: 12G",
-		"idle_timeout: 24h",
 		"- /home/me/work:/home/me/work",
 	} {
 		if !strings.Contains(string(policy), want) {
 			t.Errorf("the machine's policy should hold %q, got:\n%s", want, policy)
 		}
+	}
+	// The machine never stops: its policy names no idle timeout at all, which is the only thing
+	// the engine reads as "no idle stop" (measured: `0s` stops a sandbox at once).
+	if strings.Contains(string(policy), "idle_timeout") {
+		t.Errorf("the machine must not be stopped for being idle, got:\n%s", policy)
 	}
 	if args := strings.Join(runner.createArgs(), " "); !strings.Contains(args, "--root-disk flat:40G") {
 		t.Errorf("create should carry the disk, got %q", args)

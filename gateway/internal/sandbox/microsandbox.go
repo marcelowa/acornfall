@@ -239,7 +239,11 @@ func (p Policy) render(o owner) []byte {
 	fmt.Fprintf(&b, "image: %s\n", yamlString(p.Image))
 	fmt.Fprintf(&b, "cpus: %d\n", p.CPUs)
 	fmt.Fprintf(&b, "memory: %s\n", yamlString(p.Memory))
-	fmt.Fprintf(&b, "idle_timeout: %s\n", yamlString(p.IdleTimeout))
+	if p.IdleTimeout != NoIdleStop {
+		// Naming nothing is how a sandbox is told never to stop: measured on the pin, an omitted
+		// idle_timeout leaves it running and `0s` stops it at once.
+		fmt.Fprintf(&b, "idle_timeout: %s\n", yamlString(p.IdleTimeout))
+	}
 	if !p.Egress {
 		// The engine's default is an open network, so saying nothing would say yes.
 		b.WriteString("network: none\n")

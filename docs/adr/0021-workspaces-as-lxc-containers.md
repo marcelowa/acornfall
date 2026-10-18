@@ -58,7 +58,10 @@ What already stands behind the sketch:
 3. **The policy file keeps its fields** (`image`, `cpus`, `memory`, `network`, `idle_timeout`,
    `mounts`). `cpus` and `memory` become cgroup limits on the container — LXC's own default is
    no limit, the VM's whole share, and acornfall keeps writing explicit ones. `idle_timeout`
-   stops a container, not the VM.
+   stops a container, not the VM. **The machine never stops** — the owner's call of
+   2026-10-19 — and its policy says so by naming no idle timeout at all, which is the only
+   thing the pinned engine reads as no idle stop (measured: `0s` stops a sandbox at once, and
+   an omitted key leaves it running). A stopped machine would be every workspace at once.
 4. **The VM mounts one host folder** — a share root the install names — and nothing else. Each
    container binds only the paths its policy names: the workspace at its own path read-write,
    the global resource folders read-only ([ADR 0014](0014-global-resources-in-the-sandbox.md)).
@@ -178,6 +181,8 @@ configuration was written in Go (`gateway/internal/sandbox/lxc.go`) and run agai
 - Networking moves to the container (none or veth), so the egress rules and the guest at
   `172.16.0.10` ([ADR 0020](0020-the-tailnet-is-the-only-transport.md), last hop) need a
   second look.
-- Open: what the share root is (the workspaces folder? the home?) and who chooses it; the VM's
-  idle policy (stay up, or stop when the last container stops); who speaks to LXC — the gateway
-  over the engine's exec, or a small shim in the guest.
+- Settled by the owner on 2026-10-19: the machine never stops for being idle (`machine.go`
+  writes no `idle_timeout`, and a container's own timeout stays the container's). Still open:
+  what the share root is (the workspaces folder? the home?) and who chooses it; who speaks to
+  LXC — the gateway over the engine's exec, or a small shim in the guest; and whether a
+  workspace may ask for a privileged container.

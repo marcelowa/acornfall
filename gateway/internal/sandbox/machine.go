@@ -38,10 +38,11 @@ type Machine struct {
 	// Egress is whether the VM itself may reach the network. A container's own network is a
 	// separate question, and not built.
 	Egress bool
-	// IdleTimeout is when the engine stops the VM for being idle. It is deliberately long: the
-	// machine outlives every workspace's container, so a workspace's own 30 minutes must not
-	// stop the VM under the others. Whether it should stop with the last container is one of
-	// the ADR's open questions.
+	// IdleTimeout is when the engine stops the VM for being idle. The owner's call of
+	// 2026-10-19: the machine never stops. It has to outlive every workspace's container, and a
+	// stopped machine is every workspace at once; NoIdleStop is how the policy says so (measured
+	// on the pin: an omitted idle_timeout is no idle stop at all). A workspace's own container
+	// still stops after its own idle timeout — that is a container's business, not the VM's.
 	IdleTimeout string
 }
 
@@ -51,7 +52,7 @@ const (
 	DefaultMachineCPUs        = 4
 	DefaultMachineMemory      = "8G"
 	DefaultMachineDisk        = "flat:20G"
-	DefaultMachineIdleTimeout = "24h"
+	DefaultMachineIdleTimeout = NoIdleStop
 )
 
 func (m Machine) withDefaults() Machine {

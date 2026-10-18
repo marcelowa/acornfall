@@ -47,7 +47,8 @@ type Policy struct {
 	// works. Read-only because editing them is self-modification, which belongs behind review
 	// (issue #17). GlobalPaths builds it.
 	Global []string
-	// IdleTimeout stops a sandbox nobody is using. Empty takes the default.
+	// IdleTimeout stops a sandbox nobody is using. Empty takes the default. NoIdleStop says
+	// the sandbox must never be stopped for being idle, which is what the machine uses.
 	IdleTimeout string
 	// Owned lists paths inside the workspace that belong to the sandbox rather than to the
 	// user's folder, so that build artifacts cannot fight between host and guest. Not used
@@ -63,6 +64,12 @@ const (
 	DefaultCPUs        = 2
 	DefaultMemory      = "2G"
 	DefaultIdleTimeout = "30m"
+	// NoIdleStop is a policy's way of saying "never stop this sandbox for being idle". The
+	// engine has no value for it — measured on the pin: an omitted idle_timeout is what it
+	// reads as no idle stop, while `0s` stops the sandbox at once — so the renderer writes no
+	// key at all. A long duration would be a number nobody chose, and one that eventually
+	// stops the machine out from under every workspace at once.
+	NoIdleStop = "never"
 )
 
 func (p Policy) withDefaults() Policy {

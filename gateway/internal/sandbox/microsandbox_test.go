@@ -561,3 +561,23 @@ func resolves(path, want string) error {
 	}
 	return fmt.Errorf("%s does not lead to %s", path, want)
 }
+
+// A sandbox that must never stop for being idle is told nothing: measured on the pin, an omitted
+// idle_timeout leaves it running while `0s` stops it at once, and a very long duration would be a
+// number nobody chose that eventually stops the machine under every workspace together.
+func TestRenderNamesNoIdleTimeoutForASandboxThatMustNotStop(t *testing.T) {
+	written := Policy{Workspace: "/home/me/work", IdleTimeout: NoIdleStop}.Render()
+	if strings.Contains(string(written), "idle_timeout") {
+		t.Errorf("no idle timeout should be written, got:\n%s", written)
+	}
+	if !strings.Contains(string(written), "idle_timeout: 30m") {
+		// The ordinary default is untouched: a workspace still stops itself.
+		ordinary := Policy{Workspace: "/home/me/work"}.Render()
+		if !strings.Contains(string(ordinary), "idle_timeout: "+DefaultIdleTimeout) {
+			t.Errorf("a workspace still stops after its idle timeout, got:\n%s", ordinary)
+		}
+	}
+	if DefaultMachineIdleTimeout != NoIdleStop {
+		t.Errorf("the machine's default is to stay up, got %q", DefaultMachineIdleTimeout)
+	}
+}
