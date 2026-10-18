@@ -1,14 +1,16 @@
 # ADR 0021 — One microVM per machine, workspaces as LXC containers
 
 Status: draft, not accepted — the owner's sketch, written down on 2026-10-17 so it stops
-being lost. Nothing here is decided; the parts that exist in code are the seam it describes
-(`gateway/internal/sandbox/layers.go`: the machine layer and the policy-to-container mapping),
-the machine itself (`machine.go`: one VM per install, created once, sized by config, with a
-live test), and the container's own configuration (`lxc.go`: the two profiles, as the spike
-measured them). Nothing calls them from the product yet: the container lifecycle waits for
-the transport, and who speaks to LXC is still open. The spike it asked for as its first step
-has run on Linux/KVM: [docs/engineering/lxc-spike.md](../engineering/lxc-spike.md), and what
-it measured is in "What the spike measured" below. The decision is still open.
+being lost. Nothing here is decided by this file; the parts that exist in code are the seam it
+describes (`gateway/internal/sandbox/layers.go`: the machine layer and the policy-to-container
+mapping), the machine itself (`machine.go`: one VM per install, created once, sized by config),
+the container's own configuration (`lxc.go`: the two profiles, as the spike measured them), and
+the shim the gateway will drive the runtime with (`gateway/internal/shim`, run as
+`acornfall shim`; [docs/engineering/container-shim.md](../engineering/container-shim.md)). The
+container lifecycle is the piece still missing, so nothing is wired to the product yet. The
+spike it asked for as its first step has run on Linux/KVM:
+[docs/engineering/lxc-spike.md](../engineering/lxc-spike.md), and what it measured is in "What
+the spike measured" below. The decision is still open.
 Date: 2026-10-17
 
 ## Context
@@ -182,7 +184,11 @@ configuration was written in Go (`gateway/internal/sandbox/lxc.go`) and run agai
   `172.16.0.10` ([ADR 0020](0020-the-tailnet-is-the-only-transport.md), last hop) need a
   second look.
 - Settled by the owner on 2026-10-19: the machine never stops for being idle (`machine.go`
-  writes no `idle_timeout`, and a container's own timeout stays the container's). Still open:
-  what the share root is (the workspaces folder? the home?) and who chooses it; who speaks to
-  LXC — the gateway over the engine's exec, or a small shim in the guest; and whether a
-  workspace may ask for a privileged container.
+  writes no `idle_timeout`, and a container's own timeout stays the container's); and who speaks
+  to LXC — a small **shim in the guest, written in Go**, part of the same binary and reached over
+  one socket (`internal/shim`, `docs/engineering/container-shim.md`). The reasons are measured:
+  the engine's exec leaves a killed command running inside its container, and making a container
+  is a handful of steps whose failures are text when nobody inside owns them. Still open: what
+  the share root is (the workspaces folder? the home?) and who chooses it; whether a workspace
+  may ask for a privileged container; and the direction of the engine's vsock door, which is how
+  the gateway will reach the shim once the machine is wired.
