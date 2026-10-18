@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -128,5 +130,31 @@ func TestMemoryCountsBytesAndRefusesWhatItCannot(t *testing.T) {
 		if got, err := parseMemory(value); err == nil {
 			t.Errorf("%q should be refused, got %d bytes", value, got)
 		}
+	}
+}
+
+// The globals include a file — the install's config.json — and the runtime has to be told which
+// kind of target to make: the wrong kind is a mount that silently does not happen, so the kind
+// is read from the host where the path exists.
+func TestABindKnowsAFileFromAFolder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	container, err := Policy{
+		Workspace: filepath.Join(root, "work"),
+		Global:    []string{filepath.Join(root, "config.json")},
+	}.Container(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if container.Binds[0].File {
+		t.Error("a workspace is a folder")
+	}
+	if !container.Binds[1].File {
+		t.Error("config.json is a file")
 	}
 }

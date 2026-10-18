@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -63,6 +64,11 @@ type Bind struct {
 	Source   string
 	Target   string
 	ReadOnly bool
+	// File is whether the path is a regular file rather than a folder, read from the host where
+	// it exists. The runtime has to be told which kind of target to make, and the wrong kind is
+	// a mount that silently does not happen: measured, `create=dir` leaves a file target
+	// unmounted, and `create=auto` creates nothing at all.
+	File bool
 }
 
 // Container maps a workspace's policy onto what a container runtime needs.
@@ -120,7 +126,10 @@ func bindPath(root, path string, readOnly bool) (Bind, error) {
 	if !inside(root, clean) {
 		return Bind{}, fmt.Errorf("sandbox: %s is outside the share root %s, so the machine's VM cannot see it", clean, root)
 	}
-	return Bind{Source: clean, Target: clean, ReadOnly: readOnly}, nil
+	// A path that is not there yet is not a file: the runtime skips a missing mount (`optional`),
+	// and the kind it was told is the kind it would have made.
+	info, err := os.Stat(clean)
+	return Bind{Source: clean, Target: clean, ReadOnly: readOnly, File: err == nil && !info.IsDir()}, nil
 }
 
 // inside answers whether path is under root. A string prefix says /home/me/work2 is under
