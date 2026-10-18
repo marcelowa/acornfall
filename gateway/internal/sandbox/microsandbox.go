@@ -244,12 +244,19 @@ func (p Policy) render(o owner) []byte {
 		// The engine's default is an open network, so saying nothing would say yes.
 		b.WriteString("network: none\n")
 	}
-	b.WriteString("mounts:\n")
-	b.WriteString("  - " + yamlString(p.mount(o)) + "\n")
-	for _, path := range p.Global {
-		// `ro` is the decision, not a detail: the agent reads its instructions and runs their
-		// scripts, and editing them from inside would be self-modification.
-		b.WriteString("  - " + yamlString(path+":"+path+":ro") + "\n")
+	// A policy with nothing to mount writes no mounts at all: an empty path is not a mount, and
+	// the key is left to the engine's own default. The machine of an install that has not chosen
+	// a share root yet is the case (ADR 0021 leaves that choice open).
+	if p.Workspace != "" || len(p.Global) > 0 {
+		b.WriteString("mounts:\n")
+		if p.Workspace != "" {
+			b.WriteString("  - " + yamlString(p.mount(o)) + "\n")
+		}
+		for _, path := range p.Global {
+			// `ro` is the decision, not a detail: the agent reads its instructions and runs their
+			// scripts, and editing them from inside would be self-modification.
+			b.WriteString("  - " + yamlString(path+":"+path+":ro") + "\n")
+		}
 	}
 	return []byte(b.String())
 }
