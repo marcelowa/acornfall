@@ -26,14 +26,16 @@ type fakeRuntime struct {
 
 func (f *fakeRuntime) Run(_ context.Context, args ...string) (string, error) {
 	f.record(args)
+	// A configured failure comes first: a fake that answers anyway is a fake that hides the case
+	// the test was written for.
+	if f.failure != nil {
+		return "", f.failure
+	}
 	key := strings.Join(args, " ")
 	for prefix, answer := range f.answers {
 		if strings.HasPrefix(key, prefix) {
 			return answer, nil
 		}
-	}
-	if f.failure != nil {
-		return "", f.failure
 	}
 	return "", nil
 }
@@ -505,5 +507,31 @@ func TestCallsAreAnsweredBeforeTheConnectionEnds(t *testing.T) {
 	}
 	if kinds[3] != KindError {
 		t.Errorf("an unknown op is refused, got %v", kinds)
+	}
+}
+
+// Stopping or removing what is already gone is the wanted state, not a failure: the runtime says
+// "is not running" and "is not defined", and a caller cannot tell those from a real error.
+func TestStoppingOrRemovingWhatIsGoneIsNotAFailure(t *testing.T) {
+	runtime := &fakeRuntime{answers: map[string]string{
+		"lxc-stop -n acornfall-x -k": "",
+		"lxc-destroy -n acornfall-x": "",
+		"lxc-start --version":        "6.0.4",
+	}}
+	runtime.failure = errors.New("lxc-stop: acornfall-x: permission denied")
+	client, _ := connected(t, runtime)
+	defer client.Close()
+	ctx, cancel := callContext(t)
+	defer cancel()
+	if err := client.Stop(ctx, "acornfall-x"); err == nil {
+		t.Error("a stop the runtime refuses for another reason is a failure")
+	}
+	runtime.failure = errors.New("lxc-stop: acornfall-x: is not running")
+	if err := client.Stop(ctx, "acornfall-x"); err != nil {
+		t.Errorf("a container that is not running is already stopped: %v", err)
+	}
+	runtime.failure = errors.New("lxc-destroy: acornfall-x: Container is not defined")
+	if err := client.Remove(ctx, "acornfall-x"); err != nil {
+		t.Errorf("a container that is not there is already removed: %v", err)
 	}
 }

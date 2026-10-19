@@ -340,16 +340,16 @@ func (t *session) lifecycle(message Message, name string) error {
 			return err
 		}
 	case OpStop:
-		if _, err := t.server.run("lxc-stop", "-n", name, "-k"); err != nil {
+		if _, err := t.server.run("lxc-stop", "-n", name, "-k"); err != nil && !alreadyThere(err) {
 			return err
 		}
 	case OpRemove:
 		// Destroying a running container is refused by the runtime, and "delete this workspace and
 		// everything in it" has to work whether or not anything is running: the kill comes first.
-		if _, err := t.server.run("lxc-stop", "-n", name, "-k"); err != nil {
+		if _, err := t.server.run("lxc-stop", "-n", name, "-k"); err != nil && !alreadyThere(err) {
 			t.server.log("shim: stopping %s before removing it: %v", name, err)
 		}
-		if _, err := t.server.run("lxc-destroy", "-n", name); err != nil {
+		if _, err := t.server.run("lxc-destroy", "-n", name); err != nil && !alreadyThere(err) {
 			return err
 		}
 	}
@@ -402,6 +402,15 @@ func (t *session) create(message Message, payload CreatePayload) error {
 	image := payload.Image
 	if !strings.Contains(image, "://") {
 		image = "docker://" + image
+	}
+	// An unprivileged container cannot start without the machine allowing it a range to map, and
+	// a fresh appliance image has none: the ranges are written here, once, for the share owner's
+	// uid and for the shifted root. Measured: without them newuidmap refuses and the container
+	// does not start at all.
+	if payload.RootfsOwner > 0 {
+		if err := ensureIDRanges(payload.RootfsOwner, payload.Owner); err != nil {
+			return err
+		}
 	}
 	// Making a rootfs pulls an image, so it is the one call that is not bounded from here.
 	if _, err := t.server.runner().Run(context.Background(), "lxc-create", "-n", payload.Name, "-t", "oci", "--", "-u", image); err != nil {
@@ -649,4 +658,42 @@ func (w *syncWriter) write(message Message) error {
 	defer w.mu.Unlock()
 	_, err = w.conn.Write(line)
 	return err
+}
+
+// ensureIDRanges makes sure this machine allows an unprivileged container to map what it needs:
+// the shifted root range, and the share owner's own uid as itself (which is how a container
+// writes files that belong to the user). Both files, both entries, written once — newuidmap and
+// newgidmap check exactly these.
+func ensureIDRanges(shift, owner int) error {
+	entries := []string{fmt.Sprintf("root:%d:65536", shift)}
+	if owner > 0 && owner < 65535 {
+		entries = append(entries, fmt.Sprintf("root:%d:1", owner))
+	}
+	for _, file := range []string{"/etc/subuid", "/etc/subgid"} {
+		present, err := os.ReadFile(file)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		text := string(present)
+		for _, entry := range entries {
+			if strings.Contains(text, entry+"\n") || strings.HasSuffix(text, entry) {
+				continue
+			}
+			text += entry + "\n"
+		}
+		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+			return fmt.Errorf("shim: allowing the id ranges an unprivileged container maps: %w", err)
+		}
+	}
+	return nil
+}
+
+// alreadyThere says whether a runtime failure means "it is not there", which is the wanted state
+// for stopping and removing: the caller asked for an end and the end is here. Measured, the
+// runtime says "is not running" for a stopped container and "is not defined" for one that is
+// gone, and both arrive as errors — a remove that failed because the container had already been
+// removed is a failure nobody can act on.
+func alreadyThere(err error) bool {
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "not running") || strings.Contains(text, "not defined") || strings.Contains(text, "not found")
 }
