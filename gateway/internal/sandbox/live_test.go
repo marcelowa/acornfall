@@ -359,15 +359,12 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 				if !strings.Contains(string(body), "general") {
 					t.Errorf("the appliance's console should know its workspace, got %s", body)
 				}
-				// The workspace's container, made and started in the machine by the machine's own lxc —
-				// with the network its policy asks for, on the bridge the runtime's side made first. The
-				// image pull is the slow part, so this waits for it.
-				// The container exists and the machine made it: status is the runtime.s own word, and a
-				// container that is STOPPED here has still been created by the machine.s lxc with the
-				// network its policy asked for. Getting it to RUNNING through the engine.s own path is
-				// open: a hand start works (RUNNING, an address on the bridge), the engine.s did not
-				// within twelve minutes, and the difference is the next thing to find.
-				if strings.Contains(string(body), `"status":"RUNNING"`) || strings.Contains(string(body), `"status":"STOPPED"`) {
+				// The workspace's own container, running: control makes it when the workspace starts,
+				// and the worker's first use of its engine is what starts it — so by the time the
+				// console answers, the container should be up. Status comes from the runtime's own
+				// `lxc-info`, and the manager only reports the container whose name matches this
+				// workspace, so a stranger's container cannot answer for it.
+				if strings.Contains(string(body), `"status":"RUNNING"`) {
 					if !strings.Contains(string(body), `"engine":"lxc"`) {
 						t.Errorf("a running container should be the machine's lxc, got %s", body)
 					}
