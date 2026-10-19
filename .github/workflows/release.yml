@@ -98,7 +98,9 @@ jobs:
         run: |
           set -euo pipefail
           MSB=$(echo "$PWD"/worker/node_modules/@superradcompany/microsandbox-linux-*/bin/msb)
-          export MSB_HOME="$PWD/.msb-home"
+          # The engine's sockets need a short path: the workspace one is over the limit (113 of 108
+          # bytes, measured on the first run of this job).
+          export MSB_HOME="/tmp/msb-appliance"
           mkdir -p "$MSB_HOME" dist
           cat > builder.yaml <<EOF
           image: debian:stable-slim
