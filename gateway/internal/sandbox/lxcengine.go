@@ -300,12 +300,30 @@ func (x *LXC) startShim(ctx context.Context) error {
 	return nil
 }
 
-// List is every container this install has, and nothing of the engine's own store: the machine
-// is not a workspace, and it must never be reported as one.
+// List is every container this install has, and nothing of the engine's own store: the machine is
+// not a workspace and must never be reported as one.
+//
+// It is a read. It does not create the machine and it does not start the shim, because doctor
+// asks this question about an install that has never made one, and a report that creates things
+// is not a report — measured: `doctor --sandbox-engine lxc` tried to copy the shim into a machine
+// that did not exist and reported the copy failure as the sandbox's problem. A machine that is
+// not there has no containers; the first workspace is what makes it.
 func (x *LXC) List(ctx context.Context) ([]Instance, error) {
-	client, err := x.shimClient(ctx)
-	if err != nil {
+	if err := x.listen(); err != nil {
 		return nil, err
+	}
+	conn, err := x.accept(ctx, time.Second)
+	if err != nil {
+		return nil, nil
+	}
+	client := shim.NewClient(conn)
+	defer client.Close()
+	hello, err := client.Hello(ctx)
+	if err != nil {
+		return nil, nil
+	}
+	if hello.Runtime == "" {
+		return nil, fmt.Errorf("%w: the machine has no container runtime: its image needs one (lxc), which is what the appliance image is for", ErrUnavailable)
 	}
 	containers, err := client.List(ctx)
 	if err != nil {

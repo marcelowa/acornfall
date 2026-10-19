@@ -284,3 +284,32 @@ func TestAConnectionThatArrivesWhileNobodyWaitsIsNotLost(t *testing.T) {
 	}
 	conn.Close()
 }
+
+// Listing is a read: an install that has never made a machine answers "no containers" and creates
+// nothing. Measured with doctor, which asks this question about every install — and the lxc
+// engine answered by trying to copy the shim into a machine that did not exist, reporting the
+// copy's failure as the sandbox's problem.
+func TestListingCreatesNothing(t *testing.T) {
+	home := shortTempDir(t)
+	engine := NewMicrosandbox(home).WithRunner(&machineRunner{})
+	engine.installed = true
+	machine := &machineRunner{}
+	engine.WithRunner(machine)
+	door := filepath.Join(t.TempDir(), "machine.sock")
+	driver := NewLXC(engine, Machine{ShareRoot: t.TempDir()}, door, "/bin/true")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	instances, err := driver.List(ctx)
+	if err != nil {
+		t.Fatalf("a read that finds nothing is not a failure: %v", err)
+	}
+	if len(instances) != 0 {
+		t.Errorf("instances = %v, want none", instances)
+	}
+	if machine.createArgs() != nil {
+		t.Errorf("listing must not create a machine: %v", machine.calls)
+	}
+	if machine.ran("copy") {
+		t.Error("listing must not deliver the shim")
+	}
+}
