@@ -353,11 +353,23 @@ func providers(argv []string) {
 		fmt.Fprintln(os.Stderr, "usage: acornfall provider <list|add|remove>")
 		os.Exit(2)
 	}
+	// The key belongs in the mount, which is what the machine reads as its world: the home is the
+	// machinery, and a credential there is one the appliance cannot see (measured: a key stored
+	// by this command, and a workspace that still had none).
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	path := filepath.Join(dir, "credentials.json")
+	root, err := resolveRoot("", "")
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	where := layout.New(root, dir)
+	if err := where.Ensure(); err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	_ = layout.Migrate(where, func(string, ...any) {})
+	path := where.Credentials()
 	switch args[0] {
 	case "list":
 		all := readCredentials(path)
