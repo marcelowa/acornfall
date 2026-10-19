@@ -79,20 +79,20 @@ jobs:
     needs: binaries
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
       # This job needs root: lxc-create, chroot and the id ranges are root's work, and the first
       # run of this job failed on `sudo: command not found` because the runner is unprivileged.
-      - run: test "0id -u)" = 0 || { echo "this job needs the runner to be root"; exit 1; }
+      - run: test "$(id -u)" = 0 || { echo "this job needs the runner to be root"; exit 1; }
+      - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
       # The image runs the release binary, not a fresh build: it is the same product the host
       # ships, with the same version stamped into it.
       - run: mkdir -p bin && cp dist/acornfall-linux-amd64 bin/acornfall && chmod +x bin/acornfall
-      # The runner is already root: sudo is not installed on it, and asking for it failed the
-      # first appliance build this job ever ran.
+      # The runner is root, which is why nothing here asks for sudo: asking failed, because sudo
+      # is not installed on it at all.
       - run: apt-get update -qq && apt-get install -y -qq lxc skopeo umoci jq unzip
-      - run: BINARY=/bin/acornfall WORKER=/worker sh scripts/build-appliance.sh appliance-linux-amd64.tar.gz
+      - run: BINARY="$PWD/bin/acornfall" WORKER="$PWD/worker" sh scripts/build-appliance.sh appliance-linux-amd64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: appliance
