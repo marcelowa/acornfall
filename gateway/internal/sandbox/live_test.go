@@ -315,17 +315,17 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 
-	// The appliance's init: the shim first (it retries until the gateway listens), then the
-	// gateway itself. No sandbox tier yet — the appliance's containers are the next piece, and a
-	// console that refuses tools is the honest state until then.
+	// The appliance's init: the product, whole. No shim line and no sandbox-state, because inside
+	// the machine the containers are the gateway's own neighbours (--in-machine) — and the tier is
+	// on: a workspace here gets a container, made and started in this machine.
 	start := strings.Join([]string{
-		"/usr/local/bin/acornfall shim --connect /var/lib/acornfall/state/machine.sock &",
-		"ACORNFALL_DEV_PROVIDER=1 ACORNFALL_NO_SANDBOX=1 exec /usr/local/bin/acornfall",
+		"ACORNFALL_DEV_PROVIDER=1 exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 --insecure",
 		"--root " + root,
 		"--home /var/lib/acornfall",
 		"--workspace " + workspace,
 		"--worker-dir /usr/local/lib/acornfall/worker",
+		"--sandbox-engine lxc --in-machine",
 		"--model faux/faux-1",
 	}, " ")
 	driver := NewLXC(engine, Machine{
@@ -351,14 +351,27 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 	for {
 		response, err := http.Get(url + "/api/state")
 		if err == nil {
-			body, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 			response.Body.Close()
 			if response.StatusCode == http.StatusOK {
 				if !strings.Contains(string(body), "general") {
 					t.Errorf("the appliance's console should know its workspace, got %s", body)
 				}
-				t.Logf("the appliance answered on %s: %s", url, strings.TrimSpace(string(body))[:120])
-				return
+				// The appliance's sandbox tier, as far as it honestly goes today: the engine is the
+				// machine's own lxc — in this machine, no door and no shim — and the container stops at
+				// the one thing ADR 0021 left open, its network. The policy promises a workspace egress,
+				// so a container made without it would be a quieter lie than the refusal. When the
+				// network lands, this assertion becomes the container's own running state.
+				if strings.Contains(string(body), `"engine":"lxc"`) {
+					if !strings.Contains(string(body), `"isolated":true`) {
+						t.Errorf("the machine's containers are the machine's own, and the report should say so, got %s", body)
+					}
+					if !strings.Contains(string(body), `"problem":"sandbox: a container's network is not built`) {
+						t.Errorf("the container should stop at the network it has not been given, got %s", body)
+					}
+					t.Logf("the appliance answered on %s: the machine's own lxc, stopping where ADR 0021 stops: %s", url, strings.TrimSpace(string(body))[:160])
+					return
+				}
 			}
 		}
 		if time.Now().After(deadline) {

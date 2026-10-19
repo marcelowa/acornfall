@@ -66,6 +66,7 @@ func serve(argv []string) error {
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: <root>/workspaces, and <root> is ~/acornfall)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor), lxc (containers in one machine), or host (no isolation)")
+	inMachine := flags.Bool("in-machine", false, "this gateway is running inside the machine: the containers are this machine's own, so there is nothing to create and nothing to reach")
 	migrateDir := flags.String("migrate-dir", "", "release migrate scripts directory (default: the scripts baked into the binary)")
 	disableVMNesting := flags.Bool("disable-vm-nesting", false, "keep a workspace's sandbox from nesting virtual machines; by default a sandbox nests when the engine and the machine can, and a workspace's own setting wins")
 	model := flags.String("model", "", "default model as provider/modelId")
@@ -153,7 +154,16 @@ func serve(argv []string) error {
 	if engineName == "host" && *sandboxState != "" {
 		return errors.New("--sandbox-state belongs to the microsandbox engine; the host engine keeps no state")
 	}
-	engine, err := sandboxTier(ctx, dir, *sandboxState, engineName)
+	// The appliance's shape (ADR 0022): this process is inside the machine, so the containers are
+	// its own neighbours and the engine is the machine's lxc, run here. Naming another engine
+	// with it would be a contradiction, not a preference.
+	if *inMachine && engineName != "" && engineName != "lxc" {
+		return errors.New("--in-machine runs the machine's own containers (lxc); it cannot be combined with --sandbox-engine " + engineName)
+	}
+	if *inMachine && *sandboxState != "" {
+		return errors.New("--sandbox-state belongs to the microsandbox engine; the machine's containers are its own lxc folder")
+	}
+	engine, err := sandboxTier(ctx, dir, *sandboxState, engineName, resolvedRoot, *inMachine)
 	if err != nil {
 		return err
 	}
@@ -263,14 +273,22 @@ func serve(argv []string) error {
 // ACORNFALL_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
 // nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
 // behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
-func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.Manager, error) {
+func sandboxTier(ctx context.Context, home, state, engineName, root string, inMachine bool) (*sandbox.Manager, error) {
 	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
 		log.Printf("sandbox: disabled by ACORNFALL_NO_SANDBOX; commands and file tools will refuse")
 		return nil, nil
 	}
-	driver, err := sandbox.Engine(home, state, engineName)
-	if err != nil {
-		return nil, err
+	var driver sandbox.Driver
+	var err error
+	if inMachine {
+		// The engine of a gateway inside the machine: the shim's own work, in this process, over a
+		// pipe — no door, no vsock, nothing to copy in, no machine to make.
+		driver = sandbox.NewInMachine(root)
+	} else {
+		driver, err = sandbox.Engine(home, state, engineName)
+		if err != nil {
+			return nil, err
+		}
 	}
 	engine, err := sandbox.Open(ctx, sandbox.Options{
 		Home:   home,
