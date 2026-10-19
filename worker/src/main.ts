@@ -175,6 +175,10 @@ async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
 			return await import("./microsandbox.ts");
 		case "host":
 			return await import("./host.ts");
+		case "lxc":
+			// Containers in the machine the worker itself is in (ADR 0022): the gateway made the
+			// container, and this runs things in it with the runtime.s own attach.
+			return await import("./lxc.ts");
 		default:
 			return undefined;
 	}
