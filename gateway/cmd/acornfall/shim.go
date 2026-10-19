@@ -33,10 +33,9 @@ func shimCommand(argv []string) {
 		return
 	}
 	if *connect != "" {
-		if err := server.ServeDialer(func() (net.Conn, error) { return shim.DialUnix(*connect) }); err != nil {
-			log.Fatalf("acornfall shim: %v", err)
-		}
-		return
+		// ServeDialer keeps asking: it returns only when the connection failed for a reason asking
+		// again will not fix.
+		log.Fatalf("acornfall shim: %v", server.ServeDialer(func() (net.Conn, error) { return shim.DialUnix(*connect) }))
 	}
 	if *pipe {
 		if err := server.Serve(stdio{reader: os.Stdin, writer: os.Stdout}); err != nil {

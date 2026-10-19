@@ -248,17 +248,6 @@ func TestTheDoorsSocketIsTheInstallsOwn(t *testing.T) {
 	_ = fmt.Sprint(io.Discard)
 }
 
-// idMapFor is the identity entry the renderer writes for the share's owner, or the plain shift
-// when the engine has no user uid to carry (it runs as root here, and a machine-wide root has
-// nothing to map). The test follows the machine it runs on rather than pretending it is one.
-func idMapFor(t *testing.T) string {
-	t.Helper()
-	if uid := currentOwner().uid; uid > 0 {
-		return fmt.Sprintf("lxc.idmap = u %d %d 1", uid, uid)
-	}
-	return "lxc.idmap = u 0 100000 65536"
-}
-
 // The door's queue, on its own: a connection that arrives while nobody is waiting has to be
 // handed to the next wait. The live run found the alternative — the accept loop logged the shim
 // connecting and the wait still timed out — and this is the smallest test that says which.
