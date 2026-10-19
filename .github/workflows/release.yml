@@ -80,6 +80,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
+      # This job needs root: lxc-create, chroot and the id ranges are root's work, and the first
+      # run of this job failed on `sudo: command not found` because the runner is unprivileged.
+      - run: test "0id -u)" = 0 || { echo "this job needs the runner to be root"; exit 1; }
         with:
           path: dist
           merge-multiple: true
@@ -89,11 +92,11 @@ jobs:
       # The runner is already root: sudo is not installed on it, and asking for it failed the
       # first appliance build this job ever ran.
       - run: apt-get update -qq && apt-get install -y -qq lxc skopeo umoci jq unzip
-      - run: BINARY=$PWD/bin/acornfall WORKER=$PWD/worker sh scripts/build-appliance.sh appliance.tar.gz
+      - run: BINARY=/bin/acornfall WORKER=/worker sh scripts/build-appliance.sh appliance-linux-amd64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: appliance
-          path: appliance.tar.gz
+          path: appliance-linux-amd64.tar.gz
 
   publish:
     # The appliance joins the release for the same reason the worker does: the launcher fetches
@@ -115,7 +118,7 @@ jobs:
           merge-multiple: true
       # The checksum file is what the gateway verifies downloads against
       # before swapping or staging. No checksum file, no verify — see ADR 0019.
-      - run: cd dist && sha256sum acornfall-* worker.tar.gz appliance.tar.gz > sha256sums.txt && ls -la
+      - run: cd dist && sha256sum acornfall-* worker.tar.gz appliance-linux-*.tar.gz > sha256sums.txt && ls -la
       # The release body is the tag message, which is what the update page
       # reads as "what changed". Every release before this step shipped a null
       # body, so the gateway falls back to the tag annotation for those.

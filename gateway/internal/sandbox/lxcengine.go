@@ -443,3 +443,23 @@ func (x *LXC) Engine() *Microsandbox { return x.engine }
 // RemoveMachine takes the machine away: an init is fixed at boot, so installing a new appliance
 // is replacing the machine. The product is in the mount, which is not part of the machine.
 func (x *LXC) RemoveMachine(ctx context.Context) error { return x.machine.RemoveMachine(ctx) }
+
+// MachineStop shuts the machine down the way it can shut itself down: its init is the appliance's
+// gateway, which exits on SIGTERM, and an init that exits is a machine that powers off. The
+// engine's own stop asks the machine to stop gracefully, and nothing inside answers that — a
+// person reads the wait as "it does not stop" (measured on a real install).
+func (x *LXC) MachineStop(ctx context.Context) error {
+	if !x.engine.Installed() {
+		return nil
+	}
+	name := x.machine.Name()
+	if _, err := x.engine.run(ctx, "exec", name, "--", "kill", "-TERM", "1"); err != nil {
+		return fmt.Errorf("sandbox: asking the machine to stop: %w", err)
+	}
+	// The engine sees the VM go away on its own; the record is what needs settling, and a stop
+	// with a budget is how it settles without waiting forever.
+	if err := x.engine.Stop(ctx, name); err != nil {
+		return err
+	}
+	return nil
+}

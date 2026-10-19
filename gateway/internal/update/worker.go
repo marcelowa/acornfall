@@ -406,10 +406,10 @@ func untarWorker(tarball []byte, dir string) error {
 	}
 }
 
-// ApplianceTarball is the release asset holding the appliance image — the unpacked rootfs the
-// machine boots from (ADR 0022). It is the release's own rootfs, built by
-// scripts/build-appliance.sh and carried whole.
-const ApplianceTarball = "appliance.tar.gz"
+// The appliance is one image per architecture, and its asset name says which: an arm64 host that
+// fetched an amd64 rootfs would install a machine that cannot boot, and the failure would look
+// like a broken image rather than the wrong one.
+func applianceTarballName(arch string) string { return "appliance-linux-" + arch + ".tar.gz" }
 
 // FetchAppliance is a fresh install's answer to where the machine's rootfs comes from: the
 // release, once, verified against the release's own checksums the same way the worker's sources
@@ -422,9 +422,10 @@ func (m *Manager) FetchAppliance(ctx context.Context, tag, dir string) error {
 	if err != nil {
 		return err
 	}
-	asset := assetNamed(release, ApplianceTarball)
+	name := applianceTarballName(runtime.GOARCH)
+	asset := assetNamed(release, name)
 	if asset.URL == "" {
-		return fmt.Errorf("update: release %s has no %s", release.Tag, ApplianceTarball)
+		return fmt.Errorf("%w: release %s has no %s: this build is %s, and an appliance of another architecture cannot boot", ErrReleaseNotFound, release.Tag, name, runtime.GOARCH)
 	}
 	tarball, err := m.download(ctx, asset)
 	if err != nil {
