@@ -201,6 +201,8 @@ type Manager struct {
 	latestURL  string
 	bunBaseURL string
 	client     *http.Client
+	// largeClient is for whole assets, where the 30-second metadata timeout is the wrong question.
+	largeClient *http.Client
 
 	mu       sync.Mutex
 	settings Settings
@@ -255,8 +257,12 @@ func New(home, root, binPath, migrateDir string) *Manager {
 		migrateDir: migrateDir,
 		latestURL:  LatestURL,
 		client:     &http.Client{Timeout: 30 * time.Second},
-		settings:   DefaultSettings(),
-		IsAdmin:    func(*http.Request) bool { return true },
+		// Assets are not metadata: the appliance image is hundreds of megabytes, and a timeout
+		// sized for a JSON answer killed a download that was working (measured: 223 MB, forty
+		// seconds, "context deadline exceeded while reading body"). The context still bounds it.
+		largeClient: &http.Client{},
+		settings:    DefaultSettings(),
+		IsAdmin:     func(*http.Request) bool { return true },
 	}
 }
 
@@ -1246,7 +1252,7 @@ func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := m.client.Do(request)
+	response, err := m.largeClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -1254,7 +1260,16 @@ func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("releases: download answered %s", response.Status)
 	}
-	return io.ReadAll(io.LimitReader(response.Body, 256<<20))
+	payload, err := io.ReadAll(io.LimitReader(response.Body, 1024<<20))
+	if err != nil {
+		return nil, fmt.Errorf("update: downloading %s: %w", asset.Name, err)
+	}
+	// A body shorter than the release says is a download that stopped early, and unpacking it
+	// reported "invalid tar header" instead (measured on a 223 MB image behind a slow link).
+	if asset.Size > 0 && int64(len(payload)) < asset.Size {
+		return nil, fmt.Errorf("update: downloading %s: got %d of %d bytes", asset.Name, len(payload), asset.Size)
+	}
+	return payload, nil
 }
 
 // checksumList fetches the release's checksum file (sha256sums.txt or

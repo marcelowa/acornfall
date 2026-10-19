@@ -446,7 +446,16 @@ func (m *Manager) FetchAppliance(ctx context.Context, tag, dir string) error {
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
-	if err := untarWorker(tarball, staging); err != nil {
+	// The release's tarball is gzipped like the worker's; untarWorker takes a plain tar.
+	gzip, err := gzip.NewReader(bytes.NewReader(tarball))
+	if err != nil {
+		return fmt.Errorf("update: the appliance is not a gzip stream: %w", err)
+	}
+	plain, err := io.ReadAll(gzip)
+	if err != nil {
+		return fmt.Errorf("update: reading the appliance: %w", err)
+	}
+	if err := untarWorker(plain, staging); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(dir); err != nil {
