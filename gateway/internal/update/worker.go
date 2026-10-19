@@ -455,11 +455,82 @@ func (m *Manager) FetchAppliance(ctx context.Context, tag, dir string) error {
 	if err != nil {
 		return fmt.Errorf("update: reading the appliance: %w", err)
 	}
-	if err := untarWorker(plain, staging); err != nil {
+	if err := untarImage(plain, staging); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
 	return os.Rename(staging, dir)
+}
+
+// untarImage unpacks a rootfs tarball: every kind of entry a filesystem has, not just regular
+// files. A symlink is not a detail here — /bin/sh on Debian is one, and an image whose shell is
+// missing is a machine whose init cannot start (measured: "handoff init binary not found at
+// /bin/sh", which says nothing about the unpacker that dropped it).
+func untarImage(tarball []byte, dir string) error {
+	reader := tar.NewReader(bytes.NewReader(tarball))
+	root := filepath.Clean(dir)
+	inside := func(name string) (string, error) {
+		clean := filepath.Clean("/" + name)
+		target := filepath.Join(root, clean)
+		if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+			return "", fmt.Errorf("update: image tarball escapes: %q", name)
+		}
+		return target, nil
+	}
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("update: image tarball unreadable: %w", err)
+		}
+		target, err := inside(header.Name)
+		if err != nil {
+			return err
+		}
+		mode := os.FileMode(header.Mode) &^ 0o022
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, mode|0o700); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(out, reader); err != nil {
+				out.Close()
+				return err
+			}
+			if err := out.Close(); err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			_ = os.Remove(target)
+			if err := os.Symlink(header.Linkname, target); err != nil {
+				return err
+			}
+		case tar.TypeLink:
+			source, err := inside(header.Linkname)
+			if err != nil {
+				return err
+			}
+			_ = os.Remove(target)
+			if err := os.Link(source, target); err != nil {
+				return err
+			}
+		}
+		// Devices and fifos are skipped on purpose: a rootfs image is a tree of files, links and
+		// directories, and a device node is something the machine's kernel makes for itself.
+	}
 }

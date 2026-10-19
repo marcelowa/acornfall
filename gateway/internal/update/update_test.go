@@ -1182,3 +1182,54 @@ func TestNotesResolvesSeveralTagsAndCachesThem(t *testing.T) {
 		t.Fatalf("an unread tag must be absent, got %v", tags)
 	}
 }
+
+// An image is not a pile of regular files: /bin/sh is a symlink on Debian, and an unpacker that
+// drops it produces a machine whose init cannot start. Measured, on the release's own tarball.
+func TestTheImageKeepsItsSymlinksAndItsLinks(t *testing.T) {
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	write := func(header *tar.Header, body string) {
+		t.Helper()
+		if err := writer.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if body != "" {
+			if _, err := writer.Write([]byte(body)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	write(&tar.Header{Name: "usr/bin/dash", Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len("#!/bin/sh\n"))}, "#!/bin/sh\n")
+	write(&tar.Header{Name: "bin", Typeflag: tar.TypeDir, Mode: 0o755}, "")
+	write(&tar.Header{Name: "bin/sh", Typeflag: tar.TypeSymlink, Linkname: "/usr/bin/dash", Mode: 0o777}, "")
+	write(&tar.Header{Name: "usr/bin/sh-copy", Typeflag: tar.TypeLink, Linkname: "usr/bin/dash", Mode: 0o755}, "")
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := untarImage(buffer.Bytes(), dir); err != nil {
+		t.Fatal(err)
+	}
+	link, err := os.Readlink(filepath.Join(dir, "bin", "sh"))
+	if err != nil {
+		t.Fatalf("the shell is a symlink and has to survive as one: %v", err)
+	}
+	if link != "/usr/bin/dash" {
+		t.Errorf("the symlink points at %q", link)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "usr", "bin", "dash")); err != nil {
+		t.Fatalf("the file the link points at is there: %v", err)
+	}
+	// A hard link is the same file, not a copy the image cannot afford.
+	first, err := os.Stat(filepath.Join(dir, "usr", "bin", "dash"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.Stat(filepath.Join(dir, "usr", "bin", "sh-copy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(first, second) {
+		t.Error("a hard link should be the same file")
+	}
+}
