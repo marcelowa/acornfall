@@ -414,3 +414,18 @@ func (x *LXC) Remove(ctx context.Context, name string) error {
 func (x *LXC) container(policy Policy) (Container, LXCSettings, error) {
 	return ContainerFor(policy, x.machine.Machine().ShareRoot, x.dir, x.privileged, x.engine.hostNesting().Available)
 }
+
+// WithAppliance is the machine booting as the product (ADR 0022): the script it runs as its init,
+// and the port its console is published on. It is the host-side engine's way of saying what the
+// engine inside the machine already is, and it is passed through because the machine's own
+// configuration is where both live.
+func (x *LXC) WithAppliance(start, forward string) *LXC {
+	x.machine.WithAppliance(start, forward)
+	return x
+}
+
+// MachineName is the machine this install has, for a person asking.
+func (x *LXC) MachineName() string { return x.machine.Name() }
+
+// Engine is the pinned engine underneath: the launcher installs it before the machine can boot.
+func (x *LXC) Engine() *Microsandbox { return x.engine }
