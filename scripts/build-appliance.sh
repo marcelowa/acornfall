@@ -56,7 +56,7 @@ cat >"$ROOTFS/tmp/appliance-install.sh" <<'INNER'
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq lxc skopeo umoci jq unzip curl
+apt-get install -y -qq lxc skopeo umoci jq unzip curl iptables iproute2
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 INNER

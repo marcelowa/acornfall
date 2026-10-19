@@ -196,8 +196,11 @@ func (x *InMachine) Create(ctx context.Context, policy Policy, policyDir string)
 		return err
 	}
 	payload := shim.CreatePayload{
-		Name:        container.Name,
-		Image:       policy.Image,
+		Name:    container.Name,
+		Network: networkPayload(settings.Network),
+		// The image that becomes the rootfs is the container's, which went through the
+		// policy's defaults: a workspace that never named one has an empty policy image.
+		Image:       container.Image,
 		Dir:         settings.Dir,
 		Config:      string(config),
 		Owner:       settings.UID,
@@ -291,24 +294,10 @@ func (x *InMachine) forget(client *shim.Client) {
 	x.mu.Unlock()
 }
 
-// container maps a workspace's policy onto a container and its settings, refusing what cannot be
-// a container rather than making one that cannot work. The share root is this machine's mount,
-// because that is the folder the containers can see (ADR 0022).
+// container maps a workspace's policy onto a container and its settings. The mapping itself is
+// shared with the host-side engine (ContainerFor), so a workspace's container cannot differ by
+// which of the two is running. The share root is this machine's mount, because that is the
+// folder the containers can see (ADR 0022).
 func (x *InMachine) container(policy Policy) (Container, LXCSettings, error) {
-	container, err := policy.Container(x.root)
-	if err != nil {
-		return Container{}, LXCSettings{}, err
-	}
-	settings := LXCSettings{
-		Dir:          filepath.Join(x.dir, container.Name),
-		Unprivileged: !x.privileged,
-		UID:          currentOwner().uid,
-		GID:          currentOwner().gid,
-	}
-	// The containers are where a workspace's own virtual machines would run, so the device goes
-	// in when the workspace allows nesting and the machine has the device to give.
-	if !policy.DisableVMNesting && hostNestedSupport().Available {
-		settings.KVM = true
-	}
-	return container, settings, nil
+	return ContainerFor(policy, x.root, x.dir, x.privileged, hostNestedSupport().Available)
 }

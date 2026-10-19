@@ -126,6 +126,10 @@ type CreatePayload struct {
 	// find out. Zero leaves the rootfs as the image made it.
 	RootfsOwner int `json:"rootfsOwner,omitempty"`
 	RootfsGroup int `json:"rootfsGroup,omitempty"`
+	// Network is the network this container joins, or nil for none at all. It is the engine's
+	// choice and the shim's to make real: the bridge, its address and its way out of the machine
+	// are made here, once, before the first container that wants them starts.
+	Network *NetworkPayload `json:"network,omitempty"`
 }
 
 // Bind is one mount's two ends, enough for the shim to prepare the target.

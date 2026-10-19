@@ -366,8 +366,11 @@ func (x *LXC) Create(ctx context.Context, policy Policy, policyDir string) error
 		return err
 	}
 	payload := shim.CreatePayload{
-		Name:        container.Name,
-		Image:       policy.Image,
+		Name:    container.Name,
+		Network: networkPayload(settings.Network),
+		// The image that becomes the rootfs is the container's, which went through the
+		// policy's defaults: a workspace that never named one has an empty policy image.
+		Image:       container.Image,
 		Dir:         settings.Dir,
 		Config:      string(config),
 		Owner:       settings.UID,
@@ -405,23 +408,9 @@ func (x *LXC) Remove(ctx context.Context, name string) error {
 	return client.Remove(ctx, name)
 }
 
-// container maps a workspace's policy onto a container and its settings, refusing what cannot
-// be a container rather than making one that cannot work.
+// container maps a workspace's policy onto a container and its settings. The mapping itself is
+// shared with the engine inside the machine (ContainerFor), so a workspace's container cannot
+// differ by which of the two is running.
 func (x *LXC) container(policy Policy) (Container, LXCSettings, error) {
-	container, err := policy.Container(x.machine.Machine().ShareRoot)
-	if err != nil {
-		return Container{}, LXCSettings{}, err
-	}
-	settings := LXCSettings{
-		Dir:          filepath.Join(x.dir, container.Name),
-		Unprivileged: !x.privileged,
-		UID:          currentOwner().uid,
-		GID:          currentOwner().gid,
-	}
-	// The containers are where a workspace's own virtual machines would run, so the device goes
-	// in when the workspace allows nesting and the machine can grant it.
-	if !policy.DisableVMNesting && x.engine.hostNesting().Available {
-		settings.KVM = true
-	}
-	return container, settings, nil
+	return ContainerFor(policy, x.machine.Machine().ShareRoot, x.dir, x.privileged, x.engine.hostNesting().Available)
 }

@@ -103,14 +103,66 @@ func TestAContainerWithNoIdentityUidTakesThePlainShift(t *testing.T) {
 	}
 }
 
-// A container's network is the piece ADR 0021 says needs a second look, so it refuses rather than
-// handing the workspace the VM's own network. The refusal names the decision, not the code.
-func TestAContainerRefusesTheNetworkItCannotHaveYet(t *testing.T) {
+// A workspace that wants a network gets a veth on the machine's bridge, with the address the
+// engine derived for it; one that does not gets no interface at all. Both are pinned here,
+// because both are the difference between a workspace's policy and a hope.
+func TestAContainerGetsTheNetworkItsPolicyAsksFor(t *testing.T) {
+	container := workspaceContainer()
+	container.Egress = true
+	network := NetworkFor(container.Name)
+	config, err := container.LXCConfig(LXCSettings{Dir: "/var/lib/lxc/ws", Network: network})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"lxc.net.0.type = veth\n",
+		"lxc.net.0.link = acornfall0\n",
+		"lxc.net.0.flags = up\n",
+		"lxc.net.0.ipv4.address = " + network.Address + "\n",
+		"lxc.net.0.ipv4.gateway = 10.7.0.1\n",
+	} {
+		if !strings.Contains(string(config), want) {
+			t.Errorf("want %q in:\n%s", want, config)
+		}
+	}
+	if strings.Contains(string(config), "lxc.net.0.type = none") {
+		t.Errorf("a workspace that asks for a network should not get none:\n%s", config)
+	}
+
+	quiet, err := workspaceContainer().LXCConfig(LXCSettings{Dir: "/var/lib/lxc/ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(quiet), "lxc.net.0.type = none\n") {
+		t.Errorf("a workspace that forbids egress gets no interface, got:\n%s", quiet)
+	}
+}
+
+// A container that wants egress and has no bridge to join is refused: it would have no network
+// at all, which is a quieter lie than the refusal.
+func TestAContainerRefusesTheNetworkItCannotHave(t *testing.T) {
 	container := workspaceContainer()
 	container.Egress = true
 	_, err := container.LXCConfig(LXCSettings{Dir: "/var/lib/lxc/ws"})
-	if err == nil || !strings.Contains(err.Error(), "0021") {
-		t.Fatalf("want a refusal naming the decision, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "bridge") {
+		t.Fatalf("want a refusal naming the bridge, got %v", err)
+	}
+}
+
+// The address is derived from the container's name, so a container made again is reachable at
+// the same address and nothing has to remember it.
+func TestAContainerAddressFollowsItsName(t *testing.T) {
+	first := NetworkFor("acornfall-app-1234abcd")
+	again := NetworkFor("acornfall-app-1234abcd")
+	other := NetworkFor("acornfall-app-deadbeef")
+	if first.Address != again.Address {
+		t.Errorf("the same container should get the same address: %s and %s", first.Address, again.Address)
+	}
+	if first.Address == other.Address {
+		t.Errorf("two containers should not share an address: %s", first.Address)
+	}
+	if !strings.HasPrefix(first.Address, "10.7.0.") || !strings.HasSuffix(first.Address, "/24") {
+		t.Errorf("address %s is not on the containers' network", first.Address)
 	}
 }
 

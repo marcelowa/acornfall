@@ -412,6 +412,13 @@ func (t *session) create(message Message, payload CreatePayload) error {
 			return err
 		}
 	}
+	// The network, before the container: a bridge that is not there yet is a container that
+	// starts and then cannot reach anything.
+	if payload.Network != nil {
+		if err := ensureBridge(t.server.runner(), payload.Network); err != nil {
+			return err
+		}
+	}
 	// Making a rootfs pulls an image, so it is the one call that is not bounded from here.
 	if _, err := t.server.runner().Run(context.Background(), "lxc-create", "-n", payload.Name, "-t", "oci", "--", "-u", image); err != nil {
 		return fmt.Errorf("shim: making the rootfs of %s: %w", payload.Name, err)
@@ -438,6 +445,13 @@ func (t *session) create(message Message, payload CreatePayload) error {
 			return err
 		}
 		if err := os.Chmod(payload.Dir, 0o755); err != nil {
+			return err
+		}
+	}
+	// Name resolution, after the rootfs exists and before anything runs in it: the machine's own
+	// resolver is the only one that knows the network the container is about to be on.
+	if payload.Network != nil {
+		if err := resolvFor(rootfs); err != nil {
 			return err
 		}
 	}
