@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -213,7 +214,7 @@ func TestAWorkspaceOrTheEngineCanAskForThePrivilegedProfile(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "work")
 	policy := Policy{Image: "debian:stable-slim", Workspace: workspace, Privileged: true}
-	container, settings, err := ContainerFor(policy, root, "/var/lib/lxc", false, false)
+	container, settings, err := ContainerFor(policy, root, "/var/lib/lxc", false, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +229,7 @@ func TestAWorkspaceOrTheEngineCanAskForThePrivilegedProfile(t *testing.T) {
 		t.Errorf("the privileged profile maps no ids:\n%s", config)
 	}
 
-	engineWide, settings, err := ContainerFor(Policy{Image: "debian:stable-slim", Workspace: workspace}, root, "/var/lib/lxc", true, false)
+	engineWide, settings, err := ContainerFor(Policy{Image: "debian:stable-slim", Workspace: workspace}, root, "/var/lib/lxc", true, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,11 +238,64 @@ func TestAWorkspaceOrTheEngineCanAskForThePrivilegedProfile(t *testing.T) {
 	}
 	_ = engineWide
 
-	_, quiet, err := ContainerFor(Policy{Image: "debian:stable-slim", Workspace: workspace}, root, "/var/lib/lxc", false, false)
+	_, quiet, err := ContainerFor(Policy{Image: "debian:stable-slim", Workspace: workspace}, root, "/var/lib/lxc", false, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !quiet.Unprivileged {
 		t.Error("the default is the mitigation: unprivileged unless somebody asked")
+	}
+}
+
+// What a container is given is a ceiling and a share, never a reservation: the ceiling is the
+// workspace's own and never more than half the machine, the soft limit is where reclaim starts,
+// and the cpu is a weight that divides when contended and is given away when idle.
+func TestAContainersResourcesAreCeilingsNotReservations(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "work")
+	const machine = 4 << 30
+	container, settings, err := ContainerFor(
+		Policy{Image: "debian:stable-slim", Workspace: workspace, CPUs: 2, Memory: "8G"}, root, "/var/lib/lxc", false, false, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.MemoryBytes != machine/2 {
+		t.Errorf("a workspace cannot be given more than half the machine: got %d, want %d", settings.MemoryBytes, machine/2)
+	}
+	if settings.MemoryHigh >= settings.MemoryBytes {
+		t.Errorf("the soft limit has to come before the hard one: high %d, max %d", settings.MemoryHigh, settings.MemoryBytes)
+	}
+	if settings.CPUWeight != 200 {
+		t.Errorf("two cpus is twice the runtime's share: got %d, want 200", settings.CPUWeight)
+	}
+	config, err := container.LXCConfig(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"lxc.cgroup2.memory.max = " + strconv.FormatInt(machine/2, 10),
+		"lxc.cgroup2.memory.high = " + strconv.FormatInt(settings.MemoryHigh, 10),
+		"lxc.cgroup2.cpu.weight = 200",
+	} {
+		if !strings.Contains(string(config), want) {
+			t.Errorf("want %q in:\n%s", want, config)
+		}
+	}
+
+	// A workspace that asks for less than half keeps what it asked for, and an engine that does
+	// not know the machine's size (a test, or a run without one) does not invent a ceiling.
+	_, small, err := ContainerFor(Policy{Image: "debian:stable-slim", Workspace: workspace, Memory: "1G"}, root, "/var/lib/lxc", false, false, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if small.MemoryBytes != 1<<30 {
+		t.Errorf("a workspace under the cap keeps its own limit: got %d", small.MemoryBytes)
+	}
+	_, unknown, err := ContainerFor(Policy{Image: "debian:stable-slim", Workspace: workspace, Memory: "1G"}, root, "/var/lib/lxc", false, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unknown.MemoryBytes != 1<<30 {
+		t.Errorf("an engine that does not know the machine should not cap: got %d", unknown.MemoryBytes)
 	}
 }

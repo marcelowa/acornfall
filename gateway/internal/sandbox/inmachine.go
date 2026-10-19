@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -299,5 +300,31 @@ func (x *InMachine) forget(client *shim.Client) {
 // which of the two is running. The share root is this machine's mount, because that is the
 // folder the containers can see (ADR 0022).
 func (x *InMachine) container(policy Policy) (Container, LXCSettings, error) {
-	return ContainerFor(policy, x.root, x.dir, x.privileged, hostNestedSupport().Available)
+	return ContainerFor(policy, x.root, x.dir, x.privileged, hostNestedSupport().Available, MachineMemoryBytes())
+}
+
+// MachineMemoryBytes is what this machine has, in bytes: the ceiling a container's limit is
+// measured against. It is read from the machine itself, because inside the machine that is the
+// only place that knows — the host-side engine reads the same number from the machine's
+// configuration instead.
+func MachineMemoryBytes() int64 {
+	contents, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(contents), "\n") {
+		if !strings.HasPrefix(line, "MemTotal:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return 0
+		}
+		kilobytes, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return kilobytes * 1024
+	}
+	return 0
 }

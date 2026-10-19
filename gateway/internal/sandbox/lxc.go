@@ -76,6 +76,13 @@ type LXCSettings struct {
 	// container whose policy wants egress needs one: the engine has to give it, because the
 	// bridge is the machine's to make.
 	Network *ContainerNetwork
+	// MemoryBytes and MemoryHigh are the container's ceiling and its soft limit: the ceiling is
+	// the workspace's own and never more than half the machine, and high is where reclaim starts
+	// (three quarters of it) so a workspace is squeezed before it is killed.
+	MemoryBytes int64
+	MemoryHigh  int64
+	// CPUWeight is the container's share of a contended cpu: proportional, never reserved.
+	CPUWeight int
 	// Init is what the container runs as its init. Empty takes lxcContainerInit.
 	Init string
 }
@@ -145,7 +152,24 @@ func (c Container) LXCConfig(s LXCSettings) ([]byte, error) {
 	// The limits the policy names, always explicit: the runtime's default is no limit at all,
 	// which would hand one workspace the whole machine.
 	fmt.Fprintf(&b, "lxc.cgroup2.cpu.max = %d 100000\n", c.CPUs*100000)
-	fmt.Fprintf(&b, "lxc.cgroup2.memory.max = %d\n", c.MemoryBytes)
+	// The effective ceiling: the workspace's ask, capped by the machine when the engine knows it
+	// (LXCSettings.MemoryBytes is that answer, and it is zero when nobody could say).
+	ceiling := c.MemoryBytes
+	if s.MemoryBytes > 0 {
+		ceiling = s.MemoryBytes
+	}
+	fmt.Fprintf(&b, "lxc.cgroup2.memory.max = %d\n", ceiling)
+	// The soft limit first in effect: reclaim and throttling begin there, so a workspace that
+	// outgrows its expectation is squeezed while it can still finish, and the hard limit is what
+	// stops it taking the machine down.
+	if s.MemoryHigh > 0 && s.MemoryHigh < ceiling {
+		fmt.Fprintf(&b, "lxc.cgroup2.memory.high = %d\n", s.MemoryHigh)
+	}
+	// A share, not a reservation: cgroup v2's default is 100, and a workspace that asked for more
+	// cpus is proportionally louder when cpus are contended and gives its share away when idle.
+	if s.CPUWeight > 0 {
+		fmt.Fprintf(&b, "lxc.cgroup2.cpu.weight = %d\n", s.CPUWeight)
+	}
 	if s.KVM {
 		b.WriteString("lxc.cgroup2.devices.allow = c 10:232 rwm\n")
 	}
@@ -216,15 +240,22 @@ func (s LXCSettings) RootfsGroup() int { return s.RootfsOwner() }
 // with. It is one function because the answer has to be the same whether the gateway is inside
 // the machine (InMachine) or reaching the machine through the shim (LXC): a workspace whose
 // container differs by which of the two is running would be a policy nobody can read.
-func ContainerFor(policy Policy, shareRoot, dir string, privileged, nest bool) (Container, LXCSettings, error) {
+// machineMemory is what the machine can give the containers in bytes, or zero when the caller does
+// not know: the ceiling is then the workspace's own, which is what an engine tested in isolation
+// can say.
+func ContainerFor(policy Policy, shareRoot, dir string, privileged, nest bool, machineMemory int64) (Container, LXCSettings, error) {
 	container, err := policy.Container(shareRoot)
 	if err != nil {
 		return Container{}, LXCSettings{}, err
 	}
+	ceiling := containerCeiling(container.MemoryBytes, machineMemory)
 	settings := LXCSettings{
-		Dir: filepath.Join(dir, container.Name),
-		UID: currentOwner().uid,
-		GID: currentOwner().gid,
+		Dir:         filepath.Join(dir, container.Name),
+		UID:         currentOwner().uid,
+		GID:         currentOwner().gid,
+		MemoryBytes: ceiling,
+		MemoryHigh:  softLimit(ceiling),
+		CPUWeight:   cpuWeight(container.CPUs),
 	}
 	// A workspace can ask for the sharpest profile (ADR 0021's open question), and the engine
 	// can hold it for everyone; either is enough. The unprivileged profile stays the default
@@ -260,4 +291,50 @@ func networkPayload(network *ContainerNetwork) *shim.NetworkPayload {
 		return nil
 	}
 	return &shim.NetworkPayload{Bridge: network.Bridge, Subnet: ContainerSubnet, Gateway: network.Gateway}
+}
+
+// MachineMemory is what this machine can give the containers, in bytes: what a container's
+// ceiling is measured against. The host-side engine reads it from the machine's configuration,
+// the engine inside the machine from the machine itself (MachineMemoryBytes), and both are the
+// same number said two ways.
+func (m Machine) MemoryBytes() int64 {
+	bytes, err := parseMemory(m.Memory)
+	if err != nil || bytes <= 0 {
+		return 0
+	}
+	return bytes
+}
+
+// containerCeiling is what one container may take: the workspace's own limit, and never more than
+// half the machine. Half rather than all of it because two workspaces are the ordinary case: a
+// limit that could take the whole machine is one that makes the second workspace pay for the
+// first, and a container that reaches it takes the machine down with it instead of being slowed.
+func containerCeiling(wanted, machine int64) int64 {
+	if machine > 0 && (wanted <= 0 || wanted > machine/2) {
+		return machine / 2
+	}
+	return wanted
+}
+
+// softLimit is where a container starts feeling the squeeze: three quarters of its ceiling, so
+// reclaim happens while there is still headroom rather than at the wall.
+func softLimit(ceiling int64) int64 {
+	if ceiling <= 0 {
+		return 0
+	}
+	return ceiling / 4 * 3
+}
+
+// cpuWeight is a workspace's share of a contended cpu, in cgroup v2's units: the runtime's
+// default is 100, and a workspace that asked for more cpus is proportionally louder. It is a
+// share, not a reservation — an idle workspace gives its share away.
+func cpuWeight(cpus int) int {
+	if cpus <= 0 {
+		return 0
+	}
+	weight := cpus * 100
+	if weight > 10000 {
+		return 10000
+	}
+	return weight
 }
