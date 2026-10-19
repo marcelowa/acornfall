@@ -29,6 +29,13 @@ func machineCommand(argv []string) {
 		machineUp(argv[1:])
 	case "status":
 		machineStatus(argv[1:])
+	case "down":
+		machineDown(argv[1:])
+	case "restart":
+		// A restart is what a person reaches for when the machine is not behaving; it is a stop and
+		// a start, with the same flags, because everything the product needs is in the mount.
+		machineDown(argv[1:])
+		machineUp(argv[1:])
 	default:
 		machineUsage()
 	}
@@ -37,8 +44,10 @@ func machineCommand(argv []string) {
 func machineUsage() {
 	fmt.Fprint(os.Stderr, `acornfall machine: the one machine an install runs in.
 
-  acornfall machine up      boot it, and say where the console is
-  acornfall machine status  whether it is there and running
+  acornfall machine up       boot it, and say where the console is
+  acornfall machine status   whether it is there and running
+  acornfall machine down     take it away; the mount and the image stay
+  acornfall machine restart  down, then up — what a person reaches for
 
 The machine runs the appliance: the gateway and the worker inside it, with ~/acornfall mounted
 as the product (config, state, workspaces). Nothing of the product runs on the host.
@@ -288,4 +297,43 @@ func awaitConsole(ctx context.Context, url, token string, within time.Duration) 
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// machineDown takes the machine away. Its disk is the image and the product is in the mount, so
+// what is lost is the containers and nothing of anyone's work: the next up makes a fresh machine
+// from the same image, booting in seconds.
+func machineDown(argv []string) {
+	flags := flag.NewFlagSet("acornfall machine down", flag.ContinueOnError)
+	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
+	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
+	image := flags.String("image", "", "the appliance image (default: <home>/appliance/rootfs)")
+	if err := flags.Parse(argv); err != nil {
+		os.Exit(2)
+	}
+	resolvedHome, err := resolveDataDir(*home)
+	if err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
+	resolvedRoot, err := resolveRoot(*root, "")
+	if err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
+	resolvedImage := *image
+	if resolvedImage == "" {
+		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
+	}
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, applianceInit(resolvedRoot, ""))
+	if err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
+	if !driver.Engine().Installed() {
+		log.Printf("machine: no engine is installed here, so there is no machine to stop")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	if err := driver.RemoveMachine(ctx); err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
+	log.Printf("machine: %s is gone (the mount, and the image, are not)", driver.MachineName())
 }

@@ -263,7 +263,7 @@ func TestTheLifecycleCallsTheEngineAsDocumented(t *testing.T) {
 		{"create", "--help"},
 		{"create", "--conf"},
 		{"start", "ws"},
-		{"stop", "ws"},
+		{"stop", "--timeout", "20", "ws"},
 		{"rm", "--force", "ws"},
 	}
 	if len(runner.calls) != len(want) {

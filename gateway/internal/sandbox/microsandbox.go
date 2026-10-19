@@ -391,8 +391,12 @@ func (m *Microsandbox) Start(ctx context.Context, name string) error {
 	return err
 }
 
+// Stop asks the sandbox to shut down, and gives it a budget: the engine's own default is to wait
+// indefinitely, and a machine whose init does not treat SIGTERM as shutdown waits forever — which
+// a person reads as "it does not stop" (measured). The timeout fails without killing, so a
+// workload that is writing is not interrupted here.
 func (m *Microsandbox) Stop(ctx context.Context, name string) error {
-	_, err := m.run(ctx, "stop", name)
+	_, err := m.run(ctx, "stop", "--timeout", "20", name)
 	return err
 }
 
