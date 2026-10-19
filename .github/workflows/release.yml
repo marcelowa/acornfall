@@ -85,6 +85,12 @@ jobs:
       # The image runs the release binary, not a fresh build: it is the same product the host
       # ships, with the same version stamped into it.
       - run: mkdir -p bin && cp dist/acornfall-linux-amd64 bin/acornfall && chmod +x bin/acornfall
+      # The engine is the worker's own dependency, and the builder's door: installed the way the
+      # product installs it, from the lockfile, so the job boots the same engine the release ships.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cd worker && bun install --frozen-lockfile
       # The builder is a Debian machine, the same base the appliance carries, so the build runs in
       # a known system rather than whatever the runner host is. The workspace is mounted at its own
       # path, so everything below is written where the next step can collect it.
