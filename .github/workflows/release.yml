@@ -109,6 +109,10 @@ jobs:
           mounts:
             - $PWD:$PWD
           EOF
+          # The state folder lives on the runner, so the last run's builder is still recorded:
+          # creating over it fails with "sandbox already exists" (measured on the second run).
+          "$MSB" stop --force appliance-builder >/dev/null 2>&1 || true
+          "$MSB" remove appliance-builder >/dev/null 2>&1 || true
           "$MSB" create --conf builder.yaml --name appliance-builder
           trap '"$MSB" stop --force appliance-builder >/dev/null 2>&1 || true' EXIT
           "$MSB" exec appliance-builder -- sh -c \
