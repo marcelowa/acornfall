@@ -231,6 +231,15 @@ func applianceInit(root, token string) string {
 		auth = "--token " + token
 	}
 	return strings.Join([]string{
+		// The image is a tarball of files, links and directories: device nodes are the kernel's to
+		// make, and an unpacker run as a user cannot create them. A machine whose /dev is empty
+		// cannot attach to a container at all (measured: "open_devnull: Operation not permitted"),
+		// so the init makes the few nodes a container runtime needs before anything else exists.
+		"for d in null:1:3 zero:1:5 full:1:7 random:1:8 urandom:1:9 tty:5:0; do",
+		"  n=${d%%:*}; rest=${d#*:}; ma=${rest%%:*}; mi=${rest#*:};",
+		"  [ -e /dev/$n ] || mknod -m 666 /dev/$n c $ma $mi || true;",
+		"done;",
+		"[ -d /dev/pts ] || mkdir -p /dev/pts; [ -d /dev/shm ] || mkdir -p /dev/shm;",
 		// Everything the appliance says goes to a file inside the machine: it is the only place a
 		// container that failed to start explains itself, and the console is not readable.
 		"exec /usr/local/bin/acornfall",
