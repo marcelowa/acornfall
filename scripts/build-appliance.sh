@@ -108,6 +108,14 @@ rm -rf /tmp/bun /tmp/bun.zip
 # dependencies are three hundred megabytes of toolchain nothing there will ever call.
 cd /usr/local/lib/acornfall/worker
 /usr/local/bin/bun install --frozen-lockfile --production
+# The appliance never runs the sandbox SDK: its engine is the machine's own lxc, and the SDK is
+# only ever imported by the engine that needs a hypervisor. 103 MB of it would be disk spent on
+# a dependency the machine cannot reach. Measured: the rootfs goes from 760M to 648M apparent.
+rm -rf /usr/local/lib/acornfall/worker/node_modules/@superradcompany /usr/local/lib/acornfall/worker/node_modules/microsandbox
+# The tools that only the build needed, and what a person never reads on a machine with no shell.
+apt-get purge -y -qq curl unzip >/dev/null 2>&1 || true
+apt-get autoremove -y -qq >/dev/null 2>&1 || true
+rm -rf /usr/share/doc /usr/share/man /usr/share/locale /var/lib/apt/lists /var/cache/apt
 INNER
 chroot "$ROOTFS" /bin/sh /tmp/appliance-bun.sh || die "putting bun and the worker's dependencies in failed"
 rm -f "$ROOTFS/tmp/appliance-bun.sh"
