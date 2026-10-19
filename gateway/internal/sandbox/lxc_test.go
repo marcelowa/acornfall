@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -202,5 +203,45 @@ func TestAContainerNeedsExplicitLimitsAndPlaces(t *testing.T) {
 	}
 	if _, err := (Container{Name: "ws", CPUs: 2}).LXCConfig(LXCSettings{Dir: "/var/lib/lxc/ws"}); err == nil {
 		t.Error("a container needs a memory limit")
+	}
+}
+
+// ADR 0021 leaves the profile open and proposes unprivileged; a workspace can ask for the other
+// one, and the engine can hold it for everyone. Either way the setting has to reach the
+// configuration: a profile that stopped at the policy would be a promise with no effect.
+func TestAWorkspaceOrTheEngineCanAskForThePrivilegedProfile(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "work")
+	policy := Policy{Image: "debian:stable-slim", Workspace: workspace, Privileged: true}
+	container, settings, err := ContainerFor(policy, root, "/var/lib/lxc", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.Unprivileged {
+		t.Error("a workspace that asks for the privileged profile should get it")
+	}
+	config, err := container.LXCConfig(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(config), "lxc.idmap") {
+		t.Errorf("the privileged profile maps no ids:\n%s", config)
+	}
+
+	engineWide, settings, err := ContainerFor(Policy{Image: "debian:stable-slim", Workspace: workspace}, root, "/var/lib/lxc", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.Unprivileged {
+		t.Error("an engine told to run privileged containers should run them")
+	}
+	_ = engineWide
+
+	_, quiet, err := ContainerFor(Policy{Image: "debian:stable-slim", Workspace: workspace}, root, "/var/lib/lxc", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !quiet.Unprivileged {
+		t.Error("the default is the mitigation: unprivileged unless somebody asked")
 	}
 }

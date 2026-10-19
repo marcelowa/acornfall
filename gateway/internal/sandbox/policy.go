@@ -35,6 +35,12 @@ type Policy struct {
 	// it has the switch. A sandbox on a machine that cannot nest still boots. See
 	// docs/adr/0018-disable-vm-nesting.md.
 	DisableVMNesting bool
+	// Privileged runs this workspace's container as root in the machine instead of inside a user
+	// namespace. It is the sharpest trade ADR 0021 names: the unprivileged profile is the default
+	// because a user namespace is the mitigation, and a workspace that asks for more unreachable
+	// things (its own mounts, its own devices) is asking for this. A workspace that does not ask
+	// gets the default.
+	Privileged bool
 	// Egress allows the sandbox to reach the network. On by default for new workspaces;
 	// ADR 0012 records what that exposes.
 	Egress bool

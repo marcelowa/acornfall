@@ -67,6 +67,11 @@ type Workspace struct {
 	// --disable-vm-nesting; a pointer because true is a choice and absent is not. Like Image,
 	// it takes effect at the next sandbox, because nesting is decided when one is created.
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
+	// Privileged runs this workspace's container as root in the machine instead of inside a user
+	// namespace. ADR 0021 leaves the choice open and gives the unprivileged profile as the
+	// default; false is that default, and true is a workspace saying it needs what only root in
+	// the machine can reach.
+	Privileged bool `json:"privileged,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
@@ -89,6 +94,7 @@ func (w Workspace) SandboxPolicy(root string, disableVMNesting bool) sandbox.Pol
 		Image:            w.Image,
 		Workspace:        w.Path,
 		Egress:           w.Network != NetworkOff,
+		Privileged:       w.Privileged,
 		DisableVMNesting: disableVMNesting,
 		Global:           sandbox.GlobalPaths(root),
 	}
@@ -102,13 +108,24 @@ func ValidNetwork(value string) bool {
 
 // Views renders workspaces for the interface, which is the only place `running` belongs.
 //
-// A conversion rather than a field-by-field copy, because the two shapes are the same shape:
-// a field added to one and not the other is then a compile error instead of a value that
-// quietly stops reaching the interface.
+// Field by field rather than a conversion, because the two shapes are the same shape except for
+// the one field that means something different: "running" is runtime state for the interface and
+// never stored. The copy is the price of that difference, and its test is what keeps a new field
+// from quietly stopping here.
 func Views(list []Workspace) []WorkspaceState {
 	views := make([]WorkspaceState, 0, len(list))
 	for _, workspace := range list {
-		views = append(views, WorkspaceState(workspace))
+		views = append(views, WorkspaceState{
+			Name:             workspace.Name,
+			Path:             workspace.Path,
+			Title:            workspace.Title,
+			General:          workspace.General,
+			Image:            workspace.Image,
+			Network:          workspace.Network,
+			Privileged:       workspace.Privileged,
+			DisableVMNesting: workspace.DisableVMNesting,
+			Running:          workspace.Running,
+		})
 	}
 	return views
 }

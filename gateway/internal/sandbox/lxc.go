@@ -222,11 +222,14 @@ func ContainerFor(policy Policy, shareRoot, dir string, privileged, nest bool) (
 		return Container{}, LXCSettings{}, err
 	}
 	settings := LXCSettings{
-		Dir:          filepath.Join(dir, container.Name),
-		Unprivileged: !privileged,
-		UID:          currentOwner().uid,
-		GID:          currentOwner().gid,
+		Dir: filepath.Join(dir, container.Name),
+		UID: currentOwner().uid,
+		GID: currentOwner().gid,
 	}
+	// A workspace can ask for the sharpest profile (ADR 0021's open question), and the engine
+	// can hold it for everyone; either is enough. The unprivileged profile stays the default
+	// because a user namespace is the mitigation.
+	settings.Unprivileged = !(privileged || policy.Privileged)
 	// The containers are where a workspace's own virtual machines would run, so the device goes
 	// in when the workspace allows nesting and the machine can grant it.
 	if !policy.DisableVMNesting && nest {

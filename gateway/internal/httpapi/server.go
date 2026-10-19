@@ -143,6 +143,10 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		Network *string `json:"network"`
 		// DisableVMNesting, when true, keeps this workspace's sandbox from nesting;
 		// absent or false follows the install's --disable-vm-nesting.
+		// Privileged, when true, runs this workspace's sandbox as root in the machine instead of
+		// inside a user namespace (ADR 0021's open question); absent is the default, which is
+		// unprivileged.
+		Privileged       *bool `json:"privileged"`
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
 		Trusted          *bool `json:"trusted"`
 	}
@@ -178,8 +182,9 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	if body.Network != nil {
 		workspace.Network = *body.Network
 	}
-	if body.DisableVMNesting != nil {
-		workspace.DisableVMNesting = body.DisableVMNesting
+
+	if body.Privileged != nil {
+		workspace.Privileged = *body.Privileged
 	}
 	if err := s.workspaces.Update(workspace); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -206,6 +211,9 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		// DisableVMNesting, when present, keeps this workspace's sandbox from nesting;
 		// absent leaves the workspace's own setting alone.
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
+		// Privileged, when present, changes whether this workspace's sandbox runs as root in the
+		// machine; absent leaves the workspace's own setting alone.
+		Privileged *bool `json:"privileged"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -229,8 +237,9 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.Network != nil {
 		existing.Network = *body.Network
 	}
-	if body.DisableVMNesting != nil {
-		existing.DisableVMNesting = body.DisableVMNesting
+
+	if body.Privileged != nil {
+		existing.Privileged = *body.Privileged
 	}
 	if err := s.workspaces.Update(existing); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)

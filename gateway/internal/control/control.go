@@ -114,6 +114,10 @@ type WorkspaceState struct {
 	// DisableVMNesting is nil when this workspace follows the install's --disable-vm-nesting,
 	// and a choice of its own otherwise. True refuses nesting; absent or false allows it
 	// wherever the engine and the machine can.
+	// Privileged runs this workspace's container as root in the machine instead of inside a user
+	// namespace (ADR 0021's open question). False is the default, and the default is the
+	// mitigation.
+	Privileged       bool  `json:"privileged,omitempty"`
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
 	Running          bool  `json:"running"`
 }
