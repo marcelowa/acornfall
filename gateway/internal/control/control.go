@@ -919,7 +919,7 @@ func (c *Control) StateFor(conversationID string) State {
 		},
 		WorkerUp:    c.workerUp,
 		WorkerError: c.workerError,
-		Sandbox:     c.sandbox,
+		Sandbox:     c.sandboxStatus(),
 		Update:      c.updateSummary(),
 		Inherited: Inherited{
 			Model:    c.bindings[active].Provider == "",
@@ -2636,4 +2636,22 @@ func defaultConversation(infos []protocol.ConversationInfo) string {
 		}
 	}
 	return firstVisible(infos)
+}
+
+// sandboxStatus is the cached sandbox with its status asked again. The container's own state is
+// the one thing in this report that changes without this process doing anything — control makes
+// the container when a workspace starts, and the worker's first use of its engine is what starts
+// it — so a console that showed a running workspace's container as stopped would be reporting a
+// snapshot as if it were the world.
+func (c *Control) sandboxStatus() SandboxState {
+	state := c.sandbox
+	if !state.Tools || c.opts.Sandbox == nil {
+		return state
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if status, err := c.opts.Sandbox.Status(ctx, c.opts.Workspace.Path); err == nil && status != "" {
+		state.Status = status
+	}
+	return state
 }
