@@ -94,8 +94,7 @@ and the worker through a store they share.
 ## Consequences
 
 - ADR 0012's "the worker stays on the host" is superseded; its measurement (the command line
-  versus the SDK) is why the exec is local now.
-- ADR 0015's host engine becomes "the appliance on the host" rather than "the tools on the host".
+  versus the SDK) is why the exec is local now.- ADR 0015's host engine becomes "the appliance on the host" rather than "the tools on the host".
 - ADR 0019 (self-update) grows a second piece: the launcher updates the appliance image and the
   launcher, and the appliance updates itself inside the machine — who owns which is open.
 - ADR 0021's machine stops being only where containers live: it is the product's home.
@@ -105,3 +104,45 @@ and the worker through a store they share.
 - Open: who runs the launcher's own update; whether a workspace may be privileged once the key
   lives in the mount (the flag exists, its cost is now the key); what the appliance image is
   called and how it is versioned against the launcher.
+
+## The layout move, specified
+
+The rule the two folders follow, settled with the owner on 2026-10-19: **the mount holds what the
+product is; `~/.acornfall` holds what runs it.** The engine's store cannot move inside the mount
+because it holds the file that *is* the machine's disk: a machine that mounts the folder holding
+its own backing file can write its own disk through the share, a backup copies a live disk, and a
+person's `rm` in the folder they browse takes the machine with it. The launcher also has to boot
+and repair the machine when it is not running, so its machinery cannot live behind a mount that
+only exists while the machine is up.
+
+```
+~/acornfall/            the mount: the product
+  .agents/              global skills, agents, prompts, commands — one bundle, no layers
+  config/               config.json, settings.json, credentials.json, token
+  state/                conversations, drafts, the workspace registry
+  workspaces/<name>/    a workspace
+~/.acornfall/           the machinery: the launcher's
+  tools/                the engine's install
+  sandboxes/            its store: images, and the machine's disk
+```
+
+What the move touches, in one piece (a half-move is a product that reads half its files):
+
+1. **The share root becomes a thing the code knows.** `--root` (default: the parent of
+   `--workspaces-dir`, which is already `~/acornfall/workspaces`), so the root and the workspaces
+   cannot disagree. `--home` keeps meaning the machinery.
+2. **control**: the workspace state, the drafts, the registry, the settings and the credentials
+   move under the root; the install keeps `tools/`, `sandboxes/`, `version`, `update.json`.
+3. **The sandbox mounts**: one bundle (`<root>/.agents`) and the config file
+   (`<root>/config/config.json`), instead of the user's `~/.agents` plus four install folders.
+   `GlobalPaths` shrinks with it.
+4. **The worker** reads the same bundle (it gets the root from control) — `layerRoots` loses the
+   two-layer merge, which is the simplification the one-bundle shape buys.
+5. **A migration, once, at start**: the old public files under `<home>` move into the root's
+   places, each one logged, with a marker so it does not run twice. Secrets included, because
+   they are moving between two folders this install owns.
+6. **The docs and the flags' help text**, and the e2e harness's fixtures.
+
+Not part of this move: the gateway and the worker going inside the machine. That is the section
+above, and it happens after — the appliance's own home is `/var/lib/acornfall` inside the machine,
+and the mount arrives there as the share root.
