@@ -69,8 +69,34 @@ jobs:
           name: worker-sources
           path: worker.tar.gz
 
-  publish:
+  appliance:
+    # The image the machine boots (ADR 0022): the release's own rootfs, with acornfall, bun and
+    # the worker inside it. Building it needs root — lxc-create and chroot — which the self-hosted
+    # runner can give: this job runs as the runner's user and uses sudo for the one script.
+    # amd64 only for now: the image carries architecture-specific binaries, and one image per
+    # release is the number the launcher fetches.
+    runs-on: [self-hosted, linux, x64]
     needs: binaries
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # The image runs the release binary, not a fresh build: it is the same product the host
+      # ships, with the same version stamped into it.
+      - run: mkdir -p bin && cp dist/acornfall-linux-amd64 bin/acornfall && chmod +x bin/acornfall
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq lxc skopeo umoci jq unzip
+      - run: sudo BINARY=$PWD/bin/acornfall WORKER=$PWD/worker sh scripts/build-appliance.sh appliance.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appliance
+          path: appliance.tar.gz
+
+  publish:
+    # The appliance joins the release for the same reason the worker does: the launcher fetches
+    # it on a fresh install (ADR 0022), and a release without one cannot boot a machine.
+    needs: [binaries, appliance]
     runs-on: [self-hosted, linux, x64]
     steps:
       # The tag message is read from the repository, so the job needs the tag:
@@ -87,7 +113,7 @@ jobs:
           merge-multiple: true
       # The checksum file is what the gateway verifies downloads against
       # before swapping or staging. No checksum file, no verify — see ADR 0019.
-      - run: cd dist && sha256sum acornfall-* worker.tar.gz > sha256sums.txt && ls -la
+      - run: cd dist && sha256sum acornfall-* worker.tar.gz appliance.tar.gz > sha256sums.txt && ls -la
       # The release body is the tag message, which is what the update page
       # reads as "what changed". Every release before this step shipped a null
       # body, so the gateway falls back to the tag annotation for those.
