@@ -317,7 +317,9 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 
 	// The appliance's init: the product, whole. No shim line and no sandbox-state, because inside
 	// the machine the containers are the gateway's own neighbours (--in-machine) — and the tier is
-	// on: a workspace here gets a container, made and started in this machine.
+	// on: a workspace here gets a container, made and started in this machine. Everything it says
+	// goes to a file inside the machine: the gateway's log is the only place a start that failed
+	// explains itself, and the machine's console is not a place a person can read.
 	start := strings.Join([]string{
 		"ACORNFALL_DEV_PROVIDER=1 exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 --insecure",
@@ -327,6 +329,7 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 		"--worker-dir /usr/local/lib/acornfall/worker",
 		"--sandbox-engine lxc --in-machine",
 		"--model faux/faux-1",
+		">>/var/lib/acornfall/appliance.log 2>&1",
 	}, " ")
 	driver := NewLXC(engine, Machine{
 		Image:     os.Getenv("ACORNFALL_MACHINE_IMAGE"),
