@@ -181,6 +181,9 @@ configuration was written in Go (`gateway/internal/sandbox/lxc.go`) and run agai
 
 ## Consequences
 
+See also [ADR 0022](0022-the-appliance-runs-in-the-machine.md): the machine this ADR describes is
+where the whole appliance is meant to run, not only its containers.
+
 - `gateway/internal/sandbox`: `Microsandbox` grows the VM/container split; `Manager` keeps
   owning policy and refusal.
 - `worker/src/sandbox.ts`: `SandboxClient` keeps its surface (exec and files); what sits behind
