@@ -147,3 +147,17 @@ lxc, skopeo, umoci, jq, and the id ranges the unprivileged profile maps.
 
 The worker's client — the second definition of this protocol, in TypeScript — arrives with the
 worker's exec moving inside a container.
+
+## The machine's image
+
+The image the machine boots is built by `scripts/build-appliance.sh`: a Debian-stable rootfs
+with lxc, skopeo, umoci, jq, the shifted id range in `/etc/subuid` and `/etc/subgid`, and
+`/etc/acornfall-appliance` naming it. It is a release asset (ADR 0022) — the install unpacks it
+and the engine boots the machine from the directory — so nothing needs a registry account. The
+build runs in a *chroot* rather than a container: apt needs the machine's network, a chroot has
+it, and no namespaces are needed to install into a rootfs.
+
+With it, the engine's live chain runs whole: `ACORNFALL_MACHINE_IMAGE=<unpacked rootfs> go test
+./internal/sandbox -run LiveLXC` makes a machine from the image, delivers the shim into it, and
+creates, starts, lists, stops and removes a workspace's container — measured, 73 seconds
+including the container's image pull.
