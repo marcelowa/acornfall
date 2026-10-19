@@ -429,3 +429,7 @@ func (x *LXC) MachineName() string { return x.machine.Name() }
 
 // Engine is the pinned engine underneath: the launcher installs it before the machine can boot.
 func (x *LXC) Engine() *Microsandbox { return x.engine }
+
+// RemoveMachine takes the machine away: an init is fixed at boot, so installing a new appliance
+// is replacing the machine. The product is in the mount, which is not part of the machine.
+func (x *LXC) RemoveMachine(ctx context.Context) error { return x.machine.RemoveMachine(ctx) }

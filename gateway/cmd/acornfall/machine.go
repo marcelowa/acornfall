@@ -13,6 +13,7 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/update"
 )
 
 // machineCommand is the host's side of ADR 0022: the host is a launcher, and the product is a
@@ -51,6 +52,8 @@ func machineUp(argv []string) {
 	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
 	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
 	image := flags.String("image", "", "the appliance image, an unpacked rootfs (default: <home>/appliance/rootfs)")
+	tag := flags.String("tag", "", "the release to fetch the appliance from (default: this build's version)")
+	refresh := flags.Bool("refresh", false, "fetch the appliance again and recreate the machine: an init is fixed at boot, so an update is a new machine")
 	port := flags.Int("port", 7777, "the host port the console is published on, on loopback")
 	cpus := flags.Int("cpus", 2, "virtual cpus for the machine")
 	memory := flags.String("memory", "4G", "memory for the machine")
@@ -73,22 +76,35 @@ func machineUp(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
 	}
-	if err := checkAppliance(resolvedImage); err != nil {
-		log.Fatalf("acornfall machine: %v", err)
-	}
 	// The mount is the product, so it has to be there before the machine is: the machine mounts
 	// it, and a machine whose world is missing boots into a console with no workspaces.
 	where := layout.New(resolvedRoot, resolvedHome)
 	if err := where.Ensure(); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, *cpus, *memory, *port)
+	// The token, when the install has one, comes from the mount: the appliance has no secrets of
+	// its own, and a port that answers without one is only safe while it is loopback.
+	token := ""
+	if contents, err := os.ReadFile(where.Token()); err == nil {
+		token = strings.TrimSpace(string(contents))
+	}
+	if err := ensureAppliance(ctx, resolvedHome, resolvedImage, *refresh, *tag); err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, *cpus, *memory, *port, applianceInit(resolvedRoot, token))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	engine := driver.Engine()
 	if err := engine.Install(ctx, log.Printf); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
+	}
+	if *refresh {
+		// An init is fixed at boot: a new image is a new machine, and the product is in the mount,
+		// so nothing of it is lost.
+		if err := driver.RemoveMachine(ctx); err != nil {
+			log.Fatalf("acornfall machine: removing the old machine: %v", err)
+		}
 	}
 	log.Printf("machine: booting the appliance from %s", resolvedImage)
 	if err := driver.EnsureMachine(ctx); err != nil {
@@ -99,7 +115,7 @@ func machineUp(argv []string) {
 	if *wait <= 0 {
 		return
 	}
-	if err := awaitConsole(ctx, url, *wait); err != nil {
+	if err := awaitConsole(ctx, url, token, *wait); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	log.Printf("machine: the appliance is serving on %s", url)
@@ -127,7 +143,7 @@ func machineStatus(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777)
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, applianceInit(resolvedRoot, ""))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -162,7 +178,7 @@ func machineStatus(argv []string) {
 // the appliance's own gateway — it is in the machine, and its containers are its neighbours —
 // but the machine's configuration still carries it, because the host may need the same door for
 // the engine that reaches containers from outside (internal/sandbox/lxcengine.go).
-func machineDriver(home, image, root string, cpus int, memory string, port int) (*sandbox.LXC, error) {
+func machineDriver(home, image, root string, cpus int, memory string, port int, start string) (*sandbox.LXC, error) {
 	binary, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("this binary's own path is what the machine runs the shim from: %w", err)
@@ -175,22 +191,27 @@ func machineDriver(home, image, root string, cpus int, memory string, port int) 
 		ShareRoot: root,
 	}
 	driver := sandbox.NewLXC(engine, machine, filepath.Join(home, "state", "machine.sock"), binary)
-	driver = driver.WithAppliance(applianceInit(root), fmt.Sprintf("127.0.0.1:%d:7777", port))
+	driver = driver.WithAppliance(start, fmt.Sprintf("127.0.0.1:%d:7777", port))
 	return driver, nil
 }
 
 // applianceInit is what the machine runs as its init: the product, out of the image, with the
 // mount as its world. There is no provider flag and no model flag here — they come from the
 // mount, which is the point of the layout (ADR 0022): the machine holds nothing of the
-// product's, so it can be replaced without losing any.
-func applianceInit(root string) string {
+// product's, so it can be replaced without losing any. The token, when there is one, comes from
+// the mount for the same reason; without one the port is only published on loopback.
+func applianceInit(root, token string) string {
 	machineHome := "/var/lib/acornfall"
 	workspace := filepath.Join(root, "workspaces", "general")
+	auth := "--insecure"
+	if token != "" {
+		auth = "--token " + token
+	}
 	return strings.Join([]string{
 		// Everything the appliance says goes to a file inside the machine: it is the only place a
 		// container that failed to start explains itself, and the console is not readable.
 		"exec /usr/local/bin/acornfall",
-		"--addr 0.0.0.0:7777 --insecure",
+		"--addr 0.0.0.0:7777 " + auth,
 		"--root " + root,
 		"--home " + machineHome,
 		"--workspace " + workspace,
@@ -198,6 +219,26 @@ func applianceInit(root string) string {
 		"--sandbox-engine lxc --in-machine",
 		">>" + filepath.Join(machineHome, "appliance.log") + " 2>&1",
 	}, " ")
+}
+
+// ensureAppliance makes sure the machine's rootfs is there: an install that has one uses it, and
+// a fresh install fetches the release's, verified against the release's own checksums. A refresh
+// always fetches — that is what updating the appliance means, because the image is the product's
+// half of the machine.
+func ensureAppliance(ctx context.Context, home, image string, refresh bool, tag string) error {
+	if !refresh {
+		if err := checkAppliance(image); err == nil {
+			return nil
+		}
+	}
+	if tag == "" {
+		tag = update.BuildVersion
+	}
+	if tag == "" {
+		return fmt.Errorf("this build does not know its own version, so it cannot say which release the appliance comes from: pass --image or --tag")
+	}
+	log.Printf("machine: fetching the appliance %s into %s", tag, image)
+	return update.New(home, filepath.Dir(home), "", "").FetchAppliance(ctx, tag, image)
 }
 
 // checkAppliance refuses an image that is not one, by name: the machine's error for a missing
@@ -213,11 +254,19 @@ func checkAppliance(image string) error {
 
 // awaitConsole waits for the appliance's own state endpoint: a published port that answers is
 // the machine being ready, and anything earlier is a window that looks like a broken install.
-func awaitConsole(ctx context.Context, url string, within time.Duration) error {
+func awaitConsole(ctx context.Context, url, token string, within time.Duration) error {
 	deadline := time.Now().Add(within)
 	client := &http.Client{Timeout: 5 * time.Second}
 	for {
-		response, err := client.Get(url + "/api/state")
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/state", nil)
+		if err != nil {
+			return err
+		}
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response, requestErr := client.Do(request)
+		err = requestErr
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode == http.StatusOK {

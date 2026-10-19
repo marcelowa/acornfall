@@ -405,3 +405,52 @@ func untarWorker(tarball []byte, dir string) error {
 		}
 	}
 }
+
+// ApplianceTarball is the release asset holding the appliance image — the unpacked rootfs the
+// machine boots from (ADR 0022). It is the release's own rootfs, built by
+// scripts/build-appliance.sh and carried whole.
+const ApplianceTarball = "appliance.tar.gz"
+
+// FetchAppliance is a fresh install's answer to where the machine's rootfs comes from: the
+// release, once, verified against the release's own checksums the same way the worker's sources
+// are. It unpacks into dir, and a partial unpack is refused rather than half a machine.
+func (m *Manager) FetchAppliance(ctx context.Context, tag, dir string) error {
+	if tag == "" {
+		return fmt.Errorf("update: no tag to fetch the appliance for")
+	}
+	release, err := m.releaseFor(ctx, tag)
+	if err != nil {
+		return err
+	}
+	asset := assetNamed(release, ApplianceTarball)
+	if asset.URL == "" {
+		return fmt.Errorf("update: release %s has no %s", release.Tag, ApplianceTarball)
+	}
+	tarball, err := m.download(ctx, asset)
+	if err != nil {
+		return err
+	}
+	list, err := m.checksumList(ctx, release)
+	if err != nil {
+		return err
+	}
+	if err := verify(list, tarball, release.Tag); err != nil {
+		return err
+	}
+	// Unpacked beside the target and moved into place, so a failure leaves the old image (or
+	// none) rather than a rootfs with half its files.
+	staging := dir + ".partial"
+	if err := os.RemoveAll(staging); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		return err
+	}
+	if err := untarWorker(tarball, staging); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	return os.Rename(staging, dir)
+}

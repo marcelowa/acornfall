@@ -11,10 +11,10 @@ import (
 // world, and its containers as this machine's own. No provider and no model appear here — they
 // come from the mount, which is what lets the machine be replaced without losing the product.
 func TestTheMachineRunsTheApplianceAsItsInit(t *testing.T) {
-	start := applianceInit("/home/me/acornfall")
+	start := applianceInit("/home/me/acornfall", "sekrit")
 	for _, want := range []string{
 		"exec /usr/local/bin/acornfall",
-		"--addr 0.0.0.0:7777 --insecure",
+		"--addr 0.0.0.0:7777 --token sekrit",
 		"--root /home/me/acornfall",
 		"--home /var/lib/acornfall",
 		"--workspace /home/me/acornfall/workspaces/general",
@@ -53,5 +53,18 @@ func TestAnImageThatIsNotAnApplianceIsRefusedByName(t *testing.T) {
 	}
 	if err := checkAppliance(good); err != nil {
 		t.Fatalf("an appliance image should be accepted: %v", err)
+	}
+}
+
+// Without a token in the mount the port answers unauthenticated, which is only acceptable
+// because it is published on loopback: the init says which of the two it is, and never both.
+func TestTheApplianceUsesTheMountsTokenOrNothing(t *testing.T) {
+	withToken := applianceInit("/home/me/acornfall", "sekrit")
+	if !strings.Contains(withToken, "--token sekrit") || strings.Contains(withToken, "--insecure") {
+		t.Errorf("a token in the mount is what the port answers with:\n%s", withToken)
+	}
+	without := applianceInit("/home/me/acornfall", "")
+	if !strings.Contains(without, "--insecure") || strings.Contains(without, "--token") {
+		t.Errorf("no token is the loopback case, and it says so:\n%s", without)
 	}
 }

@@ -307,6 +307,12 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The image is the machine's rootfs, and the engine writes the containers it makes into it:
+	// a run that leaves them behind gives the next run a machine with strangers in it. Cleaning
+	// it here is a test saying so out loud — the engine's own answer is a proper overlay.
+	if err := os.RemoveAll(filepath.Join(os.Getenv("ACORNFALL_MACHINE_IMAGE"), "var", "lib", "lxc")); err != nil {
+		t.Logf("cleaning the image's containers: %v", err)
+	}
 	// A free port on the host, so two runs do not collide.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
