@@ -1,7 +1,9 @@
 package sandbox
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -387,4 +389,170 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 		}
 		time.Sleep(3 * time.Second)
 	}
+}
+
+// Live: a tool command goes through the worker and runs in the workspace's container. This is
+// the one link the other tests cannot show — a hand start proves the container runs, and the
+// container being RUNNING proves the worker reached its engine, but neither proves that a
+// command the model asks for ends up inside the container rather than in the machine.
+//
+// The proof is the command's own output: LXC gives a container its name as its hostname, so
+// `hostname` printing acornfall-general-<hash> is a command that ran inside the container. The
+// dev provider is scripted to ask for exactly that (worker/src/devprovider.ts), and the script
+// lives in the root — the mount — because the worker that reads it is inside the machine.
+//
+//	ACORNFALL_LXC=1 ACORNFALL_MACHINE_IMAGE=<unpacked appliance> go test ./internal/sandbox -run LiveATool -v
+func TestLiveAToolRunsInTheContainer(t *testing.T) {
+	if os.Getenv("ACORNFALL_LXC") == "" || os.Getenv("ACORNFALL_MACHINE_IMAGE") == "" {
+		t.Skip("set ACORNFALL_LXC=1 and ACORNFALL_MACHINE_IMAGE=<unpacked appliance> to boot the appliance")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	home := shortTempDir(t)
+	engine := NewMicrosandbox(home)
+	if state := os.Getenv("ACORNFALL_SANDBOX_STATE"); state != "" {
+		engine = engine.WithStateDir(state)
+	}
+	if err := engine.Install(ctx, t.Logf); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Usable(); err != nil {
+		t.Skipf("no hypervisor here: %v", err)
+	}
+	root := filepath.Join(t.TempDir(), "acornfall")
+	workspace := filepath.Join(root, "workspaces", "general")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The command the model will ask for, and where the worker finds it: in the mount, because
+	// the worker is in the machine and the mount is the only folder both sides can see.
+	script := filepath.Join(root, "dev-script.json")
+	rules := `{"rules":[{"match":"prove it","tools":[{"name":"bash","args":{"command":"hostname"}}],"reply":"done"}]}`
+	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+	start := strings.Join([]string{
+		"ACORNFALL_DEV_PROVIDER=1 ACORNFALL_DEV_SCRIPT=" + script + " exec /usr/local/bin/acornfall",
+		"--addr 0.0.0.0:7777 --insecure",
+		"--root " + root,
+		"--home /var/lib/acornfall",
+		"--workspace " + workspace,
+		"--worker-dir /usr/local/lib/acornfall/worker",
+		"--sandbox-engine lxc --in-machine",
+		"--model faux/faux-1",
+		">>/var/lib/acornfall/appliance.log 2>&1",
+	}, " ")
+	driver := NewLXC(engine, Machine{
+		Image:     os.Getenv("ACORNFALL_MACHINE_IMAGE"),
+		CPUs:      2,
+		Memory:    "1G",
+		ShareRoot: root,
+	}, filepath.Join(home, "state", "machine.sock"), "/bin/true").WithLog(t.Logf)
+	driver.machine.WithAppliance(start, fmt.Sprintf("127.0.0.1:%d:7777", port))
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := driver.machine.RemoveMachine(cleanup); err != nil {
+			t.Logf("removing the machine: %v", err)
+		}
+	})
+	if err := driver.EnsureMachine(ctx); err != nil {
+		t.Fatal(err)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	// The console, and the sandbox being ready, before a turn is worth asking for.
+	deadline := time.Now().Add(12 * time.Minute)
+	ready := false
+	for !ready {
+		response, err := http.Get(url + "/api/state")
+		if err == nil {
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
+			response.Body.Close()
+			ready = response.StatusCode == http.StatusOK && strings.Contains(string(body), `"status":"RUNNING"`)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the appliance's container never came up on %s: %v", url, err)
+		}
+		time.Sleep(3 * time.Second)
+	}
+	// A conversation to ask in. The console makes one when asked for one.
+	response, err := http.Post(url+"/api/workspaces/general/conversations", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Conversation struct {
+			ID string `json:"id"`
+		} `json:"conversation"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if created.Conversation.ID == "" {
+		t.Fatal("the console made a conversation with no id")
+	}
+	conversation := created.Conversation.ID
+	// The prompt, and then the transcript: the dev provider asks for `hostname` on this turn.
+	response, err = http.Post(url+"/api/workspaces/general/conversations/"+conversation+"/messages",
+		"application/json", strings.NewReader(`{"text":"prove it"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	// Accepted is the console saying the turn is queued, which is all a message can be: the
+	// answer arrives on the transcript.
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {
+		t.Fatalf("the console refused the message: %s", response.Status)
+	}
+	// The stream is the transcript, replayed and then live. Every frame's data is searched as it
+	// arrives: what the command printed is what says where it ran.
+	streamCtx, cancelStream := context.WithDeadline(ctx, time.Now().Add(6*time.Minute))
+	defer cancelStream()
+	request, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
+		fmt.Sprintf("%s/api/stream?workspace=general&conversation=%s", url, conversation), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("opening the transcript: %v", err)
+	}
+	defer stream.Body.Close()
+	scanner := bufio.NewScanner(stream.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	transcript := &strings.Builder{}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		transcript.WriteString(strings.TrimPrefix(line, "data: "))
+		// The container's own name, as its hostname: the command ran in it, not in the machine.
+		if strings.Contains(transcript.String(), "acornfall-general-") {
+			t.Logf("a tool ran in the container: %s", firstMatch(transcript.String(), "acornfall-general-"))
+			return
+		}
+	}
+	t.Fatalf("no command ran in the container before the transcript closed")
+}
+
+// firstMatch is the container's name as it appeared, for the log: the identifier and the
+// characters after it, which is what a reader needs to see to believe it.
+func firstMatch(text, prefix string) string {
+	index := strings.Index(text, prefix)
+	if index < 0 {
+		return ""
+	}
+	rest := text[index:]
+	if len(rest) > 48 {
+		rest = rest[:48]
+	}
+	return rest
 }
