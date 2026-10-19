@@ -21,12 +21,19 @@ func shimCommand(argv []string) {
 	socket := flags.String("socket", "/run/acornfall-shim.sock", "unix socket to listen on inside the machine")
 	pipe := flags.Bool("stdio", false, "serve one connection on stdin and stdout instead of a socket")
 	vsock := flags.Int("vsock", 0, "dial the host on this vsock port and serve the connection (the door the engine publishes)")
+	connect := flags.String("connect", "", "dial this unix socket and serve the connection (the appliance, where the gateway is in the same machine)")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
 	server := &shim.Server{Version: update.BuildVersion, Log: log.Printf}
 	if *vsock > 0 {
 		if err := server.ServeVSock(*vsock); err != nil {
+			log.Fatalf("acornfall shim: %v", err)
+		}
+		return
+	}
+	if *connect != "" {
+		if err := server.ServeDialer(func() (net.Conn, error) { return shim.DialUnix(*connect) }); err != nil {
 			log.Fatalf("acornfall shim: %v", err)
 		}
 		return

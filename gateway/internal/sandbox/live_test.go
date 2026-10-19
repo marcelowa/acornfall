@@ -3,6 +3,10 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -267,5 +271,99 @@ func TestLiveLXCTheEngineMakesAContainer(t *testing.T) {
 	}
 	if err := driver.Remove(ctx, name); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Live: the appliance, whole — the machine boots acornfall as its init, and the console answers
+// on the host's forwarded port. This is ADR 0022's shape end to end: the gateway and the worker
+// inside the machine, the host a launcher and one published port.
+//
+//	ACORNFALL_LXC=1 ACORNFALL_MACHINE_IMAGE=<unpacked appliance> go test ./internal/sandbox -run LiveAppliance -v
+func TestLiveTheApplianceServesTheConsole(t *testing.T) {
+	if os.Getenv("ACORNFALL_LXC") == "" || os.Getenv("ACORNFALL_MACHINE_IMAGE") == "" {
+		t.Skip("set ACORNFALL_LXC=1 and ACORNFALL_MACHINE_IMAGE=<unpacked appliance> to boot the appliance")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	home := shortTempDir(t)
+	engine := NewMicrosandbox(home)
+	if state := os.Getenv("ACORNFALL_SANDBOX_STATE"); state != "" {
+		engine = engine.WithStateDir(state)
+	}
+	if err := engine.Install(ctx, t.Logf); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Usable(); err != nil {
+		t.Skipf("no hypervisor here: %v", err)
+	}
+	// The root the machine mounts, and a workspace inside it: the appliance's containers bind
+	// from the root, so a workspace outside it is one the appliance cannot see (ADR 0022).
+	// It has to be on a filesystem the engine can bind into the microVM. A directory on a
+	// virtiofs mount is not one: the machine boots, dies at once and its published port is
+	// refused, with nothing in the engine.s output to say why. Real installs mount a home
+	// directory; this is only ever a surprise inside a sandbox like this one.
+	root := filepath.Join(t.TempDir(), "acornfall")
+	workspace := filepath.Join(root, "workspaces", "general")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A free port on the host, so two runs do not collide.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	// The appliance's init: the shim first (it retries until the gateway listens), then the
+	// gateway itself. No sandbox tier yet — the appliance's containers are the next piece, and a
+	// console that refuses tools is the honest state until then.
+	start := strings.Join([]string{
+		"/usr/local/bin/acornfall shim --connect /var/lib/acornfall/state/machine.sock &",
+		"ACORNFALL_DEV_PROVIDER=1 ACORNFALL_NO_SANDBOX=1 exec /usr/local/bin/acornfall",
+		"--addr 0.0.0.0:7777 --insecure",
+		"--root " + root,
+		"--home /var/lib/acornfall",
+		"--workspace " + workspace,
+		"--worker-dir /usr/local/lib/acornfall/worker",
+		"--model faux/faux-1",
+	}, " ")
+	driver := NewLXC(engine, Machine{
+		Image:     os.Getenv("ACORNFALL_MACHINE_IMAGE"),
+		CPUs:      2,
+		Memory:    "1G",
+		ShareRoot: root,
+	}, filepath.Join(home, "state", "machine.sock"), "/bin/true").WithLog(t.Logf)
+	driver.machine.WithAppliance(start, fmt.Sprintf("127.0.0.1:%d:7777", port))
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := driver.machine.RemoveMachine(cleanup); err != nil {
+			t.Logf("removing the machine: %v", err)
+		}
+	}()
+	if err := driver.EnsureMachine(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The console, from the host, through the engine's own port forward.
+	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	deadline := time.Now().Add(4 * time.Minute)
+	for {
+		response, err := http.Get(url + "/api/state")
+		if err == nil {
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				if !strings.Contains(string(body), "general") {
+					t.Errorf("the appliance's console should know its workspace, got %s", body)
+				}
+				t.Logf("the appliance answered on %s: %s", url, strings.TrimSpace(string(body))[:120])
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the appliance never answered on %s: %v", url, err)
+		}
+		time.Sleep(3 * time.Second)
 	}
 }

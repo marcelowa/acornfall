@@ -110,6 +110,13 @@ type MachineEngine struct {
 	// means no door, which is what a machine nobody speaks to looks like.
 	door     string
 	doorPort int
+	// appliance is what the machine runs as its init when it is the whole product and not only the
+	// container host (docs/adr/0022): the gateway, and the shim beside it. Empty means the machine
+	// boots its image's own init, which is what a container host does.
+	appliance string
+	// forward is the port the console reaches the appliance on, in the engine's own spelling
+	// ("HOST:GUEST" or "BIND:HOST:GUEST"). Empty means nothing is published.
+	forward string
 }
 
 // NewMachineEngine wires the machine to the pinned engine. dir is a folder of the install's
@@ -189,6 +196,17 @@ func (x *MachineEngine) create(ctx context.Context, name string) error {
 	if x.door != "" {
 		args = append(args, "--vsock", fmt.Sprintf("%s:%d", x.door, x.doorPort))
 	}
+	// The appliance: what the machine runs as its init, and the port the console reaches it on.
+	// The engine hands PID 1 to a binary of its own choosing (`--init`), so the init is a shell
+	// that runs the appliance's own script and lets the last line of it — the gateway — take
+	// PID 1 over with exec. `--script`/`--entrypoint` looks like the natural pair and is not:
+	// that entrypoint only overrides an OCI image's, and a rootfs directory has none.
+	if x.appliance != "" {
+		args = append(args, "--init", "/bin/sh", "--init-arg", "-c", "--init-arg", x.appliance)
+	}
+	if x.forward != "" {
+		args = append(args, "--port", x.forward)
+	}
 	// The machine asks for nesting wherever the machine can grant it, because the containers
 	// inside are the ones that want a /dev/kvm; whether any workspace gets the device is its
 	// own policy's business (docs/adr/0018-disable-vm-nesting.md), and the pinned engine has no
@@ -207,4 +225,16 @@ func (x *MachineEngine) RemoveMachine(ctx context.Context) error {
 		return nil
 	}
 	return ignoreMissing(x.engine.Remove(ctx, x.Name()))
+}
+
+// WithAppliance boots the machine as the product's home: start is what the machine runs as its
+// init — the gateway, with the shim beside it — and forward is the port the console reaches it on,
+// in the engine's own spelling ("HOST:GUEST", or "BIND_ADDR:HOST:GUEST" to put it on the tailnet
+// and nowhere else). Both are part of the machine's own configuration, so they are set before it
+// is created, and a machine that already exists keeps what it booted with: an install that
+// changes them recreates the machine, which is the honest price of an init that is fixed at boot.
+func (x *MachineEngine) WithAppliance(start, forward string) *MachineEngine {
+	x.appliance = start
+	x.forward = forward
+	return x
 }

@@ -234,3 +234,33 @@ func TestTheMachineCarriesItsDoor(t *testing.T) {
 		t.Errorf("a machine with no door should not be given one, got %q", args)
 	}
 }
+
+// The appliance is part of the machine's own configuration: what it runs as its init, and the
+// port the console reaches it on. Both are create-time flags, which is why an install that
+// changes them recreates the machine rather than expecting a running one to change its mind.
+func TestTheMachineCanBootAsTheAppliance(t *testing.T) {
+	runner := &machineRunner{}
+	machine := NewMachineEngine(machineDriver(t, runner), Machine{}, t.TempDir()).
+		WithAppliance("exec /usr/local/bin/acornfall gateway --addr 127.0.0.1:7777", "127.0.0.1:7777:7777")
+	if err := machine.EnsureMachine(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(runner.createArgs(), " ")
+	if !strings.Contains(args, "--init /bin/sh --init-arg -c") {
+		t.Errorf("the machine runs the appliance as its init, got %q", args)
+	}
+	if !strings.Contains(args, "--init-arg exec /usr/local/bin/acornfall gateway --addr 127.0.0.1:7777") {
+		t.Errorf("the appliance runs as one argument, got %q", args)
+	}
+	if !strings.Contains(args, "--port 127.0.0.1:7777:7777") {
+		t.Errorf("the console needs a port, got %q", args)
+	}
+
+	plain := &machineRunner{}
+	if err := NewMachineEngine(machineDriver(t, plain), Machine{}, t.TempDir()).EnsureMachine(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(plain.createArgs(), " "); strings.Contains(args, "--entrypoint") || strings.Contains(args, "--port") {
+		t.Errorf("a container host boots its image's own init, got %q", args)
+	}
+}

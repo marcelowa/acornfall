@@ -12,6 +12,8 @@ package shim
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"syscall"
 	"time"
 )
@@ -46,4 +48,34 @@ func (s *Server) ServeVSock(port int) error {
 // that has not started, a host still coming up.
 func isRetryable(err error) bool {
 	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ETIMEDOUT) || errors.Is(err, syscall.EAGAIN)
+}
+
+// ServeDialer serves whatever connection a dialer gives it, and keeps asking: the same loop as
+// the vsock door, for a door that is a unix socket. That is the appliance's shape — the gateway
+// and the shim live in the same machine (ADR 0022), so the "door" is a socket in its own
+// filesystem and there is nothing to publish and nothing to copy in.
+func (s *Server) ServeDialer(dial func() (net.Conn, error)) error {
+	for {
+		conn, err := dial()
+		if err != nil {
+			if !isRetryable(err) {
+				return err
+			}
+			s.log("shim: %v; trying again in a second", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if err := s.Serve(conn); err != nil {
+			s.log("shim: the connection ended: %v", err)
+		}
+	}
+}
+
+// DialUnix connects to the gateway's socket inside the same machine.
+func DialUnix(path string) (net.Conn, error) {
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("shim: cannot reach the gateway at %s: %w", path, err)
+	}
+	return conn, nil
 }

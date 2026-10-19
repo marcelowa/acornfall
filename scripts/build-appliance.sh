@@ -15,6 +15,11 @@ NAME=acornfall-appliance-build
 DIR=/var/lib/lxc/$NAME
 ROOTFS=$DIR/rootfs
 BASE=${BASE:-debian:stable-slim}
+# The product itself: the binary the release ships, and the worker's sources. Both default to this
+# repository's own build, so an appliance built here is the appliance this checkout is.
+BINARY=${BINARY:-$(pwd)/bin/acornfall}
+WORKER=${WORKER:-$(pwd)/worker}
+BUN_VERSION=${BUN_VERSION:-1.4.3}
 
 say() { printf '%s\n' "$*"; }
 die() { printf '%s\n' "$*" >&2; exit 1; }
@@ -51,7 +56,7 @@ cat >"$ROOTFS/tmp/appliance-install.sh" <<'INNER'
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq lxc skopeo umoci jq
+apt-get install -y -qq lxc skopeo umoci jq unzip curl
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 INNER
@@ -69,16 +74,57 @@ mkdir -p /var/lib/acornfall
 # start a container the first time it is asked.
 grep -q "^root:100000:" /etc/subuid || echo "root:100000:65536" >> /etc/subuid
 grep -q "^root:100000:" /etc/subgid || echo "root:100000:65536" >> /etc/subgid
-# A mark a person, and doctor, can read: which appliance this is.
-echo "acornfall appliance, debian stable, lxc $(lxc-start --version)" > /etc/acornfall-appliance
 INNER
 chroot "$ROOTFS" /bin/sh /tmp/appliance-setup.sh || die "arranging the appliance failed"
 rm -f "$ROOTFS/tmp/appliance-setup.sh"
+
+# The product: acornfall and the worker it runs. Both go in so the appliance starts with no
+# network of its own and no first-boot download (ADR 0022: one image to update, not four things).
+[ -x "$BINARY" ] || die "no acornfall binary at $BINARY: run make build, or pass BINARY=..."
+[ -d "$WORKER/src" ] || die "no worker sources at $WORKER: pass WORKER=..."
+say "putting acornfall and the worker into the image"
+mkdir -p "$ROOTFS/usr/local/bin" "$ROOTFS/usr/local/lib/acornfall/worker"
+cp "$BINARY" "$ROOTFS/usr/local/bin/acornfall"
+chmod 755 "$ROOTFS/usr/local/bin/acornfall"
+cp "$WORKER/package.json" "$WORKER/bun.lock" "$ROOTFS/usr/local/lib/acornfall/worker/"
+cp -r "$WORKER/src" "$ROOTFS/usr/local/lib/acornfall/worker/src"
+
+say "installing bun $BUN_VERSION and the worker's dependencies"
+cat >"$ROOTFS/tmp/appliance-bun.sh" <<INNER
+set -e
+export DEBIAN_FRONTEND=noninteractive
+export HOME=/root
+case "\$(dpkg --print-architecture)" in
+	amd64) BUN_ARCH=x64 ;;
+	arm64) BUN_ARCH=aarch64 ;;
+	*) echo "no bun for \$(dpkg --print-architecture)" >&2; exit 1 ;;
+esac
+curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/bun-linux-\$BUN_ARCH.zip"
+unzip -q -o /tmp/bun.zip -d /tmp/bun
+find /tmp/bun -name bun -type f -exec install -m 755 {} /usr/local/bin/bun \;
+rm -rf /tmp/bun /tmp/bun.zip
+/usr/local/bin/bun --version
+# Production only: the appliance runs the worker, it does not develop it, and the dev
+# dependencies are three hundred megabytes of toolchain nothing there will ever call.
+cd /usr/local/lib/acornfall/worker
+/usr/local/bin/bun install --frozen-lockfile --production
+INNER
+chroot "$ROOTFS" /bin/sh /tmp/appliance-bun.sh || die "putting bun and the worker's dependencies in failed"
+rm -f "$ROOTFS/tmp/appliance-bun.sh"
+
+# A mark a person, and doctor, can read: which appliance this is.
+chroot "$ROOTFS" /bin/sh -c 'echo "acornfall appliance, debian stable, lxc $(lxc-start --version)" > /etc/acornfall-appliance' || die "naming the appliance failed"
 
 cleanup
 trap - EXIT INT TERM
 
 say "packing $OUT"
 tar -czf "$OUT" -C "$ROOTFS" .
-lxc-destroy -n "$NAME" >/dev/null 2>&1 || true
+# KEEP=1 leaves the rootfs where it is: the engine takes a rootfs directory, so a test — or a
+# person — boots the machine straight from the build instead of unpacking the tarball again.
+if [ "${KEEP:-0}" = "1" ]; then
+	say "keeping the rootfs at $ROOTFS"
+else
+	lxc-destroy -n "$NAME" >/dev/null 2>&1 || true
+fi
 say "done: $OUT ($(du -h "$OUT" | cut -f1))"
