@@ -3,9 +3,11 @@ package sandbox
 import (
 	"bufio"
 	"context"
+
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/acornfall/acornfall/gateway/internal/update"
 	"io"
 	"net"
 	"net/http"
@@ -559,4 +561,106 @@ func firstMatch(text, prefix string) string {
 		rest = rest[:48]
 	}
 	return rest
+}
+
+// Live: the appliance boots from the release's own tarball. Every other test here boots a
+// directory, and releases ship a tarball — the two differ exactly in what tar carries: symlinks,
+// hard links, device nodes. Two betas were broken that way, twice: an image with no shell, then
+// an image with no /dev. This unpacks the shipped artefact with the code an install uses, and
+// boots what comes out.
+//
+//	ACORNFALL_LXC=1 ACORNFALL_APPLIANCE_TARBALL=<appliance-linux-amd64.tar.gz> go test ./internal/sandbox -run LiveApplianceFromTheRelease
+func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
+	archive := os.Getenv("ACORNFALL_APPLIANCE_TARBALL")
+	if os.Getenv("ACORNFALL_LXC") == "" || archive == "" {
+		t.Skip("set ACORNFALL_LXC=1 and ACORNFALL_APPLIANCE_TARBALL=<release tarball> to unpack and boot one")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	home := shortTempDir(t)
+	engine := NewMicrosandbox(home)
+	if state := os.Getenv("ACORNFALL_SANDBOX_STATE"); state != "" {
+		engine = engine.WithStateDir(state)
+	}
+	if err := engine.Install(ctx, t.Logf); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Usable(); err != nil {
+		t.Skipf("no hypervisor here: %v", err)
+	}
+	payload, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The install's own unpacker, on the release's own bytes.
+	image := filepath.Join(t.TempDir(), "rootfs")
+	if err := os.MkdirAll(image, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.UnpackAppliance(payload, image); err != nil {
+		t.Fatalf("unpacking %s: %v", archive, err)
+	}
+	// What the unpacker cannot make and the machine needs: this is the assertion that would have
+	// caught the beta whose /dev was empty.
+	if _, err := os.Lstat(filepath.Join(image, "bin", "sh")); err != nil {
+		t.Fatalf("the unpacked image has no /bin/sh: %v", err)
+	}
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspaces", "general")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+	start := strings.Join([]string{
+		"ACORNFALL_DEV_PROVIDER=1 exec /usr/local/bin/acornfall",
+		"--addr 0.0.0.0:7777 --insecure",
+		"--root " + root,
+		"--home /var/lib/acornfall",
+		"--workspace " + workspace,
+		"--worker-dir /usr/local/lib/acornfall/worker",
+		"--sandbox-engine lxc --in-machine",
+		"--model faux/faux-1",
+		">>/var/lib/acornfall/appliance.log 2>&1",
+	}, " ")
+	driver := NewLXC(engine, Machine{
+		Image:     image,
+		CPUs:      2,
+		Memory:    "1G",
+		ShareRoot: root,
+	}, filepath.Join(home, "state", "machine.sock"), "/bin/true").WithLog(t.Logf)
+	driver.machine.WithAppliance(start, fmt.Sprintf("127.0.0.1:%d:7777", port))
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := driver.machine.RemoveMachine(cleanup); err != nil {
+			t.Logf("removing the machine: %v", err)
+		}
+	})
+	if err := driver.EnsureMachine(ctx); err != nil {
+		t.Fatalf("booting the unpacked release: %v", err)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	deadline := time.Now().Add(12 * time.Minute)
+	for {
+		response, err := http.Get(url + "/api/state")
+		if err == nil {
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
+			response.Body.Close()
+			// A container that runs at all is the proof: lxc-attach needs /dev/null, the container
+			// needs /bin/sh, and both come out of what this test unpacked.
+			if response.StatusCode == http.StatusOK && strings.Contains(string(body), `"status":"RUNNING"`) {
+				t.Logf("the unpacked release boots and runs a container: %s", url)
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the unpacked release never ran a container on %s: %v", url, err)
+		}
+		time.Sleep(3 * time.Second)
+	}
 }

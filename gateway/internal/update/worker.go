@@ -447,16 +447,7 @@ func (m *Manager) FetchAppliance(ctx context.Context, tag, dir string) error {
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
-	// The release's tarball is gzipped like the worker's; untarWorker takes a plain tar.
-	gzip, err := gzip.NewReader(bytes.NewReader(tarball))
-	if err != nil {
-		return fmt.Errorf("update: the appliance is not a gzip stream: %w", err)
-	}
-	plain, err := io.ReadAll(gzip)
-	if err != nil {
-		return fmt.Errorf("update: reading the appliance: %w", err)
-	}
-	if err := untarImage(plain, staging); err != nil {
+	if err := UnpackAppliance(tarball, staging); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(dir); err != nil {
@@ -534,4 +525,19 @@ func untarImage(tarball []byte, dir string) error {
 		// Devices and fifos are skipped on purpose: a rootfs image is a tree of files, links and
 		// directories, and a device node is something the machine's kernel makes for itself.
 	}
+}
+
+// UnpackAppliance is the whole of what installing an appliance image does to a tarball: gunzip,
+// then every kind of entry a filesystem has. It is exported because the test that guards the
+// release's own artefact has to unpack it exactly as an install does.
+func UnpackAppliance(tarball []byte, dir string) error {
+	gzip, err := gzip.NewReader(bytes.NewReader(tarball))
+	if err != nil {
+		return fmt.Errorf("update: the appliance is not a gzip stream: %w", err)
+	}
+	plain, err := io.ReadAll(gzip)
+	if err != nil {
+		return fmt.Errorf("update: reading the appliance: %w", err)
+	}
+	return untarImage(plain, dir)
 }
