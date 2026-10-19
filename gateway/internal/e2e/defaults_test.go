@@ -103,7 +103,7 @@ func TestInstallDefaultsApplyToEveryWorkspace(t *testing.T) {
 
 	// And clearing the install default leaves no file behind: an empty layer is not a layer.
 	c.post("/api/defaults/thinking", map[string]any{"level": ""}, nil)
-	if _, err := os.Stat(filepath.Join(s.Home, "settings.json")); err == nil {
+	if _, err := os.Stat(filepath.Join(s.Root, "config", "settings.json")); err == nil {
 		t.Error("clearing the install defaults should leave no file")
 	}
 	if got := c.state("second"); got.DefaultsOrigin["thinking"] != "" {

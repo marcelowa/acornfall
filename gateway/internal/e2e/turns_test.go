@@ -85,8 +85,8 @@ func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
 	t.Parallel()
 	workspaceResources(t)
 	s := start(t, withSetup(func(t *testing.T, s *system) {
-		s.writeHome(t, "commands/deploy.md", "---\nname: deploy\ndescription: the install's way\n---\nInstall deploy.")
-		s.writeHome(t, "commands/shared.md", "---\nname: shared\ndescription: from the install\n---\nShared install body.")
+		s.writeRoot(t, "commands/deploy.md", "---\nname: deploy\ndescription: the install's way\n---\nInstall deploy.")
+		s.writeRoot(t, "commands/shared.md", "---\nname: shared\ndescription: from the install\n---\nShared install body.")
 		s.writeWorkspace(t, ".acornfall/commands/deploy.md", "---\nname: deploy\ndescription: this workspace's way\n---\nWorkspace deploy.")
 	}))
 	c := s.client()

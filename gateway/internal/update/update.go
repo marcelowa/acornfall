@@ -192,7 +192,10 @@ var ErrReleaseNotFound = errors.New("release not found")
 
 // Manager owns the update state for one install.
 type Manager struct {
-	home       string
+	home string
+	// root is the folder the machine mounts: the product.s config and state live there, which
+	// is what a backup keeps a copy of (docs/adr/0022).
+	root       string
 	binPath    string
 	migrateDir string
 	latestURL  string
@@ -239,7 +242,7 @@ type Manager struct {
 // New builds a Manager. Empty binPath means the current executable.
 // Empty migrateDir means <repo>/scripts/migrate beside nothing: pass it
 // explicitly in production; empty disables the migrate step in tests.
-func New(home, binPath, migrateDir string) *Manager {
+func New(home, root, binPath, migrateDir string) *Manager {
 	if binPath == "" {
 		if executable, err := os.Executable(); err == nil {
 			binPath = executable
@@ -247,6 +250,7 @@ func New(home, binPath, migrateDir string) *Manager {
 	}
 	return &Manager{
 		home:       home,
+		root:       root,
 		binPath:    binPath,
 		migrateDir: migrateDir,
 		latestURL:  LatestURL,
@@ -856,10 +860,10 @@ func assetNamed(release Release, name string) Asset {
 	return Asset{}
 }
 
-// Backup copies config, state DB, and workspace list into
-// <home>/backups/<timestamp>/ and keeps the last 3. Secrets are never
-// backed up: credentials.json stays out, and old copies are scrubbed.
-// Update stops when backup fails.
+// Backup copies the product's own files into <home>/backups/<timestamp>/ and keeps the last 3:
+// the install's config and settings and the workspace list, which live in the root the machine
+// mounts (ADR 0022), plus the machinery's version and update state. Secrets are never backed up:
+// credentials.json stays out, and old copies are scrubbed. Update stops when backup fails.
 func (m *Manager) Backup() (string, error) {
 	stamp := time.Now().UTC().Format("20060102-150405.000000000")
 	dir := filepath.Join(m.backupsDir(), stamp)
@@ -871,21 +875,26 @@ func (m *Manager) Backup() (string, error) {
 		}
 		dir = filepath.Join(m.backupsDir(), fmt.Sprintf("%s-%d", stamp, i))
 	}
-	files := []string{"config.json", "settings.json", "workspaces.json", "version", "update.json"}
-	for _, name := range files {
-		source := filepath.Join(m.home, name)
-		payload, err := os.ReadFile(source)
+	files := []struct{ source, name string }{
+		{filepath.Join(m.root, "config", "config.json"), "config.json"},
+		{filepath.Join(m.root, "config", "settings.json"), "settings.json"},
+		{filepath.Join(m.root, "state", "workspaces.json"), "workspaces.json"},
+		{filepath.Join(m.home, "version"), "version"},
+		{filepath.Join(m.home, "update.json"), "update.json"},
+	}
+	for _, file := range files {
+		payload, err := os.ReadFile(file.source)
 		if err != nil {
 			continue
 		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), payload, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, file.name), payload, 0o600); err != nil {
 			return "", err
 		}
 	}
-	if err := copyDir(filepath.Join(m.home, "state"), filepath.Join(dir, "state")); err != nil {
+	if err := copyDir(filepath.Join(m.root, "state"), filepath.Join(dir, "state")); err != nil {
 		return "", err
 	}
 	if err := m.pruneBackups(); err != nil {

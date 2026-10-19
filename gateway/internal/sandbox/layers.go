@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"math"
 	"os"
 	"path/filepath"
@@ -144,14 +145,16 @@ const (
 // workspace at once, and the provider key with them (ADR 0022's price, paid in policy here).
 func bindPath(root, path string, readOnly bool) (Bind, error) {
 	clean := filepath.Clean(path)
-	if !inside(root, clean) {
+	if !layout.Under(root, clean) {
 		return Bind{}, fmt.Errorf("sandbox: %s is outside the share root %s, so the machine's VM cannot see it", clean, root)
 	}
 	if clean == filepath.Clean(root) {
 		return Bind{}, fmt.Errorf("sandbox: %s is the share root itself: a container bound there would see every workspace and the install's own files", clean)
 	}
 	for _, private := range []string{filepath.Join(root, PrivateConfig), filepath.Join(root, PrivateState)} {
-		if !inside(private, clean) {
+		// The folder itself, or anything inside it: Under excludes the folder it is given, because
+		// everywhere else the path being tested must not *be* the thing, and here it must be caught.
+		if clean != private && !layout.Under(private, clean) {
 			continue
 		}
 		if clean == filepath.Join(root, PrivateConfig, SharedConfig) {
@@ -163,16 +166,6 @@ func bindPath(root, path string, readOnly bool) (Bind, error) {
 	// and the kind it was told is the kind it would have made.
 	info, err := os.Stat(clean)
 	return Bind{Source: clean, Target: clean, ReadOnly: readOnly, File: err == nil && !info.IsDir()}, nil
-}
-
-// inside answers whether path is under root. A string prefix says /home/me/work2 is under
-// /home/me/work; a relative path with no leading .. is what actually answers it.
-func inside(root, path string) bool {
-	relative, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 // Memory as a policy writes it: a whole number and a binary unit, because "2G" in a policy

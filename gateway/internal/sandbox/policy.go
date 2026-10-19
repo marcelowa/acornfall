@@ -88,32 +88,25 @@ func (p Policy) withDefaults() Policy {
 	return p
 }
 
-// ecosystemDir is the rest of the ecosystem's name for a resource bundle. The worker reads
-// it as well as the install's own folders, so a bundle written for another harness works
-// here, and the sandbox has to see the same paths the worker read the instructions from.
+// The bundle is one tree: the global skills, agents, prompts and commands, in the folder the
+// machine mounts (ADR 0022). It used to be two layers — the user's `~/.agents` and the install's
+// own four folders — and one tree is what the one-bundle shape buys: a skill's own directory is
+// the same string for the worker, for the model, and for a container's bind.
 const ecosystemDir = ".agents"
 
-// globalFolders are the install's resource folders, which exist in every install so that a
-// sandbox's mount always resolves: the user's bundle in full, then the install's own. The
-// prompt-template folder has two names because both are read.
-func globalFolders(home, userHome string) []string {
-	folders := []string{filepath.Join(userHome, ecosystemDir)}
-	for _, name := range []string{"agents", "skills", "prompts", "commands"} {
-		folders = append(folders, filepath.Join(home, name))
-	}
-	return folders
-}
-
-// GlobalPaths is what a workspace's sandbox mounts read-only at the same paths. A file is
-// only mountable if it is there when the sandbox is created, so `<home>/config.json` is
-// included when it exists and not otherwise; adding one later needs the sandbox recreated.
+// GlobalPaths is what a workspace's sandbox mounts read-only at the same paths: the bundle in
+// full, and the install's config file when it exists. A file is only mountable if it is there
+// when the sandbox is created, so config.json is included when it exists and not otherwise;
+// adding one later needs the sandbox recreated.
 //
-// `<home>` itself is deliberately absent: it holds credentials.json, token, and state/, and
-// the agent has no business reading any of them. That is the whole reason the list is
-// explicit. See docs/adr/0014-global-resources-in-the-sandbox.md.
-func GlobalPaths(home, userHome string) []string {
-	paths := globalFolders(home, userHome)
-	config := filepath.Join(home, "config.json")
+// The install's own folder is deliberately absent, and so is everything else in the root that a
+// container has no business reading: `config/` holds the provider credential and the token, and
+// `state/` holds every workspace's conversations. The mapping refuses those paths in both
+// directions (see bindPath). docs/adr/0014-global-resources-in-the-sandbox.md,
+// docs/adr/0022-the-appliance-runs-in-the-machine.md.
+func GlobalPaths(root string) []string {
+	paths := []string{filepath.Join(root, ecosystemDir)}
+	config := filepath.Join(root, "config", "config.json")
 	if info, err := os.Stat(config); err == nil && !info.IsDir() {
 		paths = append(paths, config)
 	}
@@ -121,13 +114,12 @@ func GlobalPaths(home, userHome string) []string {
 }
 
 // EnsureGlobal creates the folders GlobalPaths names, so a fresh install has somewhere to
-// mount from. It does not create config.json: an empty one would be a decision about
-// defaults nobody made, and the mount is skipped while the file is absent.
-func EnsureGlobal(home, userHome string) error {
-	for _, folder := range globalFolders(home, userHome) {
-		if err := os.MkdirAll(folder, 0o700); err != nil {
-			return fmt.Errorf("create %s: %w", folder, err)
-		}
+// mount from. It does not create config.json: an empty one would be a decision about defaults
+// nobody made, and the mount is skipped while the file is absent.
+func EnsureGlobal(root string) error {
+	folder := filepath.Join(root, ecosystemDir)
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", folder, err)
 	}
 	return nil
 }

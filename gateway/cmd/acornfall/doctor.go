@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"github.com/acornfall/acornfall/gateway/internal/ready"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
@@ -47,7 +49,7 @@ func doctorCommand(argv []string) {
 	manager.Verify(context.Background())
 	report := manager.Report()
 	nesting := manager.Nesting(context.Background())
-	updater := update.New(resolved, "", "")
+	updater := update.New(resolved, filepath.Dir(resolved), "", "")
 	if err := updater.Open(); err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
@@ -157,17 +159,17 @@ func disabledReason() string {
 
 // readyInputForBoot gathers the boot-time readiness list. The engine may
 // be nil (refused tier): that is a stated answer, not a missing one.
-func readyInputForBoot(home string, updates *update.Manager, engine *sandbox.Manager) ready.Input {
+func readyInputForBoot(where layout.Layout, updates *update.Manager, engine *sandbox.Manager) ready.Input {
 	_, bunOK := updates.BunInstalled()
 	status := updates.Status()
 	input := ready.Input{
-		Home:          home,
+		Home:          where.Home,
 		Current:       status.Current,
 		RuntimeTag:    updates.RuntimeTag(),
 		Worker:        updates.WorkerVersion(),
 		BunPath:       updates.BunPath(),
 		BunOK:         bunOK,
-		HasCredential: ready.HasCredential(home),
+		HasCredential: ready.HasCredential(where.Credentials()),
 		Latest:        status.Latest,
 	}
 	if engine == nil {

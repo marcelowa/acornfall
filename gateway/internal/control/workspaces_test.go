@@ -1,6 +1,7 @@
 package control
 
 import (
+	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,12 @@ func TestNoHomeDirectoryIsAnErrorNotAGuess(t *testing.T) {
 // value that nothing reads is a value something can read again by accident.
 func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "workspaces.json")
+	// The registry lives in the root's state folder (ADR 0022).
+	where := layout.New(dir, dir)
+	path := where.Registry()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	legacy := `{
   "workspacesDir": "` + dir + `/workspaces",
   "workspaces": [
@@ -43,7 +49,7 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	workspaces := NewWorkspaces(WorkspacesOptions{Home: dir})
+	workspaces := NewWorkspaces(WorkspacesOptions{Layout: where})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +94,7 @@ func TestNestingFollowsTheInstallUnlessTheWorkspaceChooses(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			workspace := Workspace{DisableVMNesting: test.workspace}
-			got := workspace.SandboxPolicy(home, userHome, test.install).DisableVMNesting
+			got := workspace.SandboxPolicy(home, test.install).DisableVMNesting
 			if got != test.want {
 				t.Errorf("DisableVMNesting = %t, want %t", got, test.want)
 			}

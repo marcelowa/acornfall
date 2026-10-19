@@ -19,7 +19,7 @@ func updateServer(t *testing.T) (*Server, *update.Manager) {
 	if err := os.WriteFile(bin, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := update.New(home, bin, t.TempDir())
+	manager := update.New(home, home, bin, t.TempDir())
 	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
 		t.Fatal(err)
 	}

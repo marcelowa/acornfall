@@ -32,12 +32,12 @@ var ErrNoProvider = errors.New("no authenticated provider")
 type Options struct {
 	// Workspace is the folder and name this Control serves.
 	Workspace Workspace
-	// Home is the installation folder: global resources and shared credentials.
-	Home string
-	// UserHome is the user's home folder, for `~/.agents`, which a sandbox mounts read-only
-	// beside the install's own resource folders. The entry point resolves it and fails when it
-	// cannot, so a control always has one.
-	UserHome string
+	// Root is the folder the machine mounts: the bundle, the config, the state and the
+	// workspaces (docs/adr/0022). The install.s own folder is not passed here: a control writes
+	// nothing to the machinery, and the paths it needs are spelled out below.
+	Root string
+	// InstallSettings is the install-wide defaults file, which every workspace falls back to.
+	InstallSettings string
 	// StoragePath is this workspace's durable storage. One storage per workspace, because
 	// conversation ids are only unique inside one.
 	StoragePath string
@@ -454,7 +454,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 		"--workspace", c.opts.Workspace.Path,
 		"--storage", c.opts.StoragePath,
 		"--credentials", c.opts.Credentials,
-		"--home", c.opts.Home,
+		"--root", c.opts.Root,
 	)
 	// The sandbox is made first, because the worker is told to use it and refuses to run
 	// anything without it. A failure is a state, not a stop: the workspace opens, the tools
@@ -813,7 +813,7 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 		state.Problem = problem.Error()
 		return state
 	}
-	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome, c.opts.DisableVMNesting)
+	policy := c.opts.Workspace.SandboxPolicy(c.opts.Root, c.opts.DisableVMNesting)
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()
 		workerpool.Log("sandbox for %s: %v", c.opts.Workspace.Name, err)
@@ -1704,7 +1704,7 @@ func (c *Control) reapplyInheriting(ctx context.Context) error {
 
 // loadInstallDefaults reads the install-wide layer.
 func (c *Control) loadInstallDefaults() {
-	install, err := LoadDefaults(filepath.Join(c.opts.Home, "settings.json"))
+	install, err := LoadDefaults(c.opts.InstallSettings)
 	if err != nil {
 		workerpool.Log("install defaults unreadable, using this workspace's: %v", err)
 		return

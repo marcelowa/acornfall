@@ -148,11 +148,7 @@ describe("loading", () => {
 			"---\nname: only-here\ndescription: prompts only\n---\nBody",
 		);
 
-		const roots = layerRoots({
-			home: join(root, "home"),
-			workspace,
-			userHome: join(root, "user"),
-		});
+		const roots = layerRoots({ root: join(root, "acornfall"), workspace });
 		const commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS), hostFiles);
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["audit", "from commands"],
@@ -163,15 +159,9 @@ describe("loading", () => {
 
 	test("the .agents folder is read, and ours shadows it", async () => {
 		const root = await tempDir("acornfall-commands-");
-		const home = join(root, "home");
 		const workspace = join(root, "workspace");
-		const user = join(root, "user");
-		// The same command in all three places it can live: the user's ecosystem folder, the
-		// workspace's, and ours beside it. Ours is read last and wins.
-		await write(
-			join(user, ".agents", "commands", "deploy.md"),
-			"---\nname: deploy\ndescription: user\n---\nUser",
-		);
+		// The same command in both places it can live in a workspace: the ecosystem's folder, and
+		// ours beside it. Ours is read last and wins.
 		await write(
 			join(workspace, ".agents", "commands", "deploy.md"),
 			"---\nname: deploy\ndescription: ecosystem\n---\nEco",
@@ -185,7 +175,7 @@ describe("loading", () => {
 			"---\nname: shared\ndescription: only in .agents\n---\nShared",
 		);
 
-		const roots = layerRoots({ home, workspace, userHome: user });
+		const roots = layerRoots({ root, workspace });
 		const commands = await loadCommands(resourceFolders(roots, ["commands"]), hostFiles);
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["deploy", "native"],

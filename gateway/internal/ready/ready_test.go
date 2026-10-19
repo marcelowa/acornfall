@@ -89,14 +89,18 @@ func TestEngineProblemFails(t *testing.T) {
 }
 
 func TestCredentialsReadTheFile(t *testing.T) {
-	home := t.TempDir()
-	if HasCredential(home) {
+	// The file, not the folder: the credential lives in the root's config folder (ADR 0022).
+	credentials := filepath.Join(t.TempDir(), "config", "credentials.json")
+	if HasCredential(credentials) {
 		t.Fatal("no file, no credential")
 	}
-	if err := os.WriteFile(filepath.Join(home, "credentials.json"), []byte(`{"x":{"type":"api_key"}}`), 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Dir(credentials), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if !HasCredential(home) {
+	if err := os.WriteFile(credentials, []byte(`{"x":{"type":"api_key"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !HasCredential(credentials) {
 		t.Fatal("a stored key must count")
 	}
 }

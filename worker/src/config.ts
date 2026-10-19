@@ -10,7 +10,6 @@
  * which layer set it. See docs/adr/0004-resource-overlay.md.
  */
 import type { Files } from "./files.ts";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type LayerName = "global" | "workspace" | "agent";
@@ -390,21 +389,23 @@ const NATIVE_DIR = ".acornfall";
  * overrides the install and how the native folder overrides the ecosystem one beside it.
  */
 export interface LayerRoots {
-	/** The user's: the ecosystem's shared folder first, then the install's own. */
+	/** The install's: one bundle in the folder the machine mounts, and the config folder beside it. */
 	global: readonly string[];
 	/** The workspace's: the ecosystem's folder first, then ours. */
 	workspace: readonly string[];
 }
 
 export function layerRoots(options: {
-	home: string;
+	/** The folder the machine mounts: the bundle, the config, the state, the workspaces (ADR 0022). */
+	root: string;
 	workspace: string;
-	/** The user's home directory, for `~/.agents`. Injected so a test never reads the real one. */
-	userHome?: string;
 }): LayerRoots {
-	const user = options.userHome ?? homedir();
 	return {
-		global: [join(user, ECOSYSTEM_DIR), options.home],
+		// The global layer is one bundle in the folder the machine mounts: the resources, and the
+		// config folder beside it for `config.json`. There are no layers to shadow, because the files
+		// are the user's own — which is what one bundle buys over the user's `~/.agents` plus the
+		// install's four folders.
+		global: [join(options.root, ECOSYSTEM_DIR), join(options.root, "config")],
 		workspace: [join(options.workspace, ECOSYSTEM_DIR), join(options.workspace, NATIVE_DIR)],
 	};
 }

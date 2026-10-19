@@ -8,61 +8,6 @@ import (
 	"testing"
 )
 
-// The install folder holds credentials.json, token, and state/, which an agent must never
-// reach. Everything it may read lives in a named resource folder, which is why the mount
-// list is spelled out rather than mounting the install and hoping.
-func TestGlobalPathsAreTheResourceFoldersAndNeverTheInstall(t *testing.T) {
-	home := t.TempDir()
-	userHome := t.TempDir()
-	if err := EnsureGlobal(home, userHome); err != nil {
-		t.Fatal(err)
-	}
-	for _, folder := range globalFolders(home, userHome) {
-		info, err := os.Stat(folder)
-		if err != nil || !info.IsDir() {
-			t.Errorf("%s should exist after EnsureGlobal: %v", folder, err)
-		}
-	}
-
-	paths := GlobalPaths(home, userHome)
-	want := []string{
-		filepath.Join(userHome, ".agents"),
-		filepath.Join(home, "agents"),
-		filepath.Join(home, "skills"),
-		filepath.Join(home, "prompts"),
-		filepath.Join(home, "commands"),
-	}
-	if !slices.Equal(paths, want) {
-		t.Errorf("the mounted paths should be the resource folders, got %v want %v", paths, want)
-	}
-	for _, forbidden := range []string{home, filepath.Join(home, "credentials.json"), filepath.Join(home, "state")} {
-		if slices.Contains(paths, forbidden) {
-			t.Errorf("%s must never be mounted into a sandbox", forbidden)
-		}
-	}
-}
-
-// The engine refuses a mount of a path that is not there, and a file cannot be created on
-// the user's behalf the way an empty folder can: config.json is mounted when it exists, and
-// a sandbox made before it was written does not see it until it is recreated.
-func TestTheGlobalConfigIsMountedOnlyWhenItExists(t *testing.T) {
-	home := t.TempDir()
-	userHome := t.TempDir()
-	if err := EnsureGlobal(home, userHome); err != nil {
-		t.Fatal(err)
-	}
-	config := filepath.Join(home, "config.json")
-	if slices.Contains(GlobalPaths(home, userHome), config) {
-		t.Error("an install with no config.json should not mount one")
-	}
-	if err := os.WriteFile(config, []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(GlobalPaths(home, userHome), config) {
-		t.Error("config.json should be mounted once it exists")
-	}
-}
-
 func TestNameIsStableAndReadable(t *testing.T) {
 	name := Name("/home/marcelo/workspace/acornfall")
 	if !strings.HasPrefix(name, "acornfall-acornfall-") {
@@ -81,6 +26,46 @@ func TestNameSurvivesOddFolders(t *testing.T) {
 		name := Name(path)
 		if name == "" || strings.ContainsAny(name, " /!") {
 			t.Errorf("Name(%q) = %q, which the engine would refuse", path, name)
+		}
+	}
+}
+
+// One bundle, in the folder the machine mounts, and the install's config file when it exists.
+// The root holds the credential and every workspace's state beside it, which is why the mount
+// list is spelled out rather than mounting the root and hoping (ADR 0014, ADR 0022).
+func TestGlobalPathsAreTheBundleAndNeverTheRootsPrivateFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureGlobal(root); err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(root, ".agents")
+	if info, err := os.Stat(bundle); err != nil || !info.IsDir() {
+		t.Errorf("%s should exist after EnsureGlobal: %v", bundle, err)
+	}
+	if paths := GlobalPaths(root); !slices.Equal(paths, []string{bundle}) {
+		t.Errorf("the mounted paths should be the bundle alone, got %v", paths)
+	}
+
+	config := filepath.Join(root, "config", "config.json")
+	if err := os.MkdirAll(filepath.Dir(config), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if paths := GlobalPaths(root); !slices.Contains(paths, config) {
+		t.Errorf("an existing config.json is mounted read-only, got %v", paths)
+	}
+
+	for _, forbidden := range []string{
+		root,
+		filepath.Join(root, "config"),
+		filepath.Join(root, "config", "credentials.json"),
+		filepath.Join(root, "config", "token"),
+		filepath.Join(root, "state"),
+	} {
+		if slices.Contains(GlobalPaths(root), forbidden) {
+			t.Errorf("%s must never be mounted into a sandbox", forbidden)
 		}
 	}
 }

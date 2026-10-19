@@ -187,13 +187,15 @@ func releases(input Input) Requirement {
 	return Requirement{"releases", true, "not checked yet", ""}
 }
 
-// HasCredential reports whether the credentials file names a provider.
-func HasCredential(home string) bool {
-	return credentialCount(home) > 0
+// HasCredential reports whether the credentials file names a provider. It takes the file, not the
+// folder: the credential lives in the root's config folder (ADR 0022), beside the token and the
+// install's config, and only one of the three is a secret.
+func HasCredential(path string) bool {
+	return credentialCount(path) > 0
 }
 
-func credentialCount(home string) int {
-	payload, err := os.ReadFile(home + "/credentials.json")
+func credentialCount(path string) int {
+	payload, err := os.ReadFile(path)
 	if err != nil {
 		return 0
 	}

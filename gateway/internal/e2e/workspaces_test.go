@@ -39,7 +39,7 @@ func TestWorkspacesAreIsolatedAndStartOnDemand(t *testing.T) {
 	if want := filepath.Join(s.WorkspacesDir, "second"); second.Workspace.Path != want {
 		t.Errorf("the folder should be %s, got %s", want, second.Workspace.Path)
 	}
-	if _, err := os.Stat(filepath.Join(s.Home, "state", "second", "session.sqlite")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Root, "state", "second", "session.sqlite")); err != nil {
 		t.Errorf("each workspace keeps its own storage: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
 	if _, err := os.Stat(folder); err != nil {
 		t.Errorf("removing a workspace must not delete the folder: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(s.Home, "state", "doomed", "session.sqlite")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Root, "state", "doomed", "session.sqlite")); err != nil {
 		t.Errorf("removing a workspace must not delete its history: %v", err)
 	}
 	// Its worker is stopped with it, so a removed workspace costs nothing.

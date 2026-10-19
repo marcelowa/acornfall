@@ -49,8 +49,8 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 	s := start(t,
 		withScript(scriptRule{Match: "who are you", Reply: "an agent"}),
 		withSetup(func(t *testing.T, s *system) {
-			s.writeHome(t, "agents/researcher.md", "---\nname: researcher\ndescription: the global one\ndenying: bash\n---\nGlobal body.")
-			s.writeHome(t, "agents/global-only.md", "---\nname: global-only\ndescription: only in the install\n---\nGlobal only body.")
+			s.writeRoot(t, "agents/researcher.md", "---\nname: researcher\ndescription: the global one\ndenying: bash\n---\nGlobal body.")
+			s.writeRoot(t, "agents/global-only.md", "---\nname: global-only\ndescription: only in the install\n---\nGlobal only body.")
 			s.writeWorkspace(t, ".acornfall/agents/researcher.md", "---\nname: researcher\ndescription: the workspace one\n---\nWorkspace body.")
 		}),
 	)
@@ -113,7 +113,7 @@ func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 	s := start(t,
 		withScript(scriptRule{Match: "fold", Reply: "folded"}),
 		withSetup(func(t *testing.T, s *system) {
-			s.writeHome(t, "config.json", `{"defaults":{"instructions":"GLOBAL MARKER","denyTools":["bash"]}}`)
+			s.writeRoot(t, "config.json", `{"defaults":{"instructions":"GLOBAL MARKER","denyTools":["bash"]}}`)
 			s.writeWorkspace(t, ".acornfall/config.json", `{"defaults":{"instructions":"WORKSPACE MARKER","denyTools":["write"]}}`)
 		}),
 	)
@@ -270,8 +270,8 @@ func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 			scriptRule{Match: "without skills", Reply: "restricted"},
 		),
 		withSetup(func(t *testing.T, s *system) {
-			s.writeHome(t, "skills/acorn-notes/SKILL.md", "---\nname: acorn-notes\ndescription: how to keep notes\n---\nLong body that should not be in the prompt.")
-			s.writeHome(t, "agents/picky.md", "---\nname: picky\ndescription: only wants its own skill\nskills: some-other-skill\n---\nBody.")
+			s.writeRoot(t, "skills/acorn-notes/SKILL.md", "---\nname: acorn-notes\ndescription: how to keep notes\n---\nLong body that should not be in the prompt.")
+			s.writeRoot(t, "agents/picky.md", "---\nname: picky\ndescription: only wants its own skill\nskills: some-other-skill\n---\nBody.")
 		}),
 	)
 	c := s.client()
@@ -426,14 +426,14 @@ func TestAGlobalSkillsScriptRunsInsideTheWorkspace(t *testing.T) {
 			},
 		),
 		withSetup(func(t *testing.T, s *system) {
-			s.writeHome(t, ".agents/skills/greeting/SKILL.md",
+			s.writeRoot(t, ".agents/skills/greeting/SKILL.md",
 				"---\nname: greeting\ndescription: greets from a script\n---\nRun scripts/run.sh from this directory.")
 			// The write is what proves the mount is read-only: the skill's own folder is the
 			// thing self-modification would edit, so it is the thing the engine must refuse.
-			s.writeHome(t, ".agents/skills/greeting/run.sh",
+			s.writeRoot(t, ".agents/skills/greeting/run.sh",
 				"echo GLOBAL-SCRIPT-RAN\n"+
 					"if echo x > \"$(dirname \"$0\")/marker\" 2>/dev/null; then echo SKILL-WRITABLE; else echo SKILL-READ-ONLY; fi\n")
-			s.writeHome(t, "config.json", `{"defaults":{"instructions":"INSTALL CONFIG MARKER"}}`)
+			s.writeRoot(t, "config.json", `{"defaults":{"instructions":"INSTALL CONFIG MARKER"}}`)
 		}),
 	)
 	c := s.client()
@@ -448,7 +448,7 @@ func TestAGlobalSkillsScriptRunsInsideTheWorkspace(t *testing.T) {
 	}
 
 	c.prompt("general", root, fmt.Sprintf("run the script \u2014 RUN: sh %s && cat %s",
-		filepath.Join(directory, "run.sh"), filepath.Join(s.Home, "config.json")))
+		filepath.Join(directory, "run.sh"), filepath.Join(s.Root, "config", "config.json")))
 	got := c.waitForText("general", root, "ran the global script")
 
 	ran := got.lastToolResult()

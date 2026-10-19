@@ -55,7 +55,7 @@ func testManager(t *testing.T) (*Manager, string) {
 		t.Fatal(err)
 	}
 	migrate := t.TempDir()
-	manager := New(home, bin, migrate)
+	manager := New(home, filepath.Join(home, "root"), bin, migrate)
 	manager.client = &http.Client{}
 	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
 		t.Fatal(err)
@@ -336,7 +336,7 @@ func TestBuildVersionStampsFreshInstall(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := New(home, bin, "")
+	manager := New(home, filepath.Join(home, "root"), bin, "")
 	if err := manager.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestDevBuildNeverPrompts(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := New(home, bin, "")
+	manager := New(home, filepath.Join(home, "root"), bin, "")
 	manager.client = &http.Client{}
 	// No version file: current stays "dev".
 	if err := manager.Open(); err != nil {

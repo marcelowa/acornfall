@@ -18,6 +18,7 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/httpapi"
+	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"github.com/acornfall/acornfall/gateway/internal/ready"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
@@ -59,9 +60,10 @@ func serve(argv []string) error {
 	token := flags.String("token", "", "shared secret; generated and stored when a non-loopback address has none")
 	insecure := flags.Bool("insecure", false, "listen without a token (trusted network or tunnel only)")
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
-	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
+	home := flags.String("home", "", "the machinery folder: the engine's install and store (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
-	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
+	root := flags.String("root", "", "the folder the machine mounts: the bundle, the config, the state and the workspaces (default: the parent of --workspaces-dir)")
+	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: <root>/workspaces, and <root> is ~/acornfall)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor), lxc (containers in one machine), or host (no isolation)")
 	migrateDir := flags.String("migrate-dir", "", "release migrate scripts directory (default: the scripts baked into the binary)")
@@ -86,15 +88,21 @@ func serve(argv []string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	// The user's home is resolved here rather than inside control: the sandbox mounts `~/.agents`
-	// at the same path the worker reads it from, and both have to be answering about the same
-	// folder. The resource folders are created now so a sandbox always has somewhere to mount
-	// from, even before anything has been written to them.
-	userHome, err := os.UserHomeDir()
+	// The two folders of ADR 0022: the root the machine mounts (the product) and the home (the
+	// machinery). The root defaults to the parent of the workspaces folder, so the two cannot
+	// disagree about where a workspace lives, and an install that names only a workspaces folder
+	// still gets a root.
+	resolvedRoot, err := resolveRoot(*root, *workspacesDir)
 	if err != nil {
-		return fmt.Errorf("cannot tell where the user's home is: %w", err)
+		return err
 	}
-	if err := sandbox.EnsureGlobal(dir, userHome); err != nil {
+	where := layout.New(resolvedRoot, dir)
+	// The move onto the two-folder layout, once: an install that kept its public files in the home
+	// has them moved into the root, each one logged, before anything reads them.
+	if err := layout.Migrate(where, log.Printf); err != nil {
+		return err
+	}
+	if err := sandbox.EnsureGlobal(where.Root); err != nil {
 		return err
 	}
 	// The general workspace's folder: the folder the install was started in, unless told
@@ -110,7 +118,7 @@ func serve(argv []string) error {
 
 	// The self-update tier, owned early: boot readiness (migrate, bun, worker
 	// sources) is decided before anything serves.
-	updates := update.New(dir, "", *migrateDir)
+	updates := update.New(dir, where.Root, "", *migrateDir)
 	if err := updates.Open(); err != nil {
 		return err
 	}
@@ -130,7 +138,7 @@ func serve(argv []string) error {
 			log.Printf("worker: %v", err)
 		}
 	}
-	guard, err := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"), dir, *addr, *insecure)
+	guard, err := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"), where.ConfigDir(), *addr, *insecure)
 	if err != nil {
 		return err
 	}
@@ -153,8 +161,7 @@ func serve(argv []string) error {
 	go updates.StartLoop(ctx)
 
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
-		Home:          dir,
-		UserHome:      userHome,
+		Layout:        where,
 		GeneralPath:   general,
 		WorkspacesDir: *workspacesDir,
 		WorkerCommand: command,
@@ -211,7 +218,7 @@ func serve(argv []string) error {
 	// Readiness, plainly: every unsatisfied requirement is one log line
 	// with its fix. Auto-installable pieces were ensured above; what is
 	// still missing refuses loudly at use, never silently.
-	for _, requirement := range ready.Check(readyInputForBoot(dir, updates, engine)) {
+	for _, requirement := range ready.Check(readyInputForBoot(where, updates, engine)) {
 		if !requirement.OK {
 			log.Printf("ready: %s not satisfied: %s (fix: %s)", requirement.Name, requirement.Detail, requirement.Fix)
 		}
@@ -306,7 +313,7 @@ func versionCommand(argv []string) {
 }
 
 func versionString(home string) (string, error) {
-	manager := update.New(home, "", "")
+	manager := update.New(home, filepath.Dir(home), "", "")
 	if err := manager.Open(); err != nil {
 		return "", err
 	}
@@ -623,4 +630,26 @@ func resolveWorkerDir(flagValue string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("worker not found: pass --worker-dir or set ACORNFALL_WORKER")
+}
+
+// resolveRoot names the folder the machine mounts. An explicit --root wins; otherwise it is the
+// parent of the workspaces folder, which is the shape the layout already had (`~/acornfall`
+// holding `workspaces/`), so an install that only ever named a workspaces folder keeps working
+// and still gets the two-folder split around it.
+func resolveRoot(root, workspacesDir string) (string, error) {
+	if root != "" {
+		return filepath.Abs(root)
+	}
+	if workspacesDir != "" {
+		absolute, err := filepath.Abs(workspacesDir)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Dir(absolute), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot tell where the product's folder is: %w (pass --root)", err)
+	}
+	return filepath.Join(home, "acornfall"), nil
 }
