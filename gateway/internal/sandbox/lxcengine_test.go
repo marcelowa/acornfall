@@ -191,9 +191,13 @@ func TestTheEngineRefusesAMachineWithNoRuntime(t *testing.T) {
 func TestPrivilegedRunsTheOtherProfile(t *testing.T) {
 	runtime := newFakeLXC(nil)
 	share := t.TempDir()
+	workspace := filepath.Join(share, "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	engine := lxcEngine(t, runtime, share).WithPrivileged(true)
 	policyDir := t.TempDir()
-	if err := engine.Create(context.Background(), Policy{Workspace: share, Image: "debian:stable-slim"}, policyDir); err != nil {
+	if err := engine.Create(context.Background(), Policy{Workspace: workspace, Image: "debian:stable-slim"}, policyDir); err != nil {
 		t.Fatal(err)
 	}
 	config, err := os.ReadFile(filepath.Join(policyDir, "container.conf"))

@@ -1,7 +1,8 @@
 # ADR 0022 — The appliance runs in the machine, the host is a launcher
 
 Status: draft, not accepted — the owner's decisions of 2026-10-19, written down so they stop
-being lost. Nothing here is built. [ADR 0021](0021-workspaces-as-lxc-containers.md) is the
+being lost. One rule of it exists in code: decision 5's guard, in the policy mapping
+(`gateway/internal/sandbox/layers.go`, with tests) — nothing else is built. [ADR 0021](0021-workspaces-as-lxc-containers.md) is the
 machine this one moves the product into; this file is the bigger shape around it.
 Date: 2026-10-19
 

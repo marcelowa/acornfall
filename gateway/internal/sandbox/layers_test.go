@@ -158,3 +158,50 @@ func TestABindKnowsAFileFromAFolder(t *testing.T) {
 		t.Error("config.json is a file")
 	}
 }
+
+// ADR 0022 puts the provider key and the product's state inside the folder the machine mounts, so
+// what keeps them out of a container is this mapping and nothing else. Both directions are
+// tested, because both are a door: a path outside the root, and a path above the private ones.
+func TestAContainerNeverSeesTheRootsPrivateFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, folder := range []string{"workspaces/work", ".agents/skills", "config", "state"} {
+		if err := os.MkdirAll(filepath.Join(root, folder), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"config/config.json", "config/credentials.json", "state/conversations.json"} {
+		if err := os.WriteFile(filepath.Join(root, file), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allowed := []string{
+		filepath.Join(root, "workspaces/work"),
+		filepath.Join(root, ".agents"),
+		filepath.Join(root, "config", "config.json"),
+	}
+	for _, path := range allowed {
+		if _, err := (Policy{Workspace: path}).Container(root); err != nil {
+			t.Errorf("%s should be bindable: %v", path, err)
+		}
+	}
+	refused := []string{
+		root,
+		filepath.Join(root, "config"),
+		filepath.Join(root, "config", "credentials.json"),
+		filepath.Join(root, "state"),
+		filepath.Join(root, "state", "conversations.json"),
+	}
+	for _, path := range refused {
+		if _, err := (Policy{Workspace: path}).Container(root); err == nil {
+			t.Errorf("%s must never be a container's bind", path)
+		}
+	}
+	// A global is refused the same way: it is the same door.
+	if _, err := (Policy{Workspace: filepath.Join(root, "workspaces/work"), Global: []string{filepath.Join(root, "state")}}).Container(root); err == nil {
+		t.Error("a private folder named as a global is still private")
+	}
+	// And the root's own parent is outside it, which is the other rule and still holds.
+	if _, err := (Policy{Workspace: root + "-other"}).Container(root); err == nil {
+		t.Error("a sibling of the root is outside it")
+	}
+}

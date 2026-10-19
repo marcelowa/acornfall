@@ -121,10 +121,43 @@ func (p Policy) Container(shareRoot string) (Container, error) {
 	}, nil
 }
 
+// The share root's own shape, as ADR 0022 settles it: one folder the machine mounts, with the
+// product's state and secrets inside it. The rule that keeps a container out of them is the
+// mapping's, so the names live here, beside the rule, rather than in a caller that could forget.
+const (
+	// PrivateConfig is the root's private settings folder: the install's `config.json` and,
+	// beside it, the provider key and the API token.
+	PrivateConfig = "config"
+	// PrivateState is the root's state folder: conversations, the workspace registry, drafts.
+	PrivateState = "state"
+	// SharedConfig is the one file inside the private config folder that every workspace may
+	// read: the install's settings, mounted read-only (docs/adr/0014). It is not a secret, which
+	// is why it is the one exception.
+	SharedConfig = "config.json"
+)
+
+// bindPath is one bind, refused unless it is a path a container may see: inside the share root,
+// never the root itself, and never anything private under it.
+//
+// Both directions matter. A path outside the root is a door nobody declared; a path *above* the
+// private ones — the root, or a private folder — is a bind that would hand a container every
+// workspace at once, and the provider key with them (ADR 0022's price, paid in policy here).
 func bindPath(root, path string, readOnly bool) (Bind, error) {
 	clean := filepath.Clean(path)
 	if !inside(root, clean) {
 		return Bind{}, fmt.Errorf("sandbox: %s is outside the share root %s, so the machine's VM cannot see it", clean, root)
+	}
+	if clean == filepath.Clean(root) {
+		return Bind{}, fmt.Errorf("sandbox: %s is the share root itself: a container bound there would see every workspace and the install's own files", clean)
+	}
+	for _, private := range []string{filepath.Join(root, PrivateConfig), filepath.Join(root, PrivateState)} {
+		if !inside(private, clean) {
+			continue
+		}
+		if clean == filepath.Join(root, PrivateConfig, SharedConfig) {
+			continue
+		}
+		return Bind{}, fmt.Errorf("sandbox: %s is the share root's private files (%s): the provider key and the product's state are not a container's business", clean, private)
 	}
 	// A path that is not there yet is not a file: the runtime skips a missing mount (`optional`),
 	// and the kind it was told is the kind it would have made.
