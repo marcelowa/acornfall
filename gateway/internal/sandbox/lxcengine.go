@@ -124,7 +124,17 @@ func (x *LXC) Install(ctx context.Context, log func(string, ...any)) error {
 // Usable is the engine's half of the question: a machine to boot, and a hypervisor to boot it
 // in. What the machine itself has — the container runtime, the id ranges to map — is answered by
 // the first call that reaches it, because a machine does not exist until a workspace needs one.
-func (x *LXC) Usable() error { return x.engine.Usable() }
+// Usable reports whether a container can be made here. Two things have to be true: the machine.s
+// own runtime is there, and the machine knows which folder it mounts — a workspace outside it is
+// one its containers cannot see, and ADR 0021 leaves that choice to a person (--root). A run
+// that never made a machine has not chosen, and a report that said "ready" would be saying
+// something nobody decided.
+func (x *LXC) Usable() error {
+	if strings.TrimSpace(x.machine.Machine().ShareRoot) == "" {
+		return fmt.Errorf("%w: no share root is chosen: name the folder the machine mounts (--root), which is what a workspace's container binds", ErrUnavailable)
+	}
+	return x.engine.Usable()
+}
 
 // Nesting is the machine's answer, not a container's: the containers are where a workspace's own
 // virtual machines would run, and the device has to exist in the machine for any of them.

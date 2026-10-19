@@ -102,6 +102,12 @@ func machineUp(argv []string) {
 	if *refresh {
 		// An init is fixed at boot: a new image is a new machine, and the product is in the mount,
 		// so nothing of it is lost.
+		// The engine writes the machine's containers into the image it booted from, so an image
+		// that has been booted carries them: a new machine made from it would start with a
+		// stranger's containers on its disk.
+		if err := os.RemoveAll(filepath.Join(resolvedImage, "var", "lib", "lxc")); err != nil {
+			log.Fatalf("acornfall machine: cleaning the image's containers: %v", err)
+		}
 		if err := driver.RemoveMachine(ctx); err != nil {
 			log.Fatalf("acornfall machine: removing the old machine: %v", err)
 		}
