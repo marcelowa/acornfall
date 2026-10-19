@@ -94,7 +94,9 @@ func TestTheEngineInTheMachineRunsItsOwnContainers(t *testing.T) {
 		t.Errorf("list = %+v, want what the runtime listed", instances)
 	}
 
-	policy := Policy{Image: "debian:stable-slim", Workspace: workspace}
+	// Privileged on purpose: the container work is what this test is about, and an unprivileged one
+	// asks the shim to write /etc/subuid, which a CI user may not do (the machine's root may).
+	policy := Policy{Image: "debian:stable-slim", Workspace: workspace, Privileged: true}
 	if err := engine.Create(ctx, policy, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}

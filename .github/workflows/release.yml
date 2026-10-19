@@ -86,8 +86,10 @@ jobs:
       # The image runs the release binary, not a fresh build: it is the same product the host
       # ships, with the same version stamped into it.
       - run: mkdir -p bin && cp dist/acornfall-linux-amd64 bin/acornfall && chmod +x bin/acornfall
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq lxc skopeo umoci jq unzip
-      - run: sudo BINARY=$PWD/bin/acornfall WORKER=$PWD/worker sh scripts/build-appliance.sh appliance.tar.gz
+      # The runner is already root: sudo is not installed on it, and asking for it failed the
+      # first appliance build this job ever ran.
+      - run: apt-get update -qq && apt-get install -y -qq lxc skopeo umoci jq unzip
+      - run: BINARY=$PWD/bin/acornfall WORKER=$PWD/worker sh scripts/build-appliance.sh appliance.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: appliance

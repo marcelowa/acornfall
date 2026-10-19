@@ -114,7 +114,9 @@ func TestAContainerIsMadeFromThePolicysImage(t *testing.T) {
 	}
 	engine := lxcEngine(t, runtime, share)
 	policyDir := t.TempDir()
-	if err := engine.Create(context.Background(), Policy{Workspace: workspace, Image: "golang:1.24", CPUs: 2, Memory: "1G"}, policyDir); err != nil {
+	if err := // Privileged on purpose: the container work is the subject here, and an unprivileged container
+		// asks the shim to write /etc/subuid, which a CI user may not do.
+		engine.Create(context.Background(), Policy{Workspace: workspace, Image: "golang:1.24", CPUs: 2, Memory: "1G", Privileged: true}, policyDir); err != nil {
 		t.Fatal(err)
 	}
 	create := runtime.ran("lxc-create")
@@ -129,10 +131,9 @@ func TestAContainerIsMadeFromThePolicysImage(t *testing.T) {
 	for _, want := range []string{
 		"lxc.uts.name = " + Name(workspace),
 		"lxc.rootfs.path = dir:" + filepath.Join(engine.dir, Name(workspace), "rootfs"),
-		"lxc.mount.auto = proc:rw",
+		"lxc.mount.auto = proc:mixed",
 		"lxc.cgroup2.cpu.max = 200000 100000",
 		"lxc.mount.entry = " + workspace + " " + strings.TrimPrefix(workspace, "/") + " none bind,create=dir,optional",
-		idMapFor(t),
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the container's configuration should hold %q, got:\n%s", want, text)
