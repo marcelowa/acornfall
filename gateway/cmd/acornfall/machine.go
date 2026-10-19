@@ -91,6 +91,12 @@ func machineUp(argv []string) {
 	if err := where.Ensure(); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
+	// An install from before the layout moved kept its key in the machinery folder; the machine
+	// reads the mount. Moving it here is what makes "it worked, but the workspace has no key" a
+	// thing of the past — the move the gateway does at boot, done for the host's own folder.
+	if err := layout.Migrate(where, log.Printf); err != nil {
+		log.Printf("machine: moving the old layout: %v", err)
+	}
 	// The token, when the install has one, comes from the mount: the appliance has no secrets of
 	// its own, and a port that answers without one is only safe while it is loopback.
 	token := ""
