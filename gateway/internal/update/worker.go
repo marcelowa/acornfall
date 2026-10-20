@@ -461,7 +461,11 @@ func (m *Manager) FetchAppliance(ctx context.Context, tag, dir string) error {
 // missing is a machine whose init cannot start (measured: "handoff init binary not found at
 // /bin/sh", which says nothing about the unpacker that dropped it).
 func untarImage(tarball []byte, dir string) error {
-	reader := tar.NewReader(bytes.NewReader(tarball))
+	return untarImageStream(bytes.NewReader(tarball), dir)
+}
+
+func untarImageStream(r io.Reader, dir string) error {
+	reader := tar.NewReader(r)
 	root := filepath.Clean(dir)
 	inside := func(name string) (string, error) {
 		clean := filepath.Clean("/" + name)
@@ -531,13 +535,15 @@ func untarImage(tarball []byte, dir string) error {
 // then every kind of entry a filesystem has. It is exported because the test that guards the
 // release's own artefact has to unpack it exactly as an install does.
 func UnpackAppliance(tarball []byte, dir string) error {
+	// Streaming on purpose: the image is 575 MB unpacked, and reading the stream whole
+	// and then gunzipping it whole is another 575 MB of memory for no reason.
 	gzip, err := gzip.NewReader(bytes.NewReader(tarball))
 	if err != nil {
 		return fmt.Errorf("update: the appliance is not a gzip stream: %w", err)
 	}
-	plain, err := io.ReadAll(gzip)
-	if err != nil {
-		return fmt.Errorf("update: reading the appliance: %w", err)
-	}
-	return untarImage(plain, dir)
+	return UntarImage(gzip, dir)
 }
+
+// UntarImage is the appliance's entry rules without the []byte in the way: the caller
+// streams, so a 575 MB image costs 575 MB of disk and almost nothing of memory.
+func UntarImage(r io.Reader, dir string) error { return untarImageStream(r, dir) }
