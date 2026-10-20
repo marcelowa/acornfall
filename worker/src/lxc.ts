@@ -95,7 +95,14 @@ class LXCClient implements SandboxClient {
 		const argv =
 			options.cwd === undefined && options.clearEnv !== true && options.env === undefined
 				? inner
-				: ["/bin/sh", "-c", this.wrapper(options), "sh", ...(options.cwd === undefined ? [] : [options.cwd]), ...inner];
+				: [
+						"/bin/sh",
+						"-c",
+						this.wrapper(options),
+						"sh",
+						...(options.cwd === undefined ? [] : [options.cwd]),
+						...inner,
+					];
 		const proc = Bun.spawn(["lxc-attach", "-n", this.name, "--", ...argv], {
 			stdin: "ignore",
 			stdout: "pipe",
