@@ -453,7 +453,10 @@ func (x *LXC) MachineStop(ctx context.Context) error {
 		return nil
 	}
 	name := x.machine.Name()
-	if _, err := x.engine.run(ctx, "exec", name, "--", "kill", "-TERM", "1"); err != nil {
+	// sh -c, because kill is a shell builtin on Debian and the image does not carry the
+	// standalone binary: the direct call fails with "failed to exec kill" and a graceful stop
+	// never happens (measured on a real install, where stop was the documented way to stop).
+	if _, err := x.engine.run(ctx, "exec", name, "--", "sh", "-c", "kill -TERM 1"); err != nil {
 		return fmt.Errorf("sandbox: asking the machine to stop: %w", err)
 	}
 	// The engine sees the VM go away on its own; the record is what needs settling, and a stop
