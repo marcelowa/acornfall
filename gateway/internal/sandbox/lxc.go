@@ -130,6 +130,10 @@ func (c Container) LXCConfig(s LXCSettings) ([]byte, error) {
 	// otherwise a state and a shrug, and the person who has to fix it has no log to read.
 	fmt.Fprintf(&b, "lxc.log.file = %s\n", filepath.Join(s.Dir, "lxc.log"))
 	b.WriteString("lxc.log.level = ERROR\n")
+	// The container's own /dev, populated by lxc. Without it the rootfs's /dev is whatever the
+	// image carried — nothing — and lxc-attach cannot even open /dev/null to start: "open_devnull:
+	// Operation not permitted", which names neither /dev nor the config line missing (measured).
+	b.WriteString("lxc.autodev = 1\n")
 	// The network: a veth on the machine's bridge when the workspace's policy wants one, and no
 	// interface at all when it does not. Saying nothing would hand it the machine's own network.
 	if c.Egress {

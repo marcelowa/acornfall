@@ -43,6 +43,7 @@ func TestTheUnprivilegedContainerConfigPinsWhatTheSpikeMeasured(t *testing.T) {
 		"lxc.rootfs.path = dir:/var/lib/lxc/acornfall-app-1234abcd/rootfs\n",
 		"lxc.log.file = /var/lib/lxc/acornfall-app-1234abcd/lxc.log\n",
 		"lxc.log.level = ERROR\n",
+		"lxc.autodev = 1\n",
 		"lxc.net.0.type = none\n",
 		"lxc.mount.auto = proc:rw\n",
 		"lxc.cgroup2.cpu.max = 200000 100000\n",
