@@ -48,9 +48,6 @@ jobs:
             echo "hit=false" >> "$GITHUB_OUTPUT"
             echo "::warning::no appliance on this runner for $hash; the next tag builds and proves it"
           fi
-      - name: Say why it cannot run
-        if: steps.appliance.outputs.hit != 'true'
-        run: |
       - name: Unpack the release's tarball and boot it
         if: steps.appliance.outputs.hit == 'true'
         env:
