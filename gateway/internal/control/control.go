@@ -466,10 +466,13 @@ func (c *Control) startWorker(ctx context.Context) error {
 	sandboxState := c.provisionSandbox(ctx)
 	if sandboxState.Tools {
 		args = append(args, "--sandbox", sandbox.Name(c.opts.Workspace.Path))
-		if driver := c.opts.Sandbox.Driver(); driver != nil {
-			// The worker attaches with this engine's SDK: naming it here is how the two sides
-			// of one install cannot disagree about which engine is in use.
-			args = append(args, "--sandbox-engine", driver.Name())
+		// The worker attaches with this engine's SDK: naming it here is how the two sides of one
+		// install cannot disagree about which engine is in use. The name comes from the report the
+		// manager just produced — Driver() can be nil on a manager that has not resolved one, and
+		// the worker then fell back to its own default, which read as "microsandbox" on an lxc
+		// install (measured).
+		if engine := sandboxState.Engine; engine != "" {
+			args = append(args, "--sandbox-engine", engine)
 		}
 	}
 	if err := ctx.Err(); err != nil {
