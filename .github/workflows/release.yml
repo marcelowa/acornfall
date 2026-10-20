@@ -97,7 +97,7 @@ jobs:
       # The appliance depends on three inputs: the gateway, the worker sources, and the script
       # that assembles them. Nothing else in a release changes a byte of it, so a version bump
       # or a workflow edit should cost a cache restore, not seven minutes in a builder.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache@v4
         id: appliance
         with:
           path: dist/appliance-linux-amd64.tar.gz
