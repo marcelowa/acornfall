@@ -49,4 +49,4 @@ jobs:
           ACORNFALL_APPLIANCE_TARBALL: dist/appliance-linux-amd64.tar.gz
         # The module is in gateway/, not at the root: go test from the root cannot find it.
         working-directory: gateway
-        run: go test ./internal/sandbox -run LiveApplianceFromTheRelease -v -timeout 25m
+        run: go test ./internal/sandbox -run TestLiveTheApplianceBootsFromItsReleaseTarball -v -timeout 25m
