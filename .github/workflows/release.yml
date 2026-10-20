@@ -157,3 +157,51 @@ jobs:
           files: dist/*
           body_path: release-notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # A release has to prove its own artefact boots. Two betas did not, and both were found by a
+  # person installing it: the tests boot a directory, releases ship a tarball, and what tar
+  # carries — symlinks, hard links, device nodes — is exactly what broke. This job unpacks the
+  # published tarball with the install's own code, boots it, and starts a machine with the
+  # published binary as the runner user: the unprivileged install the docs promise, executed.
+  prove:
+    needs: publish
+    runs-on: ${{ inputs.runner || 'kvm' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: gateway/go.sum
+      - name: Download the release's own artefacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for name in acornfall-linux-amd64 appliance-linux-amd64.tar.gz; do
+            curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
+              | jq -r --arg n "$name" '.assets[] | select(.name == $n) | .url' \
+              | xargs -I{} curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+                  -H "Accept: application/octet-stream" -o "/tmp/$name" {}
+          done
+          chmod +x /tmp/acornfall-linux-amd64
+          ls -la /tmp/acornfall-linux-amd64 /tmp/appliance-linux-amd64.tar.gz
+      - name: machine up as an ordinary user
+        env:
+          MSB_HOME: /tmp/msb-prove
+          ACORNFALL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          /tmp/acornfall-linux-amd64 machine up
+          /tmp/acornfall-linux-amd64 machine status
+          curl -fsS --retry 30 --retry-delay 5 --retry-all-errors http://127.0.0.1:7777/api/state | head -c 400
+      - name: The release's tarball boots from a clean unpack
+        env:
+          ACORNFALL_LXC: "1"
+          MSB_HOME: /tmp/msb-prove
+          ACORNFALL_APPLIANCE_TARBALL: /tmp/appliance-linux-amd64.tar.gz
+        run: go test ./gateway/internal/sandbox -run LiveApplianceFromTheRelease -v -timeout 25m
+      - name: Take the machine down
+        if: always()
+        run: /tmp/acornfall-linux-amd64 machine down || true
