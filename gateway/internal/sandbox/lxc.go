@@ -134,6 +134,13 @@ func (c Container) LXCConfig(s LXCSettings) ([]byte, error) {
 	// image carried — nothing — and lxc-attach cannot even open /dev/null to start: "open_devnull:
 	// Operation not permitted", which names neither /dev nor the config line missing (measured).
 	b.WriteString("lxc.autodev = 1\n")
+	// autodev makes the nodes; the device cgroup decides whether opening them is allowed. lxc's
+	// own attach opens /dev/null before it enters the namespaces and gets EPERM when the allow
+	// list is empty — the error is "Operation not permitted", not "no such file", and the command
+	// runs anyway (measured). These are the nodes a container's init and lxc itself need.
+	for _, device := range []string{"c 1:3 rwm", "c 1:5 rwm", "c 1:7 rwm", "c 1:8 rwm", "c 1:9 rwm", "c 5:0 rwm", "c 5:1 rwm", "c 5:2 rwm", "c 136:* rwm"} {
+		fmt.Fprintf(&b, "lxc.cgroup2.devices.allow = %s\n", device)
+	}
 	// The network: a veth on the machine's bridge when the workspace's policy wants one, and no
 	// interface at all when it does not. Saying nothing would hand it the machine's own network.
 	if c.Egress {
