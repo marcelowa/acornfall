@@ -153,7 +153,7 @@ class LXCClient implements SandboxClient {
 		return {
 			code,
 			stdout: concatChunks(stdout),
-			stderr: concatChunks(stderr),
+			stderr: quietAttach(concatChunks(stderr), code),
 			...(stopped === undefined ? {} : { stopped }),
 		};
 	}
@@ -252,4 +252,23 @@ class LXCClient implements SandboxClient {
 /** A value that survives one trip through a shell. */
 function shellQuote(value: string): string {
 	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * lxc-attach opens /dev/null before it enters the container's namespaces, and prints
+ *
+ *   open_devnull: 1345 Operation not permitted - Can't open /dev/null
+ *
+ * whether or not the attach then works. On the machine built here it fails that open and
+ * proceeds, so every successful command carried a line that reads like the reason it could
+ * not run — and cost a day of diagnosis in beta 6. If the command succeeded, that line is
+ * noise: drop it. If it failed, keep every word lxc said.
+ */
+function quietAttach(stderr: Uint8Array, code: number): Uint8Array {
+	if (code !== 0) return stderr;
+	const kept = new TextDecoder()
+		.decode(stderr)
+		.split("\n")
+		.filter((line) => !line.includes("open_devnull"));
+	return new TextEncoder().encode(kept.join("\n"));
 }
