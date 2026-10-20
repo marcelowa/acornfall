@@ -361,6 +361,14 @@ func (t *session) lifecycle(message Message, name string) error {
 // returns success even when the container's init fails a moment later, and the state is what
 // says whether anything is running.
 func (t *session) start(name string) error {
+	// A container that is already up has been started. Asking lxc to start it again is not a
+	// no-op: it reports "ABORTING" and the caller concludes the sandbox is unusable, so every
+	// tool is disabled on a machine where the container is running (measured: a restart with
+	// the container left RUNNING did exactly that, on every boot, and the console said "this
+	// workspace has no sandbox" while lxc-ls said RUNNING).
+	if status, err := t.status(name); err == nil && status == "RUNNING" {
+		return nil
+	}
 	if _, err := t.server.run("lxc-start", "-n", name); err != nil {
 		return err
 	}
