@@ -217,7 +217,9 @@ jobs:
           ACORNFALL_LXC: "1"
           MSB_HOME: /tmp/msb-prove
           ACORNFALL_APPLIANCE_TARBALL: /tmp/appliance-linux-amd64.tar.gz
-        run: go test ./gateway/internal/sandbox -run LiveApplianceFromTheRelease -v -timeout 25m
+        # The module is in gateway/, not at the root: go test from the root cannot find it.
+        working-directory: gateway
+        run: go test ./internal/sandbox -run LiveApplianceFromTheRelease -v -timeout 25m
       - name: Take the machine down
         if: always()
         run: /tmp/acornfall-linux-amd64 machine down || true
