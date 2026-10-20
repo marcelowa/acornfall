@@ -664,7 +664,7 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 			// inside it is the other live test's question — a machine has no container until a
 			// turn asks for one, so waiting for "RUNNING" here waits forever (measured in CI).
 			if response.StatusCode == http.StatusOK {
-				t.Logf("the unpacked release boots and runs a container: %s", url)
+				t.Logf("the unpacked release boots and serves the console at %s: %.200s", url, body)
 				return
 			}
 		}
