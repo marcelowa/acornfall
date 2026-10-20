@@ -111,7 +111,7 @@ export const LongToken: Story = {
 		entry: {
 			kind: "user",
 			id: "long-token",
-			text: "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",
+			text: "github_pat_example_not_a_real_token_0000",
 			at,
 		},
 	},
