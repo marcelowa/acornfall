@@ -31,7 +31,7 @@ jobs:
           cache-dependency-path: gateway/go.sum
       # The same key the release uses: if the appliance changed, this is a miss and the proof is
       # skipped with a reason rather than a red mark. The release builds it on the next tag.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache@v4
         id: appliance
         with:
           path: dist/appliance-linux-amd64.tar.gz
