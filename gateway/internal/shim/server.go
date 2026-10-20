@@ -511,7 +511,7 @@ func (t *session) exec(message Message, payload ExecPayload) error {
 	var streams sync.WaitGroup
 	streams.Add(2)
 	go func() { defer streams.Done(); copyOutput(handle.Stdout(), "stdout", message.ID, chunks) }()
-	go func() { defer streams.Done(); copyOutput(handle.Stderr(), "stderr", message.ID, chunks) }()
+	go func() { defer streams.Done(); copyOutput(quietStderr(handle.Stderr()), "stderr", message.ID, chunks) }()
 	type outcome struct {
 		code int
 		err  error
@@ -710,4 +710,30 @@ func ensureIDRanges(shift, owner int) error {
 func alreadyThere(err error) bool {
 	text := strings.ToLower(err.Error())
 	return strings.Contains(text, "not running") || strings.Contains(text, "not defined") || strings.Contains(text, "not found")
+}
+
+// quietStderr drops lxc-attach's own noise from a command's stderr, and only that. The attach
+// opens /dev/null before it has entered the container's namespaces, fails on a machine where that
+// open is not permitted, and runs the command anyway — so every successful command arrived with a
+// line that reads like the reason it could not run. Three diagnoses on a real install went to that
+// line before anyone checked the container's /dev and found it correct.
+//
+// Everything else is left alone: when a command fails, its own words and lxc's are the reason.
+func quietStderr(r io.ReadCloser) io.ReadCloser {
+	out, in := io.Pipe()
+	go func() {
+		defer in.Close()
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.Contains(line, "open_devnull") {
+				continue
+			}
+			if _, err := io.WriteString(in, line+"\n"); err != nil {
+				return
+			}
+		}
+	}()
+	return out
 }
