@@ -29,19 +29,30 @@ jobs:
         with:
           go-version: "1.27.1"
           cache-dependency-path: gateway/go.sum
-      # The same key the release uses: if the appliance changed, this is a miss and the proof is
-      # skipped with a reason rather than a red mark. The release builds it on the next tag.
-      - uses: actions/cache@v4
+      # actions/cache only writes on this runner ("Cache mode: write"), so every restore is a
+      # miss. The runner is one machine: keep the appliance on its disk, keyed by a hash of the
+      # inputs, and the proof becomes a file copy.
+      - name: Find the appliance this runner built last
         id: appliance
-        with:
-          path: dist/appliance-linux-amd64.tar.gz
-          key: appliance-${{ hashFiles('gateway/**', 'worker/src/**', 'worker/package.json', 'worker/bun.lock', 'scripts/build-appliance.sh') }}
-      - name: Say why it cannot run
-        if: steps.appliance.outputs.cache-hit != 'true'
         run: |
-          echo "::warning::no cached appliance for these inputs; the next tag builds and proves it"
+          set -euo pipefail
+          mkdir -p "$HOME/acornfall-ci" dist
+          hash=$(find gateway worker/src worker/package.json worker/bun.lock scripts/build-appliance.sh \
+            -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+          if [ -f "$HOME/acornfall-ci/$hash.tar.gz" ]; then
+            cp "$HOME/acornfall-ci/$hash.tar.gz" dist/appliance-linux-amd64.tar.gz
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "the appliance for $hash is on this runner"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::no appliance on this runner for $hash; the next tag builds and proves it"
+          fi
+      - name: Say why it cannot run
+        if: steps.appliance.outputs.hit != 'true'
+        run: |
       - name: Unpack the release's tarball and boot it
-        if: steps.appliance.outputs.cache-hit == 'true'
+        if: steps.appliance.outputs.hit == 'true'
         env:
           ACORNFALL_LXC: "1"
           MSB_HOME: /tmp/msb-prove
