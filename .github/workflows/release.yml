@@ -133,6 +133,16 @@ jobs:
         with:
           name: appliance
           path: dist/appliance-linux-amd64.tar.gz
+      # Leave the appliance where the next push's proof can copy it: this runner's disk, named
+      # by the hash prove.yml computes. Seconds here buy minutes there.
+      - name: Keep the appliance on the runner
+        run: |
+          set -euo pipefail
+          hash=$(find gateway worker/src worker/package.json worker/bun.lock scripts/build-appliance.sh \
+            -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          mkdir -p "$HOME/acornfall-ci"
+          cp dist/appliance-linux-amd64.tar.gz "$HOME/acornfall-ci/$hash.tar.gz"
+          ls -la "$HOME/acornfall-ci"
   publish:
     # The appliance joins the release for the same reason the worker does: the launcher fetches
     # it on a fresh install (ADR 0022), and a release without one cannot boot a machine.
