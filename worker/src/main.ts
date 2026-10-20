@@ -599,7 +599,11 @@ async function describe(): Promise<DescribeData> {
 		workdir: args.workspace,
 		providers,
 		// subagents: the delegation tools are installed below, so the interface may offer them.
-		capabilities: { steer: true, subagents: true, sandbox: "local-process" },
+		// sandbox: the engine control gave this workspace. It was the string "local-process"
+		// unconditionally, while the appliance was running every tool in a container — and the
+		// interface, reading it, disabled tool execution on a working install (measured: beta 10,
+		// engine lxc, container RUNNING, "this workspace has no sandbox").
+		capabilities: { steer: true, subagents: true, sandbox: args.sandboxEngine },
 	};
 }
 
