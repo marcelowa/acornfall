@@ -94,7 +94,17 @@ jobs:
       # The builder is a Debian machine, the same base the appliance carries, so the build runs in
       # a known system rather than whatever the runner host is. The workspace is mounted at its own
       # path, so everything below is written where the next step can collect it.
+      # The appliance depends on three inputs: the gateway, the worker sources, and the script
+      # that assembles them. Nothing else in a release changes a byte of it, so a version bump
+      # or a workflow edit should cost a cache restore, not seven minutes in a builder.
+      - uses: actions/cache@v4
+        id: appliance
+        with:
+          path: dist/appliance-linux-amd64.tar.gz
+          key: appliance-${{ hashFiles('gateway/**', 'worker/src/**', 'worker/package.json', 'worker/bun.lock', 'scripts/build-appliance.sh') }}
+      - name: reuse the cached appliance, if it is the same appliance
       - name: build the appliance inside a machine
+        if: steps.appliance.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           MSB=$(echo "$PWD"/worker/node_modules/@superradcompany/microsandbox-linux-*/bin/msb)
