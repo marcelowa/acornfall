@@ -121,12 +121,6 @@ export type WireAuthEvent =
 	| { kind: "done"; providerId: string }
 	| { kind: "error"; message: string };
 
-export interface WireAuthFrame {
-	type: "auth";
-	authId: string;
-	event: WireAuthEvent;
-}
-
 /** The events a dialog renders as steps: prompts and outcomes are not notices. */
 export type WireAuthNotice = Extract<
 	WireAuthEvent,
