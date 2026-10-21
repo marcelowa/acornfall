@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/layout"
@@ -21,7 +20,8 @@ import (
 func doctorCommand(argv []string) {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "data directory")
-	home := flags.String("home", "", "the acornfall folder (default: ~/.acornfall)")
+	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
+	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine to report: microsandbox (default), lxc (containers in one machine), or host")
 	asJSON := flags.Bool("json", false, "print the report as JSON")
 	if err := flags.Parse(argv); err != nil {
@@ -35,6 +35,11 @@ func doctorCommand(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
+	resolvedRoot, err := resolveRoot(*root, "")
+	if err != nil {
+		log.Fatalf("acornfall doctor: %v", err)
+	}
+	where := layout.New(resolvedRoot, resolved)
 
 	engineName := *sandboxEngine
 	if engineName == "" {
@@ -49,7 +54,7 @@ func doctorCommand(argv []string) {
 	manager.Verify(context.Background())
 	report := manager.Report()
 	nesting := manager.Nesting(context.Background())
-	updater := update.New(resolved, filepath.Dir(resolved), "", "")
+	updater := update.New(resolved, where.Root, "", "")
 	if err := updater.Open(); err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
@@ -58,7 +63,7 @@ func doctorCommand(argv []string) {
 	checkCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	health := updater.Preflight(checkCtx)
-	requirements := ready.Check(readyInput(resolved, updater, health, report, engineName))
+	requirements := ready.Check(readyInput(where, updater, health, report, engineName))
 	if *asJSON {
 		// The report plus what the engine and the machine say about nesting: two answers,
 		// because either half can refuse and the reason is worth reading.
@@ -127,10 +132,10 @@ func doctorCommand(argv []string) {
 
 // readyInput gathers what the readiness list reads from the managers
 // doctor already owns. Report-only where possible: doctor changes nothing.
-func readyInput(home string, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
+func readyInput(where layout.Layout, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
 	_, bunOK := updater.BunInstalled()
 	return ready.Input{
-		Home:            home,
+		Home:            where.Home,
 		Current:         health.Version,
 		RuntimeTag:      updater.RuntimeTag(),
 		Worker:          updater.WorkerVersion(),
@@ -144,7 +149,10 @@ func readyInput(home string, updater *update.Manager, health update.Preflight, r
 		EngineDisabled:  disabledReason(),
 		Latest:          health.Latest,
 		ReleasesNote:    health.Releases,
-		HasCredential:   ready.HasCredential(home),
+		// The file, not the folder: the install's credentials moved into the mount, and a
+		// readiness list that reads ~/.acornfall/credentials.json says "no provider stored"
+		// over an install that has one.
+		HasCredential: ready.HasCredential(where.Credentials()),
 	}
 }
 

@@ -151,11 +151,12 @@ The chain is **conversation → its definition → this workspace → the instal
 
 | # | Feature | Test |
 |---|---|---|
-| P1 | Credentials live in the install folder (0600) and never inside a workspace. | `worker/test/skills.test.ts`, `TestWorkspacesAreIsolatedAndStartOnDemand` |
+| P1 | Credentials live in the mount, `config/credentials.json` (0600), and never inside a workspace. | `worker/test/skills.test.ts`, `TestWorkspacesAreIsolatedAndStartOnDemand` |
 | P2 | The provider list and each model's thinking levels come from the harness. | `worker/test/protocol.test.ts`, `TestAFreshInstallHasARootConversation` |
 | P3 | A non-loopback bind always ends up with a token; loopback needs none; `--insecure` is how you say otherwise. | `httpapi.TestResolveToken` |
 | P4 | The token is accepted as a bearer header or as a cookie set by a `?token=` link, and refused otherwise. | `httpapi.TestRequireToken` |
 | P5 | Credential reads hand back copies, `modify` returning nothing changes nothing, and `delete` is what removes. | `worker/test/skills.test.ts` |
+| P6 | The readiness list doctor and a fresh install print reads the paths this install actually uses: the credentials in the mount, and the engine it will run. | `TestDoctorReadsTheCredentialsFromTheMount` |
 
 ## The worker protocol
 
