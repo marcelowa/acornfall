@@ -172,6 +172,13 @@ gateway in the way: `worker/test/protocol.test.ts`.
 | X5 | `expand` rewrites a command into what the model will see. |
 | X6 | `policy`, `usage`, `commands`, and `agents` answer with what the interface explains. |
 
+## The machine and the appliance
+
+| # | Feature | Test |
+|---|---|---|
+| M1 | An appliance image is the release it says it is. An image from another release, or one that does not say which it is, is replaced before the machine boots, and the machine is made again — so an upgrade never boots the previous appliance or the containers it left behind. `--image` is the person's own tree and is not compared. | `TestTheImageIsTheReleaseThisBuildRuns`, `TestStampingAnImageNamesItsRelease`, `TestStampingAnImageWithNoMarkInventsNothing` |
+| M2 | One container the runtime cannot read is that container's problem: the workspace that owns it refuses with the runtime's words and a repair, and every other workspace keeps its tools. | `TestOneUnreadableContainerDoesNotFailTheList`, `TestAnUnreadableContainerIsItsOwnWorkspacesProblem` |
+
 ## Fixed by writing these tests
 
 Five things were broken, and the feature tests are what found them. Each has its own test now,

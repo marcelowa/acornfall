@@ -20,8 +20,11 @@ type fakeRuntime struct {
 	mu      sync.Mutex
 	calls   [][]string
 	answers map[string]string
-	failure error
-	handle  *fakeHandle
+	// failures is per command prefix, for the case a test is about: one container the runtime
+	// cannot answer for, while every other command works.
+	failures map[string]error
+	failure  error
+	handle   *fakeHandle
 }
 
 func (f *fakeRuntime) Run(_ context.Context, args ...string) (string, error) {
@@ -32,6 +35,11 @@ func (f *fakeRuntime) Run(_ context.Context, args ...string) (string, error) {
 		return "", f.failure
 	}
 	key := strings.Join(args, " ")
+	for prefix, err := range f.failures {
+		if strings.HasPrefix(key, prefix) {
+			return "", err
+		}
+	}
 	for prefix, answer := range f.answers {
 		if strings.HasPrefix(key, prefix) {
 			return answer, nil
@@ -211,6 +219,42 @@ func TestTheShimListsWhatTheRuntimeKnows(t *testing.T) {
 	}
 	if instances[1].Running {
 		t.Errorf("second = %+v, want a stopped container", instances[1])
+	}
+}
+
+// A container that is there and cannot be read is reported as such. Failing the whole call is
+// what turned one bad container into "this workspace has no sandbox" for every workspace on the
+// machine, while their own containers were RUNNING.
+func TestOneUnreadableContainerDoesNotFailTheList(t *testing.T) {
+	runtime := &fakeRuntime{
+		answers: map[string]string{
+			"lxc-ls -1":                     "acornfall-good\nacornfall-bad",
+			"lxc-info -n acornfall-good -s": "State: RUNNING",
+		},
+		failures: map[string]error{
+			"lxc-info -n acornfall-bad -s": errors.New("container has no configuration file"),
+		},
+	}
+	client, _ := connected(t, runtime)
+	defer client.Close()
+	ctx, cancel := callContext(t)
+	defer cancel()
+
+	instances, err := client.List(ctx)
+	if err != nil {
+		t.Fatalf("one unreadable container should not fail the list: %v", err)
+	}
+	if len(instances) != 2 {
+		t.Fatalf("instances = %+v, want both containers", instances)
+	}
+	if instances[0].Name != "acornfall-good" || !instances[0].Running || instances[0].Problem != "" {
+		t.Errorf("the container that answered should be running and unremarkable: %+v", instances[0])
+	}
+	if instances[1].Problem == "" {
+		t.Errorf("the container that could not be read should say so: %+v", instances[1])
+	}
+	if instances[1].Running {
+		t.Errorf("a container whose state is unknown is not running: %+v", instances[1])
 	}
 }
 

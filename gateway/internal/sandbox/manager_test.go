@@ -329,3 +329,36 @@ func TestAnEngineWithoutAMachineNeedsNoEnsuring(t *testing.T) {
 		t.Errorf("a flat engine still creates its sandbox: %v", driver.calls)
 	}
 }
+
+// One container the runtime cannot read is that container's problem. It used to fail the list
+// call, so every workspace on the machine lost its tools while the containers themselves were
+// fine — and the only cure was a clean install, because the unreadable container lived in the
+// image the next machine booted from.
+func TestAnUnreadableContainerIsItsOwnWorkspacesProblem(t *testing.T) {
+	broken := Instance{Name: Name("/home/me/other"), Problem: "container has no configuration file"}
+
+	// Another workspace's: this one is made as usual.
+	other := &fakeDriver{listed: []Instance{broken}}
+	name, err := openWith(t, other).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("a stranger's unreadable container is not this workspace's problem: %v", err)
+	}
+	if name != Name("/home/me/work") || !other.ran("create") {
+		t.Errorf("this workspace's sandbox should be created, got %q and %v", name, other.calls)
+	}
+
+	// This workspace's own: the refusal names the container and says what to do.
+	own := &fakeDriver{listed: []Instance{{Name: Name("/home/me/work"), Problem: broken.Problem}}}
+	_, err = openWith(t, own).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
+	if err == nil {
+		t.Fatal("this workspace's container cannot be read, so its sandbox is not usable")
+	}
+	for _, want := range []string{Name("/home/me/work"), broken.Problem, "machine down"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal should name %q: %v", want, err)
+		}
+	}
+	if own.ran("create") || own.ran("start") {
+		t.Errorf("an unreadable container is not silently replaced: %v", own.calls)
+	}
+}

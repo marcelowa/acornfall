@@ -295,7 +295,14 @@ func (t *session) list(message Message) error {
 	for _, name := range names {
 		status, err := t.status(name)
 		if err != nil {
-			return err
+			// One container the runtime cannot answer for is that container's problem, not a
+			// machine without a runtime: reporting it and carrying on is what keeps every other
+			// workspace's tools working. A container left in the image by an older machine did
+			// exactly this, and every workspace said "this workspace has no sandbox" while its
+			// own container was RUNNING (measured).
+			t.server.log("shim: %s is there and the runtime cannot read it: %v", name, err)
+			result.Containers = append(result.Containers, Instance{Name: name, Problem: err.Error()})
+			continue
 		}
 		result.Containers = append(result.Containers, Instance{Name: name, Status: status, Running: status == "RUNNING"})
 	}

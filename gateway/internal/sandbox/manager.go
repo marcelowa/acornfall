@@ -80,6 +80,10 @@ type Instance struct {
 	Name   string `json:"name"`
 	Image  string `json:"image"`
 	Status string `json:"status"`
+	// Problem is why this container's state could not be read. It is that container's problem:
+	// the sandbox for the workspace that owns it refuses with this sentence, and every other
+	// workspace keeps working.
+	Problem string `json:"problem,omitempty"`
 }
 
 // Running is the engine's word for a sandbox that can take a command.
@@ -269,7 +273,16 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 	}
 	for _, instance := range instances {
 		if instance.Name != name {
+			// Someone else's container that the runtime cannot read is worth a line in the log
+			// and nothing more: it used to fail the list call, which disabled the tools of every
+			// workspace on a machine where the containers were fine.
+			if instance.Problem != "" {
+				m.say("sandbox: %s is there and the runtime cannot read it (%s); it is not this workspace's", instance.Name, instance.Problem)
+			}
 			continue
+		}
+		if instance.Problem != "" {
+			return "", fmt.Errorf("sandbox: this workspace's container %s is there and the runtime cannot read it (%s): `acornfall machine down` and `machine up` make a new one", instance.Name, instance.Problem)
 		}
 		if instance.Running() {
 			return name, nil
@@ -283,6 +296,13 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 		return "", err
 	}
 	return name, nil
+}
+
+// say logs when a caller asked for one: a manager built without a Log still works.
+func (m *Manager) say(format string, args ...any) {
+	if m.log != nil {
+		m.log(format, args...)
+	}
 }
 
 // Stop shuts a workspace's sandbox down, keeping everything it accumulated. The engine also

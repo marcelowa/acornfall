@@ -341,7 +341,7 @@ func (x *LXC) List(ctx context.Context) ([]Instance, error) {
 	}
 	instances := make([]Instance, 0, len(containers))
 	for _, container := range containers {
-		instances = append(instances, Instance{Name: container.Name, Status: container.Status})
+		instances = append(instances, Instance{Name: container.Name, Status: container.Status, Problem: container.Problem})
 	}
 	return instances, nil
 }

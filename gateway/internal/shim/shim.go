@@ -91,6 +91,10 @@ type Instance struct {
 	// Running is the runtime's own word, resolved here so that every caller does not compare
 	// strings in its own way.
 	Running bool `json:"running"`
+	// Problem is why this container's state could not be read. A container that is there and
+	// unreadable is still a fact about the machine, and one of them used to fail the whole list
+	// call: every workspace lost its tools while its own container was RUNNING (measured).
+	Problem string `json:"problem,omitempty"`
 }
 
 // ListResult is every container the machine knows.
