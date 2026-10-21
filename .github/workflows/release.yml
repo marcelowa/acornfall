@@ -104,6 +104,10 @@ jobs:
           key: appliance-${{ hashFiles('gateway/**', 'worker/src/**', 'worker/package.json', 'worker/bun.lock', 'scripts/build-appliance.sh') }}
       - name: build the appliance inside a machine
         if: steps.appliance.outputs.cache-hit != 'true'
+        # The tag, so the image names the release it is: the launcher compares that with its own
+        # before it boots anything.
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           MSB=$(echo "$PWD"/worker/node_modules/@superradcompany/microsandbox-linux-*/bin/msb)

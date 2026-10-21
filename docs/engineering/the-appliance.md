@@ -95,6 +95,26 @@ Four states have lied during this beta, each in a message that was true about so
 The rule that comes out of it: **check the effect before believing the message.** `lxc-ls` said
 RUNNING through all four.
 
+## Upgrading replaces the image
+
+The image is the machine's disk, so a machine boots from whatever that directory holds — including
+the containers a previous machine left in `var/lib/lxc`. The launcher used to keep any image whose
+two files were present, so an upgrade booted the old appliance with the new launcher: the product
+inside said one thing and the binary outside said another. A container the runtime could not read
+then failed the shim's list, every workspace said "this workspace has no sandbox", and the only cure
+was a clean install, because nothing in `machine up` ever replaced a byte.
+
+An image now names the release it is in `/etc/acornfall-appliance`: the build writes it when it is
+told the tag, and the launcher stamps it after a fetch, because it verified that release's checksum.
+An image that does not say — one built before the mark carried a release — is replaced like an old
+one. A replaced image is a machine that has to be made again, and that is the point: the new image
+arrives without the containers the old one accumulated. `--image` names the person's own tree and is
+never compared or replaced.
+
+The other half is the shim's list: a container that is there and cannot be read is reported with the
+runtime's own words, and only the workspace that owns it refuses. One bad container used to be every
+workspace's outage.
+
 ## Resources
 
 Ceilings and shares, never reservations:

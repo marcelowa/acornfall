@@ -15,6 +15,8 @@ NAME=acornfall-appliance-build
 DIR=/var/lib/lxc/$NAME
 ROOTFS=$DIR/rootfs
 BASE=${BASE:-debian:stable-slim}
+# The release this image is, when the build knows it: a tag in CI, nothing for a hand build.
+VERSION=${VERSION:-}
 # The product itself: the binary the release ships, and the worker's sources. Both default to this
 # repository's own build, so an appliance built here is the appliance this checkout is.
 BINARY=${BINARY:-$(pwd)/bin/acornfall}
@@ -124,7 +126,11 @@ chroot "$ROOTFS" /bin/sh /tmp/appliance-bun.sh || die "putting bun and the worke
 rm -f "$ROOTFS/tmp/appliance-bun.sh"
 
 # A mark a person, and doctor, can read: which appliance this is.
-chroot "$ROOTFS" /bin/sh -c 'echo "acornfall appliance, debian stable, lxc $(lxc-start --version)" > /etc/acornfall-appliance' || die "naming the appliance failed"
+# The mark names the appliance, and the release it is when the build was told which one. The
+# launcher compares that release with its own: an image that does not say is one from before this
+# mark carried a release, and it is replaced rather than booted under a newer launcher.
+MARK="acornfall appliance${VERSION:+ $VERSION}"
+chroot "$ROOTFS" /bin/sh -c "echo \"$MARK, debian stable, lxc \$(lxc-start --version)\" > /etc/acornfall-appliance" || die "naming the appliance failed"
 
 cleanup
 trap - EXIT INT TERM

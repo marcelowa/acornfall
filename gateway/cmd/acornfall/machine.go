@@ -111,9 +111,6 @@ func machineUp(argv []string) {
 	if contents, err := os.ReadFile(where.Token()); err == nil {
 		token = strings.TrimSpace(string(contents))
 	}
-	if err := ensureAppliance(ctx, resolvedHome, resolvedImage, *refresh, *tag); err != nil {
-		log.Fatalf("acornfall machine: %v", err)
-	}
 	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, *cpus, *memory, *port, *host, applianceInit(resolvedRoot, token))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
@@ -122,17 +119,24 @@ func machineUp(argv []string) {
 	if err := engine.Install(ctx, log.Printf); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	if *refresh {
-		// An init is fixed at boot: a new image is a new machine, and the product is in the mount,
-		// so nothing of it is lost.
-		// The engine writes the machine's containers into the image it booted from, so an image
-		// that has been booted carries them: a new machine made from it would start with a
-		// stranger's containers on its disk.
-		if err := os.RemoveAll(filepath.Join(resolvedImage, "var", "lib", "lxc")); err != nil {
-			log.Fatalf("acornfall machine: cleaning the image's containers: %v", err)
-		}
+	// The image is the machine's disk, and an init is fixed at boot: a new image is a machine that
+	// has to be made again. It is taken away *before* the tree under it changes — a running
+	// machine reading a disk that is being replaced is the shape of corruption nobody could
+	// diagnose — and the product is in the mount, so nothing of it is lost.
+	replacing := applianceWillReplace(resolvedImage, applianceTag(*tag), *refresh, *image != "")
+	if replacing {
 		if err := driver.RemoveMachine(ctx); err != nil {
 			log.Fatalf("acornfall machine: removing the old machine: %v", err)
+		}
+	}
+	if err := ensureAppliance(ctx, resolvedHome, resolvedImage, *refresh, *image != "", *tag); err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
+	if *refresh {
+		// A refresh asked for an image without the containers a previous machine left on it. After
+		// a fetch there are none; after a fetch that could not happen, this is the cleaning.
+		if err := os.RemoveAll(filepath.Join(resolvedImage, "var", "lib", "lxc")); err != nil {
+			log.Fatalf("acornfall machine: cleaning the image's containers: %v", err)
 		}
 	}
 	log.Printf("machine: booting the appliance from %s", resolvedImage)
@@ -291,24 +295,122 @@ func applianceInit(root, token string) string {
 	}, " ")
 }
 
-// ensureAppliance makes sure the machine's rootfs is there: an install that has one uses it, and
-// a fresh install fetches the release's, verified against the release's own checksums. A refresh
-// always fetches — that is what updating the appliance means, because the image is the product's
-// half of the machine.
-func ensureAppliance(ctx context.Context, home, image string, refresh bool, tag string) error {
-	if !refresh {
-		if err := checkAppliance(image); err == nil {
-			return nil
-		}
+// ensureAppliance makes sure the machine's rootfs is the release this build runs: it fetches the
+// release's appliance, verified against the release's own checksums, and records which release the
+// image now is.
+//
+// Existence was the whole test until an upgrade left the old image in place — and with it the
+// containers a previous machine had accumulated. A container the runtime could not read then
+// disabled the tools of every workspace on the new machine, and the only cure was a clean install,
+// because nothing in `machine up` ever replaced a byte. What an image claims to be is the mark the
+// build writes into it, and the launcher stamps that mark when it fetches a release: it verified
+// the tarball's checksum, so it knows which release those bytes are.
+//
+// The caller takes the machine away first (applianceWillReplace): the image is its disk.
+func ensureAppliance(ctx context.Context, home, image string, refresh, given bool, tag string) error {
+	tag = applianceTag(tag)
+	if !applianceWillReplace(image, tag, refresh, given) {
+		return nil
 	}
-	if tag == "" {
-		tag = update.BuildVersion
-	}
+	existed := checkAppliance(image) == nil
 	if tag == "" {
 		return fmt.Errorf("this build does not know its own version, so it cannot say which release the appliance comes from: pass --image or --tag")
 	}
+	if existed {
+		log.Printf("machine: the image is %s and this build runs %s: fetching the release's", applianceDescribe(image), tag)
+	}
 	log.Printf("machine: fetching the appliance %s into %s", tag, image)
+	if err := fetchAppliance(ctx, home, tag, image); err != nil {
+		if refresh || !existed {
+			return err
+		}
+		// An install that is offline keeps the machine it has. The image is the wrong release and
+		// says so here, which is a sentence; refusing to boot would be an install that cannot start
+		// because GitHub was unreachable.
+		log.Printf("machine: cannot fetch %s (%v): booting the image that is there, which does not say which release it is", tag, err)
+		return nil
+	}
+	return stampAppliance(image, tag)
+}
+
+// applianceWillReplace says whether the image has to be fetched: a refresh, an image that is not
+// an appliance, or one that is not the release this build runs. A named image is the person's own
+// tree and a source build has no release to be, so neither is replaced.
+func applianceWillReplace(image, tag string, refresh, given bool) bool {
+	return refresh || checkAppliance(image) != nil || !applianceCurrent(image, tag, given)
+}
+
+// applianceTag is the release this launcher runs, or the one it was told.
+func applianceTag(tag string) string {
+	if tag != "" {
+		return tag
+	}
+	return update.BuildVersion
+}
+
+// fetchAppliance is the network, in one place: a test replaces it to ask what the launcher does
+// when GitHub cannot be reached.
+var fetchAppliance = func(ctx context.Context, home, tag, image string) error {
 	return update.New(home, filepath.Dir(home), "", "").FetchAppliance(ctx, tag, image)
+}
+
+// applianceMark is the file the build writes into the image, naming it. It is the only thing that
+// can tell one appliance from another: the tree is files either way, and a version a person can
+// read is also the version the launcher can compare.
+const applianceMark = "etc/acornfall-appliance"
+
+// applianceCurrent says whether the image is the release this build runs. A named image is the
+// person's, and a source build has no release to be: both keep what they have. An image that does
+// not say which release it is — every image built before this mark carried one — is not current.
+func applianceCurrent(image, tag string, given bool) bool {
+	if given || !isReleaseTag(tag) {
+		return true
+	}
+	return applianceVersion(image) == tag
+}
+
+// isReleaseTag is whether a tag names a release: `dev` is a source build, and it has no release to
+// compare an image against.
+func isReleaseTag(tag string) bool {
+	return len(tag) > 1 && tag[0] == 'v' && tag[1] >= '0' && tag[1] <= '9'
+}
+
+// applianceVersion is the release an image says it is, or "" when it does not say.
+func applianceVersion(image string) string {
+	payload, err := os.ReadFile(filepath.Join(image, applianceMark))
+	if err != nil {
+		return ""
+	}
+	// "acornfall appliance v0.10.0-beta.12, debian stable, lxc 6.0.4"
+	fields := strings.Fields(string(payload))
+	if len(fields) < 3 || fields[0] != "acornfall" || fields[1] != "appliance" {
+		return ""
+	}
+	return strings.Trim(fields[2], ",")
+}
+
+// applianceDescribe is the image's own sentence for a log line, with its release when it says one.
+func applianceDescribe(image string) string {
+	if version := applianceVersion(image); version != "" {
+		return version
+	}
+	return "of no stated release"
+}
+
+// stampAppliance records which release the image is. It keeps the rest of the mark the build wrote
+// — the base and the runtime version are still true — and replaces only the release.
+func stampAppliance(image, tag string) error {
+	path := filepath.Join(image, applianceMark)
+	mark := "acornfall appliance " + tag
+	if payload, err := os.ReadFile(path); err == nil {
+		if _, after, found := strings.Cut(string(payload), ","); found {
+			mark += ", " + strings.TrimSpace(after)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(mark+"\n"), 0o644)
 }
 
 // checkAppliance refuses an image that is not one, by name: the machine's error for a missing

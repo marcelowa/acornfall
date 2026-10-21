@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,5 +109,156 @@ func TestPublishingOffLoopbackSaysWhatIsTrue(t *testing.T) {
 	guarded := publishNotice("0.0.0.0", 7777, true)
 	if strings.Contains(guarded, "no authentication") || !strings.Contains(guarded, "token") {
 		t.Errorf("an install with a token does not lack authentication: %q", guarded)
+	}
+}
+
+// An image is the release it says it is, and one that says nothing is from before the mark
+// carried a release. Both matter: the launcher used to keep any image whose two files were there,
+// so an upgrade booted the previous appliance and the containers on it — which is how every
+// workspace came to say it had no sandbox.
+func TestTheImageIsTheReleaseThisBuildRuns(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		mark  string
+		tag   string
+		given bool
+		want  bool
+	}{
+		{"the image this build fetched", "acornfall appliance v0.10.0-beta.12, debian stable, lxc 6.0.4", "v0.10.0-beta.12", false, true},
+		{"an older one", "acornfall appliance v0.10.0-beta.11, debian stable, lxc 6.0.4", "v0.10.0-beta.12", false, false},
+		{"built before the mark carried a release", "acornfall appliance, debian stable, lxc 6.0.4", "v0.10.0-beta.12", false, false},
+		{"no mark at all", "", "v0.10.0-beta.12", false, false},
+		{"the person named this image", "acornfall appliance, debian stable, lxc 6.0.4", "v0.10.0-beta.12", true, true},
+		{"a source build has no release to be", "acornfall appliance, debian stable, lxc 6.0.4", "dev", false, true},
+		{"a source build keeps a stamped image too", "acornfall appliance v0.10.0-beta.12, debian stable, lxc 6.0.4", "", false, true},
+	} {
+		image := t.TempDir()
+		if c.mark != "" {
+			path := filepath.Join(image, applianceMark)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(c.mark+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := applianceCurrent(image, c.tag, c.given); got != c.want {
+			t.Errorf("%s: applianceCurrent(%q, given=%v) = %v, want %v", c.name, c.tag, c.given, got, c.want)
+		}
+	}
+}
+
+// Stamping keeps what the build said about the image and replaces only the release: the mark is
+// what a person reads to know which appliance they have.
+func TestStampingAnImageNamesItsRelease(t *testing.T) {
+	image := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(image, "etc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(image, applianceMark), []byte("acornfall appliance, debian stable, lxc 6.0.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := stampAppliance(image, "v0.10.0-beta.12"); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := os.ReadFile(filepath.Join(image, applianceMark))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(payload), "acornfall appliance v0.10.0-beta.12, debian stable, lxc 6.0.4\n"; got != want {
+		t.Errorf("mark = %q, want %q", got, want)
+	}
+	if version := applianceVersion(image); version != "v0.10.0-beta.12" {
+		t.Errorf("the version reads back as %q", version)
+	}
+}
+
+// An image with no mark is stamped with the release alone rather than with a base nobody measured.
+func TestStampingAnImageWithNoMarkInventsNothing(t *testing.T) {
+	image := t.TempDir()
+	if err := stampAppliance(image, "v0.10.0-beta.12"); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := os.ReadFile(filepath.Join(image, applianceMark))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(payload), "acornfall appliance v0.10.0-beta.12\n"; got != want {
+		t.Errorf("mark = %q, want %q", got, want)
+	}
+}
+
+// An image from another release is replaced, and a fetch that cannot happen must not take a
+// machine that is already there down with it: an offline install keeps what it boots. The image
+// then says it is the wrong release, which is a sentence a person can act on.
+func TestAFailedFetchKeepsTheImageThatIsThere(t *testing.T) {
+	image := t.TempDir()
+	for _, path := range []string{"usr/local/bin/acornfall", "usr/local/lib/acornfall/worker/src/main.ts"} {
+		target := filepath.Join(image, path)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fetched := false
+	original := fetchAppliance
+	fetchAppliance = func(context.Context, string, string, string) error {
+		fetched = true
+		return errors.New("no route to the release")
+	}
+	t.Cleanup(func() { fetchAppliance = original })
+
+	if err := ensureAppliance(context.Background(), t.TempDir(), image, false, false, "v0.10.0-beta.13"); err != nil {
+		t.Fatalf("an image that is there should still boot: %v", err)
+	}
+	if !fetched {
+		t.Fatal("the launcher should have tried the fetch: the image does not say which release it is")
+	}
+
+	// With no image there is nothing to boot, so the failure is the answer.
+	empty := t.TempDir()
+	if err := ensureAppliance(context.Background(), t.TempDir(), empty, false, false, "v0.10.0-beta.13"); err == nil {
+		t.Error("a missing image cannot be booted, so the fetch failure is fatal")
+	}
+}
+
+// Whether the image is replaced, and nothing else: a refresh always, a missing or broken image
+// always, an image from another release yes, and the two trees this launcher does not own no.
+func TestWhenTheImageIsReplaced(t *testing.T) {
+	good := t.TempDir()
+	for _, path := range []string{"usr/local/bin/acornfall", "usr/local/lib/acornfall/worker/src/main.ts"} {
+		target := filepath.Join(good, path)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := stampAppliance(good, "v0.10.0-beta.13"); err != nil {
+		t.Fatal(err)
+	}
+	empty := t.TempDir()
+
+	for _, c := range []struct {
+		name    string
+		image   string
+		tag     string
+		refresh bool
+		given   bool
+		want    bool
+	}{
+		{"the release this build runs", good, "v0.10.0-beta.13", false, false, false},
+		{"another release", good, "v0.10.0-beta.14", false, false, true},
+		{"a refresh asks for it", good, "v0.10.0-beta.13", true, false, true},
+		{"nothing there to boot", empty, "v0.10.0-beta.13", false, false, true},
+		{"a named image is the person's", good, "v0.10.0-beta.14", false, true, false},
+		{"a named image that is not one is still fetched", empty, "v0.10.0-beta.13", false, true, true},
+	} {
+		if got := applianceWillReplace(c.image, c.tag, c.refresh, c.given); got != c.want {
+			t.Errorf("%s: applianceWillReplace = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
