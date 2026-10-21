@@ -66,3 +66,7 @@ container.
 - The build script takes `VERSION`, so a hand build can name its release: `VERSION=v0.10.0 ./scripts/build-appliance.sh`.
   A hand build that does not is stamped by the launcher when it fetches one, not when it is given
   with `--image`.
+- The image that shipped as beta.13 carries no release: its build ran before CI passed `VERSION`
+  into the builder machine (`msb exec` carries the command, not the step's environment). The
+  launcher stamped it on the machine that fetched it — which is the path every install takes, and
+  the release's own proof shows it — and the next appliance carries the mark from the build.

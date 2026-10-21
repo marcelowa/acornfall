@@ -130,8 +130,10 @@ jobs:
           trap '"$MSB" stop --force appliance-builder >/dev/null 2>&1 || true' EXIT
           "$MSB" exec appliance-builder -- sh -c \
             'apt-get update -qq && apt-get install -y -qq lxc skopeo umoci jq unzip curl'
+          # VERSION is passed inside the exec, not in the step's env: the build runs in a machine of
+          # its own, and `msb exec` carries the command, not this shell's environment.
           "$MSB" exec appliance-builder -- sh -c \
-            "cd '$PWD' && BINARY='$PWD/bin/acornfall' WORKER='$PWD/worker' \
+            "cd '$PWD' && BINARY='$PWD/bin/acornfall' WORKER='$PWD/worker' VERSION='$VERSION' \
              sh scripts/build-appliance.sh '$PWD/dist/appliance-linux-amd64.tar.gz'"
       - uses: actions/upload-artifact@v4
         with:
