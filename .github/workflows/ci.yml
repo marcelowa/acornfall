@@ -46,6 +46,15 @@ jobs:
       # missing install would look like a pass.
       - run: make deps
       - run: make tools
+      # What the tree holds has to build before anything is generated. `go:embed all:dist`
+      # needs the placeholder in gateway/web/dist, and a local `make ui-build` cleaned it out
+      # of the tree twice: the working copy builds (the bundle is there), a fresh clone does
+      # not, and only this catches the difference.
+      - name: A fresh checkout builds
+        run: |
+          rm -rf /tmp/clean && mkdir -p /tmp/clean
+          git archive HEAD | tar -x -C /tmp/clean
+          cd /tmp/clean/gateway && go build ./...
       - run: make test
 
   commits:
