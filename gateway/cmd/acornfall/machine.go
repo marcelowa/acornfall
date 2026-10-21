@@ -5,12 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/acornfall/acornfall/gateway/internal/httpapi"
 	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
@@ -136,17 +139,9 @@ func machineUp(argv []string) {
 	if err := driver.EnsureMachine(ctx); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	// The address a browser can open: 0.0.0.0 means "every interface", which is not one.
-	browsable := *host
-	if browsable == "0.0.0.0" || browsable == "::" {
-		browsable = "127.0.0.1"
-	}
-	url := fmt.Sprintf("http://%s:%d", browsable, *port)
-	if *host != "127.0.0.1" && *host != "::1" && *host != "localhost" {
-		// Not an error: a lab VM or a tailnet is a real place to want this. Saying it once, here,
-		// with the address and port it is actually on, is cheaper than the surprise of finding the
-		// console open to a network later.
-		fmt.Fprintf(os.Stderr, "machine: publishing on %s:%d, and the appliance has no authentication\n", *host, *port)
+	url := consoleURL(*host, *port)
+	if notice := publishNotice(*host, *port, token != ""); notice != "" {
+		fmt.Fprint(os.Stderr, notice)
 	}
 	log.Printf("machine: the console is %s", url)
 	if *wait <= 0 {
@@ -156,6 +151,35 @@ func machineUp(argv []string) {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	log.Printf("machine: the appliance is serving on %s", url)
+}
+
+// consoleURL is the address a browser can open. "Every interface" is not an address, so the
+// wildcard becomes loopback; and an IPv6 literal needs its brackets, or the URL names a port that
+// does not exist.
+func consoleURL(host string, port int) string {
+	browsable := host
+	if browsable == "" || browsable == "0.0.0.0" || browsable == "::" {
+		browsable = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(browsable, strconv.Itoa(port))
+}
+
+// publishNotice is the one line a person reads when the console is not on loopback, and nothing
+// when it is. It names host and port, because "0.0.0.0" alone is not somewhere anyone can go; and
+// it says which of the two authentication situations the install is in, because a notice that says
+// "no authentication" over an install that carries a token is a notice people learn to skip.
+//
+// Not an error: a lab VM or a tailnet is a real place to want this. Saying it once, with the
+// address it is actually on, is cheaper than the surprise of finding the console open to a network
+// later.
+func publishNotice(host string, port int, authenticated bool) string {
+	if httpapi.IsLoopback(host) {
+		return ""
+	}
+	if authenticated {
+		return fmt.Sprintf("machine: publishing on %s:%d; the console asks for the token in config/token\n", host, port)
+	}
+	return fmt.Sprintf("machine: publishing on %s:%d, and the appliance has no authentication\n", host, port)
 }
 
 // machineStatus reports whether the machine is there, without making anything: asking a machine
