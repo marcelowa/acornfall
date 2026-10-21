@@ -136,11 +136,17 @@ func machineUp(argv []string) {
 	if err := driver.EnsureMachine(ctx); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	// The address a browser can open: 0.0.0.0 means "every interface", which is not one.
+	browsable := *host
+	if browsable == "0.0.0.0" || browsable == "::" {
+		browsable = "127.0.0.1"
+	}
+	url := fmt.Sprintf("http://%s:%d", browsable, *port)
 	if *host != "127.0.0.1" && *host != "::1" && *host != "localhost" {
 		// Not an error: a lab VM or a tailnet is a real place to want this. Saying it once, here,
-		// is cheaper than the surprise of finding the console open to a network later.
-		fmt.Fprintf(os.Stderr, "machine: publishing on %s, and the appliance has no authentication\n", *host)
+		// with the address and port it is actually on, is cheaper than the surprise of finding the
+		// console open to a network later.
+		fmt.Fprintf(os.Stderr, "machine: publishing on %s:%d, and the appliance has no authentication\n", *host, *port)
 	}
 	log.Printf("machine: the console is %s", url)
 	if *wait <= 0 {
