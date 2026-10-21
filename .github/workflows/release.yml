@@ -184,7 +184,7 @@ jobs:
   # published binary as the runner user: the unprivileged install the docs promise, executed.
   prove:
     needs: publish
-    runs-on: ${{ inputs.runner || 'kvm' }}
+    runs-on: kvm
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

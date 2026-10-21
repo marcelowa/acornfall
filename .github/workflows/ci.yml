@@ -49,7 +49,7 @@ jobs:
       - run: make test
 
   commits:
-    # The commit format is a standard (`.pi/skills/conventional-commits`), so it is checked
+    # The commit format is a standard (`.agents/skills/conventional-commits`), so it is checked
     # rather than trusted — over the commits a push adds, not all of history.
     runs-on: [self-hosted, linux, x64]
     steps:
