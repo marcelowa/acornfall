@@ -116,15 +116,15 @@ The chain is **conversation → its definition → this workspace → the instal
 | R7 | Slash commands come from two layers, the workspace shadowing the install, and the listing says which file each came from. | `TestCommandsComeFromBothLayersAndTheWorkspaceWins` |
 | R8 | Expansion happens server-side, so the transcript records what the model saw; arguments are appended when there is no placeholder. | `TestCommandExpansionIsWhatTheModelSees`, `TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder` + `worker/test/commands.test.ts` |
 | R9 | A message that merely starts with a slash is not rewritten. | `TestAnUnknownCommandIsSentAsWritten` |
-| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
-| R11 | The global resource folders are mounted into every sandbox at their own paths, read-only, so a skill's instructions can name a script and have it run. The install folder itself — credentials, token, state — is never mounted. | `TestAGlobalSkillsScriptRunsInsideTheWorkspace`, `TestGlobalPathsAreTheResourceFoldersAndNeverTheInstall`, `TestRenderMountsTheGlobalsReadOnly` |
+| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the install level (`~/acornfall/.agents`, the one folder the machine mounts) as well as in the workspace. Ours wins when a folder has both. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
+| R11 | The global resource folders are mounted into every sandbox at their own paths, read-only, so a skill's instructions can name a script and have it run. The install folder itself — credentials, token, state — is never mounted. | `TestAGlobalSkillsScriptRunsInsideTheWorkspace`, `TestGlobalPathsAreTheBundleAndNeverTheRootsPrivateFiles`, `TestRenderMountsTheGlobalsReadOnly` |
 
 ## Guards
 
 | # | Feature | Test |
 |---|---|---|
-| G1 | A guard blocks a tool call and tells the model why; the transcript records the call and the refusal. | `TestTrustDecidesWhetherAWorkspaceIsRead`, `worker/test/hooks.test.ts` |
-| G2 | Guards accumulate across layers: one added anywhere holds everywhere. | `worker/test/config.test.ts`, `TestTrustDecidesWhetherAWorkspaceIsRead` |
+| G1 | A guard blocks a tool call and tells the model why; the transcript records the call and the refusal. | `TestAWorkspacesOwnResourcesAreRead`, `worker/test/hooks.test.ts` |
+| G2 | Guards accumulate across layers: one added anywhere holds everywhere. | `worker/test/config.test.ts`, `TestAWorkspacesOwnResourcesAreRead` |
 | G3 | A guard that cannot be understood is an error where it is written, not a rule that quietly does nothing. | `worker/test/config.test.ts`, `TestABrokenWorkspaceFileIsReportedAndHeals` |
 | G4 | Path confinement survives `..`, sibling prefixes, and the workspace directory itself. | `worker/test/hooks.test.ts` |
 
