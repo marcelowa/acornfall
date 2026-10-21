@@ -5,7 +5,7 @@ Date: 2026-10-21
 
 ## Context
 
-Two betas in a row shipped an appliance image that could not boot. The tests were green for both,
+Two betas shipped an appliance image that could not boot. The tests were green for both,
 because every live test booted a **directory** built by `scripts/build-appliance.sh`, and a release
 ships a **tarball**. The two differ exactly in what tar carries: symlinks, hard links, device nodes.
 
@@ -58,7 +58,8 @@ shipped. It was not a gap in coverage — the tests were thorough about the wron
   Not chosen: every failed proof would become a publish that never happened, and the artefacts would
   move twice (the appliance alone is 193 MiB). Worth revisiting if a broken release ever reaches
   someone twice.
-- **A person smoke-testing before a tag** — tried seven times in this beta, wrong twice.
+- **A person smoke-testing before a tag** — the person installing the beta was the smoke test,
+  twice, and both times the report was a broken install.
 - **Trust the artifact from the same run** — the artifact is what the build produced; the release
   asset is what a person downloads. The round trip through the release is the whole point.
 
@@ -77,8 +78,8 @@ shipped. It was not a gap in coverage — the tests were thorough about the wron
   booted.
 - The unpacker now has two callers that matter (`machine up`, the proof), so its symlink and
   hard-link handling is pinned by `TestTheImageKeepsItsSymlinksAndItsLinks`.
-- The proof depends on the release API and on the runner having `python3` and no `jq` — its first
-  finding was about itself: the asset lookup used `jq`, which this runner does not have (beta 4).
+- The proof reads the release API with `python3`, because this runner has no `jq` — its first
+  finding was about itself (beta 4).
 - The appliance is still stored as a 193 MiB artifact per release. The proof reads the release, not
   the artifact, so the artifact is now only a hand-off between jobs — and the next change removes it
   by uploading straight to a draft release.

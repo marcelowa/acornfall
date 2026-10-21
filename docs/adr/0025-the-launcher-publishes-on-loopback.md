@@ -8,10 +8,11 @@ Date: 2026-10-21
 ADR 0022 left the host one job: boot the machine and publish the one port the console uses. That
 port is therefore the product's **whole** network edge — there is no other door into an install.
 
-What sits behind it is a console started with `--insecure` in this build, because the appliance has
-no secrets of its own and the mount is the only place a token could live (`applianceInit` reads
-`<root>/config/token`, and most installs do not have one). An unauthenticated console is not a page
-someone can read: it is a shell with the user's files, the provider key, and tool execution.
+What sits behind it is a console started with `--insecure` unless the mount carries a token, because
+the appliance has no secrets of its own and the mount is the only place a token could live
+(`applianceInit` reads `<root>/config/token`, and nothing in the launcher writes one). An
+unauthenticated console is not a page someone can read: it is a shell with the user's files, the
+provider key, and tool execution.
 
 The first shape published `127.0.0.1` and nothing else. That is right for the person at the
 keyboard and wrong for the owner's own box: `acornd` is a Proxmox VM, so reaching the console from a
