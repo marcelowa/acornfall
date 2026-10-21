@@ -69,6 +69,12 @@ shipped. It was not a gap in coverage — the tests were thorough about the wron
 - A green `prove` is narrower than "the release works": it says the tarball's bytes boot on the
   published binary and serve the console. Containers, tools, and models are other claims with other
   tests.
+- **A hash the runner has not seen makes the branch loop green and empty.** The job warns and skips
+  the boot, so `prove` succeeds without booting anything — the same shape of claim this ADR exists
+  to kill. Every change to `gateway/**`, `worker/src/**` or the build script changes the hash, so
+  after a code change only a tag produces an appliance for the runner to boot. Building on a miss
+  is the next change, and until it lands a green `prove` on a push is not evidence that anything
+  booted.
 - The unpacker now has two callers that matter (`machine up`, the proof), so its symlink and
   hard-link handling is pinned by `TestTheImageKeepsItsSymlinksAndItsLinks`.
 - The proof depends on the release API and on the runner having `python3` and no `jq` — its first
