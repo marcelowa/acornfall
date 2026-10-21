@@ -78,16 +78,6 @@ func (l Layout) Tools() string { return filepath.Join(l.Home, "tools") }
 // Store is the engine's own store: images, sandboxes, and the machine's disk.
 func (l Layout) Store() string { return filepath.Join(l.Home, "sandboxes") }
 
-// Version is the install's version file, which the updater writes and doctor reads.
-func (l Layout) Version() string { return filepath.Join(l.Home, "version") }
-
-// UpdateState is the updater's own bookkeeping.
-func (l Layout) UpdateState() string { return filepath.Join(l.Home, "update.json") }
-
-// Backups is where the updater keeps what it would restore after a bad update: the machinery's
-// own files. The product's files are in the mount, which an update does not touch.
-func (l Layout) Backups() string { return filepath.Join(l.Home, "backups") }
-
 // Ensure creates both folders and the shape inside them, so a fresh install has somewhere to
 // write and a sandbox has somewhere to mount from.
 func (l Layout) Ensure() error {

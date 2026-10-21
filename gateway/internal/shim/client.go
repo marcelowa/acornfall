@@ -35,17 +35,6 @@ type pending struct {
 	chunks func(Message)
 }
 
-// Dial opens the shim's socket. The shim listens on a unix socket inside the machine, which the
-// engine publishes to the host; when the two are the same machine (a test, or a shim run
-// beside the gateway) a plain unix socket is the whole path.
-func Dial(path string) (*Client, error) {
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		return nil, fmt.Errorf("shim: cannot reach the container shim at %s: %w", path, err)
-	}
-	return NewClient(conn), nil
-}
-
 // NewClient wraps a connection that already reaches a shim: a socket, a pipe, or a test's pair.
 func NewClient(conn net.Conn) *Client {
 	client := &Client{conn: conn, calls: map[uint64]*pending{}, done: make(chan struct{})}
