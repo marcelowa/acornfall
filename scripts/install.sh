@@ -4,9 +4,10 @@
 #
 #   ACORNFALL_GITHUB_TOKEN=... sh install.sh [--dir DIR] [--version TAG]
 #
-# While the repo is private the token is required (fine-grained,
-# read-only, this repo); releases answer 404 without it. --dir defaults
-# to ~/.acornfall/bin, --version to the latest release.
+# The repository is public, so no token is needed. The token is optional
+# and lifts GitHub's anonymous rate limit (60 requests an hour), which a
+# shared address can exhaust — the failure then is a 403, not a 404.
+# --dir defaults to ~/.acornfall/bin, --version to the latest release.
 set -eu
 
 DIR="${ACORNFALL_BIN_DIR:-$HOME/.acornfall/bin}"
@@ -53,12 +54,12 @@ api() {
 # grep answers instead of a parser nobody guaranteed.
 if [ -z "$VERSION" ]; then
 	VERSION="$(api https://api.github.com/repos/marcelowa/acornfall/releases/latest | tr -d '\n ' | grep -o '"tag_name":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
-	[ -n "$VERSION" ] || { echo "install.sh: no releases yet, or the token is missing"; exit 2; }
+	[ -n "$VERSION" ] || { echo "install.sh: no releases yet, or GitHub is rate-limiting this host (set ACORNFALL_GITHUB_TOKEN)"; exit 2; }
 fi
 echo "install.sh: release $VERSION, asset $asset"
 
 release="$(api "https://api.github.com/repos/marcelowa/acornfall/releases/tags/$VERSION" | tr -d '\n ')" || {
-	echo "install.sh: cannot read release $VERSION (private repo needs ACORNFALL_GITHUB_TOKEN)"
+	echo "install.sh: cannot read release $VERSION (a missing release is a 404; a 403 is GitHub's rate limit, lifted by ACORNFALL_GITHUB_TOKEN)"
 	exit 2
 }
 asset_id() {
@@ -87,8 +88,7 @@ echo "install.sh: preflight"
 "$DIR/acornfall" doctor || true
 cat <<EOF
 install.sh: next
-  export ACORNFALL_GITHUB_TOKEN='...'   # while the repo is private
   export PATH="\$PATH:$DIR"
+  acornfall machine up                  # boots the appliance machine; the console prints its URL
   acornfall provider add opencode-go "\$OPENCODE_API_KEY"
-  acornfall --workspace ~/acornfall/workspaces
 EOF
