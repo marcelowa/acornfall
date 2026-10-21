@@ -58,6 +58,7 @@ running system:
   the shim runs in-process over a `net.Pipe` instead of over a socket to a separate process
 - the gateway binds `0.0.0.0:7777` *inside* the machine, because the engine's port forward cannot
   reach the guest's loopback; the host side stays on `127.0.0.1` unless `--host` says otherwise
+  ([ADR 0025](../adr/0025-the-launcher-publishes-on-loopback.md))
 
 ## The container's two `/dev`s
 
@@ -109,7 +110,8 @@ Ceilings and shares, never reservations:
 - `prove` boots the published tarball with the install's own code, and runs `machine up` with the
   published binary as an unprivileged runner user — the artefact proving itself before anyone installs it
 - `prove.yml` runs the same boot on a branch push from the appliance the runner keeps on disk, so a
-  fix is tested in minutes rather than a release cycle
+  fix is tested in minutes rather than a release cycle. On a hash the runner has not seen it **warns
+  and skips the boot**: the run is green and nothing booted ([ADR 0024](../adr/0024-a-release-proves-its-own-artefact.md))
 
 Two known costs, both being worked: `publish` moves ~260 MB through artifact storage (the fix is a
 draft release each job uploads to directly), and the appliance is stored as a 193 MiB artifact per
