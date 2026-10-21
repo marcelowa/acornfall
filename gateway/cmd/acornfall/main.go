@@ -344,11 +344,12 @@ func versionString(home string) (string, error) {
 
 func providers(argv []string) {
 	flags := flag.NewFlagSet("provider", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "data directory")
-	if err := flags.Parse(argv); err != nil {
+	dataDir := flags.String("data-dir", "", "the machinery folder")
+	rootDir := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	args, ok := parseArgs(flags, argv)
+	if !ok {
 		return
 	}
-	args := flags.Args()
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: acornfall provider <list|add|remove>")
 		os.Exit(2)
@@ -360,7 +361,7 @@ func providers(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	root, err := resolveRoot("", "")
+	root, err := resolveRoot(*rootDir, "")
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
@@ -502,18 +503,42 @@ The interface cannot do this: it creates workspaces inside the workspaces folder
 which is what keeps it inside one directory. This edits the registry directly, and the
 gateway picks the change up on its next start.
 */
-func workspaceCommand(argv []string) {
-	flags := flag.NewFlagSet("workspace", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
-	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
-	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
-	if err := flags.Parse(argv); err != nil {
-		return
+// parseArgs parses flags that may sit anywhere among the positional arguments. One Parse does
+// not do that: the flag package stops at the first word that is not a flag, so a flag written
+// after an operand was ignored without a word — `workspace add lab /srv/lab --image golang`
+// created a workspace on the default image. Every command here reads "command operand --flag".
+func parseArgs(flags *flag.FlagSet, argv []string) ([]string, bool) {
+	var args []string
+	for rest := argv; ; {
+		if err := flags.Parse(rest); err != nil {
+			return nil, false
+		}
+		rest = flags.Args()
+		if len(rest) == 0 {
+			return args, true
+		}
+		args = append(args, rest[0])
+		rest = rest[1:]
 	}
-	args := flags.Args()
-	if len(args) == 0 {
+}
+
+func workspaceCommand(argv []string) {
+	if len(argv) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove> [--image IMAGE] [--network on|off]")
 		os.Exit(2)
+	}
+	// The command comes first and its flags may sit anywhere after it, the way the usage line
+	// reads. One Parse does not do that — the flag package stops at the first word that is not a
+	// flag — so `workspace add lab /srv/lab --image golang` ignored --image and said nothing.
+	command := argv[0]
+	flags := flag.NewFlagSet("workspace "+command, flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the machinery folder")
+	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
+	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
+	args, ok := parseArgs(flags, argv[1:])
+	if !ok {
+		return
 	}
 	if *network != "" && !control.ValidNetwork(*network) {
 		fmt.Fprintln(os.Stderr, `acornfall: --network is "on" or "off"`)
@@ -523,13 +548,19 @@ func workspaceCommand(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	path := filepath.Join(dir, "workspaces.json")
-	registry, err := control.LoadRegistryFile(path)
+	resolvedRoot, err := resolveRoot(*root, "")
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	// The registry lives in the mount, where the gateway reads it: this command used to write
+	// the machinery folder, so a workspace added here was one the gateway never saw.
+	where := layout.New(resolvedRoot, dir)
+	registry, err := control.LoadRegistryFile(where.Registry())
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
 
-	switch args[0] {
+	switch command {
 	case "list":
 		if len(registry.Workspaces) == 0 {
 			fmt.Println("no workspaces registered")
@@ -544,14 +575,14 @@ func workspaceCommand(argv []string) {
 		}
 		fmt.Printf("\nworkspaces folder: %s\n", registry.WorkspacesDir)
 	case "add":
-		if len(args) < 2 {
+		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> [folder] [--image IMAGE] [--network on|off]")
 			os.Exit(2)
 		}
-		name := args[1]
+		name := args[0]
 		folder := name
-		if len(args) > 2 {
-			folder = args[2]
+		if len(args) > 1 {
+			folder = args[1]
 		}
 		absolute, err := filepath.Abs(folder)
 		if err != nil {
@@ -568,20 +599,20 @@ func workspaceCommand(argv []string) {
 		registry.Workspaces = append(registry.Workspaces, control.Workspace{
 			Name: name, Path: absolute, Title: name, Image: *image, Network: *network,
 		})
-		if err := control.SaveRegistryFile(registry); err != nil {
+		if err := saveRegistry(where, registry); err != nil {
 			log.Fatalf("acornfall: %v", err)
 		}
 		fmt.Printf("added %s at %s\n", name, absolute)
 		fmt.Printf("sandbox: %s, network %s\n", imageLabel(*image), networkLabel(*network))
 	case "remove":
-		if len(args) < 2 {
+		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: acornfall workspace remove <name>")
 			os.Exit(2)
 		}
 		kept := registry.Workspaces[:0]
 		removed := false
 		for _, workspace := range registry.Workspaces {
-			if workspace.Name != args[1] {
+			if workspace.Name != args[0] {
 				kept = append(kept, workspace)
 				continue
 			}
@@ -591,17 +622,26 @@ func workspaceCommand(argv []string) {
 			removed = true
 		}
 		if !removed {
-			log.Fatalf("acornfall: no workspace %q", args[1])
+			log.Fatalf("acornfall: no workspace %q", args[0])
 		}
 		registry.Workspaces = kept
-		if err := control.SaveRegistryFile(registry); err != nil {
+		if err := saveRegistry(where, registry); err != nil {
 			log.Fatalf("acornfall: %v", err)
 		}
-		fmt.Printf("removed %s (its folder and history are untouched)\n", args[1])
+		fmt.Printf("removed %s (its folder and history are untouched)\n", args[0])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown workspace command %q\n", args[0])
+		fmt.Fprintf(os.Stderr, "unknown workspace command %q\n", command)
 		os.Exit(2)
 	}
+}
+
+// saveRegistry writes the registry where the gateway will read it, creating the state folder on
+// the way: a command run before the first boot still leaves a registry the gateway finds.
+func saveRegistry(where layout.Layout, registry control.RegistryFile) error {
+	if err := os.MkdirAll(where.StateDir(), 0o700); err != nil {
+		return err
+	}
+	return control.SaveRegistryFile(registry)
 }
 
 // sandboxLabel is what a workspace's sandbox will be, for the list column: short enough to
