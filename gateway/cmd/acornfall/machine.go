@@ -65,7 +65,10 @@ func machineUp(argv []string) {
 	image := flags.String("image", "", "the appliance image, an unpacked rootfs (default: <home>/appliance/rootfs)")
 	tag := flags.String("tag", "", "the release to fetch the appliance from (default: this build's version)")
 	refresh := flags.Bool("refresh", false, "fetch the appliance again and recreate the machine: an init is fixed at boot, so an update is a new machine")
-	port := flags.Int("port", 7777, "the host port the console is published on, on loopback")
+	port := flags.Int("port", 7777, "the host port the console is published on")
+	// Loopback by default because the appliance runs with --insecure: a console with no
+	// authentication on a network address is a shell anyone on that network can use.
+	host := flags.String("host", "127.0.0.1", "the host address the console is published on (0.0.0.0 exposes an unauthenticated console)")
 	cpus := flags.Int("cpus", 2, "virtual cpus for the machine")
 	memory := flags.String("memory", "4G", "memory for the machine")
 	wait := flags.Duration("wait", 3*time.Minute, "how long to wait for the console; zero does not wait")
@@ -108,7 +111,7 @@ func machineUp(argv []string) {
 	if err := ensureAppliance(ctx, resolvedHome, resolvedImage, *refresh, *tag); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, *cpus, *memory, *port, applianceInit(resolvedRoot, token))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, *cpus, *memory, *port, *host, applianceInit(resolvedRoot, token))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -134,6 +137,11 @@ func machineUp(argv []string) {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	if *host != "127.0.0.1" && *host != "::1" && *host != "localhost" {
+		// Not an error: a lab VM or a tailnet is a real place to want this. Saying it once, here,
+		// is cheaper than the surprise of finding the console open to a network later.
+		fmt.Fprintf(os.Stderr, "machine: publishing on %s, and the appliance has no authentication\n", *host)
+	}
 	log.Printf("machine: the console is %s", url)
 	if *wait <= 0 {
 		return
@@ -166,7 +174,7 @@ func machineStatus(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, applianceInit(resolvedRoot, ""))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -201,7 +209,7 @@ func machineStatus(argv []string) {
 // the appliance's own gateway — it is in the machine, and its containers are its neighbours —
 // but the machine's configuration still carries it, because the host may need the same door for
 // the engine that reaches containers from outside (internal/sandbox/lxcengine.go).
-func machineDriver(home, image, root string, cpus int, memory string, port int, start string) (*sandbox.LXC, error) {
+func machineDriver(home, image, root string, cpus int, memory string, port int, host string, start string) (*sandbox.LXC, error) {
 	binary, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("this binary's own path is what the machine runs the shim from: %w", err)
@@ -214,7 +222,7 @@ func machineDriver(home, image, root string, cpus int, memory string, port int, 
 		ShareRoot: root,
 	}
 	driver := sandbox.NewLXC(engine, machine, filepath.Join(home, "state", "machine.sock"), binary)
-	driver = driver.WithAppliance(start, fmt.Sprintf("127.0.0.1:%d:7777", port))
+	driver = driver.WithAppliance(start, fmt.Sprintf("%s:%d:7777", host, port))
 	return driver, nil
 }
 
@@ -339,7 +347,7 @@ func machineDown(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, applianceInit(resolvedRoot, ""))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -377,7 +385,7 @@ func machineStop(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, applianceInit(resolvedRoot, ""))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
