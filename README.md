@@ -80,7 +80,7 @@ chmod +x acornfall-linux-amd64
 
 0.10 runs the whole product inside one machine per install, and the host is a launcher:
 `machine up`, `status`, `stop`, `down`, `restart`. What lives inside the mount, what a
-fresh install fetches, and the four traps of the beta are in
+fresh install fetches, and how to read a failure are in
 [docs/installing.md](docs/installing.md); the architecture is
 [docs/engineering/the-appliance.md](docs/engineering/the-appliance.md).
 

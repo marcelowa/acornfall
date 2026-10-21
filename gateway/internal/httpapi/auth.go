@@ -34,9 +34,9 @@ func IsLoopback(addr string) bool {
 
 // ResolveToken returns the shared secret guarding this listener, or "" when the
 // listener is loopback-only or auth is disabled. A reachable listener without an
-// explicit token gets a generated one persisted beside the other state, so the
-// URL stays stable.
-func ResolveToken(explicit, env, dataDir, addr string, disabled bool) (string, error) {
+// explicit token gets a generated one persisted in configDir — the install's config
+// folder inside the mount — so the URL stays stable across restarts.
+func ResolveToken(explicit, env, configDir, addr string, disabled bool) (string, error) {
 	if disabled {
 		return "", nil
 	}
@@ -49,7 +49,7 @@ func ResolveToken(explicit, env, dataDir, addr string, disabled bool) (string, e
 	if IsLoopback(addr) {
 		return "", nil
 	}
-	path := filepath.Join(dataDir, "token")
+	path := filepath.Join(configDir, "token")
 	if payload, err := os.ReadFile(path); err == nil {
 		if token := strings.TrimSpace(string(payload)); token != "" {
 			return token, nil
