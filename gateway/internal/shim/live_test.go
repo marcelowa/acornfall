@@ -219,7 +219,7 @@ func TestLiveTheShimDrivesAWorkspaceContainer(t *testing.T) {
 	}
 	count := func(process string) int {
 		total := 0
-		for _, line := range strings.Split(names.String(), "\n") {
+		for line := range strings.SplitSeq(names.String(), "\n") {
 			if strings.TrimSpace(line) == process {
 				total++
 			}

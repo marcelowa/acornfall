@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -113,8 +114,7 @@ func (p *process) Wait() (int, error) {
 	if err == nil {
 		return 0, nil
 	}
-	var failure *exec.ExitError
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[*exec.ExitError](err); ok {
 		if status, ok := failure.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 			return 128 + int(status.Signal()), nil
 		}
@@ -165,11 +165,7 @@ func (s *Server) Serve(conn io.ReadWriteCloser) error {
 			if err := unmarshal(line, &message); err != nil {
 				return decodeError(err)
 			}
-			current.inflight.Add(1)
-			go func() {
-				defer current.inflight.Done()
-				current.handle(message)
-			}()
+			current.inflight.Go(func() { current.handle(message) })
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -277,7 +273,7 @@ func subIDRanges() (string, error) {
 		names[current.Username] = true
 	}
 	var ranges []string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Split(strings.TrimSpace(line), ":")
 		if len(fields) != 3 {
 			continue
@@ -402,10 +398,8 @@ func (t *session) create(message Message, payload CreatePayload) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range known {
-		if name == payload.Name {
-			return fmt.Errorf("shim: %s already exists", payload.Name)
-		}
+	if slices.Contains(known, payload.Name) {
+		return fmt.Errorf("shim: %s already exists", payload.Name)
 	}
 	image := payload.Image
 	if !strings.Contains(image, "://") {

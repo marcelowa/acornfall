@@ -46,7 +46,7 @@ func DialVSock(port int) (net.Conn, error) {
 func sockaddrVM(port int) [sockaddrVMSize]byte {
 	var address [sockaddrVMSize]byte
 	address[0] = afVsock
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		address[4+i] = byte(port >> (8 * i))
 		address[8+i] = byte(hostCID >> (8 * i))
 	}

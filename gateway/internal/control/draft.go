@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"time"
 
@@ -129,9 +130,7 @@ func (c *Control) persistDrafts() {
 	}
 	c.mu.RLock()
 	drafts := make(map[string]Draft, len(c.drafts))
-	for id, draft := range c.drafts {
-		drafts[id] = draft
-	}
+	maps.Copy(drafts, c.drafts)
 	c.mu.RUnlock()
 
 	payload, err := json.MarshalIndent(persistedDrafts{Drafts: drafts}, "", "  ")

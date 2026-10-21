@@ -312,7 +312,7 @@ func MachineMemoryBytes() int64 {
 	if err != nil {
 		return 0
 	}
-	for _, line := range strings.Split(string(contents), "\n") {
+	for line := range strings.SplitSeq(string(contents), "\n") {
 		if !strings.HasPrefix(line, "MemTotal:") {
 			continue
 		}

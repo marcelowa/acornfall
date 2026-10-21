@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -57,9 +58,7 @@ func (f *fakeLXC) ran(prefix string) []string {
 // without it starts here.
 func newFakeLXC(answers map[string]string) *fakeLXC {
 	all := map[string]string{"lxc-start --version": "6.0.4"}
-	for key, value := range answers {
-		all[key] = value
-	}
+	maps.Copy(all, answers)
 	return &fakeLXC{answers: all}
 }
 

@@ -495,7 +495,7 @@ func TestCallsAreAnsweredBeforeTheConnectionEnds(t *testing.T) {
 		t.Fatal(err)
 	}
 	kinds := map[uint64]string{}
-	for _, line := range strings.Split(strings.TrimSpace(conn.buffer.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(conn.buffer.String()), "\n") {
 		var message Message
 		if err := unmarshal([]byte(line), &message); err != nil {
 			t.Fatalf("a reply that is not a message: %q", line)
