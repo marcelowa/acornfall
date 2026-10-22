@@ -110,9 +110,9 @@ const ecosystemDir = ".agents"
 // `state/` holds every workspace's conversations. The mapping refuses those paths in both
 // directions (see bindPath). docs/adr/0014-global-resources-in-the-sandbox.md,
 // docs/adr/0022-the-appliance-runs-in-the-machine.md.
-func GlobalPaths(root string) []string {
-	paths := []string{filepath.Join(root, ecosystemDir)}
-	config := filepath.Join(root, "config", "config.json")
+func GlobalPaths(share string) []string {
+	paths := []string{filepath.Join(share, ecosystemDir)}
+	config := filepath.Join(share, "config", "config.json")
 	if info, err := os.Stat(config); err == nil && !info.IsDir() {
 		paths = append(paths, config)
 	}
@@ -122,8 +122,8 @@ func GlobalPaths(root string) []string {
 // EnsureGlobal creates the folders GlobalPaths names, so a fresh install has somewhere to
 // mount from. It does not create config.json: an empty one would be a decision about defaults
 // nobody made, and the mount is skipped while the file is absent.
-func EnsureGlobal(root string) error {
-	folder := filepath.Join(root, ecosystemDir)
+func EnsureGlobal(share string) error {
+	folder := filepath.Join(share, ecosystemDir)
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", folder, err)
 	}

@@ -25,7 +25,7 @@ async function scratch(): Promise<{ root: string; workspace: string }> {
 
 /** The roots as the worker builds them: one bundle, and the config folder beside it. */
 function rootsOf(parts: { root: string; workspace: string }): LayerRoots {
-	return layerRoots({ root: parts.root, workspace: parts.workspace });
+	return layerRoots({ share: parts.root, workspace: parts.workspace });
 }
 
 describe("the catalog", () => {

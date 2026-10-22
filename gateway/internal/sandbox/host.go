@@ -67,10 +67,10 @@ func (h *Host) Remove(context.Context, string) error { return nil }
 // Engines are the drivers this build can run, by the name the worker matches with its own
 // client. An unknown name is refused with the list, never silently defaulted: a run that
 // meant microsandbox and got the host would be a security change nobody asked for.
-func Engine(home, state, name string) (Driver, error) {
+func Engine(machinery, state, name string) (Driver, error) {
 	switch name {
 	case "", "microsandbox":
-		driver := NewMicrosandbox(home)
+		driver := NewMicrosandbox(machinery)
 		if state != "" {
 			driver = driver.WithStateDir(state)
 		}
@@ -82,12 +82,12 @@ func Engine(home, state, name string) (Driver, error) {
 		// workspace inside it. Its share root is not chosen yet (the ADR leaves that open), so
 		// it refuses to make a workspace until one is named in the machine's settings rather
 		// than binding a folder nobody picked.
-		engine := NewMicrosandbox(home)
+		engine := NewMicrosandbox(machinery)
 		if state != "" {
 			engine = engine.WithStateDir(state)
 		}
 		binary, _ := os.Executable()
-		return NewLXC(engine, Machine{}, filepath.Join(home, "state", "machine.sock"), binary), nil
+		return NewLXC(engine, Machine{}, filepath.Join(machinery, "state", "machine.sock"), binary), nil
 	default:
 		return nil, errors.New("sandbox: unknown engine " + name + " (microsandbox, lxc, host)")
 	}

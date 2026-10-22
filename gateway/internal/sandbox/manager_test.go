@@ -73,7 +73,7 @@ func (f *fakeDriver) ran(call string) bool {
 
 func openWith(t *testing.T, driver Driver) *Manager {
 	t.Helper()
-	manager, err := Open(context.Background(), Options{Home: t.TempDir(), Driver: driver})
+	manager, err := Open(context.Background(), Options{Machinery: t.TempDir(), Driver: driver})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestStatusFindsTheSandboxByName(t *testing.T) {
 // between a report and an install — and it must not install later either.
 func TestReportOnlyDescribesWithoutChangingAnything(t *testing.T) {
 	driver := &fakeDriver{}
-	manager, err := Open(context.Background(), Options{Home: t.TempDir(), Driver: driver, ReportOnly: true})
+	manager, err := Open(context.Background(), Options{Machinery: t.TempDir(), Driver: driver, ReportOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestReportOnlyDescribesWithoutChangingAnything(t *testing.T) {
 func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
 	ctx := context.Background()
 
-	readable, err := Open(ctx, Options{Home: t.TempDir(), Driver: &fakeDriver{installed: true}, ReportOnly: true})
+	readable, err := Open(ctx, Options{Machinery: t.TempDir(), Driver: &fakeDriver{installed: true}, ReportOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
 	}
 
 	skewed, err := Open(ctx, Options{
-		Home:       t.TempDir(),
+		Machinery:  t.TempDir(),
 		Driver:     &fakeDriver{installed: true, err: errors.New("database schema is newer than this msb binary")},
 		ReportOnly: true,
 	})
@@ -251,7 +251,7 @@ func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
 	}
 
 	// Report-only still changes nothing: verify is a read, not an install.
-	missing, err := Open(ctx, Options{Home: t.TempDir(), Driver: &fakeDriver{}, ReportOnly: true})
+	missing, err := Open(ctx, Options{Machinery: t.TempDir(), Driver: &fakeDriver{}, ReportOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
 }
 
 func TestOpenRefusesWithoutADriverOrHome(t *testing.T) {
-	if _, err := Open(context.Background(), Options{Home: t.TempDir()}); err == nil {
+	if _, err := Open(context.Background(), Options{Machinery: t.TempDir()}); err == nil {
 		t.Error("a manager with no engine is a mistake, not a state")
 	}
 	if _, err := Open(context.Background(), Options{Driver: &fakeDriver{}}); err == nil {

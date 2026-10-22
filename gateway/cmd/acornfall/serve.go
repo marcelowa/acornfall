@@ -60,20 +60,20 @@ type machineControl interface {
 
 // driverMachine is the real one: the engine the launcher already uses, asked the same questions.
 type driverMachine struct {
-	home   string
-	root   string
-	cpus   int
-	memory string
-	port   int
-	host   string
+	machinery string
+	share     string
+	cpus      int
+	memory    string
+	port      int
+	host      string
 }
 
 func (d driverMachine) driver(image string) (*sandbox.LXC, error) {
-	return machineDriver(d.home, image, d.root, d.cpus, d.memory, d.port, d.host, applianceInit(d.root))
+	return machineDriver(d.machinery, image, d.share, d.cpus, d.memory, d.port, d.host, applianceInit(d.share))
 }
 
 func (d driverMachine) Running(ctx context.Context) (bool, error) {
-	engine := sandbox.NewMicrosandbox(d.home)
+	engine := sandbox.NewMicrosandbox(d.machinery)
 	if !engine.Installed() {
 		// No engine is no machine, which is the same answer and not an error: asking must not install.
 		return false, nil
@@ -82,7 +82,7 @@ func (d driverMachine) Running(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	name := sandbox.MachineName(d.home)
+	name := sandbox.MachineName(d.machinery)
 	for _, instance := range instances {
 		if instance.Name == name {
 			return instance.Running(), nil
@@ -92,7 +92,7 @@ func (d driverMachine) Running(ctx context.Context) (bool, error) {
 }
 
 func (d driverMachine) Remove(ctx context.Context) error {
-	driver, err := d.driver(applianceDisk(d.home))
+	driver, err := d.driver(applianceDisk(d.machinery))
 	if err != nil {
 		return err
 	}
@@ -110,10 +110,10 @@ func (d driverMachine) Boot(ctx context.Context, image string) error {
 // supervisor is the service's head. Its decisions live here and its I/O lives behind the seams, so a
 // test drives a crash loop, the cap and a failed apply without a hypervisor and without the clock.
 type supervisor struct {
-	home    string
-	root    string
-	service string
-	machine machineControl
+	machinery string
+	share     string
+	service   string
+	machine   machineControl
 	// up makes sure there is something to boot and says where it is: the layout decision, without
 	// taking away a machine that is running.
 	up    func(ctx context.Context) (string, error)
@@ -167,7 +167,7 @@ func (s *supervisor) tick(ctx context.Context) update.HostState {
 	// declaration is a host where a person drives, and a machine taken down stays down (ADR 0030,
 	// amended). This is the one place the question is asked — the start below and the boot after an
 	// apply both come through here or through the same rule.
-	wanted := update.WantsRunning(s.root)
+	wanted := update.WantsRunning(s.share)
 	if wanted && !now.Before(s.upHeld) {
 		if image, err := s.up(ctx); err != nil {
 			s.lastErr = err.Error()
@@ -192,14 +192,14 @@ func (s *supervisor) tick(ctx context.Context) update.HostState {
 		if !running && wanted {
 			// A disk that is being replaced must not be booted: the process holding the lock is writing the tree
 			// this would start a machine on. It is not a failure, and the next tick asks again.
-			if update.LockHeld(s.root, now) {
+			if update.LockHeld(s.share, now) {
 				log.Printf("machine serve: not starting the machine: an update holds the disk")
 			} else {
 				running = s.start(ctx, now)
 			}
 		}
 	}
-	version := applianceRunningVersion(s.home)
+	version := applianceRunningVersion(s.machinery)
 	s.reconcileSelf(ctx, now, running, version)
 	return update.HostState{
 		Running:   running,
@@ -214,14 +214,14 @@ func (s *supervisor) tick(ctx context.Context) update.HostState {
 // refusal or a failure is a sentence in is.json, and the machine that is running is left exactly as
 // it is — an update that failed must never take an install down with it (ADR 0030, decision 4).
 func (s *supervisor) reconcile(ctx context.Context, now time.Time) {
-	want, err := update.ReadWant(s.root)
+	want, err := update.ReadWant(s.share)
 	if err != nil {
 		// A want.json the service refuses: the sentence names what is wrong with it, and nothing is
 		// fetched on the strength of a value that did not parse.
 		s.lastErr = err.Error()
 		return
 	}
-	if want.Version == "" || want.Version == applianceRunningVersion(s.home) {
+	if want.Version == "" || want.Version == applianceRunningVersion(s.machinery) {
 		return
 	}
 	if want.Version == s.failedTag && now.Sub(s.failedAt) < applyRetry {
@@ -230,7 +230,7 @@ func (s *supervisor) reconcile(ctx context.Context, now time.Time) {
 	// One update at a time per host: `machine update` writes the same disk, so a second apply while it
 	// runs is a state this design does not have (ADR 0031). A live lock is not a failure — the next tick
 	// asks again — and the lock is released on every way out of here.
-	unlock, note, lockErr := update.AcquireLock(s.root, now)
+	unlock, note, lockErr := update.AcquireLock(s.share, now)
 	if lockErr != nil {
 		log.Printf("machine serve: the machine's update waits: %v", lockErr)
 		return
@@ -250,7 +250,7 @@ func (s *supervisor) reconcile(ctx context.Context, now time.Time) {
 	s.lastErr = ""
 	// A request kept for a machine nobody declared running is not an apply, and the log must not say
 	// it was: the next tick after `up` picks it up with no other code (ADR 0030, amended).
-	if applianceRunningVersion(s.home) != want.Version {
+	if applianceRunningVersion(s.machinery) != want.Version {
 		return
 	}
 	log.Printf("machine serve: applied %s; the machine runs it now", want.Version)
@@ -269,14 +269,14 @@ func (s *supervisor) reconcileSelf(ctx context.Context, now time.Time, running b
 	if !s.ownsSelf {
 		if !s.selfRefused {
 			s.selfRefused = true
-			s.lastErr = "this service was not started through " + update.OwnedBinary(s.home) + ", so it will not replace itself"
+			s.lastErr = "this service was not started through " + update.OwnedBinary(s.machinery) + ", so it will not replace itself"
 			log.Printf("machine serve: %s", s.lastErr)
 		}
 		return
 	}
 	// Another process may have put this release in place — `machine update` does — and then the only
 	// thing left is to restart into it.
-	if update.PointsAt(s.home, version) {
+	if update.PointsAt(s.machinery, version) {
 		log.Printf("machine serve: %s is in place for the host; this process exits so the supervisor starts it", version)
 		s.exit(0)
 		return
@@ -310,7 +310,7 @@ func (s *supervisor) reconcileSelf(ctx context.Context, now time.Time, running b
 // the caller exits next, and an exit does not run a deferred unlock (ADR 0031, the leak that made a
 // dead pid's lock the next run's problem).
 func (s *supervisor) takeSelf(ctx context.Context, now time.Time, version string) error {
-	unlock, note, err := update.AcquireLock(s.root, now)
+	unlock, note, err := update.AcquireLock(s.share, now)
 	if err != nil {
 		return err
 	}
@@ -322,7 +322,7 @@ func (s *supervisor) takeSelf(ctx context.Context, now time.Time, version string
 	if err != nil {
 		return err
 	}
-	return update.SwapSelf(s.home, s.root, version, binary)
+	return update.SwapSelf(s.machinery, s.share, version, binary)
 }
 
 // holdSelf keeps a failed step 2 for the same delay a failed apply gets, and says why. A release with
@@ -384,11 +384,11 @@ func backoff(restarts int) time.Duration {
 // applianceRunningVersion is the release the machine on this disk is: the disk's own record, or the
 // mark inside the image an install had before the artifact was kept (ADR 0026, amended). It is what
 // is.json's version means.
-func applianceRunningVersion(home string) string {
-	if tag := applianceDiskTag(applianceDisk(home)); tag != "" {
+func applianceRunningVersion(machinery string) string {
+	if tag := applianceDiskTag(applianceDisk(machinery)); tag != "" {
 		return tag
 	}
-	if legacy := legacyAppliance(home); checkAppliance(legacy) == nil {
+	if legacy := legacyAppliance(machinery); checkAppliance(legacy) == nil {
 		return applianceVersion(legacy)
 	}
 	return ""
@@ -397,15 +397,15 @@ func applianceRunningVersion(home string) string {
 // applianceUp makes sure there is something to boot and says which directory it is. An install that
 // has a disk, or the image from before the layout, is left alone; one with neither is made from the
 // release this build runs, which is the same first boot `machine up` does.
-func applianceUp(ctx context.Context, home, root, tag string, before func() error) (string, error) {
-	plan := applianceLayoutFor(home, tag, false)
+func applianceUp(ctx context.Context, machinery, share, tag string, before func() error) (string, error) {
+	plan := applianceLayoutFor(machinery, tag, false)
 	if plan.Legacy || !plan.Unpack {
 		return plan.Image, nil
 	}
 	if tag == "" {
 		return "", fmt.Errorf("this build does not know its own version, so it cannot say which release to boot: pass --tag")
 	}
-	return makeApplianceDisk(ctx, home, root, tag, plan, false, before)
+	return makeApplianceDisk(ctx, machinery, share, tag, plan, false, before)
 }
 
 // applyRelease is one update, in the order that keeps the running machine until the new one is
@@ -417,7 +417,7 @@ func applianceUp(ctx context.Context, home, root, tag string, before func() erro
 // passes nothing, because typing it was the declaration (ADR 0031) — a command cannot be refused for
 // not being declared by a person. `name` is the caller's, so the line a refused apply leaves is not a
 // sentence about a service printed by a command.
-func applyRelease(ctx context.Context, home string, machine machineControl, tag string, allowed func() bool, name string) (string, error) {
+func applyRelease(ctx context.Context, machinery string, machine machineControl, tag string, allowed func() bool, name string) (string, error) {
 	if !update.IsReleaseVersion(tag) {
 		return "", fmt.Errorf("%q is not a release tag", tag)
 	}
@@ -432,11 +432,11 @@ func applyRelease(ctx context.Context, home string, machine machineControl, tag 
 	}
 	// The release has to exist before anything is fetched: EnsureApplianceTarball asks the release
 	// list first, so a tag that names nothing is a sentence and not a download.
-	tarball, err := fetchApplianceTarball(ctx, home, tag, false)
+	tarball, err := fetchApplianceTarball(ctx, machinery, tag, false)
 	if err != nil {
 		return "", err
 	}
-	disk := applianceDisk(home)
+	disk := applianceDisk(machinery)
 	next := disk + ".next"
 	if err := update.UnpackApplianceFile(tarball, next); err != nil {
 		return "", err
@@ -477,30 +477,30 @@ func applyRelease(ctx context.Context, home string, machine machineControl, tag 
 // this binary runs means the previous start never reached ready, so the symlink goes back to the
 // binary before it and this process exits 1. The supervisor starts the old one; a binary that cannot
 // start at all therefore undoes itself instead of looping.
-func rollBackSelf(home, root, service string, exit func(int)) {
-	attempt, found := update.ReadBootAttempt(root)
+func rollBackSelf(machinery, share, service string, exit func(int)) {
+	attempt, found := update.ReadBootAttempt(share)
 	if !found {
 		return
 	}
 	if attempt.Tag != service {
 		// Another version's marker: the start that wrote it got somewhere, so it is stale.
-		update.RemoveBootAttempt(root)
+		update.RemoveBootAttempt(share)
 		return
 	}
-	previous, err := update.PreviousBinary(home, service)
+	previous, err := update.PreviousBinary(machinery, service)
 	if err != nil || previous == "" {
 		log.Printf("machine serve: %s did not reach ready last time, and there is no earlier binary to go back to", service)
-		update.RemoveBootAttempt(root)
+		update.RemoveBootAttempt(share)
 		exit(1)
 		return
 	}
-	if err := update.PointAt(home, filepath.Base(previous)[len("acornfall-"):]); err != nil {
+	if err := update.PointAt(machinery, filepath.Base(previous)[len("acornfall-"):]); err != nil {
 		log.Printf("machine serve: going back to %s failed: %v", previous, err)
-		update.RemoveBootAttempt(root)
+		update.RemoveBootAttempt(share)
 		exit(1)
 		return
 	}
-	update.RemoveBootAttempt(root)
+	update.RemoveBootAttempt(share)
 	log.Printf("machine serve: %s did not reach ready last time; the host is going back to %s", service, filepath.Base(previous))
 	exit(1)
 }
@@ -509,8 +509,8 @@ func rollBackSelf(home, root, service string, exit func(int)) {
 // stopping the supervisor is not taking the machine down.
 func machineServe(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine serve", flag.ContinueOnError)
-	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
 	tag := flags.String("tag", "", "the release to boot when there is nothing here yet (default: this build's version)")
 	port := flags.Int("port", 7777, "the host port the console is published on")
 	// Loopback for the same reason `machine up` is: the appliance runs with --insecure.
@@ -523,15 +523,15 @@ func machineServe(argv []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Fatalf("acornfall machine serve: %v", err)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Fatalf("acornfall machine serve: %v", err)
 	}
-	where := layout.New(resolvedRoot, resolvedHome)
+	where := layout.New(resolvedShare, resolvedHome)
 	if err := where.Ensure(); err != nil {
 		log.Fatalf("acornfall machine serve: %v", err)
 	}
@@ -540,7 +540,7 @@ func machineServe(argv []string) {
 	}
 	// Before anything else: a marker that names this binary's version is the last start never reaching
 	// ready, and the answer is the binary before it (ADR 0031).
-	rollBackSelf(resolvedHome, resolvedRoot, update.BuildVersion, os.Exit)
+	rollBackSelf(resolvedHome, resolvedShare, update.BuildVersion, os.Exit)
 	if err := sandbox.NewMicrosandbox(resolvedHome).Install(ctx, log.Printf); err != nil {
 		log.Fatalf("acornfall machine serve: %v", err)
 	}
@@ -550,25 +550,25 @@ func machineServe(argv []string) {
 	}
 	// The address is the declaration's, and a flag that was given wrote it first: one file says what the
 	// machine is, so the unit and the command cannot disagree (ADR 0030, amended).
-	*host, *port, err = declaredAddress(resolvedRoot, flags, host, port)
+	*host, *port, err = declaredAddress(resolvedShare, flags, host, port)
 	if err != nil {
 		log.Fatalf("acornfall machine serve: %v", err)
 	}
 	console := consoleURL(*host, *port)
-	manager := update.New(resolvedHome, resolvedRoot, "", "")
+	manager := update.New(resolvedHome, resolvedShare, "", "")
 	machine := driverMachine{
-		home:   resolvedHome,
-		root:   resolvedRoot,
-		cpus:   *cpus,
-		memory: *memory,
-		port:   *port,
-		host:   *host,
+		machinery: resolvedHome,
+		share:     resolvedShare,
+		cpus:      *cpus,
+		memory:    *memory,
+		port:      *port,
+		host:      *host,
 	}
 	service := &supervisor{
-		home:    resolvedHome,
-		root:    resolvedRoot,
-		service: update.BuildVersion,
-		machine: machine,
+		machinery: resolvedHome,
+		share:     resolvedShare,
+		service:   update.BuildVersion,
+		machine:   machine,
 		up: func(ctx context.Context) (string, error) {
 			// What is here decides; this build's release is only the answer when nothing is.
 			here := applianceRunningVersion(resolvedHome)
@@ -577,11 +577,11 @@ func machineServe(argv []string) {
 			}
 			// The service never takes a machine away to make a disk: a person's command does that, and the
 			// service only boots what is there.
-			return applianceUp(ctx, resolvedHome, resolvedRoot, here, nil)
+			return applianceUp(ctx, resolvedHome, resolvedShare, here, nil)
 		},
 		apply: func(ctx context.Context, wanted string) (string, error) {
 			return applyRelease(ctx, resolvedHome, machine, wanted, func() bool {
-				return update.WantsRunning(resolvedRoot)
+				return update.WantsRunning(resolvedShare)
 			}, serveName)
 		},
 		now:   time.Now,
@@ -601,13 +601,13 @@ func machineServe(argv []string) {
 	ready := false
 	for {
 		state := service.tick(ctx)
-		if err := update.WriteIs(resolvedRoot, state); err != nil {
-			log.Printf("machine serve: cannot write %s, which the console reads: %v", update.IsPath(resolvedRoot), err)
+		if err := update.WriteIs(resolvedShare, state); err != nil {
+			log.Printf("machine serve: cannot write %s, which the console reads: %v", update.IsPath(resolvedShare), err)
 		} else if !ready {
 			// One full tick done — the machine asked about and the state written — is the service
 			// being ready, and it is what earns the marker's removal (ADR 0031).
 			ready = true
-			update.RemoveBootAttempt(resolvedRoot)
+			update.RemoveBootAttempt(resolvedShare)
 		}
 		select {
 		case <-ctx.Done():

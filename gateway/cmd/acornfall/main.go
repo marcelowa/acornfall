@@ -65,11 +65,11 @@ func serve(argv []string) error {
 	// The default, kept as a flag because the appliance's init names it: an old command line still works.
 	insecure := flags.Bool("insecure", false, "listen without a token: the default")
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
-	home := flags.String("home", "", "the machinery folder: the engine's install and store (default: ~/.acornfall)")
-	dataDir := flags.String("data-dir", "", "alias for --home")
-	root := flags.String("root", "", "the folder the machine mounts: the bundle, the config, the state and the workspaces (default: the parent of --workspaces-dir)")
-	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: <root>/workspaces, and <root> is ~/acornfall)")
-	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
+	machinery := flags.String("machinery", "", "the machinery folder: the engine's install and store (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "alias for --machinery")
+	share := flags.String("share", "", "the folder the machine mounts: the bundle, the config, the state and the workspaces (default: the parent of --workspaces-dir)")
+	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: <share>/workspaces, and <share> is ~/acornfall)")
+	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <machinery>/sandboxes); must be a short path")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor), lxc (containers in one machine), or host (no isolation)")
 	inMachine := flags.Bool("in-machine", false, "this gateway is running inside the machine: the containers are this machine's own, so there is nothing to create and nothing to reach")
 	migrateDir := flags.String("migrate-dir", "", "release migrate scripts directory (default: the scripts baked into the binary)")
@@ -82,7 +82,7 @@ func serve(argv []string) error {
 		return err
 	}
 
-	dir := *home
+	dir := *machinery
 	if dir == "" {
 		dir = *dataDir
 	}
@@ -94,21 +94,21 @@ func serve(argv []string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	// The two folders of ADR 0022: the root the machine mounts (the product) and the home (the
-	// machinery). The root defaults to the parent of the workspaces folder, so the two cannot
-	// disagree about where a workspace lives, and an install that names only a workspaces folder
-	// still gets a root.
-	resolvedRoot, err := resolveRoot(*root, *workspacesDir)
+	// The two folders of ADR 0022: the share the machine mounts (the product) and the machinery
+	// (the engine and its store). The share defaults to the parent of the workspaces folder, so the
+	// two cannot disagree about where a workspace lives, and an install that names only a
+	// workspaces folder still gets a share.
+	resolvedShare, err := resolveShare(*share, *workspacesDir)
 	if err != nil {
 		return err
 	}
-	where := layout.New(resolvedRoot, dir)
-	// The move onto the two-folder layout, once: an install that kept its public files in the home
-	// has them moved into the root, each one logged, before anything reads them.
+	where := layout.New(resolvedShare, dir)
+	// The move onto the two-folder layout, once: an install that kept its public files in the
+	// machinery folder has them moved into the share, each one logged, before anything reads them.
 	if err := layout.Migrate(where, log.Printf); err != nil {
 		return err
 	}
-	if err := sandbox.EnsureGlobal(where.Root); err != nil {
+	if err := sandbox.EnsureGlobal(where.Share); err != nil {
 		return err
 	}
 	// The general workspace's folder: the folder the install was started in, unless told
@@ -124,7 +124,7 @@ func serve(argv []string) error {
 
 	// The self-update tier, owned early: boot readiness (migrate, bun, worker
 	// sources) is decided before anything serves.
-	updates := update.New(dir, where.Root, "", *migrateDir)
+	updates := update.New(dir, where.Share, "", *migrateDir)
 	if *inMachine {
 		// The image is replaced by the launcher on the host, not patched from inside it: an update
 		// applied here would be undone by the next `machine up`, with nothing said (ADR 0029).
@@ -176,7 +176,7 @@ func serve(argv []string) error {
 	if *inMachine && *sandboxState != "" {
 		return errors.New("--sandbox-state belongs to the microsandbox engine; the machine's containers are its own lxc folder")
 	}
-	engine, err := sandboxTier(ctx, dir, *sandboxState, engineName, resolvedRoot, *inMachine)
+	engine, err := sandboxTier(ctx, dir, *sandboxState, engineName, resolvedShare, *inMachine)
 	if err != nil {
 		return err
 	}
@@ -279,7 +279,7 @@ func serve(argv []string) error {
 		return err
 	}
 	bound := listener.Addr().String()
-	log.Printf("acornfall listening on http://%s  home=%s", displayAddr(bound), dir)
+	log.Printf("acornfall listening on http://%s  machinery=%s", displayAddr(bound), dir)
 	if guard != "" && !httpapi.IsLoopback(bound) {
 		log.Printf("auth: token required; open http://%s/?token=%s", prettyAddr(bound), guard)
 	} else if guard == "" && !httpapi.IsLoopback(bound) {
@@ -299,7 +299,7 @@ func serve(argv []string) error {
 // ACORNFALL_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
 // nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
 // behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
-func sandboxTier(ctx context.Context, home, state, engineName, root string, inMachine bool) (*sandbox.Manager, error) {
+func sandboxTier(ctx context.Context, machinery, state, engineName, share string, inMachine bool) (*sandbox.Manager, error) {
 	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
 		log.Printf("sandbox: disabled by ACORNFALL_NO_SANDBOX; commands and file tools will refuse")
 		return nil, nil
@@ -309,17 +309,17 @@ func sandboxTier(ctx context.Context, home, state, engineName, root string, inMa
 	if inMachine {
 		// The engine of a gateway inside the machine: the shim's own work, in this process, over a
 		// pipe — no door, no vsock, nothing to copy in, no machine to make.
-		driver = sandbox.NewInMachine(root)
+		driver = sandbox.NewInMachine(share)
 	} else {
-		driver, err = sandbox.Engine(home, state, engineName)
+		driver, err = sandbox.Engine(machinery, state, engineName)
 		if err != nil {
 			return nil, err
 		}
 	}
 	engine, err := sandbox.Open(ctx, sandbox.Options{
-		Home:   home,
-		Log:    log.Printf,
-		Driver: driver,
+		Machinery: machinery,
+		Log:       log.Printf,
+		Driver:    driver,
 	})
 	if err != nil {
 		return nil, err
@@ -356,8 +356,8 @@ func versionCommand(argv []string) {
 	fmt.Println(version)
 }
 
-func versionString(home string) (string, error) {
-	manager := update.New(home, filepath.Dir(home), "", "")
+func versionString(machinery string) (string, error) {
+	manager := update.New(machinery, filepath.Dir(machinery), "", "")
 	if err := manager.Open(); err != nil {
 		return "", err
 	}
@@ -367,7 +367,7 @@ func versionString(home string) (string, error) {
 func providers(argv []string) {
 	flags := flag.NewFlagSet("provider", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "the machinery folder")
-	rootDir := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	rootDir := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
 	args, ok := parseArgs(flags, argv)
 	if !ok {
 		return
@@ -376,18 +376,18 @@ func providers(argv []string) {
 		fmt.Fprintln(os.Stderr, "usage: acornfall provider <list|add|remove>")
 		os.Exit(2)
 	}
-	// The key belongs in the mount, which is what the machine reads as its world: the home is the
+	// The key belongs in the share, which is what the machine reads as its world: the machinery is the
 	// machinery, and a credential there is one the appliance cannot see (measured: a key stored
 	// by this command, and a workspace that still had none).
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	root, err := resolveRoot(*rootDir, "")
+	share, err := resolveShare(*rootDir, "")
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	where := layout.New(root, dir)
+	where := layout.New(share, dir)
 	if err := where.Ensure(); err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
@@ -555,7 +555,7 @@ func workspaceCommand(argv []string) {
 	command := argv[0]
 	flags := flag.NewFlagSet("workspace "+command, flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "the machinery folder")
-	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
 	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
 	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
 	args, ok := parseArgs(flags, argv[1:])
@@ -570,13 +570,13 @@ func workspaceCommand(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
 	// The registry lives in the mount, where the gateway reads it: this command used to write
 	// the machinery folder, so a workspace added here was one the gateway never saw.
-	where := layout.New(resolvedRoot, dir)
+	where := layout.New(resolvedShare, dir)
 	registry, err := control.LoadRegistryFile(where.Registry())
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
@@ -698,17 +698,17 @@ func resolveDataDir(flagValue string) (string, error) {
 	if flagValue != "" {
 		return filepath.Abs(flagValue)
 	}
-	if env := os.Getenv("ACORNFALL_HOME"); env != "" {
+	if env := os.Getenv("ACORNFALL_MACHINERY"); env != "" {
 		return filepath.Abs(env)
 	}
-	if env := os.Getenv("ACORNFALL_DATA"); env != "" {
+	if env := os.Getenv("ACORNFALL_SHARE"); env != "" {
 		return filepath.Abs(env)
 	}
-	home, err := os.UserHomeDir()
+	machinery, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".acornfall"), nil
+	return filepath.Join(machinery, ".acornfall"), nil
 }
 
 // resolveWorkerDir finds the worker package without requiring configuration.
@@ -728,13 +728,13 @@ func resolveWorkerDir(flagValue string) (string, error) {
 	return "", fmt.Errorf("worker not found: pass --worker-dir or set ACORNFALL_WORKER")
 }
 
-// resolveRoot names the folder the machine mounts. An explicit --root wins; otherwise it is the
+// resolveShare names the folder the machine mounts. An explicit --root wins; otherwise it is the
 // parent of the workspaces folder, which is the shape the layout already had (`~/acornfall`
 // holding `workspaces/`), so an install that only ever named a workspaces folder keeps working
 // and still gets the two-folder split around it.
-func resolveRoot(root, workspacesDir string) (string, error) {
-	if root != "" {
-		return filepath.Abs(root)
+func resolveShare(share, workspacesDir string) (string, error) {
+	if share != "" {
+		return filepath.Abs(share)
 	}
 	if workspacesDir != "" {
 		absolute, err := filepath.Abs(workspacesDir)
@@ -743,9 +743,9 @@ func resolveRoot(root, workspacesDir string) (string, error) {
 		}
 		return filepath.Dir(absolute), nil
 	}
-	home, err := os.UserHomeDir()
+	machinery, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("cannot tell where the product's folder is: %w (pass --root)", err)
+		return "", fmt.Errorf("cannot tell where the product's folder is: %w (pass --share)", err)
 	}
-	return filepath.Join(home, "acornfall"), nil
+	return filepath.Join(machinery, "acornfall"), nil
 }

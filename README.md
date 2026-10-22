@@ -119,7 +119,7 @@ a workspace's sandbox nests virtual machines when the engine and the machine can
 refused — see [ADR 0018](docs/adr/0018-disable-vm-nesting.md)).
 
 Each of those has an environment variable, for a service manager or a container that should
-not carry flags: `ACORNFALL_HOME` or `ACORNFALL_DATA` for the install folder,
+not carry flags: `ACORNFALL_MACHINERY` or `ACORNFALL_SHARE`,
 `ACORNFALL_TOKEN` for the token, and `ACORNFALL_WORKER` for the worker's directory. A flag
 wins over the variable.
 

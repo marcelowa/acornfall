@@ -30,7 +30,7 @@ type InMachine struct {
 	// root is the folder the machine mounted. A workspace has to live under it for its container
 	// to be able to bind it: the container's view of the product is the machine's view, which is
 	// the mount (ADR 0022).
-	root string
+	share string
 	// dir is where containers are made, and privileged runs every one of them as root in this
 	// machine — the host-side engine's sharpest trade (ADR 0021), kept here so one profile is
 	// not quietly different from the other.
@@ -48,8 +48,8 @@ type InMachine struct {
 
 // NewInMachine builds the engine of a gateway that is inside the machine. root is the folder
 // the machine mounted.
-func NewInMachine(root string) *InMachine {
-	return &InMachine{root: root, dir: "/var/lib/lxc", runner: shim.ExecRunner{}}
+func NewInMachine(share string) *InMachine {
+	return &InMachine{share: share, dir: "/var/lib/lxc", runner: shim.ExecRunner{}}
 }
 
 // WithRunner replaces the runtime's command line. Tests use it; nothing else does.
@@ -300,7 +300,7 @@ func (x *InMachine) forget(client *shim.Client) {
 // which of the two is running. The share root is this machine's mount, because that is the
 // folder the containers can see (ADR 0022).
 func (x *InMachine) container(policy Policy) (Container, LXCSettings, error) {
-	return ContainerFor(policy, x.root, x.dir, x.privileged, hostNestedSupport().Available, MachineMemoryBytes())
+	return ContainerFor(policy, x.share, x.dir, x.privileged, hostNestedSupport().Available, MachineMemoryBytes())
 }
 
 // MachineMemoryBytes is what this machine has, in bytes: the ceiling a container's limit is

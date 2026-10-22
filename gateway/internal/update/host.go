@@ -24,13 +24,13 @@ var ErrNotARelease = errors.New("not a release tag")
 
 // HostDir is where the two files live: inside the mount, so the product can write one and read the
 // other (ADR 0022's one crossing).
-func HostDir(root string) string { return filepath.Join(root, "state", "host") }
+func HostDir(share string) string { return filepath.Join(share, "state", "host") }
 
 // WantPath is the file the product writes: the release it wants to be running.
-func WantPath(root string) string { return filepath.Join(HostDir(root), "want.json") }
+func WantPath(share string) string { return filepath.Join(HostDir(share), "want.json") }
 
 // IsPath is the file the host service writes: what is running, and the last thing that went wrong.
-func IsPath(root string) string { return filepath.Join(HostDir(root), "is.json") }
+func IsPath(share string) string { return filepath.Join(HostDir(share), "is.json") }
 
 // Want is the product's declaration. One field: the channel carries a release, and never a path, a
 // command, an environment variable or a URL (ADR 0030, decision 3).
@@ -97,11 +97,11 @@ func allDigits(text string) bool {
 // file that is not JSON, or a version that is not a release, is an error that names what is wrong —
 // the service puts that sentence in is.json's lastError and changes nothing, which is the whole of
 // the refusal (ADR 0030, decision 3).
-func ReadWant(root string) (Want, error) {
-	if root == "" {
+func ReadWant(share string) (Want, error) {
+	if share == "" {
 		return Want{}, nil
 	}
-	payload, err := os.ReadFile(WantPath(root))
+	payload, err := os.ReadFile(WantPath(share))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Want{}, nil
@@ -131,16 +131,16 @@ func ReadWant(root string) (Want, error) {
 // path (ADR 0029, ADR 0030): this process cannot replace the machine it runs in, so it asks the
 // process that can, and the answer arrives as state the console already reads.
 func (m *Manager) AskHost(tag string) error {
-	if m.root == "" {
+	if m.share == "" {
 		return fmt.Errorf("update: this install has no mount, so there is no way to ask the host")
 	}
-	return WriteWant(m.root, tag)
+	return WriteWant(m.share, tag)
 }
 
 // WriteWant declares the release the product wants. It is the product's only way to change the
 // machine: a release tag, validated here too, so an install on a host cannot write something the
 // service would have to refuse.
-func WriteWant(root, version string) error {
+func WriteWant(share, version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return fmt.Errorf("%w: no version, and the channel carries the release to run", ErrNotARelease)
@@ -152,17 +152,17 @@ func WriteWant(root, version string) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(WantPath(root), append(payload, '\n'))
+	return writeFileAtomic(WantPath(share), append(payload, '\n'))
 }
 
 // ReadIs is the product's read of the host's state. A missing file, an empty one and one that does
 // not parse are all "the host has not said anything yet": the console draws what it knows and names
 // nothing as an error, because the host being between restarts is not the product's failure.
-func ReadIs(root string) (HostState, bool) {
-	if root == "" {
+func ReadIs(share string) (HostState, bool) {
+	if share == "" {
 		return HostState{}, false
 	}
-	payload, err := os.ReadFile(IsPath(root))
+	payload, err := os.ReadFile(IsPath(share))
 	if err != nil || len(strings.TrimSpace(string(payload))) == 0 {
 		return HostState{}, false
 	}
@@ -174,12 +174,12 @@ func ReadIs(root string) (HostState, bool) {
 }
 
 // WriteIs is the service's write of what it observes, once a tick.
-func WriteIs(root string, state HostState) error {
+func WriteIs(share string, state HostState) error {
 	payload, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(IsPath(root), append(payload, '\n'))
+	return writeFileAtomic(IsPath(share), append(payload, '\n'))
 }
 
 // writeFileAtomic replaces path in one step: a temporary file in the same directory, flushed, then

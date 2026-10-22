@@ -1,18 +1,18 @@
 // Package layout is where an install keeps its files, in one place, so that the two folders
 // ADR 0022 settled cannot drift apart in fifteen callers.
 //
-// The rule: **the root holds what the product is; the home holds what runs it.** The root is the
-// one folder the machine mounts, so everything in it is visible to the machine and its
-// containers — the workspaces, the global bundle, the config, the state. The home holds the
-// machinery: the engine's install and its store, which contains the file that *is* the machine's
-// disk and therefore must never be inside the mount.
+// The rule: **the share holds what the product is; the machinery holds what runs it.** The share is
+// the one folder the machine mounts, so everything in it is visible to the machine and its
+// containers — the workspaces, the global bundle, the config, the state. The machinery holds the
+// engine's install and its store, which contains the file that *is* the machine's disk and
+// therefore must never be inside the share.
 //
-//	~/acornfall/            the root: the product
+//	~/acornfall/            the share: the product
 //	  .agents/              global skills, agents, prompts, commands — one bundle, no layers
 //	  config/               config.json, settings.json, credentials.json, token
 //	  state/                conversations, drafts, the workspace registry
 //	  workspaces/<name>/    a workspace
-//	~/.acornfall/           the home: the machinery
+//	~/.acornfall/           the machinery: the engine and its store
 //	  tools/                the engine's install
 //	  sandboxes/            its store
 package layout
@@ -27,23 +27,24 @@ import (
 
 // Layout is one install's two folders.
 type Layout struct {
-	// Root is the folder the machine mounts: the product's files.
-	Root string
-	// Home is the machinery: the engine, its store, and the install's own bookkeeping.
-	Home string
+	// Share is the folder the machine mounts: the product's files, the person's workspaces, and the only
+	// door between the host and the machine.
+	Share string
+	// Machinery is the install's own: the engine, its store, the machine's disk, and the bookkeeping.
+	Machinery string
 }
 
 // New names both folders. Neither is created here: a caller that wants them makes them, and
 // Ensure does it.
-func New(root, home string) Layout { return Layout{Root: root, Home: home} }
+func New(share, machinery string) Layout { return Layout{Share: share, Machinery: machinery} }
 
-// Root is the folder the machine mounts. It is the one path a container's binds are relative to.
-func (l Layout) Bundle() string { return filepath.Join(l.Root, ".agents") }
+// Share is the folder the machine mounts. It is the one path a container's binds are relative to.
+func (l Layout) Bundle() string { return filepath.Join(l.Share, ".agents") }
 
 // ConfigDir is where the install's own settings and secrets live: config.json, settings.json,
 // credentials.json, token. It is inside the mount, which is a decision with a price (ADR 0022),
 // and the mapping that keeps it out of containers is in internal/sandbox.
-func (l Layout) ConfigDir() string { return filepath.Join(l.Root, "config") }
+func (l Layout) ConfigDir() string { return filepath.Join(l.Share, "config") }
 
 // ConfigFile is the install's configuration, which every workspace reads and a sandbox mounts
 // read-only.
@@ -60,7 +61,7 @@ func (l Layout) Credentials() string { return filepath.Join(l.ConfigDir(), "cred
 func (l Layout) Token() string { return filepath.Join(l.ConfigDir(), "token") }
 
 // StateDir is the product's own state: conversations, drafts, and the registry.
-func (l Layout) StateDir() string { return filepath.Join(l.Root, "state") }
+func (l Layout) StateDir() string { return filepath.Join(l.Share, "state") }
 
 // WorkspaceState is one workspace's folder inside the state directory: its storage, its
 // settings, its drafts.
@@ -70,18 +71,18 @@ func (l Layout) WorkspaceState(name string) string { return filepath.Join(l.Stat
 func (l Layout) Registry() string { return filepath.Join(l.StateDir(), "workspaces.json") }
 
 // Workspaces is where a workspace's folder is created.
-func (l Layout) Workspaces() string { return filepath.Join(l.Root, "workspaces") }
+func (l Layout) Workspaces() string { return filepath.Join(l.Share, "workspaces") }
 
 // Tools is the engine's install.
-func (l Layout) Tools() string { return filepath.Join(l.Home, "tools") }
+func (l Layout) Tools() string { return filepath.Join(l.Machinery, "tools") }
 
 // Store is the engine's own store: images, sandboxes, and the machine's disk.
-func (l Layout) Store() string { return filepath.Join(l.Home, "sandboxes") }
+func (l Layout) Store() string { return filepath.Join(l.Machinery, "sandboxes") }
 
 // Ensure creates both folders and the shape inside them, so a fresh install has somewhere to
 // write and a sandbox has somewhere to mount from.
 func (l Layout) Ensure() error {
-	for _, dir := range []string{l.Root, l.Bundle(), l.ConfigDir(), l.StateDir(), l.Workspaces(), l.Home, l.Tools(), l.Store()} {
+	for _, dir := range []string{l.Share, l.Bundle(), l.ConfigDir(), l.StateDir(), l.Workspaces(), l.Machinery, l.Tools(), l.Store()} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("layout: creating %s: %w", dir, err)
 		}
@@ -90,7 +91,7 @@ func (l Layout) Ensure() error {
 }
 
 // The old install kept everything in one folder. These are the public files that moved to the
-// root, in the order a person would look for them.
+// share, in the order a person would look for them.
 var moved = []struct {
 	name string
 	to   func(Layout) string
@@ -114,7 +115,7 @@ var moved = []struct {
 	{"session.sqlite-shm", func(l Layout) string { return filepath.Join(l.StateDir(), "session.sqlite-shm") }},
 }
 
-// Migrate moves an install that kept its public files in the home onto the two-folder layout.
+// Migrate moves an install that kept its public files in the machinery folder onto the two-folder layout.
 // It runs once in practice and is idempotent in principle: a file that is already at its
 // destination is left alone, and one that is not there at all is not a mistake.
 //
@@ -125,7 +126,7 @@ func Migrate(l Layout, log func(string, ...any)) error {
 		return err
 	}
 	for _, move := range moved {
-		from := filepath.Join(l.Home, move.name)
+		from := filepath.Join(l.Machinery, move.name)
 		source, err := os.Stat(from)
 		if err != nil {
 			continue
@@ -159,11 +160,11 @@ func Migrate(l Layout, log func(string, ...any)) error {
 	return nil
 }
 
-// Under reports whether path is inside root, and not the root itself. Both halves matter to the
-// callers: a path outside the mount cannot be bound into a container, and the root *is* every
+// Under reports whether path is inside share, and not the share itself. Both halves matter to the
+// callers: a path outside the share cannot be bound into a container, and the share *is* every
 // workspace at once — a bind of it, or a workspace that is it, hands a container the lot.
-func Under(root, path string) bool {
-	clean, target := filepath.Clean(root), filepath.Clean(path)
+func Under(share, path string) bool {
+	clean, target := filepath.Clean(share), filepath.Clean(path)
 	if clean == target {
 		return false
 	}
@@ -181,6 +182,6 @@ func emptyDir(path string) bool {
 	return err == nil && len(entries) == 0
 }
 
-// ErrNoRoot is what a caller gets when the root is not set: a layout with no root is a machine
+// ErrNoShare is what a caller gets when the share is not set: a layout with no share is a machine
 // with no door, and guessing one is how a bind reaches something nobody chose.
-var ErrNoRoot = errors.New("layout: the root folder is not set")
+var ErrNoShare = errors.New("layout: the share folder is not set")

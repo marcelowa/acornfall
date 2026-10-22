@@ -24,8 +24,8 @@ import (
 // machineInstall installs the host service, or repairs it: the same command, twice, is the same install.
 func machineInstall(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine install", flag.ContinueOnError)
-	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
 	remote := flags.Bool("remote", false, "publish the console on 0.0.0.0, with a token (asks if neither is given)")
 	local := flags.Bool("local", false, "keep the console on 127.0.0.1 (asks if neither is given)")
 	port := flags.Int("port", 0, "the port the console is published on (default: the declaration's, or 7777)")
@@ -37,17 +37,17 @@ func machineInstall(argv []string) {
 		log.Printf("acornfall machine install: %v", err)
 		os.Exit(1)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Printf("acornfall machine install: %v", err)
 		os.Exit(1)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Printf("acornfall machine install: %v", err)
 		os.Exit(1)
 	}
-	where := layout.New(resolvedRoot, resolvedHome)
+	where := layout.New(resolvedShare, resolvedHome)
 	if err := where.Ensure(); err != nil {
 		log.Printf("acornfall machine install: %v", err)
 		os.Exit(1)
@@ -55,7 +55,7 @@ func machineInstall(argv []string) {
 	if err := layout.Migrate(where, log.Printf); err != nil {
 		log.Printf("machine install: moving the old layout: %v", err)
 	}
-	declaration := update.ReadDeclaration(resolvedRoot)
+	declaration := update.ReadDeclaration(resolvedShare)
 	_, declaredPort := declaration.Address()
 	if *port > 0 {
 		declaredPort = *port
@@ -84,17 +84,17 @@ func machineInstall(argv []string) {
 	}
 	install := installer{
 		userHome:    userHomeDir(),
-		home:        resolvedHome,
-		root:        resolvedRoot,
+		machinery:   resolvedHome,
+		share:       resolvedShare,
 		version:     version,
 		declaration: declaration,
 		binary:      binary,
 		init:        initFor(runtime.GOOS),
 		kvm:         kvmCheck,
-		machine:     driverMachine{home: resolvedHome, root: resolvedRoot, port: declaredPort, host: host},
+		machine:     driverMachine{machinery: resolvedHome, share: resolvedShare, port: declaredPort, host: host},
 	}
 	install.verify = func(ctx context.Context, cfg unitConfig) error {
-		return verifyUp(ctx, install.init, resolvedRoot, cfg, time.Now, time.Sleep)
+		return verifyUp(ctx, install.init, resolvedShare, cfg, time.Now, time.Sleep)
 	}
 	say := line(os.Stdout)
 	if err := install.run(context.Background(), func(ok bool, sentence string) {
@@ -161,12 +161,12 @@ func remoteAnswer(remote, local, terminal bool) (bool, error) {
 // uninstaller is `machine uninstall`: it stops what runs, removes what we installed, and keeps what a person
 // made. The order is asserted by a test, and the last two steps are the point of it.
 type uninstaller struct {
-	userHome string
-	home     string
-	root     string
-	init     initSystem
-	machine  machineControl
-	say      func(kind, sentence string)
+	userHome  string
+	machinery string
+	share     string
+	init      initSystem
+	machine   machineControl
+	say       func(kind, sentence string)
 }
 
 func (u uninstaller) run(ctx context.Context) error {
@@ -185,7 +185,7 @@ func (u uninstaller) run(ctx context.Context) error {
 	u.say("stopped", "the machine")
 	// 3. the unit file and the binaries;
 	if u.init != nil {
-		unitPath, _, err := u.init.Unit(unitConfig{UserHome: u.userHome, Home: u.home, Root: u.root})
+		unitPath, _, err := u.init.Unit(unitConfig{UserHome: u.userHome, Machinery: u.machinery, Share: u.share})
 		if err != nil {
 			return err
 		}
@@ -198,28 +198,28 @@ func (u uninstaller) run(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, path := range binaries(u.home) {
+	for _, path := range binaries(u.machinery) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("removing %s: %w", path, err)
 		}
 		u.say("removed", path)
 	}
 	// 4. the disk the machine ran on, and the artifacts it was made from;
-	machineDir := filepath.Dir(applianceDisk(u.home))
+	machineDir := filepath.Dir(applianceDisk(u.machinery))
 	if err := os.RemoveAll(machineDir); err != nil {
 		return fmt.Errorf("removing %s: %w", machineDir, err)
 	}
 	u.say("removed", "the machine's disk at "+machineDir)
-	appliances := filepath.Join(u.home, "appliance")
+	appliances := filepath.Join(u.machinery, "appliance")
 	if err := os.RemoveAll(appliances); err != nil {
 		return fmt.Errorf("removing %s: %w", appliances, err)
 	}
 	u.say("removed", appliances)
 	// 5. our bookkeeping inside the mount: the declaration, the host's own files, the token.
 	for _, path := range []string{
-		update.MachineIntentPath(u.root),
-		update.HostDir(u.root),
-		filepath.Join(u.root, "config", "token"),
+		update.MachineIntentPath(u.share),
+		update.HostDir(u.share),
+		filepath.Join(u.share, "config", "token"),
 	} {
 		if err := os.RemoveAll(path); err != nil {
 			return fmt.Errorf("removing %s: %w", path, err)
@@ -227,7 +227,7 @@ func (u uninstaller) run(ctx context.Context) error {
 		u.say("removed", path)
 	}
 	// 6. what is not ours, and the line that says so.
-	for _, sentence := range leftBehind(u.root, readRegistry(u.root)) {
+	for _, sentence := range leftBehind(u.share, readRegistry(u.share)) {
 		u.say("", sentence)
 	}
 	u.say("", "linger is left alone: if it was turned on, turn it off with `loginctl disable-linger "+currentUser()+"`")
@@ -235,15 +235,15 @@ func (u uninstaller) run(ctx context.Context) error {
 }
 
 // binaries is every binary we put in the install's own folder: the symlink and every release kept beside it.
-func binaries(home string) []string {
-	paths := []string{update.OwnedBinary(home)}
-	entries, err := os.ReadDir(filepath.Join(home, "bin"))
+func binaries(machinery string) []string {
+	paths := []string{update.OwnedBinary(machinery)}
+	entries, err := os.ReadDir(filepath.Join(machinery, "bin"))
 	if err != nil {
 		return paths
 	}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), "acornfall-") {
-			paths = append(paths, filepath.Join(home, "bin", entry.Name()))
+			paths = append(paths, filepath.Join(machinery, "bin", entry.Name()))
 		}
 	}
 	return paths
@@ -253,8 +253,8 @@ func binaries(home string) []string {
 // nothing at all without --yes, and the list it prints then is the dry run.
 type purger struct {
 	userHome  string
-	home      string
-	root      string
+	machinery string
+	share     string
 	yes       bool
 	init      initSystem
 	uninstall func(ctx context.Context) error
@@ -262,31 +262,31 @@ type purger struct {
 }
 
 func (p purger) run(ctx context.Context) error {
-	for _, path := range []struct{ kind, path string }{{"the machinery", p.home}, {"the mount", p.root}} {
+	for _, path := range []struct{ kind, path string }{{"the machinery", p.machinery}, {"the mount", p.share}} {
 		if err := removablePath(path.kind, path.path, p.userHome); err != nil {
 			return err
 		}
 	}
-	registry := readRegistry(p.root)
+	registry := readRegistry(p.share)
 	installed := false
-	for _, path := range []string{update.OwnedBinary(p.home), filepath.Join(p.root, "state", "machine.json")} {
+	for _, path := range []string{update.OwnedBinary(p.machinery), filepath.Join(p.share, "state", "machine.json")} {
 		if _, err := os.Lstat(path); err == nil {
 			installed = true
 		}
 	}
 	if p.init != nil {
-		if unitPath, _, err := p.init.Unit(unitConfig{UserHome: p.userHome, Home: p.home, Root: p.root}); err == nil {
+		if unitPath, _, err := p.init.Unit(unitConfig{UserHome: p.userHome, Machinery: p.machinery, Share: p.share}); err == nil {
 			if _, err := os.Lstat(unitPath); err == nil {
 				installed = true
 			}
 		}
 	}
 	// The whole list, with what is in each path: a person reads this before deciding.
-	listed := removals(p.home, p.root)
+	listed := removals(p.machinery, p.share)
 	for _, path := range listed {
 		p.say("would remove", path+" ("+sizeOf(path)+")")
 	}
-	for _, sentence := range leftBehind(p.root, registry) {
+	for _, sentence := range leftBehind(p.share, registry) {
 		p.say("", sentence)
 	}
 	if !p.yes {
@@ -311,23 +311,23 @@ func (p purger) run(ctx context.Context) error {
 			p.say("removed", "linger, so the service does not come back at boot")
 		}
 	}
-	for _, sentence := range leftBehind(p.root, registry) {
+	for _, sentence := range leftBehind(p.share, registry) {
 		p.say("", sentence)
 	}
 	return nil
 }
 
 // removals is every path a purge takes, in the order a person can follow: the machinery, then the mount.
-func removals(home, root string) []string {
+func removals(machinery, share string) []string {
 	paths := []string{
-		filepath.Join(home, "bin"),
-		filepath.Join(home, "tools"),
-		filepath.Join(home, "machines"),
-		filepath.Join(home, "appliance"),
-		filepath.Join(home, "worker"),
-		filepath.Join(home, "state"),
-		home,
-		root,
+		filepath.Join(machinery, "bin"),
+		filepath.Join(machinery, "tools"),
+		filepath.Join(machinery, "machines"),
+		filepath.Join(machinery, "appliance"),
+		filepath.Join(machinery, "worker"),
+		filepath.Join(machinery, "state"),
+		machinery,
+		share,
 	}
 	seen := make(map[string]bool, len(paths))
 	kept := paths[:0]
@@ -346,19 +346,19 @@ func removals(home, root string) []string {
 // followed.
 func removablePath(kind, path, userHome string) error {
 	clean := filepath.Clean(path)
-	home := ""
+	machinery := ""
 	if userHome != "" {
-		home = filepath.Clean(userHome)
+		machinery = filepath.Clean(userHome)
 	}
-	insideHome := home != "" && strings.HasPrefix(clean, home+string(os.PathSeparator))
+	insideMachinery := machinery != "" && strings.HasPrefix(clean, machinery+string(os.PathSeparator))
 	switch {
 	case clean == "/" || clean == ".":
 		return fmt.Errorf("%s is %s: that is every file on this machine, and a purge removes the install only", kind, clean)
-	case clean == home || (home != "" && strings.HasPrefix(home, clean+string(os.PathSeparator))):
+	case clean == machinery || (machinery != "" && strings.HasPrefix(machinery, clean+string(os.PathSeparator))):
 		return fmt.Errorf("%s is %s, which holds a home directory: a purge removes the product's folders, not someone's home", kind, clean)
 	case filepath.Dir(clean) == string(os.PathSeparator):
 		return fmt.Errorf("%s is %s, a folder at the top of the file system: a purge removes what an install made, inside a home", kind, clean)
-	case !insideHome && len(strings.Split(strings.Trim(clean, string(os.PathSeparator)), string(os.PathSeparator))) < 3:
+	case !insideMachinery && len(strings.Split(strings.Trim(clean, string(os.PathSeparator)), string(os.PathSeparator))) < 3:
 		// Two components is a person's folder outside their home: /home/someone, /srv/data. The installs
 		// this refuses to guess about are the ones it does not own.
 		return fmt.Errorf("%s is %s, which is too close to the root of the file system: a purge removes a path with at least three components, or one inside a home", kind, clean)
@@ -407,34 +407,34 @@ func humanSize(bytes int64) string {
 // removed a person's work would be the one mistake this command cannot make twice.
 func uninstallFlags() (*flag.FlagSet, *string, *string) {
 	flags := flag.NewFlagSet("acornfall machine uninstall", flag.ContinueOnError)
-	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
-	return flags, root, home
+	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	return flags, share, machinery
 }
 
 // machineUninstall removes the product and keeps the person's work.
 func machineUninstall(argv []string) {
-	flags, root, home := uninstallFlags()
+	flags, share, machinery := uninstallFlags()
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Printf("acornfall machine uninstall: %v", err)
 		os.Exit(1)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Printf("acornfall machine uninstall: %v", err)
 		os.Exit(1)
 	}
 	remove := uninstaller{
-		userHome: userHomeDir(),
-		home:     resolvedHome,
-		root:     resolvedRoot,
-		init:     initFor(runtime.GOOS),
-		machine:  driverMachine{home: resolvedHome, root: resolvedRoot},
-		say:      line(os.Stdout),
+		userHome:  userHomeDir(),
+		machinery: resolvedHome,
+		share:     resolvedShare,
+		init:      initFor(runtime.GOOS),
+		machine:   driverMachine{machinery: resolvedHome, share: resolvedShare},
+		say:       line(os.Stdout),
 	}
 	if err := remove.run(context.Background()); err != nil {
 		log.Printf("acornfall machine uninstall: %v", err)
@@ -445,34 +445,34 @@ func machineUninstall(argv []string) {
 // machinePurge removes everything, and refuses to do it without --yes.
 func machinePurge(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine purge", flag.ContinueOnError)
-	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
 	yes := flags.Bool("yes", false, "remove everything listed; without it nothing is removed and the list is the dry run")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Printf("acornfall machine purge: %v", err)
 		os.Exit(1)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Printf("acornfall machine purge: %v", err)
 		os.Exit(1)
 	}
 	remove := uninstaller{
-		userHome: userHomeDir(),
-		home:     resolvedHome,
-		root:     resolvedRoot,
-		init:     initFor(runtime.GOOS),
-		machine:  driverMachine{home: resolvedHome, root: resolvedRoot},
-		say:      line(os.Stdout),
+		userHome:  userHomeDir(),
+		machinery: resolvedHome,
+		share:     resolvedShare,
+		init:      initFor(runtime.GOOS),
+		machine:   driverMachine{machinery: resolvedHome, share: resolvedShare},
+		say:       line(os.Stdout),
 	}
 	purge := purger{
 		userHome:  userHomeDir(),
-		home:      resolvedHome,
-		root:      resolvedRoot,
+		machinery: resolvedHome,
+		share:     resolvedShare,
 		yes:       *yes,
 		init:      initFor(runtime.GOOS),
 		uninstall: remove.run,

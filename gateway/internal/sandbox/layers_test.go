@@ -83,7 +83,7 @@ func TestAContainerGetsExplicitLimitsWhenThePolicyLeavesThemUnset(t *testing.T) 
 // The share root is the only door: a policy path outside it is refused by name, not silently
 // dropped and not bound anyway. A sibling that shares a prefix is outside too, which is the
 // bug a string comparison would introduce.
-func TestAContainerBindsOnlyWhatTheShareRootHolds(t *testing.T) {
+func TestAContainerBindsOnlyWhatTheShareHolds(t *testing.T) {
 	_, err := Policy{Workspace: "/home/me/work", Global: []string{"/home/me/.agents"}}.Container("/home/me/workspaces")
 	if err == nil || !strings.Contains(err.Error(), "/home/me/work") || !strings.Contains(err.Error(), "/home/me/workspaces") {
 		t.Fatalf("want a refusal naming the path and the root, got %v", err)
@@ -96,7 +96,7 @@ func TestAContainerBindsOnlyWhatTheShareRootHolds(t *testing.T) {
 
 // Nobody has chosen the share root yet (ADR 0021 leaves it to the owner). An empty one is a
 // refusal: guessing would decide, silently, what an escape from a container reaches.
-func TestAContainerRefusesWithoutAShareRoot(t *testing.T) {
+func TestAContainerRefusesWithoutAShare(t *testing.T) {
 	_, err := Policy{Workspace: "/home/me/work"}.Container("")
 	if err == nil || !strings.Contains(err.Error(), "share root") {
 		t.Fatalf("want a refusal naming the share root, got %v", err)

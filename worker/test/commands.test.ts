@@ -148,7 +148,7 @@ describe("loading", () => {
 			"---\nname: only-here\ndescription: prompts only\n---\nBody",
 		);
 
-		const roots = layerRoots({ root: join(root, "acornfall"), workspace });
+		const roots = layerRoots({ share: join(root, "acornfall"), workspace });
 		const commands = await loadCommands(resourceFolders(roots, COMMAND_DIRS), hostFiles);
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["audit", "from commands"],
@@ -175,7 +175,7 @@ describe("loading", () => {
 			"---\nname: shared\ndescription: only in .agents\n---\nShared",
 		);
 
-		const roots = layerRoots({ root, workspace });
+		const roots = layerRoots({ share: root, workspace });
 		const commands = await loadCommands(resourceFolders(roots, ["commands"]), hostFiles);
 		expect(commands.map((command) => [command.name, command.description])).toEqual([
 			["deploy", "native"],

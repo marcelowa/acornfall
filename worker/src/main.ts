@@ -101,7 +101,7 @@ const TITLE_MAX = 64;
 interface Args {
 	workspace: string;
 	/** The folder the machine mounts: the bundle, the config, the state, the workspaces. */
-	root: string;
+	share: string;
 	storage: string;
 	credentials: string;
 	/** The sandbox this workspace runs in, as control named it. Empty means none: tools refuse. */
@@ -129,12 +129,12 @@ function parseArgs(argv: readonly string[]): Args {
 	const workspace = resolve(values.get("workspace") ?? process.cwd());
 	const defaults = (name: string) => join(workspace, ".acornfall", name);
 	const credentials = resolve(values.get("credentials") ?? defaults("credentials.json"));
-	// The root holds the credentials under `config/`, so an install that names only a credential
+	// The share holds the credentials under `config/`, so an install that names only a credential
 	// still gets one: two folders up from the file.
-	const root = resolve(values.get("root") ?? dirname(dirname(credentials)));
+	const share = resolve(values.get("share") ?? dirname(dirname(credentials)));
 	return {
 		workspace,
-		root,
+		share,
 		storage: resolve(values.get("storage") ?? defaults("session.sqlite")),
 		credentials,
 		sandbox: values.get("sandbox") ?? "",
@@ -197,7 +197,7 @@ async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
 //
 // The workspace's own files live inside the sandbox and the user's live on the host, so reads
 // are routed per path: there is one door to the workspace, and this is it.
-const roots = layerRoots({ root: args.root, workspace: args.workspace });
+const roots = layerRoots({ share: args.share, workspace: args.workspace });
 const files = routingFiles(args.workspace, sandbox);
 const discoveredSkills = await loadSkills(resourceFolders(roots, ["skills"]), files);
 
@@ -533,6 +533,7 @@ async function listConversations(): Promise<ConversationInfo[]> {
 				title,
 				hidden,
 				root: record.id === ROOT_CONVERSATION_ID,
+
 				// Read from committed state, so a run that survived a restart still
 				// shows as running, and a background run is never invisible.
 				running: live?.run !== undefined,
@@ -1180,7 +1181,7 @@ async function handle(command: HandledCommand): Promise<unknown> {
 				command.authId,
 				command.providerId,
 				command.authType,
-				await installId(join(args.root, "config")),
+				await installId(join(args.share, "config")),
 			);
 		case "logout":
 			// Removes the stored credential for this provider only.

@@ -279,7 +279,7 @@ type Control struct {
 	defaultAgent    string
 	/** Whether the conversations that predate naming an agent have been given the general one. */
 	generalPinned bool
-	// install is the install-wide layer, from <home>/settings.json. Read-only for a
+	// install is the install-wide layer, from <machinery>/settings.json. Read-only for a
 	// workspace: it is changed through the workspace layer, which writes the file once for
 	// every workspace to see.
 	install Defaults
@@ -497,7 +497,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 		"--workspace", c.opts.Workspace.Path,
 		"--storage", c.opts.StoragePath,
 		"--credentials", c.opts.Credentials,
-		"--root", c.opts.Root,
+		"--share", c.opts.Root,
 	)
 	// The sandbox is made first, because the worker is told to use it and refuses to run
 	// anything without it. A failure is a state, not a stop: the workspace opens, the tools

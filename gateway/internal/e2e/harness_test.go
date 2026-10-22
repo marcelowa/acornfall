@@ -264,8 +264,8 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	}
 
 	args := []string{
-		"--home", s.Home,
-		"--root", s.Root,
+		"--machinery", s.Home,
+		"--share", s.Root,
 		"--workspaces-dir", s.WorkspacesDir,
 		"--workspace", s.General,
 		"--worker-dir", workerDir,
@@ -291,7 +291,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// A curated environment: the test must not inherit a real install's home, token, or
 	// provider credentials, or it would be testing someone else's configuration. The
 	// switches that decide how this install behaves are forwarded explicitly.
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + s.Home, "ACORNFALL_HOME=" + s.Home}
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + s.Home, "ACORNFALL_MACHINERY=" + s.Home}
 	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
 		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
 	}

@@ -89,10 +89,10 @@ type Instance struct {
 // Running is the engine's word for a sandbox that can take a command.
 func (i Instance) Running() bool { return strings.EqualFold(i.Status, "running") }
 
-// Options configures a manager. Home and Driver are required.
+// Options configures a manager. Machinery and Driver are required.
 type Options struct {
-	// Home is the acornfall installation folder.
-	Home string
+	// Machinery is the install's own folder: the engine, its store, the machine's disk.
+	Machinery string
 	// Driver is the engine in use.
 	Driver Driver
 	// Log reports what the manager does, one line at a time. Nil silences it.
@@ -107,10 +107,10 @@ type Options struct {
 // to decide whether a sandbox can be made and when to ask the driver for one, and nothing
 // about how that happens.
 type Manager struct {
-	home   string
-	driver Driver
-	log    func(string, ...any)
-	report bool
+	machinery string
+	driver    Driver
+	log       func(string, ...any)
+	report    bool
 	// mu guards the problem below: several workspaces can start at once, and two of them
 	// must not install the engine at the same time.
 	mu sync.Mutex
@@ -120,19 +120,19 @@ type Manager struct {
 	problem error
 }
 
-// Open wires up the engine. It fails only on a mistake the caller can fix (no home
-// directory, no driver) and it installs nothing: fetching 26MB is first use's business, not
+// Open wires up the engine. It fails only on a mistake the caller can fix (no machinery folder,
+// no driver) and it installs nothing: fetching 26MB is first use's business, not
 // a gateway start's. An unusable sandbox is reported through Problem and enforced by
 // Produce, so that a machine without a hypervisor can still run everything else.
 func Open(ctx context.Context, opts Options) (*Manager, error) {
-	if strings.TrimSpace(opts.Home) == "" {
-		return nil, errors.New("sandbox: Home is required")
+	if strings.TrimSpace(opts.Machinery) == "" {
+		return nil, errors.New("sandbox: Machinery is required")
 	}
 	if opts.Driver == nil {
 		return nil, errors.New("sandbox: Driver is required")
 	}
 	_ = ctx
-	manager := &Manager{home: opts.Home, driver: opts.Driver, log: opts.Log, report: opts.ReportOnly}
+	manager := &Manager{machinery: opts.Machinery, driver: opts.Driver, log: opts.Log, report: opts.ReportOnly}
 	// A report has to answer "can this machine sandbox?" now, so a missing engine is its
 	// problem to state. Nothing is installed on its behalf.
 	if opts.ReportOnly && !opts.Driver.Installed() {

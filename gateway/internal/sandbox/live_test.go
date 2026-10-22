@@ -45,7 +45,7 @@ func TestLiveProduceAndStop(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "hello.txt"), []byte("from the host\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := Open(context.Background(), Options{Home: home, Driver: liveDriver(home), Log: t.Logf})
+	manager, err := Open(context.Background(), Options{Machinery: home, Driver: liveDriver(home), Log: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestLiveLXCTheEngineMakesAContainer(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	// A short home: the engine.s sockets live under its store, and a test.s own long name is a
+	// A short machinery: the engine.s sockets live under its store, and a test.s own long name is a
 	// refusal the engine makes on purpose (statePathLimit).
 	home := shortTempDir(t)
 	engine := NewMicrosandbox(home)
@@ -178,7 +178,7 @@ func TestLiveLXCTheEngineMakesAContainer(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("building the binary the machine runs the shim from: %v\n%s", err, out)
 	}
-	// The share root: a folder of the user's, owned by them and traversable, which is what a
+	// The share: a folder of the user's, owned by them and traversable, which is what a
 	// container's bind needs to work at all.
 	share := filepath.Join("/var/tmp", "acornfall-live-share")
 	if err := os.RemoveAll(share); err != nil {
@@ -204,10 +204,10 @@ func TestLiveLXCTheEngineMakesAContainer(t *testing.T) {
 	// is more than it has. A real install wants the flat disk (machine.go), and that flag is
 	// unit-tested; what this test is for is the chain.
 	driver := NewLXC(engine, Machine{
-		Image:     image,
-		CPUs:      2,
-		Memory:    "1G",
-		ShareRoot: share,
+		Image:  image,
+		CPUs:   2,
+		Memory: "1G",
+		Share:  share,
 	}, filepath.Join(home, "state", "machine.sock"), binary).WithLog(t.Logf)
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -267,7 +267,7 @@ func TestLiveLXCTheEngineMakesAContainer(t *testing.T) {
 	if err := driver.Start(ctx, name); err != nil {
 		t.Fatal(err)
 	}
-	manager := &Manager{driver: driver, home: home}
+	manager := &Manager{driver: driver, machinery: home}
 	status, err := manager.Status(ctx, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -311,8 +311,8 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 	// virtiofs mount is not one: the machine boots, dies at once and its published port is
 	// refused, with nothing in the engine.s output to say why. Real installs mount a home
 	// directory; this is only ever a surprise inside a sandbox like this one.
-	root := filepath.Join(t.TempDir(), "acornfall")
-	workspace := filepath.Join(root, "workspaces", "general")
+	share := filepath.Join(t.TempDir(), "acornfall")
+	workspace := filepath.Join(share, "workspaces", "general")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -338,8 +338,8 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 	start := strings.Join([]string{
 		"ACORNFALL_DEV_PROVIDER=1 exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 --insecure",
-		"--root " + root,
-		"--home /var/lib/acornfall",
+		"--share " + share,
+		"--machinery /var/lib/acornfall",
 		"--workspace " + workspace,
 		"--worker-dir /usr/local/lib/acornfall/worker",
 		"--sandbox-engine lxc --in-machine",
@@ -347,10 +347,10 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 		">>/var/lib/acornfall/appliance.log 2>&1",
 	}, " ")
 	driver := NewLXC(engine, Machine{
-		Image:     os.Getenv("ACORNFALL_MACHINE_IMAGE"),
-		CPUs:      2,
-		Memory:    "1G",
-		ShareRoot: root,
+		Image:  os.Getenv("ACORNFALL_MACHINE_IMAGE"),
+		CPUs:   2,
+		Memory: "1G",
+		Share:  share,
 	}, filepath.Join(home, "state", "machine.sock"), "/bin/true").WithLog(t.Logf)
 	driver.machine.WithAppliance(start, fmt.Sprintf("127.0.0.1:%d:7777", port))
 	defer func() {
@@ -426,14 +426,14 @@ func TestLiveAToolRunsInTheContainer(t *testing.T) {
 	if err := engine.Usable(); err != nil {
 		t.Skipf("no hypervisor here: %v", err)
 	}
-	root := filepath.Join(t.TempDir(), "acornfall")
-	workspace := filepath.Join(root, "workspaces", "general")
+	share := filepath.Join(t.TempDir(), "acornfall")
+	workspace := filepath.Join(share, "workspaces", "general")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// The command the model will ask for, and where the worker finds it: in the mount, because
 	// the worker is in the machine and the mount is the only folder both sides can see.
-	script := filepath.Join(root, "dev-script.json")
+	script := filepath.Join(share, "dev-script.json")
 	rules := `{"rules":[{"match":"prove it","tools":[{"name":"bash","args":{"command":"hostname"}}],"reply":"done"}]}`
 	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
 		t.Fatal(err)
@@ -447,8 +447,8 @@ func TestLiveAToolRunsInTheContainer(t *testing.T) {
 	start := strings.Join([]string{
 		"ACORNFALL_DEV_PROVIDER=1 ACORNFALL_DEV_SCRIPT=" + script + " exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 --insecure",
-		"--root " + root,
-		"--home /var/lib/acornfall",
+		"--share " + share,
+		"--machinery /var/lib/acornfall",
 		"--workspace " + workspace,
 		"--worker-dir /usr/local/lib/acornfall/worker",
 		"--sandbox-engine lxc --in-machine",
@@ -456,10 +456,10 @@ func TestLiveAToolRunsInTheContainer(t *testing.T) {
 		">>/var/lib/acornfall/appliance.log 2>&1",
 	}, " ")
 	driver := NewLXC(engine, Machine{
-		Image:     os.Getenv("ACORNFALL_MACHINE_IMAGE"),
-		CPUs:      2,
-		Memory:    "1G",
-		ShareRoot: root,
+		Image:  os.Getenv("ACORNFALL_MACHINE_IMAGE"),
+		CPUs:   2,
+		Memory: "1G",
+		Share:  share,
 	}, filepath.Join(home, "state", "machine.sock"), "/bin/true").WithLog(t.Logf)
 	driver.machine.WithAppliance(start, fmt.Sprintf("127.0.0.1:%d:7777", port))
 	t.Cleanup(func() {
@@ -613,8 +613,8 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(image, "bin", "sh")); err != nil {
 		t.Fatalf("the unpacked image has no /bin/sh: %v", err)
 	}
-	root := t.TempDir()
-	workspace := filepath.Join(root, "workspaces", "general")
+	share := t.TempDir()
+	workspace := filepath.Join(share, "workspaces", "general")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -627,8 +627,8 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	start := strings.Join([]string{
 		"ACORNFALL_DEV_PROVIDER=1 exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 --insecure",
-		"--root " + root,
-		"--home /var/lib/acornfall",
+		"--share " + share,
+		"--machinery /var/lib/acornfall",
 		"--workspace " + workspace,
 		"--worker-dir /usr/local/lib/acornfall/worker",
 		"--sandbox-engine lxc --in-machine",
@@ -636,10 +636,10 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 		">>/var/lib/acornfall/appliance.log 2>&1",
 	}, " ")
 	driver := NewLXC(engine, Machine{
-		Image:     image,
-		CPUs:      2,
-		Memory:    "1G",
-		ShareRoot: root,
+		Image:  image,
+		CPUs:   2,
+		Memory: "1G",
+		Share:  share,
 	}, filepath.Join(home, "state", "machine.sock"), "/bin/true").WithLog(t.Logf)
 	driver.machine.WithAppliance(start, fmt.Sprintf("127.0.0.1:%d:7777", port))
 	t.Cleanup(func() {

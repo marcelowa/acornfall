@@ -70,9 +70,9 @@ func newSupervisor(t *testing.T, machine machineControl, apply func(context.Cont
 		t.Fatal(err)
 	}
 	service := &supervisor{
-		home:    home,
-		root:    root,
-		service: "v0.10.0-beta.14",
+		machinery: home,
+		share:     root,
+		service:   "v0.10.0-beta.14",
 		// Step 2 is off unless a test turns it on: these tests are about the machine. The ones that
 		// are about the host's own binary set these fields themselves.
 		ownsSelf:     true,
@@ -541,7 +541,7 @@ func TestRestartKeepsTheMachinePinned(t *testing.T) {
 		}
 	}
 	up := func([]string) { order = append(order, "up") }
-	restartMachine([]string{"--root", root}, down, up)
+	restartMachine([]string{"--share", root}, down, up)
 	if got, want := strings.Join(order, ","), "down,up"; got != want {
 		t.Errorf("restart did %q, want %q", got, want)
 	}
@@ -549,14 +549,14 @@ func TestRestartKeepsTheMachinePinned(t *testing.T) {
 		t.Errorf("after a restart the declaration is %q, want running", got)
 	}
 	// The flags a person passes are the flags the declaration reads, whatever order they come in.
-	if got := rootFromFlags([]string{"--home", "/tmp/h", "--root", root}); got != root {
+	if got := shareFromFlags([]string{"--machinery", "/tmp/h", "--share", root}); got != root {
 		t.Errorf("rootFromFlags read %q, want %q", got, root)
 	}
-	if got := rootFromFlags([]string{"--root=" + root}); got != root {
-		t.Errorf("rootFromFlags read %q from --root=..., want %q", got, root)
+	if got := shareFromFlags([]string{"--share=" + root}); got != root {
+		t.Errorf("shareFromFlags read %q from --share=..., want %q", got, root)
 	}
-	if got := rootFromFlags([]string{"--home", "/tmp/h"}); got != "" {
-		t.Errorf("no --root is the default root, got %q", got)
+	if got := shareFromFlags([]string{"--machinery", "/tmp/h"}); got != "" {
+		t.Errorf("no --share is the default share, got %q", got)
 	}
 }
 

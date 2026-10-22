@@ -202,10 +202,10 @@ var ErrReleaseNotFound = errors.New("release not found")
 
 // Manager owns the update state for one install.
 type Manager struct {
-	home string
-	// root is the folder the machine mounts: the product.s config and state live there, which
+	machinery string
+	// share is the folder the machine mounts: the product's config and state live there, which
 	// is what a backup keeps a copy of (docs/adr/0022).
-	root       string
+	share      string
 	binPath    string
 	migrateDir string
 	latestURL  string
@@ -258,15 +258,15 @@ type Manager struct {
 // New builds a Manager. Empty binPath means the current executable.
 // Empty migrateDir means <repo>/scripts/migrate beside nothing: pass it
 // explicitly in production; empty disables the migrate step in tests.
-func New(home, root, binPath, migrateDir string) *Manager {
+func New(machinery, share, binPath, migrateDir string) *Manager {
 	if binPath == "" {
 		if executable, err := os.Executable(); err == nil {
 			binPath = executable
 		}
 	}
 	return &Manager{
-		home:       home,
-		root:       root,
+		machinery:  machinery,
+		share:      share,
 		binPath:    binPath,
 		migrateDir: migrateDir,
 		latestURL:  LatestURL,
@@ -287,11 +287,11 @@ func (m *Manager) WithLauncherOwner() *Manager {
 	return m
 }
 
-func (m *Manager) versionPath() string       { return filepath.Join(m.home, "version") }
-func (m *Manager) settingsPath() string      { return filepath.Join(m.home, "update.json") }
-func (m *Manager) backupsDir() string        { return filepath.Join(m.home, "backups") }
-func (m *Manager) pendingPath() string       { return filepath.Join(m.home, "update.pending") }
-func (m *Manager) failedPath() string        { return filepath.Join(m.home, "update.failed") }
+func (m *Manager) versionPath() string       { return filepath.Join(m.machinery, "version") }
+func (m *Manager) settingsPath() string      { return filepath.Join(m.machinery, "update.json") }
+func (m *Manager) backupsDir() string        { return filepath.Join(m.machinery, "backups") }
+func (m *Manager) pendingPath() string       { return filepath.Join(m.machinery, "update.pending") }
+func (m *Manager) failedPath() string        { return filepath.Join(m.machinery, "update.failed") }
 func (m *Manager) backupBinPath() string     { return m.binPath + ".bak" }
 func (m *Manager) backupVersionPath() string { return m.binPath + ".bak.version" }
 
@@ -439,8 +439,8 @@ func (m *Manager) hostChannel() (string, *HostState) {
 	if !m.launcherOwned {
 		return "", nil
 	}
-	want, _ := ReadWant(m.root)
-	state, ok := ReadIs(m.root)
+	want, _ := ReadWant(m.share)
+	state, ok := ReadIs(m.share)
 	if !ok {
 		return want.Version, nil
 	}
@@ -910,8 +910,8 @@ func assetNamed(release Release, name string) Asset {
 	return Asset{}
 }
 
-// Backup copies the product's own files into <home>/backups/<timestamp>/ and keeps the last 3:
-// the install's config and settings and the workspace list, which live in the root the machine
+// Backup copies the product's own files into <machinery>/backups/<timestamp>/ and keeps the last 3:
+// the install's config and settings and the workspace list, which live in the share the machine
 // mounts (ADR 0022), plus the machinery's version and update state. Secrets are never backed up:
 // credentials.json stays out, and old copies are scrubbed. Update stops when backup fails.
 func (m *Manager) Backup() (string, error) {
@@ -926,11 +926,11 @@ func (m *Manager) Backup() (string, error) {
 		dir = filepath.Join(m.backupsDir(), fmt.Sprintf("%s-%d", stamp, i))
 	}
 	files := []struct{ source, name string }{
-		{filepath.Join(m.root, "config", "config.json"), "config.json"},
-		{filepath.Join(m.root, "config", "settings.json"), "settings.json"},
-		{filepath.Join(m.root, "state", "workspaces.json"), "workspaces.json"},
-		{filepath.Join(m.home, "version"), "version"},
-		{filepath.Join(m.home, "update.json"), "update.json"},
+		{filepath.Join(m.share, "config", "config.json"), "config.json"},
+		{filepath.Join(m.share, "config", "settings.json"), "settings.json"},
+		{filepath.Join(m.share, "state", "workspaces.json"), "workspaces.json"},
+		{filepath.Join(m.machinery, "version"), "version"},
+		{filepath.Join(m.machinery, "update.json"), "update.json"},
 	}
 	for _, file := range files {
 		payload, err := os.ReadFile(file.source)
@@ -944,7 +944,7 @@ func (m *Manager) Backup() (string, error) {
 			return "", err
 		}
 	}
-	if err := copyDir(filepath.Join(m.root, "state"), filepath.Join(dir, "state")); err != nil {
+	if err := copyDir(filepath.Join(m.share, "state"), filepath.Join(dir, "state")); err != nil {
 		return "", err
 	}
 	if err := m.pruneBackups(); err != nil {
@@ -1044,7 +1044,7 @@ func (m *Manager) Migrate(ctx context.Context, tag string) error {
 			}
 			return err
 		}
-		return runScript(ctx, script, m.home, tag)
+		return runScript(ctx, script, m.machinery, tag)
 	}
 	body, err := migrateFS.ReadFile("migrate/" + tag + ".sh")
 	if err != nil {
@@ -1069,11 +1069,11 @@ func (m *Manager) Migrate(ctx context.Context, tag string) error {
 	if err := os.Chmod(tempPath, 0o700); err != nil {
 		return err
 	}
-	return runScript(ctx, tempPath, m.home, tag)
+	return runScript(ctx, tempPath, m.machinery, tag)
 }
 
-func runScript(ctx context.Context, script, home, tag string) error {
-	command := exec.CommandContext(ctx, "sh", script, home)
+func runScript(ctx context.Context, script, machinery, tag string) error {
+	command := exec.CommandContext(ctx, "sh", script, machinery)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("migrate %s: %v: %s", tag, err, strings.TrimSpace(string(output)))
@@ -1206,7 +1206,7 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 
 // checkExec proves a staged binary runs and names its tag: `version` is
 // pure Go with no flags, so this works on every platform the binary does.
-// It runs from a temp copy under an empty home, never the live path: the
+// It runs from a temp copy under an empty machinery folder, never the live path: the
 // version file would answer for the binary, and a failure must leave the
 // running build and its backup exactly alone.
 func checkExec(ctx context.Context, payload []byte, tag string) error {
@@ -1226,7 +1226,7 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	if err := os.Chmod(tempPath, 0o755); err != nil {
 		return err
 	}
-	emptyHome, err := os.MkdirTemp("", "acornfall-check-home-*")
+	emptyHome, err := os.MkdirTemp("", "acornfall-check-machinery-*")
 	if err != nil {
 		return err
 	}
@@ -1234,7 +1234,7 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, tempPath, "version")
-	command.Env = append(os.Environ(), "ACORNFALL_HOME="+emptyHome, "ACORNFALL_DATA="+emptyHome)
+	command.Env = append(os.Environ(), "ACORNFALL_MACHINERY="+emptyHome, "ACORNFALL_SHARE="+emptyHome)
 	output, err := command.Output()
 	if err != nil {
 		return fmt.Errorf("update: staged %s does not run: %w", tag, err)

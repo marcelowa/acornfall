@@ -8,7 +8,7 @@ import (
 
 func testInput(home string) Input {
 	return Input{
-		Home:            home,
+		Machinery:       home,
 		Current:         "v0.9.0",
 		Worker:          "v0.9.0",
 		BunPath:         filepath.Join(home, "tools", "bun-1.4.3", "bun"),

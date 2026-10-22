@@ -33,13 +33,13 @@ import (
 const GeneralWorkspaceName = "general"
 
 // inside says whether a folder is the root itself or below it.
-func inside(path, root string) bool {
+func inside(path, share string) bool {
 	clean, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
-	root = filepath.Clean(root)
-	return clean == root || strings.HasPrefix(clean, root+string(os.PathSeparator))
+	share = filepath.Clean(share)
+	return clean == share || strings.HasPrefix(clean, share+string(os.PathSeparator))
 }
 
 // DefaultWorkspacesDir is where workspaces are created. It is deliberately outside the
@@ -50,11 +50,11 @@ func inside(path, root string) bool {
 // would otherwise land wherever the process happened to start, which is not a place anyone
 // chose and is how a folder of them appears in a container's working directory.
 func DefaultWorkspacesDir() (string, error) {
-	home, err := os.UserHomeDir()
+	machinery, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot tell where to create workspaces: %w (pass --workspaces-dir)", err)
 	}
-	return filepath.Join(home, "acornfall", "workspaces"), nil
+	return filepath.Join(machinery, "acornfall", "workspaces"), nil
 }
 
 // Workspace is a folder the agent works in, plus the decisions that belong to it.
@@ -96,7 +96,7 @@ const NetworkOff = "off"
 // places and the worker reads both: the sandbox mounts the same paths at the same strings.
 // `disableVMNesting` is the install's own answer, --disable-vm-nesting, and a workspace's
 // own setting wins over it.
-func (w Workspace) SandboxPolicy(root string, disableVMNesting bool) sandbox.Policy {
+func (w Workspace) SandboxPolicy(share string, disableVMNesting bool) sandbox.Policy {
 	if w.DisableVMNesting != nil {
 		disableVMNesting = *w.DisableVMNesting
 	}
@@ -106,7 +106,7 @@ func (w Workspace) SandboxPolicy(root string, disableVMNesting bool) sandbox.Pol
 		Egress:           w.Network != NetworkOff,
 		Privileged:       w.Privileged,
 		DisableVMNesting: disableVMNesting,
-		Global:           sandbox.GlobalPaths(root),
+		Global:           sandbox.GlobalPaths(share),
 	}
 }
 
@@ -434,7 +434,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		Credentials:      w.opts.Layout.Credentials(),
 		Registry:         w.List,
 		WorkspacesDir:    w.Dir(),
-		Root:             w.opts.Layout.Root,
+		Root:             w.opts.Layout.Share,
 		InstallSettings:  w.opts.Layout.SettingsFile(),
 		StoragePath:      filepath.Join(w.opts.Layout.WorkspaceState(name), "session.sqlite"),
 		SettingsPath:     filepath.Join(w.opts.Layout.WorkspaceState(name), "settings.json"),
@@ -841,8 +841,8 @@ func (w *Workspaces) loadRegistry() error {
 		// A recorded folder outside the mount is the same bug as a default taken from a home: the machine
 		// cannot see it, so every workspace made there is a workspace with no sandbox. The registry remembers
 		// where workspaces live, which is how one bad run keeps making bad ones.
-		if root := w.opts.Layout.Root; dir != "" && root != "" && !inside(dir, root) {
-			workerpool.Log("workspaces folder %s is outside the mount %s: creating them inside it", dir, root)
+		if share := w.opts.Layout.Share; dir != "" && share != "" && !inside(dir, share) {
+			workerpool.Log("workspaces folder %s is outside the mount %s: creating them inside it", dir, share)
 			dir = ""
 		}
 	}
@@ -852,8 +852,8 @@ func (w *Workspaces) loadRegistry() error {
 		// /acornfall/workspaces — outside the share root, so every workspace created in it was a workspace with
 		// no sandbox, and the sentence said only that tools were off. An explicit --root settles it; only an
 		// install that names neither falls back to a home.
-		if root := w.opts.Layout.Root; root != "" {
-			dir = filepath.Join(root, "workspaces")
+		if share := w.opts.Layout.Share; share != "" {
+			dir = filepath.Join(share, "workspaces")
 		} else {
 			dir, err = DefaultWorkspacesDir()
 			if err != nil {
@@ -929,9 +929,9 @@ func (w *Workspaces) migrate() error {
 	// The write-ahead log travels with its database. Moving one without the other loses
 	// every commit that had not been checkpointed and leaves megabytes behind.
 	moves := []struct{ from, to string }{
-		{filepath.Join(w.opts.Layout.Root, "session.sqlite"), filepath.Join(state, "session.sqlite")},
-		{filepath.Join(w.opts.Layout.Root, "session.sqlite-wal"), filepath.Join(state, "session.sqlite-wal")},
-		{filepath.Join(w.opts.Layout.Root, "session.sqlite-shm"), filepath.Join(state, "session.sqlite-shm")},
+		{filepath.Join(w.opts.Layout.Share, "session.sqlite"), filepath.Join(state, "session.sqlite")},
+		{filepath.Join(w.opts.Layout.Share, "session.sqlite-wal"), filepath.Join(state, "session.sqlite-wal")},
+		{filepath.Join(w.opts.Layout.Share, "session.sqlite-shm"), filepath.Join(state, "session.sqlite-shm")},
 	}
 	for _, move := range moves {
 		if _, err := os.Stat(move.from); err != nil {
@@ -952,7 +952,7 @@ func (w *Workspaces) migrate() error {
 	// leaving them would both waste space and invite the next reader to use the wrong one.
 	if _, err := os.Stat(filepath.Join(state, "session.sqlite")); err == nil {
 		for _, orphan := range []string{"session.sqlite-wal", "session.sqlite-shm"} {
-			path := filepath.Join(w.opts.Layout.Root, orphan)
+			path := filepath.Join(w.opts.Layout.Share, orphan)
 			if _, err := os.Stat(path); err == nil {
 				workerpool.Log("removing orphaned %s", path)
 				_ = os.Remove(path)

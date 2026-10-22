@@ -130,9 +130,11 @@ only exists while the machine is up.
 
 What the move touches, in one piece (a half-move is a product that reads half its files):
 
-1. **The share root becomes a thing the code knows.** `--root` (default: the parent of
-   `--workspaces-dir`, which is already `~/acornfall/workspaces`), so the root and the workspaces
-   cannot disagree. `--home` keeps meaning the machinery.
+1. **The share becomes a thing the code knows.** `--share` (default: the parent of
+   `--workspaces-dir`, which is already `~/acornfall/workspaces`), so the share and the workspaces
+   cannot disagree. `--machinery` is the install's own folder. (Both were `--root` and `--home`
+   until beta 28: `--root` read as the root of the file system, which is exactly the confusion that
+   put a workspace outside the mount, and `--home` was never anybody's home.)
 2. **control**: the workspace state, the drafts, the registry, the settings and the credentials
    move under the root; the install keeps `tools/`, `sandboxes/`, `version`, `update.json`.
 3. **The sandbox mounts**: one bundle (`<root>/.agents`) and the config file

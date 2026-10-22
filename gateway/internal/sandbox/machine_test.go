@@ -116,11 +116,11 @@ func TestTheMachineWritesItsPolicyAndItsDiskFlag(t *testing.T) {
 	runner := &machineRunner{}
 	dir := t.TempDir()
 	machine := NewMachineEngine(machineDriver(t, runner), Machine{
-		Image:     "acornfall-appliance:0.1",
-		CPUs:      6,
-		Memory:    "12G",
-		Disk:      "flat:40G",
-		ShareRoot: "/home/me/work",
+		Image:  "acornfall-appliance:0.1",
+		CPUs:   6,
+		Memory: "12G",
+		Disk:   "flat:40G",
+		Share:  "/home/me/work",
 	}, dir)
 	if err := machine.EnsureMachine(context.Background()); err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestTheMachineAsksForNestingForItsContainers(t *testing.T) {
 
 // Nobody has chosen the share root yet (ADR 0021 leaves it open). A machine without one mounts
 // nothing — and names no mounts key at all, because an empty path is not a mount.
-func TestAMachineWithNoShareRootNamesNoMount(t *testing.T) {
+func TestAMachineWithNoShareNamesNoMount(t *testing.T) {
 	policy := Machine{}.Policy().Render()
 	if strings.Contains(string(policy), "mounts:") {
 		t.Errorf("a machine with no share root should mount nothing, got:\n%s", policy)

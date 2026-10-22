@@ -38,20 +38,20 @@ var launchdUnit string
 // unitConfig is everything a generated unit says: the symlink it starts, the two folders, and the address
 // the console is published on. It is rendered from the declaration, never edited afterwards.
 type unitConfig struct {
-	UserHome string
-	Home     string
-	Root     string
-	Host     string
-	Port     int
+	UserHome  string
+	Machinery string
+	Share     string
+	Host      string
+	Port      int
 }
 
 // unitFor renders the unit this platform's init reads and says where it goes. Anything else is refused by
 // name: there is no unit to write, and guessing one is how an install half-happens.
 func unitFor(goos string, cfg unitConfig) (path, content string, err error) {
 	unit := strings.NewReplacer(
-		"{{BINARY}}", update.OwnedBinary(cfg.Home),
-		"{{ROOT}}", cfg.Root,
-		"{{HOME}}", cfg.Home,
+		"{{BINARY}}", update.OwnedBinary(cfg.Machinery),
+		"{{SHARE}}", cfg.Share,
+		"{{MACHINERY}}", cfg.Machinery,
 		"{{HOST}}", cfg.Host,
 		"{{PORT}}", strconv.Itoa(cfg.Port),
 	)
@@ -186,8 +186,8 @@ func currentUser() string {
 }
 
 func userHomeDir() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		return home
+	if machinery, err := os.UserHomeDir(); err == nil {
+		return machinery
 	}
 	return os.Getenv("HOME")
 }
@@ -228,8 +228,8 @@ func initOutput(ctx context.Context, name string, args ...string) (string, error
 // first install, a repair and a second run without systemd.
 type installer struct {
 	userHome    string
-	home        string
-	root        string
+	machinery   string
+	share       string
 	version     string
 	declaration update.Declaration
 	binary      []byte
@@ -254,21 +254,21 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		}
 	}
 	cfg := unitConfig{
-		UserHome: in.userHome,
-		Home:     in.home,
-		Root:     in.root,
-		Host:     in.declaration.Host,
-		Port:     in.declaration.Port,
+		UserHome:  in.userHome,
+		Machinery: in.machinery,
+		Share:     in.share,
+		Host:      in.declaration.Host,
+		Port:      in.declaration.Port,
 	}
 	if cfg.Host == "" {
 		cfg.Host, cfg.Port = in.declaration.Address()
 	}
-	previous := update.ReadDeclaration(in.root)
+	previous := update.ReadDeclaration(in.share)
 	previousHost, previousPort := previous.Address()
 	addressChanged := previousHost != cfg.Host || previousPort != cfg.Port
 
 	// The binary, under the release's own name, and the symlink the unit starts.
-	versioned := update.VersionedBinary(in.home, in.version)
+	versioned := update.VersionedBinary(in.machinery, in.version)
 	written, err := writeIfDifferent(versioned, in.binary, 0o755)
 	binaryWritten := written
 	if err != nil {
@@ -278,12 +278,12 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		return err
 	}
 	say(!written, "the binary at "+versioned)
-	linked, err := pointIfDifferent(update.OwnedBinary(in.home), versioned)
+	linked, err := pointIfDifferent(update.OwnedBinary(in.machinery), versioned)
 	binaryWritten = binaryWritten || linked
 	if err != nil {
-		return fmt.Errorf("pointing %s at %s: %w", update.OwnedBinary(in.home), versioned, err)
+		return fmt.Errorf("pointing %s at %s: %w", update.OwnedBinary(in.machinery), versioned, err)
 	}
-	say(!linked, "the symlink at "+update.OwnedBinary(in.home))
+	say(!linked, "the symlink at "+update.OwnedBinary(in.machinery))
 
 	// The unit, generated from the embedded copy: never edited, and always the declaration's address.
 	unitPath, unitContent, err := in.init.Unit(cfg)
@@ -299,11 +299,11 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 	// The declaration the other commands read: it exists, and it agrees with the unit.
 	declarationWritten := previous != in.declaration
 	if declarationWritten {
-		if err := update.WriteDeclaration(in.root, in.declaration); err != nil {
+		if err := update.WriteDeclaration(in.share, in.declaration); err != nil {
 			return fmt.Errorf("writing the declaration: %w", err)
 		}
 	}
-	say(!declarationWritten, "the declaration at "+update.MachineIntentPath(in.root))
+	say(!declarationWritten, "the declaration at "+update.MachineIntentPath(in.share))
 	if addressChanged {
 		say(false, fmt.Sprintf("the address, from %s:%d to %s:%d (the declaration and the unit both)", previousHost, previousPort, cfg.Host, cfg.Port))
 	}
@@ -359,7 +359,7 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		// A disk that does not say which release it is — every machine made before the disk carried a tag, which
 		// includes every install that predates this release — is not this release's machine. That is the whole
 		// question, so "" is stale too.
-		if applianceRunningVersion(in.home) != in.version {
+		if applianceRunningVersion(in.machinery) != in.version {
 			stale = true
 		}
 	}
@@ -378,7 +378,7 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 				}
 				return in.machine.Remove(ctx)
 			}
-			if _, err := applianceUp(ctx, in.home, in.root, in.version, remove); err != nil {
+			if _, err := applianceUp(ctx, in.machinery, in.share, in.version, remove); err != nil {
 				return fmt.Errorf("making the machine's disk for %s: %w", in.version, err)
 			}
 			say(false, "made the machine's disk from "+in.version)
@@ -530,14 +530,14 @@ func consoleIsTheMachine(ctx context.Context, url string) error {
 // verifyUp is the real check after an install: the unit is active, the state the console reads has been
 // written, and the console answers on the declared address. A failure names the checks that failed, because
 // "one of these three" is a sentence that sends a person to read three things.
-func verifyUp(ctx context.Context, init initSystem, root string, cfg unitConfig, now func() time.Time, sleep func(time.Duration)) error {
+func verifyUp(ctx context.Context, init initSystem, share string, cfg unitConfig, now func() time.Time, sleep func(time.Duration)) error {
 	url := consoleURL(cfg.Host, cfg.Port)
 	// Long enough for a machine that has to be made and booted: the unit is up in a second, the state follows,
 	// and the console is the last thing — a fresh microVM takes half a minute to answer on a quiet host.
 	const within = 90 * time.Second
 	deadline := now().Add(within)
 	for {
-		failing := failingChecks(ctx, init, root, url)
+		failing := failingChecks(ctx, init, share, url)
 		if len(failing) == 0 {
 			return nil
 		}
@@ -549,13 +549,13 @@ func verifyUp(ctx context.Context, init initSystem, root string, cfg unitConfig,
 }
 
 // failingChecks is every part of "up" that is not true, in the words of the thing that is wrong.
-func failingChecks(ctx context.Context, init initSystem, root, url string) []string {
+func failingChecks(ctx context.Context, init initSystem, share, url string) []string {
 	var failing []string
 	if !init.Active(ctx) {
 		failing = append(failing, "the "+init.Name()+" unit is not active")
 	}
-	if _, ok := update.ReadIs(root); !ok {
-		failing = append(failing, update.IsPath(root)+" was not written")
+	if _, ok := update.ReadIs(share); !ok {
+		failing = append(failing, update.IsPath(share)+" was not written")
 	}
 	if err := consoleIsTheMachine(ctx, url); err != nil {
 		failing = append(failing, err.Error())
@@ -565,7 +565,7 @@ func failingChecks(ctx context.Context, init initSystem, root, url string) []str
 		if strings.Contains(err.Error(), "401") {
 			hint = " (it is asking for a token: a machine made by an earlier release carries one in its init, so `machine down` then `machine up` makes a new one)"
 		}
-		if state, ok := update.ReadIs(root); ok && state.LastError != "" {
+		if state, ok := update.ReadIs(share); ok && state.LastError != "" {
 			hint += " (the service says: " + state.LastError + ")"
 		}
 		failing = append(failing, "the console at "+url+" did not answer"+hint+": "+err.Error())
@@ -575,10 +575,10 @@ func failingChecks(ctx context.Context, init initSystem, root, url string) []str
 
 // leftBehind is the sentence an uninstall and a purge both print: the mount is the person's, and saying so
 // is the whole difference between removing a product and removing someone's work.
-func leftBehind(root string, registry control.RegistryFile) []string {
-	lines := []string{"left " + root + ": your workspaces, conversations and files are in it"}
+func leftBehind(share string, registry control.RegistryFile) []string {
+	lines := []string{"left " + share + ": your workspaces, conversations and files are in it"}
 	for _, workspace := range registry.Workspaces {
-		if !strings.HasPrefix(filepath.Clean(workspace.Path), filepath.Clean(root)+string(os.PathSeparator)) && filepath.Clean(workspace.Path) != filepath.Clean(root) {
+		if !strings.HasPrefix(filepath.Clean(workspace.Path), filepath.Clean(share)+string(os.PathSeparator)) && filepath.Clean(workspace.Path) != filepath.Clean(share) {
 			lines = append(lines, "left "+workspace.Path+" (workspace "+workspace.Name+"): it is outside the mount and it is your own folder")
 		}
 	}
@@ -587,8 +587,8 @@ func leftBehind(root string, registry control.RegistryFile) []string {
 
 // readRegistry is the registry the mount holds, or an empty one: an install with no registry is a machine
 // that has not been booted yet, not a failure to uninstall.
-func readRegistry(root string) control.RegistryFile {
-	registry, err := control.LoadRegistryFile(filepath.Join(layout.New(root, "").StateDir(), "workspaces.json"))
+func readRegistry(share string) control.RegistryFile {
+	registry, err := control.LoadRegistryFile(filepath.Join(layout.New(share, "").StateDir(), "workspaces.json"))
 	if err != nil {
 		log.Printf("machine: cannot read the workspace registry: %v", err)
 		return control.RegistryFile{}

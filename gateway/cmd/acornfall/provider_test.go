@@ -13,7 +13,7 @@ import (
 // flag written after the operand is not ignored on the way.
 func TestProviderAddWritesTheKeyIntoTheMount(t *testing.T) {
 	root, home := t.TempDir(), t.TempDir()
-	providers([]string{"add", "openai", "sk-test", "--root", root, "--data-dir", home})
+	providers([]string{"add", "openai", "sk-test", "--share", root, "--data-dir", home})
 
 	path := layout.New(root, home).Credentials()
 	payload, err := os.ReadFile(path)

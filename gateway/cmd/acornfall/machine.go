@@ -86,8 +86,8 @@ or launchd (scripts/units/), not from a terminal you will close.
 // machine: the engine finds the one this install has and leaves it alone.
 func machineUp(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine up", flag.ContinueOnError)
-	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
 	image := flags.String("image", "", applianceImageHelp)
 	tag := flags.String("tag", "", "the release to fetch the appliance from (default: this build's version)")
 	refresh := flags.Bool("refresh", false, "fetch the appliance again and recreate the machine: an init is fixed at boot, so an update is a new machine")
@@ -104,11 +104,11 @@ func machineUp(argv []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -123,12 +123,12 @@ func machineUp(argv []string) {
 	// The person asked for a running machine, and it is recorded before anything that can fail: a
 	// boot interrupted half way must leave the intent, or the service would leave the machine down
 	// because it never heard what the person wanted (ADR 0030, amended).
-	if err := declareMachine(resolvedRoot, update.IntentRunning); err != nil {
+	if err := declareMachine(resolvedShare, update.IntentRunning); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	// The mount is the product, so it has to be there before the machine is: the machine mounts
 	// it, and a machine whose world is missing boots into a console with no workspaces.
-	where := layout.New(resolvedRoot, resolvedHome)
+	where := layout.New(resolvedShare, resolvedHome)
 	if err := where.Ensure(); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -141,12 +141,12 @@ func machineUp(argv []string) {
 	// The token, when the install has one, comes from the mount: the appliance has no secrets of
 	// its own, and a port that answers without one is only safe while it is loopback.
 	// The address is the declaration's: a flag that was given wrote it, and a flag that was not reads it.
-	*host, *port, err = declaredAddress(resolvedRoot, flags, host, port)
+	*host, *port, err = declaredAddress(resolvedShare, flags, host, port)
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	build := func(image string) (*sandbox.LXC, error) {
-		return machineDriver(resolvedHome, image, resolvedRoot, *cpus, *memory, *port, *host, applianceInit(resolvedRoot))
+		return machineDriver(resolvedHome, image, resolvedShare, *cpus, *memory, *port, *host, applianceInit(resolvedShare))
 	}
 	driver, err := build(resolvedImage)
 	if err != nil {
@@ -188,7 +188,7 @@ func machineUp(argv []string) {
 		// The disk is the machine: it is taken away inside the lock that makes the disk, so nothing boots the
 		// tree while it is being replaced, and the product is in the mount, so nothing of it is lost.
 		remove := func() error { return driver.RemoveMachine(ctx) }
-		resolvedImage, err = makeApplianceDisk(ctx, resolvedHome, resolvedRoot, applianceTag(*tag), plan, *refresh, remove)
+		resolvedImage, err = makeApplianceDisk(ctx, resolvedHome, resolvedShare, applianceTag(*tag), plan, *refresh, remove)
 		if err != nil {
 			log.Fatalf("acornfall machine: %v", err)
 		}
@@ -250,17 +250,17 @@ func publishNotice(host string, port int) string {
 // how it is must not be the thing that creates it.
 func machineStatus(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine status", flag.ContinueOnError)
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
-	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
 	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -268,13 +268,13 @@ func machineStatus(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedShare, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedShare))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	fmt.Println(statusAddress(resolvedRoot))
+	fmt.Println(statusAddress(resolvedShare))
 	name := driver.MachineName()
 	if !driver.Engine().Installed() {
 		// Asking how the machine is must not install anything: a machine that was never booted
@@ -304,19 +304,19 @@ func machineStatus(argv []string) {
 // the appliance's own gateway — it is in the machine, and its containers are its neighbours —
 // but the machine's configuration still carries it, because the host may need the same door for
 // the engine that reaches containers from outside (internal/sandbox/lxcengine.go).
-func machineDriver(home, image, root string, cpus int, memory string, port int, host string, start string) (*sandbox.LXC, error) {
+func machineDriver(machinery, image, share string, cpus int, memory string, port int, host string, start string) (*sandbox.LXC, error) {
 	binary, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("this binary's own path is what the machine runs the shim from: %w", err)
 	}
-	engine := sandbox.NewMicrosandbox(home)
+	engine := sandbox.NewMicrosandbox(machinery)
 	machine := sandbox.Machine{
-		Image:     image,
-		CPUs:      cpus,
-		Memory:    memory,
-		ShareRoot: root,
+		Image:  image,
+		CPUs:   cpus,
+		Memory: memory,
+		Share:  share,
 	}
-	driver := sandbox.NewLXC(engine, machine, filepath.Join(home, "state", "machine.sock"), binary)
+	driver := sandbox.NewLXC(engine, machine, filepath.Join(machinery, "state", "machine.sock"), binary)
 	driver = driver.WithAppliance(start, fmt.Sprintf("%s:%d:7777", host, port))
 	return driver, nil
 }
@@ -326,9 +326,9 @@ func machineDriver(home, image, root string, cpus int, memory string, port int, 
 // mount, which is the point of the layout (ADR 0022): the machine holds nothing of the
 // product's, so it can be replaced without losing any. The token, when there is one, comes from
 // the mount for the same reason; without one the port is only published on loopback.
-func applianceInit(root string) string {
+func applianceInit(share string) string {
 	machineHome := "/var/lib/acornfall"
-	workspace := filepath.Join(root, "workspaces", "general")
+	workspace := filepath.Join(share, "workspaces", "general")
 	// No token: the console asks for nothing, which is the default everywhere (MVP). A launcher that
 	// published on a network address said so once, at the address it chose.
 	auth := "--insecure"
@@ -352,8 +352,8 @@ func applianceInit(root string) string {
 		// container that failed to start explains itself, and the console is not readable.
 		"exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 " + auth,
-		"--root " + root,
-		"--home " + machineHome,
+		"--share " + share,
+		"--machinery " + machineHome,
 		"--workspace " + workspace,
 		"--worker-dir /usr/local/lib/acornfall/worker",
 		"--sandbox-engine lxc --in-machine",
@@ -373,7 +373,7 @@ func applianceInit(root string) string {
 // the tarball's checksum, so it knows which release those bytes are.
 //
 // The caller takes the machine away first (applianceWillReplace): the image is its disk.
-func ensureAppliance(ctx context.Context, home, image string, refresh, given bool, tag string) error {
+func ensureAppliance(ctx context.Context, machinery, image string, refresh, given bool, tag string) error {
 	tag = applianceTag(tag)
 	if !applianceWillReplace(image, tag, refresh, given) {
 		return nil
@@ -386,7 +386,7 @@ func ensureAppliance(ctx context.Context, home, image string, refresh, given boo
 		log.Printf("machine: the image is %s and this build runs %s: fetching the release's", applianceDescribe(image), tag)
 	}
 	log.Printf("machine: fetching the appliance %s into %s", tag, image)
-	if err := fetchAppliance(ctx, home, tag, image); err != nil {
+	if err := fetchAppliance(ctx, machinery, tag, image); err != nil {
 		if refresh || !existed {
 			return err
 		}
@@ -437,8 +437,8 @@ func updateSteps(ctx context.Context, tag string, machineOnly bool, step1 func(c
 // Every way an update can fail comes back as an error and the process exits once, here: an exit inside
 // would skip the deferred release, and a lock left by a process that is gone is the next update's
 // problem (ADR 0031).
-func updateUnderLock(root string, run func() (string, error)) (string, error) {
-	unlock, note, err := update.AcquireLock(root, time.Now())
+func updateUnderLock(share string, run func() (string, error)) (string, error) {
+	unlock, note, err := update.AcquireLock(share, time.Now())
 	if err != nil {
 		return "", err
 	}
@@ -453,8 +453,8 @@ func updateUnderLock(root string, run func() (string, error)) (string, error) {
 // running before step 1 — the same write `machine up` does — because a person typing the command is the
 // declaration, and a command cannot be kept by the gate that guards the service's automatic applies. Its
 // parts are arguments so a test drives that without a hypervisor.
-func machineUpdateRun(ctx context.Context, root string, resolve func() (string, error), machineOnly bool, step1 func(context.Context, string) error, ready func(context.Context, string) bool, step2 func(context.Context, string) error) (string, error) {
-	if err := update.WriteMachineIntent(root, update.IntentRunning); err != nil {
+func machineUpdateRun(ctx context.Context, share string, resolve func() (string, error), machineOnly bool, step1 func(context.Context, string) error, ready func(context.Context, string) bool, step2 func(context.Context, string) error) (string, error) {
+	if err := update.WriteMachineIntent(share, update.IntentRunning); err != nil {
 		return "", fmt.Errorf("recording that a person asked for a running machine: %w", err)
 	}
 	tag, err := resolve()
@@ -469,8 +469,8 @@ func machineUpdateRun(ctx context.Context, root string, resolve func() (string, 
 // binary or the same disk.
 func machineUpdate(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine update", flag.ContinueOnError)
-	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
 	tag := flags.String("tag", "", "the release to update to (default: the newest one)")
 	machineOnly := flags.Bool("machine-only", false, "do step 1 and stop: the machine moves, the host keeps the binary it has")
 	port := flags.Int("port", 7777, "the host port the console is published on")
@@ -481,15 +481,15 @@ func machineUpdate(argv []string) {
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Fatalf("acornfall machine update: %v", err)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Fatalf("acornfall machine update: %v", err)
 	}
-	where := layout.New(resolvedRoot, resolvedHome)
+	where := layout.New(resolvedShare, resolvedHome)
 	if err := where.Ensure(); err != nil {
 		log.Fatalf("acornfall machine update: %v", err)
 	}
@@ -505,7 +505,7 @@ func machineUpdate(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall machine update: %v", err)
 	}
-	manager := update.New(resolvedHome, resolvedRoot, "", "")
+	manager := update.New(resolvedHome, resolvedShare, "", "")
 	resolve := func() (string, error) {
 		var releases []update.Release
 		if strings.TrimSpace(*tag) == "" {
@@ -520,18 +520,18 @@ func machineUpdate(argv []string) {
 		}
 		return update.UpdateTarget(strings.TrimSpace(*tag), releases, applianceRunningVersion(resolvedHome))
 	}
-	*host, *port, err = declaredAddress(resolvedRoot, flags, host, port)
+	*host, *port, err = declaredAddress(resolvedShare, flags, host, port)
 	if err != nil {
 		log.Printf("acornfall machine update: %v", err)
 		os.Exit(1)
 	}
 	machine := driverMachine{
-		home:   resolvedHome,
-		root:   resolvedRoot,
-		cpus:   *cpus,
-		memory: *memory,
-		port:   *port,
-		host:   *host,
+		machinery: resolvedHome,
+		share:     resolvedShare,
+		cpus:      *cpus,
+		memory:    *memory,
+		port:      *port,
+		host:      *host,
 	}
 	step1 := func(ctx context.Context, tag string) error {
 		// No gate: a person typed this command, so it is the declaration. The service's gate would
@@ -550,13 +550,13 @@ func machineUpdate(argv []string) {
 		if err != nil {
 			return err
 		}
-		return update.SwapSelf(resolvedHome, resolvedRoot, tag, binary)
+		return update.SwapSelf(resolvedHome, resolvedShare, tag, binary)
 	}
 	// The lock is released before this function returns, and the one exit below happens after it: a
 	// `log.Fatalf` here would run no deferred unlock and leave the lock behind with a dead pid, which is
 	// what the next update then had to break (ADR 0031).
-	releaseTag, err := updateUnderLock(resolvedRoot, func() (string, error) {
-		return machineUpdateRun(ctx, resolvedRoot, resolve, *machineOnly, step1, ready, step2)
+	releaseTag, err := updateUnderLock(resolvedShare, func() (string, error) {
+		return machineUpdateRun(ctx, resolvedShare, resolve, *machineOnly, step1, ready, step2)
 	})
 	if err != nil {
 		log.Printf("acornfall machine update: %v", err)
@@ -571,16 +571,16 @@ func machineUpdate(argv []string) {
 
 // statusAddress is what `machine status` says about where the console is: a person asking "where do I
 // browse" gets an answer without opening a browser, and it is the declaration's address rather than a flag's.
-func statusAddress(root string) string {
-	host, port := update.ReadDeclaration(root).Address()
+func statusAddress(share string) string {
+	host, port := update.ReadDeclaration(share).Address()
 	return "console: " + consoleURL(host, port)
 }
 
 // declaredAddress is the address the console is published on: the declaration's, which the flags write when
 // they are given. The machine's address is fixed when it is created, so one file says what it is and no two
 // processes can disagree about it (ADR 0030, amended).
-func declaredAddress(root string, flags *flag.FlagSet, host *string, port *int) (string, int, error) {
-	declaration := update.ReadDeclaration(root)
+func declaredAddress(share string, flags *flag.FlagSet, host *string, port *int) (string, int, error) {
+	declaration := update.ReadDeclaration(share)
 	written := false
 	flags.Visit(func(set *flag.Flag) {
 		switch set.Name {
@@ -595,7 +595,7 @@ func declaredAddress(root string, flags *flag.FlagSet, host *string, port *int) 
 		}
 	})
 	if written {
-		if err := update.WriteDeclaration(root, declaration); err != nil {
+		if err := update.WriteDeclaration(share, declaration); err != nil {
 			return "", 0, fmt.Errorf("recording the address: %w", err)
 		}
 	}
@@ -606,28 +606,28 @@ func declaredAddress(root string, flags *flag.FlagSet, host *string, port *int) 
 // declareMachine records what a person asked for, before the work it describes (ADR 0030, amended). A
 // failure here is loud: a command that does the work without leaving the intent is a machine the
 // service will not bring back.
-func declareMachine(root string, intent update.Intent) error {
-	return update.WriteMachineIntent(root, intent)
+func declareMachine(share string, intent update.Intent) error {
+	return update.WriteMachineIntent(share, intent)
 }
 
 // declareFromFlags is declareMachine for a command whose own flag set does not exist yet: the
 // declaration comes before the command does its work, so it reads --root out of the arguments.
 func declareFromFlags(argv []string, intent update.Intent) error {
-	root, err := resolveRoot(rootFromFlags(argv), "")
+	share, err := resolveShare(shareFromFlags(argv), "")
 	if err != nil {
 		return err
 	}
-	return declareMachine(root, intent)
+	return declareMachine(share, intent)
 }
 
-// rootFromFlags reads --root out of a command's arguments without parsing the rest: every command
+// shareFromFlags reads --share out of a command's arguments without parsing the rest: every command
 // below parses its own flags, and the declaration only needs the mount.
-func rootFromFlags(argv []string) string {
+func shareFromFlags(argv []string) string {
 	for index, arg := range argv {
-		if arg == "--root" && index+1 < len(argv) {
+		if arg == "--share" && index+1 < len(argv) {
 			return argv[index+1]
 		}
-		if value, found := strings.CutPrefix(arg, "--root="); found {
+		if value, found := strings.CutPrefix(arg, "--share="); found {
 			return value
 		}
 	}
@@ -649,20 +649,20 @@ func restartMachine(argv []string, down, up func([]string)) error {
 
 // applianceImageHelp is the --image flag's help in all four commands. An install has one directory
 // the machine boots, and which one it is depends on the layout the install was made in.
-const applianceImageHelp = "the appliance image, an unpacked rootfs (default: the disk this install boots, <home>/machines/<machine>/rootfs, or <home>/appliance/rootfs for an install that has one)"
+const applianceImageHelp = "the appliance image, an unpacked rootfs (default: the disk this install boots, <machinery>/machines/<machine>/rootfs, or <machinery>/appliance/rootfs for an install that has one)"
 
 // The two directories the appliance can live in. The release's tarball is kept under the
 // machinery, and each machine's disk is unpacked from it (ADR 0026, amended): one directory was
 // both the artifact and the live disk, so a previous machine's containers were in the next
 // machine's image and a fetch replaced the disk of a machine that was using it.
-func applianceDisk(home string) string {
-	return filepath.Join(home, "machines", sandbox.MachineName(home), "rootfs")
+func applianceDisk(machinery string) string {
+	return filepath.Join(machinery, "machines", sandbox.MachineName(machinery), "rootfs")
 }
 
 // legacyAppliance is the directory every install made before the artifact was kept boots from: the
 // image and the disk in one tree.
-func legacyAppliance(home string) string {
-	return filepath.Join(home, "appliance", "rootfs")
+func legacyAppliance(machinery string) string {
+	return filepath.Join(machinery, "appliance", "rootfs")
 }
 
 // applianceDiskTag is the release a disk was unpacked from, written beside it when it was made. It
@@ -700,24 +700,24 @@ type applianceLayout struct {
 // was working before this change, and it is still what boots when a fetch fails. It stops being
 // booted once this launcher's release differs from the mark inside it, which is decision 2 of the
 // ADR, with the old tree left where a person can find it.
-func applianceLayoutFor(home, tag string, refresh bool) applianceLayout {
-	disk := applianceDisk(home)
+func applianceLayoutFor(machinery, tag string, refresh bool) applianceLayout {
+	disk := applianceDisk(machinery)
 	if !refresh && tag != "" && checkAppliance(disk) == nil && applianceDiskTag(disk) == tag {
 		return applianceLayout{Image: disk}
 	}
-	if legacy := legacyAppliance(home); !refresh && checkAppliance(legacy) == nil && applianceCurrent(legacy, tag, false) {
+	if legacy := legacyAppliance(machinery); !refresh && checkAppliance(legacy) == nil && applianceCurrent(legacy, tag, false) {
 		return applianceLayout{Image: legacy, Legacy: true}
 	}
-	return applianceLayout{Image: disk, Tarball: update.ApplianceTarball(home, tag), Unpack: true}
+	return applianceLayout{Image: disk, Tarball: update.ApplianceTarball(machinery, tag), Unpack: true}
 }
 
 // makeApplianceDisk makes the machine's disk from the release's tarball, and says which directory to
 // boot. The artifact is fetched only when it is not here: it was verified when it was written, so a
 // machine can be made from it with no network at all.
-func makeApplianceDisk(ctx context.Context, home, root, tag string, plan applianceLayout, refresh bool, before func() error) (string, error) {
+func makeApplianceDisk(ctx context.Context, machinery, share, tag string, plan applianceLayout, refresh bool, before func() error) (string, error) {
 	// One disk at a time per host: the service's own tick and a person's install both make one, and two unpacks
 	// into one target is how a machine ends up with half an image.
-	unlock, note, err := update.AcquireLock(root, time.Now())
+	unlock, note, err := update.AcquireLock(share, time.Now())
 	if err != nil {
 		return "", err
 	}
@@ -733,11 +733,11 @@ func makeApplianceDisk(ctx context.Context, home, root, tag string, plan applian
 			return "", err
 		}
 	}
-	tarball, err := fetchApplianceTarball(ctx, home, tag, refresh)
+	tarball, err := fetchApplianceTarball(ctx, machinery, tag, refresh)
 	if err != nil {
 		// An install whose network is down is a machine that still boots (ADR 0026, decision 5).
 		// What is here is booted, and the line says which release it is instead of pretending.
-		if fallback := fallbackAppliance(home, plan.Image); fallback != "" {
+		if fallback := fallbackAppliance(machinery, plan.Image); fallback != "" {
 			log.Printf("machine: cannot fetch %s (%v): booting the appliance that is here (%s, %s)", tag, err, fallback, applianceDescribe(fallback))
 			return fallback, nil
 		}
@@ -761,8 +761,8 @@ func makeApplianceDisk(ctx context.Context, home, root, tag string, plan applian
 // fallbackAppliance is what a machine boots when the release's tarball cannot be fetched: the disk
 // the layout named when it is already an appliance, then the image directory of an install from
 // before this layout.
-func fallbackAppliance(home, disk string) string {
-	for _, candidate := range []string{disk, legacyAppliance(home)} {
+func fallbackAppliance(machinery, disk string) string {
+	for _, candidate := range []string{disk, legacyAppliance(machinery)} {
 		if checkAppliance(candidate) == nil {
 			return candidate
 		}
@@ -774,8 +774,8 @@ func fallbackAppliance(home, disk string) string {
 // tarball is what a machine is made of, so the next up is a copy rather than a download. It removes
 // only the disk this layout made — the image directory of an install from before it, and a tree a
 // person named with --image, are not ours to delete.
-func removeMachineDisk(home, image string) (bool, error) {
-	disk := applianceDisk(home)
+func removeMachineDisk(machinery, image string) (bool, error) {
+	disk := applianceDisk(machinery)
 	if filepath.Clean(image) != filepath.Clean(disk) {
 		return false, nil
 	}
@@ -787,15 +787,15 @@ func removeMachineDisk(home, image string) (bool, error) {
 
 // fetchApplianceTarball is the network, in one place: a test replaces it to ask what the launcher
 // does when GitHub cannot be reached.
-var fetchApplianceTarball = func(ctx context.Context, home, tag string, refresh bool) (string, error) {
-	return update.New(home, filepath.Dir(home), "", "").EnsureApplianceTarball(ctx, tag, refresh)
+var fetchApplianceTarball = func(ctx context.Context, machinery, tag string, refresh bool) (string, error) {
+	return update.New(machinery, filepath.Dir(machinery), "", "").EnsureApplianceTarball(ctx, tag, refresh)
 }
 
 // fetchAppliance is what a tree a person named gets when it is not an appliance yet: the release's
 // artifact, unpacked into it. The same artifact every other install keeps, so there is one way a
 // machine is made rather than two.
-var fetchAppliance = func(ctx context.Context, home, tag, image string) error {
-	tarball, err := fetchApplianceTarball(ctx, home, tag, false)
+var fetchAppliance = func(ctx context.Context, machinery, tag, image string) error {
+	tarball, err := fetchApplianceTarball(ctx, machinery, tag, false)
 	if err != nil {
 		return err
 	}
@@ -967,17 +967,17 @@ func machineDown(argv []string) {
 // anyone's work: the next up makes a fresh machine from the same image, booting in seconds.
 func takeMachineDown(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine down", flag.ContinueOnError)
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
-	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
 	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -985,7 +985,7 @@ func takeMachineDown(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedShare, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedShare))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -1019,17 +1019,17 @@ func machineStop(argv []string) {
 
 func stopMachine(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine stop", flag.ContinueOnError)
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
-	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
 	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
-	resolvedHome, err := resolveDataDir(*home)
+	resolvedHome, err := resolveDataDir(*machinery)
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -1037,7 +1037,7 @@ func stopMachine(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedShare, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedShare))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}

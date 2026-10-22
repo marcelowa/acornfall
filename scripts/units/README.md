@@ -14,7 +14,7 @@ acornfall machine purge --yes remove the product and the mount; without --yes it
 What is written, for reference:
 
 - Linux: `~/.config/systemd/user/acornfall-machine.service`, starting `~/.acornfall/bin/acornfall machine
-  serve` with `--root`, `--home`, `--host` and `--port`. `StartLimitIntervalSec=60`/`StartLimitBurst=3`
+  serve` with `--share`, `--machinery`, `--host` and `--port`. `StartLimitIntervalSec=60`/`StartLimitBurst=3`
   belong to `[Unit]` — systemd reads them there and nowhere else, so in `[Service]` a binary that cannot
   run would restart for ever instead of going to `failed`.
 - macOS: `~/Library/LaunchAgents/dev.acornfall.machine.plist`, the same symlink through `sh -c exec`

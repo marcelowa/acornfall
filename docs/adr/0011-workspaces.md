@@ -40,8 +40,10 @@ credentials, defaults, model bindings, subscribers, and the registry itself.
 
 ## Layout
 
-`--home` is the installation folder, configurable, default `~/.acornfall`. It holds
-configuration, credentials, and runtime state, and it is hidden.
+`--machinery` is the installation folder, configurable, default `~/.acornfall` (the name was
+`--home` until beta 28: it is nobody's home, it is the product's own, and a flag that sounds like
+a person's folder invites a person to put their files in it). It holds configuration,
+credentials, and runtime state, and it is hidden.
 
 **Workspaces are created in a separate, visible folder**: `--workspaces-dir`, default
 `~/acornfall/workspaces`. Two folders rather than one because they are two different things:

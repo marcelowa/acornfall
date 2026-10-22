@@ -28,7 +28,7 @@ const (
 )
 
 // MachineIntentPath is the file a person's command writes: `$ROOT/state/machine.json`.
-func MachineIntentPath(root string) string { return filepath.Join(root, "state", "machine.json") }
+func MachineIntentPath(share string) string { return filepath.Join(share, "state", "machine.json") }
 
 // Declaration is the whole of what a person said about the machine: whether it should run, and the address
 // its console is published on. The address lives here rather than in flags because the machine's address is
@@ -54,11 +54,11 @@ func (d Declaration) Address() (string, int) {
 
 // ReadDeclaration reads the file, tolerantly like the rest of the host's files: a missing, empty or broken
 // one is nothing declared, and an absent address is the default one.
-func ReadDeclaration(root string) Declaration {
-	if root == "" {
+func ReadDeclaration(share string) Declaration {
+	if share == "" {
 		return Declaration{}
 	}
-	payload, err := os.ReadFile(MachineIntentPath(root))
+	payload, err := os.ReadFile(MachineIntentPath(share))
 	if err != nil || len(strings.TrimSpace(string(payload))) == 0 {
 		return Declaration{}
 	}
@@ -74,28 +74,28 @@ func ReadDeclaration(root string) Declaration {
 }
 
 // WriteDeclaration records the whole declaration, atomically.
-func WriteDeclaration(root string, declaration Declaration) error {
+func WriteDeclaration(share string, declaration Declaration) error {
 	payload, err := json.Marshal(declaration)
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(MachineIntentPath(root), append(payload, '\n'))
+	return writeFileAtomic(MachineIntentPath(share), append(payload, '\n'))
 }
 
 // WantsRunning is the one place that answers "should this machine be running?". Only a declaration a
 // person's command wrote makes it so: a missing, empty or unparsable file is a host where a person
 // drives, which is what an install was before there was a service.
-func WantsRunning(root string) bool { return ReadMachineIntent(root) == IntentRunning }
+func WantsRunning(share string) bool { return ReadMachineIntent(share) == IntentRunning }
 
 // ReadMachineIntent reads the declaration. It is deliberately total: a missing file, an empty one, a
 // file that is not JSON and a value that is not one of the three are all "nothing declared" with no
 // error. The service must not fail or start a machine on the strength of a file it could not read,
 // and a person debugging a typo should not find a crash loop where they expected silence.
-func ReadMachineIntent(root string) Intent {
-	if root == "" {
+func ReadMachineIntent(share string) Intent {
+	if share == "" {
 		return ""
 	}
-	payload, err := os.ReadFile(MachineIntentPath(root))
+	payload, err := os.ReadFile(MachineIntentPath(share))
 	if err != nil || len(strings.TrimSpace(string(payload))) == 0 {
 		return ""
 	}
@@ -116,7 +116,7 @@ func ReadMachineIntent(root string) Intent {
 // WriteMachineIntent records what a person asked for. Only a command on the host writes this file:
 // `machine serve` reads it and never sets it, or the service would be deciding whether a machine
 // exists rather than enforcing what a person said (ADR 0030, amended).
-func WriteMachineIntent(root string, intent Intent) error {
+func WriteMachineIntent(share string, intent Intent) error {
 	switch intent {
 	case IntentRunning, IntentStopped, IntentGone:
 	default:
@@ -124,7 +124,7 @@ func WriteMachineIntent(root string, intent Intent) error {
 	}
 	// The address is the person's too, and writing the intent must not drop it: a machine taken down and
 	// brought back keeps the address it was created with.
-	declaration := ReadDeclaration(root)
+	declaration := ReadDeclaration(share)
 	declaration.Wanted = intent
-	return WriteDeclaration(root, declaration)
+	return WriteDeclaration(share, declaration)
 }

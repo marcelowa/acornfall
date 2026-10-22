@@ -397,7 +397,7 @@ export interface LayerRoots {
 
 export function layerRoots(options: {
 	/** The folder the machine mounts: the bundle, the config, the state, the workspaces (ADR 0022). */
-	root: string;
+	share: string;
 	workspace: string;
 }): LayerRoots {
 	return {
@@ -405,7 +405,7 @@ export function layerRoots(options: {
 		// config folder beside it for `config.json`. There are no layers to shadow, because the files
 		// are the user's own — which is what one bundle buys over the user's `~/.agents` plus the
 		// install's four folders.
-		global: [join(options.root, ECOSYSTEM_DIR), join(options.root, "config")],
+		global: [join(options.share, ECOSYSTEM_DIR), join(options.share, "config")],
 		workspace: [join(options.workspace, ECOSYSTEM_DIR), join(options.workspace, NATIVE_DIR)],
 	};
 }

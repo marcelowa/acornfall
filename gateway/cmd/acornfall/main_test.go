@@ -14,7 +14,7 @@ import (
 func TestWorkspaceAddWritesTheRegistryTheGatewayReads(t *testing.T) {
 	root, home, folder := t.TempDir(), t.TempDir(), t.TempDir()
 	// Flags after the operands, which is how the usage line reads them.
-	workspaceCommand([]string{"add", "lab", folder, "--image", "golang:1.24", "--root", root, "--data-dir", home})
+	workspaceCommand([]string{"add", "lab", folder, "--image", "golang:1.24", "--share", root, "--data-dir", home})
 
 	where := layout.New(root, home)
 	registry, err := control.LoadRegistryFile(where.Registry())

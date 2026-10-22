@@ -20,11 +20,11 @@ import (
 // ApplianceTarball is where the release's verified appliance is kept: one file per tag, and the
 // file's name is the release the bytes are. A machine's disk is unpacked from it, so the artifact
 // outlives every disk made from it — `machine down` takes the disk and leaves this.
-func ApplianceTarball(home, tag string) string {
+func ApplianceTarball(machinery, tag string) string {
 	if tag == "" {
 		return ""
 	}
-	return filepath.Join(home, "appliance", tag+".tar.gz")
+	return filepath.Join(machinery, "appliance", tag+".tar.gz")
 }
 
 // EnsureApplianceTarball makes the release's appliance exist at ApplianceTarball and returns that
@@ -36,7 +36,7 @@ func (m *Manager) EnsureApplianceTarball(ctx context.Context, tag string, refres
 	if tag == "" {
 		return "", fmt.Errorf("update: no tag to fetch the appliance for")
 	}
-	path := ApplianceTarball(m.home, tag)
+	path := ApplianceTarball(m.machinery, tag)
 	if !refresh {
 		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Size() > 0 {
 			return path, nil

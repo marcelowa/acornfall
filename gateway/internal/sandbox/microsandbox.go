@@ -23,8 +23,8 @@ import (
 // lifecycle and an SDK for execution. It is one implementation of Driver; the package
 // comment explains what that buys.
 type Microsandbox struct {
-	home string
-	// state is where the sandboxes live, when it is not the default under the home. Sockets
+	machinery string
+	// state is where the sandboxes live, when it is not the default under the machinery folder. Sockets
 	// need a short path and images take a while to fetch, so both are reasons to point it
 	// somewhere deliberate.
 	state     string
@@ -71,8 +71,8 @@ const releaseBase = "https://github.com/microsandbox/microsandbox/releases/downl
 const statePathLimit = 50
 
 // NewMicrosandbox builds the driver. The engine is installed on first use.
-func NewMicrosandbox(home string) *Microsandbox {
-	return &Microsandbox{home: home, base: releaseBase + "/v" + Version, hostNested: hostNestedSupport}
+func NewMicrosandbox(machinery string) *Microsandbox {
+	return &Microsandbox{machinery: machinery, base: releaseBase + "/v" + Version, hostNested: hostNestedSupport}
 }
 
 // WithRunner replaces the engine binary, which is how the driver is tested without one.
@@ -88,7 +88,7 @@ func (m *Microsandbox) Version() string { return Version }
 func (m *Microsandbox) Isolated() bool { return true }
 
 func (m *Microsandbox) InstallDir() string {
-	return filepath.Join(m.home, "tools", "microsandbox", Version)
+	return filepath.Join(m.machinery, "tools", "microsandbox", Version)
 }
 
 // StateDir is the engine's own store: images, sandbox disks, snapshots. It is inside the
@@ -98,7 +98,7 @@ func (m *Microsandbox) StateDir() string {
 	if m.state != "" {
 		return m.state
 	}
-	return filepath.Join(m.home, "sandboxes")
+	return filepath.Join(m.machinery, "sandboxes")
 }
 
 // WithStateDir moves the engine's store — images, sandbox disks, snapshots — somewhere else.
@@ -357,7 +357,7 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	}
 	if len(m.StateDir()) > statePathLimit {
 		return fmt.Errorf(
-			"%w: the sandbox state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornfall cannot be installed this deep: use a shorter --home",
+			"%w: the sandbox state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornfall cannot be installed this deep: use a shorter --machinery",
 			ErrUnavailable, len(m.StateDir()), m.StateDir(), statePathLimit,
 		)
 	}

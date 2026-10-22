@@ -31,10 +31,12 @@ var ErrNotOwned = errors.New("this process is not started through the install's 
 
 // OwnedBinary is the path the service must be started through: the symlink the unit files name, and
 // the only binary it will replace.
-func OwnedBinary(home string) string { return filepath.Join(home, "bin", "acornfall") }
+func OwnedBinary(machinery string) string { return filepath.Join(machinery, "bin", "acornfall") }
 
 // VersionedBinary is where one release's binary is kept.
-func VersionedBinary(home, tag string) string { return filepath.Join(home, "bin", "acornfall-"+tag) }
+func VersionedBinary(machinery, tag string) string {
+	return filepath.Join(machinery, "bin", "acornfall-"+tag)
+}
 
 // SelfAssetName is the release asset holding this host's binary.
 func SelfAssetName() string { return "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH }
@@ -46,12 +48,12 @@ func SelfAssetName() string { return "acornfall-" + runtime.GOOS + "-" + runtime
 // os.Executable() never reports the link — it reports the file the link named. "Started through the
 // symlink" therefore means "is that file", and the refusal this buys is the one that matters: a
 // binary in a package manager's tree, or in the user's own path, is not the install's to replace.
-func OwnsSelf(executable, home string) bool {
+func OwnsSelf(executable, machinery string) bool {
 	mine, err := filepath.EvalSymlinks(executable)
 	if err != nil {
 		return false
 	}
-	owned, err := filepath.EvalSymlinks(OwnedBinary(home))
+	owned, err := filepath.EvalSymlinks(OwnedBinary(machinery))
 	if err != nil {
 		return false
 	}
@@ -90,20 +92,20 @@ func (m *Manager) DownloadSelf(ctx context.Context, tag string) ([]byte, error) 
 // SwapSelf is the two-phase swap (ADR 0031): the binary is written under its own name, a marker
 // records the attempt, and only then is the symlink moved. A binary that cannot start is found by the
 // next process through that marker, and the symlink goes back to the one before it.
-func SwapSelf(home, root, tag string, binary []byte) error {
+func SwapSelf(machinery, share, tag string, binary []byte) error {
 	if !IsReleaseVersion(tag) {
 		return fmt.Errorf("%w: %q has no binary to keep", ErrNotARelease, tag)
 	}
-	if err := writeExecutableAtomic(VersionedBinary(home, tag), binary); err != nil {
+	if err := writeExecutableAtomic(VersionedBinary(machinery, tag), binary); err != nil {
 		return err
 	}
-	if err := WriteBootAttempt(root, BootAttempt{Tag: tag, At: StampedAt(time.Now())}); err != nil {
+	if err := WriteBootAttempt(share, BootAttempt{Tag: tag, At: StampedAt(time.Now())}); err != nil {
 		return err
 	}
-	if err := pointSymlink(OwnedBinary(home), VersionedBinary(home, tag)); err != nil {
+	if err := pointSymlink(OwnedBinary(machinery), VersionedBinary(machinery, tag)); err != nil {
 		return err
 	}
-	return pruneBinaries(home, tag)
+	return pruneBinaries(machinery, tag)
 }
 
 // PointAtPath points any link at any target, atomically: the install uses it for the symlink it makes, and
@@ -111,27 +113,27 @@ func SwapSelf(home, root, tag string, binary []byte) error {
 func PointAtPath(link, target string) error { return pointSymlink(link, target) }
 
 // PointAt points the owned symlink at the binary for tag, and is what a rollback uses too.
-func PointAt(home, tag string) error {
-	return pointSymlink(OwnedBinary(home), VersionedBinary(home, tag))
+func PointAt(machinery, tag string) error {
+	return pointSymlink(OwnedBinary(machinery), VersionedBinary(machinery, tag))
 }
 
 // PointsAt says the owned symlink already names tag's binary: another process — `machine update` is
 // the one that does — has put this release in place, and the service only has to restart into it.
-func PointsAt(home, tag string) bool {
-	target, err := os.Readlink(OwnedBinary(home))
+func PointsAt(machinery, tag string) bool {
+	target, err := os.Readlink(OwnedBinary(machinery))
 	if err != nil {
 		return false
 	}
 	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(OwnedBinary(home)), target)
+		target = filepath.Join(filepath.Dir(OwnedBinary(machinery)), target)
 	}
-	return filepath.Clean(target) == filepath.Clean(VersionedBinary(home, tag))
+	return filepath.Clean(target) == filepath.Clean(VersionedBinary(machinery, tag))
 }
 
 // PreviousBinary is the other binary in the owned folder: the one before tag, and the one a failed
 // start goes back to. Empty means there is nothing older to go back to.
-func PreviousBinary(home, tag string) (string, error) {
-	entries, err := os.ReadDir(filepath.Join(home, "bin"))
+func PreviousBinary(machinery, tag string) (string, error) {
+	entries, err := os.ReadDir(filepath.Join(machinery, "bin"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -152,7 +154,7 @@ func PreviousBinary(home, tag string) (string, error) {
 		if err != nil {
 			continue
 		}
-		others = append(others, candidate{path: filepath.Join(home, "bin", name), at: info.ModTime()})
+		others = append(others, candidate{path: filepath.Join(machinery, "bin", name), at: info.ModTime()})
 	}
 	if len(others) == 0 {
 		return "", nil
@@ -163,10 +165,10 @@ func PreviousBinary(home, tag string) (string, error) {
 
 // PruneBinaries keeps the binary this process runs and the one before it, and removes the rest: a
 // folder that grows by one 15 MB binary per release is a slow leak nobody looks at.
-func PruneBinaries(home, keep string) error { return pruneBinaries(home, keep) }
+func PruneBinaries(machinery, keep string) error { return pruneBinaries(machinery, keep) }
 
-func pruneBinaries(home, keep string) error {
-	entries, err := os.ReadDir(filepath.Join(home, "bin"))
+func pruneBinaries(machinery, keep string) error {
+	entries, err := os.ReadDir(filepath.Join(machinery, "bin"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -186,11 +188,11 @@ func pruneBinaries(home, keep string) error {
 		if err != nil {
 			continue
 		}
-		binaries = append(binaries, kept{path: filepath.Join(home, "bin", entry.Name()), at: info.ModTime()})
+		binaries = append(binaries, kept{path: filepath.Join(machinery, "bin", entry.Name()), at: info.ModTime()})
 	}
 	sort.Slice(binaries, func(a, b int) bool { return binaries[a].at.After(binaries[b].at) })
 	for index, binary := range binaries {
-		if index < 2 || binary.path == VersionedBinary(home, keep) {
+		if index < 2 || binary.path == VersionedBinary(machinery, keep) {
 			continue
 		}
 		if err := os.Remove(binary.path); err != nil && !os.IsNotExist(err) {
@@ -257,24 +259,24 @@ type BootAttempt struct {
 }
 
 // BootAttemptPath is the marker, in the folder the host's own records live in.
-func BootAttemptPath(root string) string {
-	return filepath.Join(root, "state", "host", "boot-attempt.json")
+func BootAttemptPath(share string) string {
+	return filepath.Join(share, "state", "host", "boot-attempt.json")
 }
 
 // WriteBootAttempt records a swap before the symlink moves: the window between the move and the new
 // process being ready is the one nothing else can see.
-func WriteBootAttempt(root string, attempt BootAttempt) error {
+func WriteBootAttempt(share string, attempt BootAttempt) error {
 	payload, err := json.Marshal(attempt)
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(BootAttemptPath(root), append(payload, '\n'))
+	return writeFileAtomic(BootAttemptPath(share), append(payload, '\n'))
 }
 
 // ReadBootAttempt is total like the rest of the host's files: a missing or unreadable marker is no
 // marker, and the service starts normally.
-func ReadBootAttempt(root string) (BootAttempt, bool) {
-	payload, err := os.ReadFile(BootAttemptPath(root))
+func ReadBootAttempt(share string) (BootAttempt, bool) {
+	payload, err := os.ReadFile(BootAttemptPath(share))
 	if err != nil {
 		return BootAttempt{}, false
 	}
@@ -287,7 +289,7 @@ func ReadBootAttempt(root string) (BootAttempt, bool) {
 
 // RemoveBootAttempt takes the marker away: a process that reached ready earned it, and a marker that
 // was dealt with is not one the next start should find.
-func RemoveBootAttempt(root string) { _ = os.Remove(BootAttemptPath(root)) }
+func RemoveBootAttempt(share string) { _ = os.Remove(BootAttemptPath(share)) }
 
 // Lock is one update at a time per host: `machine update` and the service's automatic step 2 both
 // take it, so two processes never write the same binary or the same disk (ADR 0031).
@@ -297,7 +299,7 @@ type Lock struct {
 }
 
 // LockPath is the lock file, beside the rest of the host's records.
-func LockPath(root string) string { return filepath.Join(root, "state", "host", "update.lock") }
+func LockPath(share string) string { return filepath.Join(share, "state", "host", "update.lock") }
 
 // lockStale is the age at which a lock stops being believed even if its pid answers: a pid can be
 // reused, and an update three quarters of an hour long is not one this host is still doing. It is the
@@ -308,8 +310,8 @@ const lockStale = 45 * time.Minute
 // AcquireLock takes the one update slot. The second return is a line for the caller's log when it
 // broke a lock a dead process left behind, and empty when the lock was free. A live lock is an
 // error naming who holds it.
-func AcquireLock(root string, now time.Time) (func(), string, error) {
-	path := LockPath(root)
+func AcquireLock(share string, now time.Time) (func(), string, error) {
+	path := LockPath(share)
 	payload, err := json.Marshal(Lock{PID: os.Getpid(), At: now})
 	if err != nil {
 		return nil, "", err
@@ -349,8 +351,8 @@ func AcquireLock(root string, now time.Time) (func(), string, error) {
 
 // LockHeld says another process holds the host's update lock. The service asks it before starting a machine: a
 // disk that is being replaced must not be booted, and the process replacing it is the one holding the lock.
-func LockHeld(root string, now time.Time) bool {
-	held, err := readLock(LockPath(root))
+func LockHeld(share string, now time.Time) bool {
+	held, err := readLock(LockPath(share))
 	if err != nil {
 		return false
 	}

@@ -82,7 +82,7 @@ func lxcEngine(t *testing.T, runtime *fakeLXC, share string) *LXC {
 	engine := NewMicrosandbox(home).WithRunner(&machineRunner{})
 	engine.installed = true
 	door := filepath.Join(t.TempDir(), "machine.sock")
-	return NewLXC(engine, Machine{ShareRoot: share}, door, "/bin/true").
+	return NewLXC(engine, Machine{Share: share}, door, "/bin/true").
 		WithShimConnection(fakeDoor(t, runtime)).
 		WithContainerDir(t.TempDir())
 }
@@ -160,7 +160,7 @@ func TestTheDoorIsOpenBeforeTheMachineIsMade(t *testing.T) {
 
 // Nobody has chosen the share root yet (ADR 0021 leaves it open). A container cannot be bound
 // from a folder nobody named, so the engine refuses rather than guessing one.
-func TestAShareRootNobodyChoseIsRefused(t *testing.T) {
+func TestAShareNobodyChoseIsRefused(t *testing.T) {
 	runtime := newFakeLXC(nil)
 	engine := lxcEngine(t, runtime, "")
 	err := engine.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
@@ -285,7 +285,7 @@ func TestListingCreatesNothing(t *testing.T) {
 	machine := &machineRunner{}
 	engine.WithRunner(machine)
 	door := filepath.Join(t.TempDir(), "machine.sock")
-	driver := NewLXC(engine, Machine{ShareRoot: t.TempDir()}, door, "/bin/true")
+	driver := NewLXC(engine, Machine{Share: t.TempDir()}, door, "/bin/true")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	instances, err := driver.List(ctx)

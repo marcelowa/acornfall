@@ -31,7 +31,7 @@ type Requirement struct {
 // Input is everything the checks read. The caller gathers it from the
 // managers it already owns; this package decides nothing it cannot see.
 type Input struct {
-	Home string
+	Machinery string
 	// Current is the running tag ("dev" for source builds).
 	Current string
 	// RuntimeTag is the binary's own stamp when it has one: execution
@@ -66,36 +66,36 @@ func Satisfied(requirements []Requirement) bool {
 	return true
 }
 
-// Check builds the list. Filesystem reads stay under Home so tests run
+// Check builds the list. Filesystem reads stay under the machinery folder so tests run
 // anywhere; /dev/kvm and disk space read the machine, which is the point.
 func Check(input Input) []Requirement {
 	return []Requirement{
-		homeWritable(input.Home),
+		machineryWritable(input.Machinery),
 		bun(input),
 		worker(input),
 		engine(input),
 		hypervisor(),
 		credentials(input),
-		disk(input.Home),
+		disk(input.Machinery),
 		releases(input),
 	}
 }
 
-func homeWritable(home string) Requirement {
-	dir := home
+func machineryWritable(machinery string) Requirement {
+	dir := machinery
 	created := "is writable"
-	// Doctor must not create anything: a home that does not exist yet is
+	// Doctor must not create anything: a machinery folder that does not exist yet is
 	// judged by its parent, which is where creation would happen.
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		dir = filepath.Dir(home)
+		dir = filepath.Dir(machinery)
 		created = "will be created inside writable " + dir
 	}
 	probe := dir + "/.acornfall-writable"
 	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
-		return Requirement{"home", false, "cannot write " + dir + ": " + err.Error(), "run with a writable --home"}
+		return Requirement{"machinery", false, "cannot write " + dir + ": " + err.Error(), "run with a writable --machinery"}
 	}
 	_ = os.Remove(probe)
-	return Requirement{"home", true, home + " " + created, ""}
+	return Requirement{"machinery", true, machinery + " " + created, ""}
 }
 
 func bun(input Input) Requirement {
@@ -161,10 +161,10 @@ func credentials(input Input) Requirement {
 	return Requirement{"credentials", false, "no provider stored", "acornfall provider add <provider> <key> (the dev provider needs none)"}
 }
 
-func disk(home string) Requirement {
+func disk(machinery string) Requirement {
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(home, &stat); err != nil {
-		if err := syscall.Statfs(filepath.Dir(home), &stat); err != nil {
+	if err := syscall.Statfs(machinery, &stat); err != nil {
+		if err := syscall.Statfs(filepath.Dir(machinery), &stat); err != nil {
 			return Requirement{"disk", true, "free space unreadable, assuming room", ""}
 		}
 	}

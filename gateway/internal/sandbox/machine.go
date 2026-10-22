@@ -30,11 +30,11 @@ type Machine struct {
 	// direct ext4 instead of an overlay on the VM's OverlayFS (ADR 0021). Size it for every
 	// workspace's rootfs together.
 	Disk string
-	// ShareRoot is the one host folder the VM mounts — the only door from the machine's
+	// Share is the one host folder the VM mounts — the only door from the machine's
 	// containers to the user's files. Empty means nobody has chosen it yet (the ADR leaves the
 	// choice open), and a machine without one mounts nothing: its containers then have no door
 	// at all, which is the safe direction for a guess.
-	ShareRoot string
+	Share string
 	// NoEgress takes the machine off the network. It is off by default because the machine needs
 	// the network for its own work — pulling the image a workspace.s container is made of is the
 	// first thing it does — and a workspace.s own reach is a different question entirely: a
@@ -83,7 +83,7 @@ func (m Machine) Policy() Policy {
 		CPUs:        m.CPUs,
 		Memory:      m.Memory,
 		Egress:      !m.NoEgress,
-		Workspace:   m.ShareRoot,
+		Workspace:   m.Share,
 		IdleTimeout: m.IdleTimeout,
 	}
 }
@@ -91,8 +91,8 @@ func (m Machine) Policy() Policy {
 // MachineName is the engine-level name of an install's machine. Derived from the installation
 // folder so that two installs sharing an engine store still keep their own machines, and so
 // that removing a workspace can never name it.
-func MachineName(home string) string {
-	return "acornfall-machine-" + shortHash(home)
+func MachineName(machinery string) string {
+	return "acornfall-machine-" + shortHash(machinery)
 }
 
 // MachineEngine is the machine half of the engine ADR 0021 proposes. It is deliberately not a
@@ -136,7 +136,7 @@ func (x *MachineEngine) WithDoor(path string, port int) *MachineEngine {
 	return x
 }
 
-func (x *MachineEngine) Name() string { return MachineName(x.engine.home) }
+func (x *MachineEngine) Name() string { return MachineName(x.engine.machinery) }
 
 // Machine is what this install asked the VM to be.
 func (x *MachineEngine) Machine() Machine { return x.machine }
@@ -175,7 +175,7 @@ func (x *MachineEngine) create(ctx context.Context, name string) error {
 	// gives, before the engine's own error arrives with the machine half-made.
 	if len(x.engine.StateDir()) > statePathLimit {
 		return fmt.Errorf(
-			"%w: the machine's state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornfall cannot be installed this deep: use a shorter --home",
+			"%w: the machine's state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornfall cannot be installed this deep: use a shorter --machinery",
 			ErrUnavailable, len(x.engine.StateDir()), x.engine.StateDir(), statePathLimit,
 		)
 	}
@@ -227,7 +227,7 @@ func (x *MachineEngine) RemoveMachine(ctx context.Context) error {
 	return ignoreMissing(x.engine.Remove(ctx, x.Name()))
 }
 
-// WithAppliance boots the machine as the product's home: start is what the machine runs as its
+// WithAppliance boots the machine as the product's world: start is what the machine runs as its
 // init — the gateway, with the shim beside it — and forward is the port the console reaches it on,
 // in the engine's own spelling ("HOST:GUEST", or "BIND_ADDR:HOST:GUEST" to put it on the tailnet
 // and nowhere else). Both are part of the machine's own configuration, so they are set before it

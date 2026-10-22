@@ -121,7 +121,7 @@ func TestUnderIsAboutFoldersNotText(t *testing.T) {
 	if Under("/home/me/acornfall", "/home/me/acornfall") {
 		t.Error("the root is not under itself: a bind of it is every workspace at once")
 	}
-	if !strings.HasPrefix(New("/r", "/h").Root, "/") {
+	if !strings.HasPrefix(New("/r", "/h").Share, "/") {
 		t.Error("paths stay as they were given")
 	}
 }

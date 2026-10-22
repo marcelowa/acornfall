@@ -130,8 +130,8 @@ func (x *LXC) Install(ctx context.Context, log func(string, ...any)) error {
 // that never made a machine has not chosen, and a report that said "ready" would be saying
 // something nobody decided.
 func (x *LXC) Usable() error {
-	if strings.TrimSpace(x.machine.Machine().ShareRoot) == "" {
-		return fmt.Errorf("%w: no share root is chosen: name the folder the machine mounts (--root), which is what a workspace's container binds", ErrUnavailable)
+	if strings.TrimSpace(x.machine.Machine().Share) == "" {
+		return fmt.Errorf("%w: no share is chosen: name the folder the machine mounts (--share), which is what a workspace's container binds", ErrUnavailable)
 	}
 	return x.engine.Usable()
 }
@@ -422,7 +422,7 @@ func (x *LXC) Remove(ctx context.Context, name string) error {
 // shared with the engine inside the machine (ContainerFor), so a workspace's container cannot
 // differ by which of the two is running.
 func (x *LXC) container(policy Policy) (Container, LXCSettings, error) {
-	return ContainerFor(policy, x.machine.Machine().ShareRoot, x.dir, x.privileged, x.engine.hostNesting().Available, x.machine.Machine().MemoryBytes())
+	return ContainerFor(policy, x.machine.Machine().Share, x.dir, x.privileged, x.engine.hostNesting().Available, x.machine.Machine().MemoryBytes())
 }
 
 // WithAppliance is the machine booting as the product (ADR 0022): the script it runs as its init,

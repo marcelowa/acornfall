@@ -104,8 +104,8 @@ func newInstallFixture(t *testing.T, declaration update.Declaration) installFixt
 		say:  said,
 		install: installer{
 			userHome:    userHome,
-			home:        home,
-			root:        root,
+			machinery:   home,
+			share:       root,
 			version:     "v0.10.0-beta.16",
 			declaration: declaration,
 			binary:      []byte("the running binary"),
@@ -145,7 +145,7 @@ func TestInstallTwiceChangesNothingTheSecondTime(t *testing.T) {
 		}
 	}
 	// And the files it owns are the same bytes they were after the first run.
-	versioned := update.VersionedBinary(fixture.install.home, fixture.install.version)
+	versioned := update.VersionedBinary(fixture.install.machinery, fixture.install.version)
 	if body, err := os.ReadFile(versioned); err != nil || string(body) != string(fixture.install.binary) {
 		t.Fatalf("the binary at %s: %q, %v", versioned, body, err)
 	}
@@ -166,7 +166,7 @@ func TestInstallFixesAUnitWithTheWrongExecStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "ExecStart="+update.OwnedBinary(fixture.install.home)+" machine serve") {
+	if !strings.Contains(string(body), "ExecStart="+update.OwnedBinary(fixture.install.machinery)+" machine serve") {
 		t.Errorf("the unit was not repaired:\n%s", body)
 	}
 	if strings.Contains(string(body), "/usr/local/bin") {
@@ -179,15 +179,15 @@ func TestInstallFixesAUnitWithTheWrongExecStart(t *testing.T) {
 func TestInstallFixesAMissingSymlink(t *testing.T) {
 	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning})
 	fixture.run(t)
-	if err := os.Remove(update.OwnedBinary(fixture.install.home)); err != nil {
+	if err := os.Remove(update.OwnedBinary(fixture.install.machinery)); err != nil {
 		t.Fatal(err)
 	}
 	fixture.run(t)
-	target, err := os.Readlink(update.OwnedBinary(fixture.install.home))
+	target, err := os.Readlink(update.OwnedBinary(fixture.install.machinery))
 	if err != nil {
 		t.Fatalf("the symlink was not repaired: %v", err)
 	}
-	if target != update.VersionedBinary(fixture.install.home, fixture.install.version) {
+	if target != update.VersionedBinary(fixture.install.machinery, fixture.install.version) {
 		t.Errorf("the symlink points at %q", target)
 	}
 }
@@ -266,7 +266,7 @@ func TestTheDeclarationAndTheUnitAgreeAfterEitherAnswer(t *testing.T) {
 			if !strings.Contains(string(body), "--host "+c.wantHost+" --port "+itoa(c.wantPort)) {
 				t.Errorf("the unit does not carry the declaration's address:\n%s", body)
 			}
-			written := update.ReadDeclaration(fixture.install.root)
+			written := update.ReadDeclaration(fixture.install.share)
 			host, port := written.Address()
 			if host != c.wantHost || port != c.wantPort {
 				t.Errorf("the declaration says %s:%d, want %s:%d", host, port, c.wantHost, c.wantPort)
@@ -367,12 +367,12 @@ func newUninstallFixture(t *testing.T) uninstallFixture {
 		workspace:   workspace,
 		bookkeeping: bookkeeping,
 		remove: uninstaller{
-			userHome: userHome,
-			home:     home,
-			root:     root,
-			init:     init,
-			machine:  machine,
-			say:      func(string, string) {},
+			userHome:  userHome,
+			machinery: home,
+			share:     root,
+			init:      init,
+			machine:   machine,
+			say:       func(string, string) {},
 		},
 	}
 }
@@ -388,7 +388,7 @@ func TestUninstallStopsARunningMachineFirst(t *testing.T) {
 	if fixture.init.disableCalls != 1 {
 		t.Errorf("the service was disabled %d times", fixture.init.disableCalls)
 	}
-	if _, err := os.Stat(applianceDisk(fixture.remove.home)); err != nil {
+	if _, err := os.Stat(applianceDisk(fixture.remove.machinery)); err != nil {
 		t.Errorf("the disk of a running machine was removed: %v", err)
 	}
 	// And with the machine removable, the service is disabled before the machine goes.
@@ -419,14 +419,14 @@ func TestUninstallRemovesTheBookkeepingInTheMountAndKeepsTheWorkspaces(t *testin
 	if body, err := os.ReadFile(fixture.workspace); err != nil || string(body) != "a person's work" {
 		t.Errorf("a workspace file was touched: %q, %v", body, err)
 	}
-	conversation := filepath.Join(fixture.remove.root, "state", "conversations", "a-conversation.json")
+	conversation := filepath.Join(fixture.remove.share, "state", "conversations", "a-conversation.json")
 	if _, err := os.Stat(conversation); err != nil {
 		t.Errorf("a conversation under state/ was removed: %v", err)
 	}
-	if _, err := os.Stat(update.IsPath(fixture.remove.root)); !os.IsNotExist(err) {
+	if _, err := os.Stat(update.IsPath(fixture.remove.share)); !os.IsNotExist(err) {
 		t.Errorf("our is.json is still there: %v", err)
 	}
-	for _, path := range []string{update.OwnedBinary(fixture.remove.home), applianceDisk(fixture.remove.home), filepath.Join(fixture.remove.home, "appliance")} {
+	for _, path := range []string{update.OwnedBinary(fixture.remove.machinery), applianceDisk(fixture.remove.machinery), filepath.Join(fixture.remove.machinery, "appliance")} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("%s is still there: %v", path, err)
 		}
@@ -441,8 +441,8 @@ func TestUninstallLeavesNoFlagThatDeletesTheMount(t *testing.T) {
 			t.Errorf("uninstall has a --%s flag, and it must not have one", name)
 		}
 	}
-	if flags.Lookup("root") == nil || flags.Lookup("home") == nil {
-		t.Error("uninstall needs --root and --home")
+	if flags.Lookup("share") == nil || flags.Lookup("machinery") == nil {
+		t.Error("uninstall needs --share and --machinery")
 	}
 }
 
@@ -452,8 +452,8 @@ func TestInstallAfterUninstallKeepsTheWorkspaces(t *testing.T) {
 	installAgain := func() {
 		again := installer{
 			userHome:    fixture.remove.userHome,
-			home:        fixture.remove.home,
-			root:        fixture.remove.root,
+			machinery:   fixture.remove.machinery,
+			share:       fixture.remove.share,
 			version:     "v0.10.0-beta.16",
 			declaration: update.Declaration{Wanted: update.IntentRunning},
 			binary:      []byte("the running binary"),
@@ -503,14 +503,14 @@ func newPurgeFixture(t *testing.T, yes bool) purgeFixture {
 	}
 	said := &[]string{}
 	calls := new(int)
-	remove := uninstaller{userHome: userHome, home: home, root: root, init: init, machine: &fakeMachine{}, say: func(string, string) {}}
+	remove := uninstaller{userHome: userHome, machinery: home, share: root, init: init, machine: &fakeMachine{}, say: func(string, string) {}}
 	fixture := purgeFixture{init: init, said: said, uninstal: calls}
 	fixture.purge = purger{
-		userHome: userHome,
-		home:     home,
-		root:     root,
-		yes:      yes,
-		init:     init,
+		userHome:  userHome,
+		machinery: home,
+		share:     root,
+		yes:       yes,
+		init:      init,
 		uninstall: func(ctx context.Context) error {
 			*calls++
 			return remove.run(ctx)
@@ -527,13 +527,13 @@ func TestPurgeWithoutYesRemovesNothing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nothing removed: pass --yes") {
 		t.Fatalf("want a refusal naming --yes, got %v", err)
 	}
-	for _, path := range []string{fixture.purge.home, fixture.purge.root, fixture.init.unitPath} {
+	for _, path := range []string{fixture.purge.machinery, fixture.purge.share, fixture.init.unitPath} {
 		if _, statErr := os.Stat(path); statErr != nil {
 			t.Errorf("%s was removed without --yes: %v", path, statErr)
 		}
 	}
 	listing := strings.Join(*fixture.said, "\n")
-	if !strings.Contains(listing, fixture.purge.home) || !strings.Contains(listing, fixture.purge.root) {
+	if !strings.Contains(listing, fixture.purge.machinery) || !strings.Contains(listing, fixture.purge.share) {
 		t.Errorf("the list does not name what it would remove:\n%s", listing)
 	}
 	if *fixture.uninstal != 0 {
@@ -547,7 +547,7 @@ func TestPurgeRemovesTheUnitTheHomeAndTheMount(t *testing.T) {
 	if err := fixture.purge.run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{fixture.purge.home, fixture.purge.root, fixture.init.unitPath} {
+	for _, path := range []string{fixture.purge.machinery, fixture.purge.share, fixture.init.unitPath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("%s is still there: %v", path, err)
 		}
@@ -579,7 +579,7 @@ func TestPurgeRunsUninstallFirstWhenTheServiceIsInstalled(t *testing.T) {
 	if *fixture.uninstal != 1 {
 		t.Fatalf("the uninstall ran %d times", *fixture.uninstal)
 	}
-	if _, err := os.Stat(applianceDisk(fixture.purge.home)); !os.IsNotExist(err) {
+	if _, err := os.Stat(applianceDisk(fixture.purge.machinery)); !os.IsNotExist(err) {
 		t.Errorf("the machine's disk survived the purge: %v", err)
 	}
 }
@@ -590,11 +590,11 @@ func TestPurgeLeavesAWorkspaceOutsideTheMount(t *testing.T) {
 	fixture := newPurgeFixture(t, true)
 	elsewhere := t.TempDir()
 	registry := control.RegistryFile{Workspaces: []control.Workspace{{Name: "other", Path: elsewhere}}}
-	if err := os.MkdirAll(filepath.Join(fixture.purge.root, "state"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(fixture.purge.share, "state"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	payload := `{"workspaces":[{"name":"other","path":` + quote(elsewhere) + `,"title":"","general":false}]}`
-	if err := os.WriteFile(filepath.Join(fixture.purge.root, "state", "workspaces.json"), []byte(payload), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(fixture.purge.share, "state", "workspaces.json"), []byte(payload), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(elsewhere, "a-file"), []byte("mine"), 0o644); err != nil {
@@ -645,7 +645,7 @@ func TestPurgeRefusesASymlinkedMount(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := newPurgeFixture(t, true)
-	fixture.purge.root = link
+	fixture.purge.share = link
 	err := fixture.purge.run(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("want a refusal naming the symlink, got %v", err)
@@ -707,7 +707,7 @@ func TestInstallingWithANewAddressRecreatesARunningMachine(t *testing.T) {
 			if machine.removes != c.wantRemoves {
 				t.Errorf("the machine was removed %d times, want %d", machine.removes, c.wantRemoves)
 			}
-			if got, _ := update.ReadDeclaration(fixture.install.root).Address(); got != "0.0.0.0" {
+			if got, _ := update.ReadDeclaration(fixture.install.share).Address(); got != "0.0.0.0" {
 				t.Errorf("the declaration says %q", got)
 			}
 			body, err := os.ReadFile(fixture.init.unitPath)
@@ -761,7 +761,7 @@ func TestInstallRecreatesTheMachineWhenTheReleaseChanges(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
 			// The disk is the previous release's, and the machine is or is not running on it.
-			makeRunningDisk(t, fixture.install.home, "v0.10.0-beta.15")
+			makeRunningDisk(t, fixture.install.machinery, "v0.10.0-beta.15")
 			machine := &fakeMachine{running: c.running}
 			fixture.install.machine = machine
 			fixture.run(t)
@@ -770,7 +770,7 @@ func TestInstallRecreatesTheMachineWhenTheReleaseChanges(t *testing.T) {
 			}
 			// And the disk is this release's, whether or not the machine was running: removing the machine is not
 			// upgrading it, and the service would make the next one from the disk that was there.
-			if tag := applianceDiskTag(applianceDisk(fixture.install.home)); tag != fixture.install.version {
+			if tag := applianceDiskTag(applianceDisk(fixture.install.machinery)); tag != fixture.install.version {
 				t.Errorf("the disk is %q, want %q", tag, fixture.install.version)
 			}
 		})
@@ -788,7 +788,7 @@ func TestTheVerifySaysWhichCheckFailed(t *testing.T) {
 	wait := func(d time.Duration) { clock.advance(d + 20*time.Second) }
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
-	err := verifyUp(ctx, inactive, root, unitConfig{UserHome: root, Home: root, Root: root, Host: "127.0.0.1", Port: 6553}, clock.now, wait)
+	err := verifyUp(ctx, inactive, root, unitConfig{UserHome: root, Machinery: root, Share: root, Host: "127.0.0.1", Port: 6553}, clock.now, wait)
 	if err == nil {
 		t.Fatal("an inactive unit is not up")
 	}
@@ -802,7 +802,7 @@ func TestTheVerifySaysWhichCheckFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	active := &fakeInit{unitPath: filepath.Join(root, "unit"), active: true}
-	err = verifyUp(ctx, active, root, unitConfig{UserHome: root, Home: root, Root: root, Host: "127.0.0.1", Port: 6553}, clock.now, wait)
+	err = verifyUp(ctx, active, root, unitConfig{UserHome: root, Machinery: root, Share: root, Host: "127.0.0.1", Port: 6553}, clock.now, wait)
 	if err == nil || !strings.Contains(err.Error(), "did not answer") {
 		t.Fatalf("want the console named, got %v", err)
 	}
@@ -851,7 +851,7 @@ func TestTheVerifyKnowsWhichConsoleItIsTalkingTo(t *testing.T) {
 func TestInstallRecreatesAMachineFromBeforeTheTagRecord(t *testing.T) {
 	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
 	// The disk of a machine from an older release: the files, and no tag beside them.
-	disk := applianceDisk(fixture.install.home)
+	disk := applianceDisk(fixture.install.machinery)
 	writeApplianceFiles(t, disk, "")
 	machine := &fakeMachine{running: true}
 	fixture.install.machine = machine
@@ -867,7 +867,7 @@ func TestAnInstallDoesNotTouchTheMachineWhenTheDiskIsLocked(t *testing.T) {
 	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
 	machine := &fakeMachine{running: true}
 	fixture.install.machine = machine
-	unlock, _, err := update.AcquireLock(fixture.install.root, time.Now())
+	unlock, _, err := update.AcquireLock(fixture.install.share, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

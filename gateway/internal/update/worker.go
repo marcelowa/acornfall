@@ -37,9 +37,9 @@ const WorkerTarball = "worker.tar.gz"
 // bunDownloadBase is where bun releases live. A test points elsewhere.
 const bunDownloadBase = "https://github.com/oven-sh/bun/releases/download"
 
-func (m *Manager) toolsDir() string   { return filepath.Join(m.home, "tools") }
+func (m *Manager) toolsDir() string   { return filepath.Join(m.machinery, "tools") }
 func (m *Manager) bunDir() string     { return filepath.Join(m.toolsDir(), "bun-"+BunVersion) }
-func (m *Manager) workerDir() string  { return filepath.Join(m.home, "worker") }
+func (m *Manager) workerDir() string  { return filepath.Join(m.machinery, "worker") }
 func (m *Manager) workerBak() string  { return m.workerDir() + ".bak" }
 func (m *Manager) workerBad() string  { return m.workerDir() + ".bad" }
 func (m *Manager) workerTag() string  { return filepath.Join(m.workerDir(), "VERSION") }
@@ -47,7 +47,7 @@ func (m *Manager) workerLock() string { return filepath.Join(m.workerDir(), "bun
 func (m *Manager) workerMark() string {
 	return filepath.Join(m.workerDir(), "node_modules", ".acornfall-installed")
 }
-func (m *Manager) workerPending() string { return filepath.Join(m.home, "worker.pending.tgz") }
+func (m *Manager) workerPending() string { return filepath.Join(m.machinery, "worker.pending.tgz") }
 
 // BunPath is where the pinned bun lives. It may not exist yet: EnsureBun
 // downloads it, and a missing one with no network is a refusal, not a guess.
@@ -421,11 +421,11 @@ func untarImage(tarball []byte, dir string) error {
 
 func untarImageStream(r io.Reader, dir string) error {
 	reader := tar.NewReader(r)
-	root := filepath.Clean(dir)
+	share := filepath.Clean(dir)
 	inside := func(name string) (string, error) {
 		clean := filepath.Clean("/" + name)
-		target := filepath.Join(root, clean)
-		if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+		target := filepath.Join(share, clean)
+		if target != share && !strings.HasPrefix(target, share+string(os.PathSeparator)) {
 			return "", fmt.Errorf("update: image tarball escapes: %q", name)
 		}
 		return target, nil

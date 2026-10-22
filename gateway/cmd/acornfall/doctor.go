@@ -20,14 +20,14 @@ import (
 func doctorCommand(argv []string) {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "data directory")
-	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
-	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine to report: microsandbox (default), lxc (containers in one machine), or host")
 	asJSON := flags.Bool("json", false, "print the report as JSON")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
-	dir := *home
+	dir := *machinery
 	if dir == "" {
 		dir = *dataDir
 	}
@@ -35,11 +35,11 @@ func doctorCommand(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
-	resolvedRoot, err := resolveRoot(*root, "")
+	resolvedShare, err := resolveShare(*share, "")
 	if err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
-	where := layout.New(resolvedRoot, resolved)
+	where := layout.New(resolvedShare, resolved)
 
 	engineName := *sandboxEngine
 	if engineName == "" {
@@ -54,7 +54,7 @@ func doctorCommand(argv []string) {
 	manager.Verify(context.Background())
 	report := manager.Report()
 	nesting := manager.Nesting(context.Background())
-	updater := update.New(resolved, where.Root, "", "")
+	updater := update.New(resolved, where.Share, "", "")
 	if err := updater.Open(); err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
@@ -135,7 +135,7 @@ func doctorCommand(argv []string) {
 func readyInput(where layout.Layout, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
 	_, bunOK := updater.BunInstalled()
 	return ready.Input{
-		Home:            where.Home,
+		Machinery:       where.Machinery,
 		Current:         health.Version,
 		RuntimeTag:      updater.RuntimeTag(),
 		Worker:          updater.WorkerVersion(),
@@ -171,7 +171,7 @@ func readyInputForBoot(where layout.Layout, updates *update.Manager, engine *san
 	_, bunOK := updates.BunInstalled()
 	status := updates.Status()
 	input := ready.Input{
-		Home:          where.Home,
+		Machinery:     where.Machinery,
 		Current:       status.Current,
 		RuntimeTag:    updates.RuntimeTag(),
 		Worker:        updates.WorkerVersion(),
@@ -201,13 +201,13 @@ func readyInputForBoot(where layout.Layout, updates *update.Manager, engine *san
 // reportManager builds the report-only manager doctor describes. It has to name an engine:
 // without a driver, Open refuses ("sandbox: Driver is required") and doctor can only report
 // that failure, never the tier it exists to diagnose.
-func reportManager(home, engineName string) (*sandbox.Manager, error) {
-	driver, err := sandbox.Engine(home, "", engineName)
+func reportManager(machinery, engineName string) (*sandbox.Manager, error) {
+	driver, err := sandbox.Engine(machinery, "", engineName)
 	if err != nil {
 		return nil, err
 	}
 	return sandbox.Open(context.Background(), sandbox.Options{
-		Home:       home,
+		Machinery:  machinery,
 		Driver:     driver,
 		ReportOnly: true,
 	})

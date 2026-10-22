@@ -46,7 +46,7 @@ class Worker {
 				join(root, "state", "session.sqlite"),
 				"--credentials",
 				join(root, "config", "credentials.json"),
-				"--root",
+				"--share",
 				root,
 			],
 			{

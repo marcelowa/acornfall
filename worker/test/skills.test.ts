@@ -76,7 +76,7 @@ describe("skills", () => {
 			"---\nname: both\ndescription: native\n---\nC",
 		);
 
-		const roots = layerRoots({ root: join(root, "acornfall"), workspace });
+		const roots = layerRoots({ share: join(root, "acornfall"), workspace });
 		const skills = await loadSkills(resourceFolders(roots, ["skills"]), hostFiles);
 		expect(skills.map((skill) => [skill.name, skill.description])).toEqual([
 			["both", "native"],
