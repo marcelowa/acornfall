@@ -1,6 +1,6 @@
 # ADR 0030 — The host supervises the machine, and the product declares intent
 
-Status: accepted, 2026-10-22
+Status: accepted, 2026-10-22; amended 2026-10-22 — a person's intent is a file too (below)
 Date: 2026-10-22
 
 ## Context
@@ -145,3 +145,46 @@ validation rule: a value the service can refuse by name.
   not ask the service.
 - Open: the service's own update (who replaces the replacer) is the same question as the launcher's,
   and it is still open in ADR 0022's consequences.
+
+## Amendment, 2026-10-22 — a person's intent is a file too
+
+The design above gave the *product* a way to say what it wants, and left the other question to the
+service: should this machine exist at all? The service answered it by always wanting a machine.
+`machine down` removed the disk and the next tick made one again, so a command that reported success
+was undone within a second. The missing piece is the same shape as the one this file chose for the
+product.
+
+1. **Two intents, two files, one service.** The product's release is `state/host/want.json` inside
+   the mount (above). A person's is `state/machine.json` on the host:
+
+   ```
+   ~/acornfall/state/machine.json   written by a person's command
+     { "wanted": "running" }        one of: running, stopped, gone
+   ```
+
+2. **The commands write it, before the work they describe.** `up` and `restart` write `running`,
+   `stop` writes `stopped`, `down` writes `gone`. A boot interrupted half way leaves the intent
+   behind, which is the point of a file over a flag; `restart` declares `running` *before* its down
+   half, so a failure between the two does not leave a machine the service believes nobody wants.
+3. **The service enforces it and never sets it.** `machine serve` reads that file and writes nothing
+   to it. Only `running` makes it start, restart or boot a machine, and it is one function that
+   answers the question — the start path, the restart path and the boot after an apply all ask it,
+   so there is no second place for the rule to drift. Backoff and the cap apply only to a machine
+   that should be up: a machine a person stopped is not a crash loop.
+4. **Missing, empty or unparsable is "nothing declared", with no error.** That host is a host where
+   a person drives, which is what an install was before there was a service: nothing is started, the
+   product's release is still applied, and the state is still reported.
+5. **`down` is final until someone says `up`.** A machine taken down does not come back because a
+   tick happened, and it does not come back because an update arrived: an apply still makes the disk
+   (that is the release, which the product asked for) and stops before booting when no person
+   declared the machine running.
+
+**Why the service is the enforcer and never the owner.** A process that starts a machine because it
+is written to start one cannot be told to stop; a process that enforces a file can. Every question
+this service answers — is the machine running, which release is it, should it exist — has an author
+that is not the service: the engine, the disk, and a person. The one thing it owns is the loop.
+
+**The consequence worth stating plainly**: `machine down` now reports something that stays true. The
+cost is that a machine taken down is not brought back by anything but a command, so a person who
+takes a machine down and expects an update to bring it back is wrong — and the screen says which
+release was asked for and what the host did, including "left it stopped".

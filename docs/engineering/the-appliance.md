@@ -62,7 +62,13 @@ The two sides talk through the mount, because the mount is the one thing both ca
 ~/acornfall/state/host/want.json   the product writes  { "version": "v0.10.0-beta.14" }
 ~/acornfall/state/host/is.json     the service writes  { "running": true, "version": "v0.10.0-beta.13",
                                                          "service": "…", "lastError": "", "at": "…" }
+~/acornfall/state/machine.json     a person's command writes  { "wanted": "running" }
 ```
+
+The second intent is whether the machine should exist at all: `running`, `stopped` or `gone`, written
+by `machine up`, `stop` and `down` before they act, and read by the service. Only `running` makes it
+start, restart or boot a machine, so `machine down` is not undone by the next tick. No file, an empty
+one or one that does not parse is a host where a person drives: nothing is started.
 
 Both are written whole and renamed into place, and both are read tolerantly: a missing, empty or
 unparsable file is "nothing declared yet", never an error the console shows. `want.json` is the only
