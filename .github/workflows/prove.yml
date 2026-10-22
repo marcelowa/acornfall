@@ -1,6 +1,6 @@
 name: prove
 
-# The release's proof job takes ~35 minutes: build the appliance, publish a release, then boot
+# The release's proof job takes ~11 minutes: build the appliance, publish a release, then boot
 # it. That is right for a release and wrong for everything else — three failures in a row were
 # in the test harness, and each cost half an hour to learn about. This is the same boot, on a
 # branch push, from the appliance the release already built: a few minutes, nothing published.
