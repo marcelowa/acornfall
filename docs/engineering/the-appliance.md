@@ -180,6 +180,24 @@ A tag is one pass now: each job uploads what it built to the release's own draft
 assembles the checksum file from what the producers left on the runner, so no artifact storage sits
 between two jobs on one disk. A tag took 27m43 before that and 6m57 on beta.14.
 
+## The host's own update
+
+An update is two steps ([ADR 0031](../adr/0031-an-update-is-two-steps.md)): the machine first, the
+service second, and only for a release the machine runs and whose state reports a worker ready — the
+first tick all three conditions hold, with no timer and nothing recorded. A bad release may break the
+machine; the host has to still be there to fix it, so the host never takes a release the machine has
+not brought up on this host. The exposure is named in the ADR: the release has been seen ready once,
+and a release that fails later fails on both sides — the net is the previous binary, the boot marker
+and the unit's restart limit.
+
+The service's binary lives under the folder the install owns: `~/.acornfall/bin/acornfall-<tag>` per
+release, and `~/.acornfall/bin/acornfall` as a symlink to the current one — the path the unit files
+must start it through, and the only binary it will replace. The swap writes the binary, leaves
+`state/host/boot-attempt.json`, then moves the symlink and exits; a start that finds its own marker
+goes back to the previous binary and exits 1, which is what turns an unbootable binary into one failed
+start instead of a loop. `acornfall machine update` runs both steps now, waiting for readiness between
+them; the automatic path takes the release on the first ready tick.
+
 ## What is still open
 
 - **engine/catalog conflict**: the Go side and the worker have shipped different engine versions, and
