@@ -59,18 +59,56 @@ api() {
 	curl -fsSL ${TOKEN:+-H "Authorization: Bearer $TOKEN"} -H "Accept: application/vnd.github+json" "$1"
 }
 
-# The tag: explicit, or the newest release. `/releases` rather than `/releases/latest`: latest excludes
-# pre-releases, and this project ships nothing but betas.
+# The tag: the one asked for, or the newest release that can actually be installed.
+#
+# "Newest" is not `per_page=1`. A release is public before its assets are all there — the pipeline opens a
+# draft, uploads into it and publishes at the end, and a run that is cancelled or fails leaves the draft
+# behind — so the newest *release* can be one nobody can download. Measured: an install picked
+# v0.10.0-beta.28, whose run was cancelled, and answered 404 for a binary the version claimed to have.
+#
+# So the list is scanned in order, and the first release that is not a draft and carries both the binary for
+# this machine and its checksum wins. A stable release beats a pre-release, which is what makes this work the
+# day there is a 1.0; today every release is a beta, and the newest complete one is chosen.
+list="$(api 'https://api.github.com/repos/marcelowa/acornfall/releases?per_page=10' | tr -d '\n ')" || {
+	echo "install.sh: cannot read the release list (a 403 is GitHub's rate limit, lifted by ACORNFALL_GITHUB_TOKEN)"
+	exit 2
+}
+usable() {
+	# Each fragment starts at a release's tag and carries that release's assets: the JSON puts assets after
+	# tag_name, which is why splitting there is enough to tell one release from the next.
+	printf '%s' "$list" | sed 's/"tag_name":"/\n/g' | tail -n +2 | while IFS= read -r chunk; do
+		tag="$(printf '%s' "$chunk" | cut -d'"' -f1)"
+		[ -n "$tag" ] || continue
+		case "$chunk" in *'"draft":true'*) continue ;; esac
+		if [ "$1" = stable ]; then
+			case "$chunk" in *'"prerelease":true'*) continue ;; esac
+		fi
+		case "$chunk" in *"\"name\":\"$asset\""*) ;; *) continue ;; esac
+		case "$chunk" in *'"name":"sha256sums.txt"'*) ;; *) continue ;; esac
+		echo "$tag"
+		break
+	done
+}
 if [ -z "$VERSION" ]; then
-	VERSION="$(api 'https://api.github.com/repos/marcelowa/acornfall/releases?per_page=1' | tr -d '\n ' | grep -o '"tag_name":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
-	[ -n "$VERSION" ] || { echo "install.sh: no releases yet, or GitHub is rate-limiting this host (set ACORNFALL_GITHUB_TOKEN)"; exit 2; }
+	VERSION="$(usable stable)"
+	[ -n "$VERSION" ] || VERSION="$(usable any)"
+	[ -n "$VERSION" ] || {
+		echo "install.sh: no release carries $asset and its checksum yet (or GitHub is rate-limiting this host: set ACORNFALL_GITHUB_TOKEN)"
+		exit 2
+	}
 fi
 echo "install.sh: release $VERSION, asset $asset"
 
-release="$(api "https://api.github.com/repos/marcelowa/acornfall/releases/tags/$VERSION" | tr -d '\n ')" || {
-	echo "install.sh: cannot read release $VERSION (a missing release is a 404; a 403 is GitHub's rate limit, lifted by ACORNFALL_GITHUB_TOKEN)"
-	exit 2
-}
+# A 404 leaves the assignment empty rather than failing it — `set -e` does not see the status of a function
+# inside a substitution — so the payload itself is what says whether there is a release to install.
+release="$(api "https://api.github.com/repos/marcelowa/acornfall/releases/tags/$VERSION" | tr -d '\n ')" || release=""
+case "$release" in
+	*'"tag_name"'*) ;;
+	*)
+		echo "install.sh: no release for $VERSION: GitHub answers 404 for a tag whose release is a draft or never finished (a 403 is its rate limit, lifted by ACORNFALL_GITHUB_TOKEN)"
+		exit 2
+		;;
+esac
 asset_id() {
 	printf '%s' "$release" | grep -o "\"id\":[0-9]*,\"node_id\":\"[A-Za-z0-9_=-]*\",\"name\":\"$1\"" | head -n 1 | cut -d: -f2 | cut -d, -f1
 }
