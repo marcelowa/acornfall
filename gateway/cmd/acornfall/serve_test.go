@@ -25,6 +25,7 @@ type fakeMachine struct {
 	bootErr    error
 	runningErr error
 	removeErr  error
+	order      *[]string
 	lastImage  string
 }
 
@@ -32,6 +33,9 @@ func (f *fakeMachine) Running(context.Context) (bool, error) { return f.running,
 
 func (f *fakeMachine) Remove(context.Context) error {
 	f.removes++
+	if f.order != nil {
+		*f.order = append(*f.order, "machine")
+	}
 	return f.removeErr
 }
 

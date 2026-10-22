@@ -311,7 +311,7 @@ func newUninstallFixture(t *testing.T) uninstallFixture {
 	root := filepath.Join(userHome, "acornfall")
 	order := &[]string{}
 	init := &fakeInit{unitPath: filepath.Join(userHome, ".config", "systemd", "user", "acornfall-machine.service"), order: order}
-	machine := &fakeMachine{running: true}
+	machine := &fakeMachine{running: true, order: order}
 	// The install: the unit, the binary, a disk, an artifact.
 	for _, path := range []string{init.unitPath, update.VersionedBinary(home, "v0.10.0-beta.16"), update.VersionedBinary(home, "v0.10.0-beta.15")} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -337,6 +337,14 @@ func newUninstallFixture(t *testing.T) uninstallFixture {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(workspace, []byte("a person's work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A conversation and the registry are the person's too, and they live under state/ beside our bookkeeping.
+	conversation := filepath.Join(root, "state", "conversations", "a-conversation.json")
+	if err := os.MkdirAll(filepath.Dir(conversation), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(conversation, []byte(`{"a conversation":"that is the person's"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bookkeeping := []string{
@@ -391,7 +399,9 @@ func TestUninstallStopsARunningMachineFirst(t *testing.T) {
 	if err := fixture.remove.run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.Join(*fixture.order, ","), "disable"; got != want {
+	// The service stops before the machine, and the machine before the disk it was running on: the disk is
+	// removed after the "machine" entry, which is the one thing this order is for.
+	if got, want := strings.Join(*fixture.order, ","), "disable,machine"; got != want {
 		t.Errorf("the order was %q, want %q", got, want)
 	}
 }
@@ -410,6 +420,13 @@ func TestUninstallRemovesTheBookkeepingInTheMountAndKeepsTheWorkspaces(t *testin
 	}
 	if body, err := os.ReadFile(fixture.workspace); err != nil || string(body) != "a person's work" {
 		t.Errorf("a workspace file was touched: %q, %v", body, err)
+	}
+	conversation := filepath.Join(fixture.remove.root, "state", "conversations", "a-conversation.json")
+	if _, err := os.Stat(conversation); err != nil {
+		t.Errorf("a conversation under state/ was removed: %v", err)
+	}
+	if _, err := os.Stat(update.IsPath(fixture.remove.root)); !os.IsNotExist(err) {
+		t.Errorf("our is.json is still there: %v", err)
 	}
 	for _, path := range []string{update.OwnedBinary(fixture.remove.home), applianceDisk(fixture.remove.home), filepath.Join(fixture.remove.home, "appliance")} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {

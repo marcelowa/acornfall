@@ -212,11 +212,21 @@ type uninstaller struct {
 }
 
 func (u uninstaller) run(ctx context.Context) error {
-	// 1. Stop the service: a unit that keeps restarting the binary would race the removal.
+	// The order is the whole of what makes this safe, and it is the reverse of what an operator does by hand:
+	// 1. stop the service — a unit that keeps restarting the binary would race the removal;
 	if u.init != nil {
 		if err := u.init.Disable(ctx); err != nil {
 			return fmt.Errorf("stopping the service: %w", err)
 		}
+		u.say("stopped", "the "+u.init.Name()+" service")
+	}
+	// 2. stop the machine — and only then is its disk ours to remove;
+	if err := u.machine.Remove(ctx); err != nil {
+		return fmt.Errorf("stopping the machine: %w", err)
+	}
+	u.say("stopped", "the machine")
+	// 3. the unit file and the binaries;
+	if u.init != nil {
 		unitPath, _, err := u.init.Unit(unitConfig{UserHome: u.userHome, Home: u.home, Root: u.root})
 		if err != nil {
 			return err
@@ -230,30 +240,24 @@ func (u uninstaller) run(ctx context.Context) error {
 			return err
 		}
 	}
-	// 2. The machine, and then the disk it was running on: never the other way round.
-	if err := u.machine.Remove(ctx); err != nil {
-		return fmt.Errorf("removing the machine: %w", err)
-	}
-	u.say("removed", "the machine")
-	machineDir := filepath.Dir(applianceDisk(u.home))
-	if err := os.RemoveAll(machineDir); err != nil {
-		return fmt.Errorf("removing %s: %w", machineDir, err)
-	}
-	u.say("removed", "the machine's disk at "+machineDir)
-	// 3. Ours: the artifacts and the binary we put there.
-	for _, path := range []string{filepath.Join(u.home, "appliance")} {
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("removing %s: %w", path, err)
-		}
-		u.say("removed", path)
-	}
 	for _, path := range binaries(u.home) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("removing %s: %w", path, err)
 		}
 		u.say("removed", path)
 	}
-	// 4. Our bookkeeping inside the mount: the declaration, the host's own files, the token.
+	// 4. the disk the machine ran on, and the artifacts it was made from;
+	machineDir := filepath.Dir(applianceDisk(u.home))
+	if err := os.RemoveAll(machineDir); err != nil {
+		return fmt.Errorf("removing %s: %w", machineDir, err)
+	}
+	u.say("removed", "the machine's disk at "+machineDir)
+	appliances := filepath.Join(u.home, "appliance")
+	if err := os.RemoveAll(appliances); err != nil {
+		return fmt.Errorf("removing %s: %w", appliances, err)
+	}
+	u.say("removed", appliances)
+	// 5. our bookkeeping inside the mount: the declaration, the host's own files, the token.
 	for _, path := range []string{
 		update.MachineIntentPath(u.root),
 		update.HostDir(u.root),
@@ -264,7 +268,7 @@ func (u uninstaller) run(ctx context.Context) error {
 		}
 		u.say("removed", path)
 	}
-	// 5. What is not ours, and the line that says so.
+	// 6. what is not ours, and the line that says so.
 	for _, sentence := range leftBehind(u.root, readRegistry(u.root)) {
 		u.say("", sentence)
 	}
