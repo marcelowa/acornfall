@@ -1,6 +1,6 @@
 # ADR 0026 — An appliance image names the release it is
 
-Status: accepted, 2026-10-21
+Status: accepted, 2026-10-21; amended 2026-10-22 — the artifact is the release tarball (below)
 Date: 2026-10-21
 
 ## Context
@@ -70,3 +70,58 @@ container.
   into the builder machine (`msb exec` carries the command, not the step's environment). The
   launcher stamped it on the machine that fetched it — which is the path every install takes, and
   the release's own proof shows it — and the next appliance carries the mark from the build.
+
+## Amendment, 2026-10-22 — the artifact is the release tarball
+
+The decision above made the image name its release, which fixed the upgrade that booted the
+previous appliance. It did not fix where the image *comes from*: `~/.acornfall/appliance/rootfs`
+was both the thing a release ships and the live disk the machine writes to, and one directory
+cannot be both. A container a previous machine left behind is in the next machine's image, because
+the image is the disk; a fetch replaces the tree a running machine is using, because the tree is
+the image. That is the whole bug class this file's Context describes, and the mark answered only
+the half of it that was a question about releases.
+
+1. **The artifact is the release's tarball**, kept once it has been verified against the release's
+   own checksums, at `~/.acornfall/appliance/<tag>.tar.gz`. The file's name is the release the
+   bytes are, so the artifact's release is read from the file system.
+2. **A machine's disk is made from that tarball**, at
+   `~/.acornfall/machines/<machine-name>/rootfs`. The disk is the machine's to dirty — containers,
+   logs, whatever a running appliance writes — and it records the release it was unpacked from in
+   the file beside it, `machines/<machine-name>/tag`.
+3. **`machine down` deletes the disk and keeps the artifact.** The next `machine up` makes a new
+   disk from the tarball that is already here: a copy, not a download. An install that has the
+   tarball can make a machine with no network at all.
+4. **A release this install has not unpacked is a new disk, not an edited one.** A new tag never
+   writes into the tree the previous machine used.
+5. **The layout an install already has is kept.** Which directory the machine boots is decided in
+   this order, and this is the rule the code implements:
+   - the disk for the release this launcher runs, when it exists;
+   - else the image directory an install has from before this amendment,
+     `~/.acornfall/appliance/rootfs`, booted exactly as it is today while the mark inside it names
+     the release this launcher runs;
+   - else the release's tarball — fetched when it is not here, verified, kept — unpacked into a new
+     disk.
+
+   The old directory is never deleted and never overwritten, `--refresh` included: it is what
+   worked before this change, and the launcher makes the new disk beside it instead. That image
+   stops being booted once this launcher's release differs from its mark, which is decision 2
+   above, now with the old tree left where a person can still find it.
+6. **The mark stays, and stops deciding.** `etc/acornfall-appliance` is still written by the build
+   and stamped after a verified unpack, because it is the file a person reads —
+   `cat ~/.acornfall/machines/<machine-name>/rootfs/etc/acornfall-appliance`. It is no longer what
+   an update decision reads: for a disk made from a tarball the release is the tarball's name, and
+   the mark is read only for the image directory of an install from before this amendment, which
+   has nothing else to say which release it is.
+
+### What changes from the decision above
+
+- `machine down` removes the machine's disk. It does not remove the artifact, the old image
+  directory, or a tree a person named with `--image`.
+- One unpack per release instead of one per boot: the disk costs its unpacked size (575 MB) once,
+  and `machine down` is what pays it again.
+- `--refresh` fetches the tarball again and makes the disk again; it no longer edits the booted
+  image to clean containers out of it, because a disk unpacked from the artifact has none.
+- The command a person reads is the one in the last bullet of the decision above, with the new
+  path: `cat ~/.acornfall/machines/<machine-name>/rootfs/etc/acornfall-appliance`.
+- `--image` is unchanged: a named directory is the person's own tree, never compared and never
+  deleted.
