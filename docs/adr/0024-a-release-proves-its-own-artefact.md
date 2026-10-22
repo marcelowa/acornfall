@@ -80,6 +80,12 @@ shipped. It was not a gap in coverage — the tests were thorough about the wron
   hard-link handling is pinned by `TestTheImageKeepsItsSymlinksAndItsLinks`.
 - The proof reads the release API with `python3`, because this runner has no `jq` — its first
   finding was about itself (beta 4).
-- The appliance is still stored as a 193 MiB artifact per release. The proof reads the release, not
-  the artifact, so the artifact is now only a hand-off between jobs — and the next change removes it
-  by uploading straight to a draft release.
+- The appliance is no longer stored as a 193 MiB artifact per release. Each job uploads what it
+  built straight to the tag's draft release, and the job that assembles the checksums reads the
+  lines the producers left on the runner. Nothing in the release path downloads the run's own
+  artifacts back onto the disk that made them: that download was 15m57 of the 27m43 a tag took
+  (v0.10.0-beta.13).
+- That hand-off is a folder on the runner, `~/acornfall-release/<tag>/sums`, so the runner carries
+  state between the jobs where the release carries the bytes. A missing folder, or a producer whose
+  line is not in it, stops `publish` with a sentence naming the file: a release that quietly ships
+  without a checksum line is not a smaller failure.
