@@ -1378,15 +1378,28 @@ func verify(list string, payload []byte, tag string) error {
 }
 
 func matchChecksum(payload []byte, list, tag string) error {
+	if !sumInList(list, payload, "") {
+		return fmt.Errorf("releases: checksum mismatch for %s", tag)
+	}
+	return nil
+}
+
+// sumInList answers whether the release's checksum file carries payload. name narrows it to one file
+// when the caller has to know *which* entry matched — a release has four binaries and a wrong one is
+// still a checksum that is in the list.
+func sumInList(list string, payload []byte, name string) bool {
 	sum := sha256.Sum256(payload)
 	want := hex.EncodeToString(sum[:])
 	for line := range strings.SplitSeq(list, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == want {
-			return nil
+		if len(fields) < 2 || fields[0] != want {
+			continue
+		}
+		if name == "" || fields[1] == name {
+			return true
 		}
 	}
-	return fmt.Errorf("releases: checksum mismatch for %s", tag)
+	return false
 }
 
 // swap keeps the last good binary as .bak, writes the new one, records the
