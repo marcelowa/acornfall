@@ -20,7 +20,13 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--remote|--local) PASS="$PASS $1"; shift ;;
 		--version) VERSION="$2"; shift 2 ;;
-		-h|--help) echo "usage: install.sh [--remote|--local] [--version TAG]"; exit 0 ;;
+		-h|--help)
+			echo "usage: install.sh [--remote|--local] [--version TAG]"
+			echo "  --remote   publish the console on 0.0.0.0, with a token"
+			echo "  --local    keep the console on 127.0.0.1"
+			echo "  with neither, machine install asks (it needs a terminal to ask with)"
+			exit 0
+			;;
 		*) echo "unknown flag $1"; exit 2 ;;
 	esac
 done

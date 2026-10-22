@@ -51,6 +51,12 @@ sh install.sh --remote     # on 0.0.0.0, with a token
 The answer is written into `~/acornfall/state/machine.json` beside `wanted`, and into the generated unit,
 so the two cannot disagree. `machine status` prints the address, so "where do I browse" has an answer.
 
+A remote install ends by printing the address to open with the token in it once —
+`http://<hostname>:7777/?token=…` — because the cookie keeps it after that. If the person wants the other
+answer later, `machine install --remote` (or `--local`) writes both the declaration and the unit and
+restarts the service, and it recreates the machine when one is running on the old address, because a
+machine's address is fixed when it is created.
+
 ## Removing it
 
 ```sh
