@@ -27,3 +27,17 @@ replace ([ADR 0031](../../docs/adr/0031-an-update-is-two-steps.md)): started fro
 package manager's tree, `~/.local/bin`, a checkout — it supervises and applies the product's releases,
 and refuses to update itself, with a line in `is.json` saying why. Changing `ExecStart` or
 `ProgramArguments` to another path is choosing that.
+
+## Two things a person should not have to rediscover
+
+**`StartLimitIntervalSec` and `StartLimitBurst` belong to `[Unit]`, not `[Service]`.** systemd reads
+them from `[Unit]` and nowhere else: in `[Service]` it logs `Unknown key name ... ignoring` and
+enforces no limit at all, so a binary that cannot run would restart every `RestartSec` for ever
+instead of going to `failed`. They are in `[Unit]` in the unit beside this file; do not move them back.
+
+**launchd has no equivalent of that limit.** `ThrottleInterval` (ten seconds, and set explicitly in
+the plist) only slows the loop down; it does not stop it. On macOS the boot marker is the only thing
+that undoes a binary which cannot start, and a job that cannot start at all stays visible in
+`launchctl print gui/$(id -u)/dev.acornfall.machine` rather than going to a failed state. The plist
+also runs the binary through `sh -c exec ...` because launchd does not expand `~` in
+`ProgramArguments` — a literal `~/.acornfall/bin/acornfall` is a path that does not exist.

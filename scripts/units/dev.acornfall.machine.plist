@@ -16,18 +16,26 @@
 <dict>
 	<key>Label</key>
 	<string>dev.acornfall.machine</string>
+	<!-- The install's own symlink, which is what lets the service update itself (ADR 0031): a binary
+	     anywhere else is one it will not replace. It goes through sh because launchd does not expand
+	     "~" (or any other shell syntax) in ProgramArguments: a literal "~/.acornfall/..." is a path
+	     that does not exist, and the job fails to start with nothing said. -->
 	<key>ProgramArguments</key>
 	<array>
-		<!-- The install's own symlink, which is what lets the service update itself (ADR 0031): a
-		     binary anywhere else is one it will not replace. -->
-		<string>~/.acornfall/bin/acornfall</string>
-		<string>machine</string>
-		<string>serve</string>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>exec "$HOME/.acornfall/bin/acornfall" machine serve</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
+	<!-- launchd has no StartLimitBurst: ThrottleInterval is the closest thing, and it only slows the
+	     loop down (the default is ten seconds). It is set here so a job that cannot start is visible
+	     rather than a spawn every second, and it does NOT replace the systemd limit or the service's
+	     own boot marker (ADR 0031). -->
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
 	<key>StandardOutPath</key>
 	<string>/tmp/acornfall-machine.log</string>
 	<key>StandardErrorPath</key>
