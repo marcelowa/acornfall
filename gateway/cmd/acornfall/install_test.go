@@ -18,6 +18,8 @@ import (
 type fakeInit struct {
 	unitPath     string
 	active       bool
+	enabled      bool
+	restarts     int
 	linger       bool
 	enableCalls  int
 	disableCalls int
@@ -54,6 +56,14 @@ func (f *fakeInit) Disable(context.Context) error {
 
 func (f *fakeInit) Active(context.Context) bool { return f.active }
 
+func (f *fakeInit) Enabled(context.Context) (bool, error) { return f.enabled, nil }
+
+func (f *fakeInit) Restart(context.Context) error {
+	f.restarts++
+	f.active = true
+	return nil
+}
+
 func (f *fakeInit) Linger(context.Context) (bool, error) { return f.linger, nil }
 
 func (f *fakeInit) EnableLinger(context.Context) error { f.linger = true; return nil }
@@ -77,7 +87,7 @@ func newInstallFixture(t *testing.T, declaration update.Declaration) installFixt
 	userHome := t.TempDir()
 	home := filepath.Join(userHome, ".acornfall")
 	root := filepath.Join(userHome, "acornfall")
-	init := &fakeInit{unitPath: filepath.Join(userHome, ".config", "systemd", "user", "acornfall-machine.service")}
+	init := &fakeInit{unitPath: filepath.Join(userHome, ".config", "systemd", "user", "acornfall-machine.service"), enabled: true}
 	said := &[]string{}
 	return installFixture{
 		init: init,
@@ -114,10 +124,11 @@ func TestInstallTwiceChangesNothingTheSecondTime(t *testing.T) {
 	declaration := update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777}
 	fixture := newInstallFixture(t, declaration)
 	fixture.run(t)
+	afterFirst := len(*fixture.say)
 	fixture.run(t)
 
 	// The first run fixed what was missing; the second found all of it.
-	second := (*fixture.say)[len(*fixture.say)/2:]
+	second := (*fixture.say)[afterFirst:]
 	for _, line := range second {
 		if strings.HasPrefix(line, "fixed") {
 			t.Errorf("the second install changed something: %q", line)
@@ -627,3 +638,87 @@ func quote(value string) string {
 }
 
 func itoa(value int) string { return strconv.Itoa(value) }
+
+// The other half of a repair: a unit that is there but not enabled, or a service that is not running, is fixed
+// and said so. That is what "run install again if something is wrong" means.
+func TestInstallFixesAUnitThatIsNotEnabledAndAServiceThatIsNotRunning(t *testing.T) {
+	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+	fixture.run(t)
+	// The unit is right and the declaration is right; the service is merely off.
+	fixture.init.enabled = false
+	fixture.init.active = false
+	*fixture.say = nil
+	fixture.run(t)
+	if fixture.init.enableCalls < 2 {
+		t.Errorf("the service was enabled %d times, want a second fix", fixture.init.enableCalls)
+	}
+	found := false
+	for _, line := range *fixture.say {
+		if strings.HasPrefix(line, "fixed") && strings.Contains(line, "the service") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a service that was not running was not said to be fixed: %v", *fixture.say)
+	}
+}
+
+// A remote install prints the address to open with the token once, and the sentence that stops a person pasting
+// it every time. Loopback prints the address alone: there is nothing to authenticate.
+func TestARemoteInstallPrintsTheTokenURLOnce(t *testing.T) {
+	token := strings.Repeat("a", 64)
+	lines := installClosing("0.0.0.0", 7777, token, "/home/me/acornfall/config/token")
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "/?token="+token) {
+		t.Errorf("the address does not carry the token:\n%s", joined)
+	}
+	if !strings.Contains(joined, "cookie") {
+		t.Errorf("nothing says the cookie keeps it:\n%s", joined)
+	}
+	if !strings.Contains(joined, "/home/me/acornfall/config/token") {
+		t.Errorf("the token's path is missing:\n%s", joined)
+	}
+	if strings.Count(joined, token) != 1 {
+		t.Errorf("the token appears %d times, want once:\n%s", strings.Count(joined, token), joined)
+	}
+	local := strings.Join(installClosing("127.0.0.1", 7777, "", "/home/me/acornfall/config/token"), "\n")
+	if strings.Contains(local, "token=") || !strings.Contains(local, "http://127.0.0.1:7777") {
+		t.Errorf("a loopback install prints no token:\n%s", local)
+	}
+}
+
+// Changing the answer later is one command: the declaration and the unit move, and a machine that is running on
+// the old address is recreated, because a machine's address is fixed when it is created.
+func TestInstallingWithANewAddressRecreatesARunningMachine(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		running     bool
+		wantRemoves int
+	}{
+		{name: "running", running: true, wantRemoves: 1},
+		{name: "not running", running: false, wantRemoves: 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+			fixture.run(t)
+			machine := &fakeMachine{running: c.running}
+			fixture.install.machine = machine
+			// The person answers the other way this time.
+			fixture.install.declaration = update.Declaration{Wanted: update.IntentRunning, Host: "0.0.0.0", Port: 7777}
+			fixture.run(t)
+			if machine.removes != c.wantRemoves {
+				t.Errorf("the machine was removed %d times, want %d", machine.removes, c.wantRemoves)
+			}
+			if got, _ := update.ReadDeclaration(fixture.install.root).Address(); got != "0.0.0.0" {
+				t.Errorf("the declaration says %q", got)
+			}
+			body, err := os.ReadFile(fixture.init.unitPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), "--host 0.0.0.0") {
+				t.Errorf("the unit still says the old address:\n%s", body)
+			}
+		})
+	}
+}

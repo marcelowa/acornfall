@@ -102,6 +102,7 @@ func machineInstall(argv []string) {
 		binary:      binary,
 		init:        initFor(runtime.GOOS),
 		kvm:         kvmCheck,
+		machine:     driverMachine{home: resolvedHome, root: resolvedRoot, port: declaredPort, host: host, token: tokenOf(resolvedRoot)},
 	}
 	install.verify = func(ctx context.Context, cfg unitConfig) error {
 		return verifyUp(ctx, install.init, resolvedRoot, cfg, time.Sleep)
@@ -117,13 +118,22 @@ func machineInstall(argv []string) {
 		log.Printf("acornfall machine install: %v", err)
 		os.Exit(1)
 	}
-	url := consoleURL(host, declaredPort)
-	say("", "the console is "+url)
+	token := ""
 	if reachable {
-		say("", "it asks for the token in "+filepath.Join(resolvedRoot, "config", "token"))
-	} else {
-		say("", "it is on loopback: no token, and nothing outside this machine can reach it")
+		token = tokenOf(resolvedRoot)
 	}
+	for _, sentence := range installClosing(host, declaredPort, token, filepath.Join(resolvedRoot, "config", "token")) {
+		say("", sentence)
+	}
+}
+
+// tokenOf is the console's token when the install has one, and empty on loopback.
+func tokenOf(root string) string {
+	contents, err := os.ReadFile(filepath.Join(root, "config", "token"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(contents))
 }
 
 // line prints one item of an install or a removal: a state column, then the sentence.

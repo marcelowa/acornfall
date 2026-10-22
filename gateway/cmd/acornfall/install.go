@@ -11,6 +11,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -69,6 +70,8 @@ type initSystem interface {
 	Reload(ctx context.Context) error
 	Enable(ctx context.Context) error
 	Disable(ctx context.Context) error
+	Enabled(ctx context.Context) (bool, error)
+	Restart(ctx context.Context) error
 	Active(ctx context.Context) bool
 	Linger(ctx context.Context) (bool, error)
 	EnableLinger(ctx context.Context) error
@@ -97,6 +100,22 @@ func (systemdInit) Disable(ctx context.Context) error {
 
 func (systemdInit) Active(ctx context.Context) bool {
 	return runInit(ctx, "systemctl", "--user", "is-active", "--quiet", "acornfall-machine.service") == nil
+}
+
+func (systemdInit) Enabled(ctx context.Context) (bool, error) {
+	err := runInit(ctx, "systemctl", "--user", "is-enabled", "--quiet", "acornfall-machine.service")
+	if err != nil {
+		// A unit that is not enabled is an answer, not a failure; anything else is the init complaining.
+		if strings.Contains(err.Error(), "exit status 1") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (systemdInit) Restart(ctx context.Context) error {
+	return runInit(ctx, "systemctl", "--user", "restart", "acornfall-machine.service")
 }
 
 func (systemdInit) Linger(ctx context.Context) (bool, error) {
@@ -139,6 +158,13 @@ func (launchdInit) Disable(ctx context.Context) error {
 
 func (launchdInit) Active(ctx context.Context) bool {
 	return runInit(ctx, "launchctl", "print", launchdDomain()+"/dev.acornfall.machine") == nil
+}
+
+// Enabled is true once the agent is bootstrapped: launchd has no separate "enabled" a person sets.
+func (launchdInit) Enabled(ctx context.Context) (bool, error) { return launchdInit{}.Active(ctx), nil }
+
+func (launchdInit) Restart(ctx context.Context) error {
+	return runInit(ctx, "launchctl", "kickstart", "-k", launchdDomain()+"/dev.acornfall.machine")
 }
 
 func (launchdInit) Linger(context.Context) (bool, error) { return true, nil }
@@ -205,6 +231,9 @@ type installer struct {
 	declaration update.Declaration
 	binary      []byte
 	init        initSystem
+	// machine is how a changed address reaches the machine that is already running: it is recreated, because a
+	// machine's address is fixed when it is created. Nil on a host where nothing is running.
+	machine machineControl
 	// kvm and verify are the two host checks: a test replaces them.
 	kvm    func() error
 	verify func(ctx context.Context, cfg unitConfig) error
@@ -231,6 +260,9 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 	if cfg.Host == "" {
 		cfg.Host, cfg.Port = in.declaration.Address()
 	}
+	previous := update.ReadDeclaration(in.root)
+	previousHost, previousPort := previous.Address()
+	addressChanged := previousHost != cfg.Host || previousPort != cfg.Port
 
 	// The binary, under the release's own name, and the symlink the unit starts.
 	versioned := update.VersionedBinary(in.home, in.version)
@@ -260,14 +292,16 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 	say(!unitWritten, "the "+in.init.Name()+" unit at "+unitPath)
 
 	// The declaration the other commands read: it exists, and it agrees with the unit.
-	declarationWritten := false
-	if existing := update.ReadDeclaration(in.root); existing != in.declaration {
+	declarationWritten := previous != in.declaration
+	if declarationWritten {
 		if err := update.WriteDeclaration(in.root, in.declaration); err != nil {
 			return fmt.Errorf("writing the declaration: %w", err)
 		}
-		declarationWritten = true
 	}
 	say(!declarationWritten, "the declaration at "+update.MachineIntentPath(in.root))
+	if addressChanged {
+		say(false, fmt.Sprintf("the address, from %s:%d to %s:%d (the declaration and the unit both)", previousHost, previousPort, cfg.Host, cfg.Port))
+	}
 
 	// The service: reloaded after a write, enabled, and lingered so it starts at boot.
 	if unitWritten {
@@ -275,11 +309,25 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 			return err
 		}
 	}
-	active := in.init.Active(ctx)
-	if err := in.init.Enable(ctx); err != nil {
+	enabled, err := in.init.Enabled(ctx)
+	if err != nil {
 		return err
 	}
-	say(active && !unitWritten, "the service, enabled and running")
+	active := in.init.Active(ctx)
+	if !enabled || !active {
+		if err := in.init.Enable(ctx); err != nil {
+			return err
+		}
+	}
+	say(enabled && active && !unitWritten, "the service, enabled and running")
+	if unitWritten || addressChanged {
+		// The unit is what starts it and the address is read at start-up: a service that is already running
+		// would go on publishing the old one until something restarted it.
+		if err := in.init.Restart(ctx); err != nil {
+			return err
+		}
+		say(false, "restarted the service, so it publishes what the unit says")
+	}
 	lingered, err := in.init.Linger(ctx)
 	if err != nil {
 		return err
@@ -291,6 +339,16 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 	}
 	say(lingered, "linger, so it starts at boot without a login")
 
+	// A machine's address is fixed when it is created, so a machine that is running on the old one is taken
+	// away: the service makes it again on the new address, and says nothing when it was not running.
+	if addressChanged && in.machine != nil {
+		if running, err := in.machine.Running(ctx); err == nil && running {
+			if err := in.machine.Remove(ctx); err != nil {
+				return fmt.Errorf("recreating the machine on its new address: %w", err)
+			}
+			say(false, "recreated the machine, which was running on the old address")
+		}
+	}
 	// The check that it is actually up: the unit active, the state written, the console answering.
 	if in.verify != nil {
 		if err := in.verify(ctx, cfg); err != nil {
@@ -298,6 +356,30 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		}
 	}
 	return nil
+}
+
+// installClosing is what an install tells a person to open. On a network address it is the URL with the token
+// once — the cookie keeps it after that, which is the sentence that stops someone pasting it every time — and
+// on loopback it is the address alone, because there is nothing to authenticate.
+func installClosing(host string, port int, token, tokenPath string) []string {
+	browsable := host
+	if browsable == "" || browsable == "0.0.0.0" || browsable == "::" {
+		browsable = "127.0.0.1"
+		if host != "" {
+			if name, err := os.Hostname(); err == nil && name != "" {
+				browsable = name
+			}
+		}
+	}
+	url := "http://" + net.JoinHostPort(browsable, strconv.Itoa(port))
+	if token == "" {
+		return []string{"open " + url, "it is on loopback: no token, and nothing outside this machine can reach it"}
+	}
+	return []string{
+		"open " + url + "/?token=" + token,
+		"the cookie keeps it after that: this browser will not ask again",
+		"the token is in " + tokenPath,
+	}
 }
 
 // writeIfDifferent writes content when the file does not already hold it, and says whether it wrote. A file
