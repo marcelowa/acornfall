@@ -113,6 +113,10 @@ type Status struct {
 	Failed string `json:"failed,omitempty"`
 	// RestartRequired is set after files are swapped but the process is old.
 	RestartRequired bool `json:"restartRequired,omitempty"`
+	// Wanted is the release the product asked the host for, and Host is what the host service says
+	// it is running (ADR 0030). Both are empty on a host install, where the product updates itself.
+	Wanted string     `json:"wanted,omitempty"`
+	Host   *HostState `json:"host,omitempty"`
 }
 
 // Preflight is doctor's update section: what runs, what the worker is,
@@ -171,11 +175,11 @@ type ApplyOptions struct {
 	Tag string
 }
 
-// ErrLauncherOwnsIt is the appliance's answer to "update me": inside the machine this process is
-// not the thing that owns its version. The image is replaced by the launcher on the host
-// (ADR 0026, ADR 0029), so an update applied here would be undone by the next `machine up` —
-// silently, which is worse than a refusal.
-var ErrLauncherOwnsIt = errors.New("this install is updated from the host: run `acornfall machine up` there, which replaces the appliance rather than patching it")
+// ErrLauncherOwnsIt is the appliance's answer to anything that would change this process's own
+// image: inside the machine the version belongs to the host (ADR 0026, ADR 0029). Restarting and
+// rolling back are refused with it; an update is not refused but declared, over the channel the
+// host service reads (ADR 0030).
+var ErrLauncherOwnsIt = errors.New("this install is updated from the host: the update screen asks the host service to apply a release (ADR 0030), and `acornfall machine up` on the host is the deliberate path")
 
 // ErrRunsActive is the refusal when runs are active and drain is "wait".
 type ErrRunsActive struct{}
@@ -407,6 +411,9 @@ func (m *Manager) SetCurrentVersion(tag string) error {
 
 // Status builds the screen's answer.
 func (m *Manager) Status() Status {
+	// The channel is read before the lock: G4 forbids I/O under it, and these are the two files the
+	// host writes while the console reads.
+	wanted, host := m.hostChannel()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return Status{
@@ -420,8 +427,28 @@ func (m *Manager) Status() Status {
 		RestartRequired: m.restart,
 		DownloadSize:    AssetFor(m.latest).Size,
 		WorkerSize:      WorkerTarballAsset(m.latest).Size,
+		Wanted:          wanted,
+		Host:            host,
 	}
 }
+
+// hostChannel is the declared intent and the observed state, for an install a host supervises. A
+// want.json the service would refuse still shows its own words: the refusal is the host's sentence
+// in is.json.lastError, and hiding what was asked for would hide the reason it was refused.
+func (m *Manager) hostChannel() (string, *HostState) {
+	if !m.launcherOwned {
+		return "", nil
+	}
+	want, _ := ReadWant(m.root)
+	state, ok := ReadIs(m.root)
+	if !ok {
+		return want.Version, nil
+	}
+	return want.Version, &state
+}
+
+// LauncherOwned says this process cannot change its own version: the host does (ADR 0029, ADR 0030).
+func (m *Manager) LauncherOwned() bool { return m.launcherOwned }
 
 // Check forces a release check now.
 func (m *Manager) Check(ctx context.Context) (Release, error) {
@@ -1060,7 +1087,10 @@ func runScript(ctx context.Context, script, home, tag string) error {
 // the new binary migrates at boot before serving.
 func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if m.launcherOwned {
-		return ErrLauncherOwnsIt
+		// Inside the machine the update is the host's (ADR 0029). What this process can do is say
+		// which release it wants to be, in the file the host service reads (ADR 0030); the drain
+		// options are the dialog's, and a replaced machine takes the runs with it either way.
+		return m.AskHost(options.Tag)
 	}
 	if options.Drain == "" {
 		options.Drain = "wait"

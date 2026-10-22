@@ -1234,16 +1234,17 @@ func TestTheImageKeepsItsSymlinksAndItsLinks(t *testing.T) {
 	}
 }
 
-// The appliance does not update itself: the image is replaced by the launcher on the host, so an
-// update applied here would be undone by the next `machine up` — with nothing said. Every way to
-// change the version refuses, and the refusal says where the update happens.
-func TestTheApplianceRefusesToUpdateItself(t *testing.T) {
-	manager := New(t.TempDir(), t.TempDir(), "", "").WithLauncherOwner()
+// The appliance does not change its own image: restarting and rolling back rewrite the binary the
+// machine is running, and the next `machine up` would take both away with nothing said. An update
+// is not refused — it is declared in the mount for the host service to act on (ADR 0030) — and
+// every other way to change the version refuses, naming where the update happens.
+func TestTheApplianceDoesNotChangeItsOwnImage(t *testing.T) {
+	root := t.TempDir()
+	manager := New(t.TempDir(), root, "", "").WithLauncherOwner()
 	for _, c := range []struct {
 		what string
 		call func() error
 	}{
-		{"apply", func() error { return manager.Apply(context.Background(), ApplyOptions{Tag: "v0.10.0-beta.14"}) }},
 		{"restart", manager.Restart},
 		{"rollback", func() error { return manager.Rollback(errors.New("test")) }},
 	} {
@@ -1251,8 +1252,14 @@ func TestTheApplianceRefusesToUpdateItself(t *testing.T) {
 		if !errors.Is(err, ErrLauncherOwnsIt) {
 			t.Errorf("%s: %v, want the launcher-owns-it refusal", c.what, err)
 		}
-		if err != nil && !strings.Contains(err.Error(), "machine up") {
-			t.Errorf("%s: the refusal should name the command that does update: %v", c.what, err)
+		if err != nil && !strings.Contains(err.Error(), "host") {
+			t.Errorf("%s: the refusal should say where the update happens: %v", c.what, err)
 		}
+	}
+	if err := manager.Apply(context.Background(), ApplyOptions{Tag: "v0.10.0-beta.14"}); err != nil {
+		t.Fatalf("an update in the appliance is a declaration: %v", err)
+	}
+	if want, err := ReadWant(root); err != nil || want.Version != "v0.10.0-beta.14" {
+		t.Errorf("the intent is in the mount: %+v, %v", want, err)
 	}
 }
