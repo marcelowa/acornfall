@@ -73,6 +73,24 @@ path it would take, with what is in each, and exits non-zero. That listing is th
 second flag. It runs the uninstall first when the service is still installed, and it prints any workspace
 the registry names *outside* the mount without touching it, because those are your own folders.
 
+Both are the exact reverse of an install, in this order:
+
+| Installed | Removed by |
+|---|---|
+| the service, enabled and lingering | uninstall: stopped, disabled, the unit file removed, `daemon-reload`. Linger is left, with the one line that turns it off — `purge` turns it off itself |
+| `~/.acornfall/bin/acornfall-<release>` and the `bin/acornfall` symlink | uninstall: every `bin/acornfall*` |
+| the machine, its disk under `machines/<name>/`, the artifacts under `appliance/` | uninstall: the machine is stopped first, and its disk only after it is gone |
+| the product's bookkeeping inside the mount — `state/machine.json`, `state/host/` (lock, boot marker, `is.json`), `config/token` | uninstall |
+| the mount: workspaces, conversations, files under `state/` | nothing but `purge --yes` |
+
+A second `machine install` after an `uninstall` works from the same mount and keeps the workspaces: the
+product is replaceable, the mount is not.
+
+One trace neither command can know about: a file a person downloaded by hand — `curl -o
+/tmp/acornfall-linux-amd64`, a checksum beside it, a binary they copied somewhere themselves. `install.sh`
+downloads into its own temporary folder and removes it, so the script leaves nothing; a hand `curl` leaves
+the operator's own file, and deleting it is theirs to do.
+
 ## Flags
 
 | Flag | Default | Meaning |
