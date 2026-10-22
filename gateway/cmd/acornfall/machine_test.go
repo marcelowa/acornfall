@@ -454,3 +454,57 @@ func TestAFetchThatCannotHappenBootsWhatIsHere(t *testing.T) {
 		t.Error("a missing disk cannot be booted, so the fetch failure is fatal")
 	}
 }
+
+// The two steps are ordered for a reason: a bad release may break the machine, and the host has to be
+// there to fix it. So step 2 is taken only for a release step 1 proved, and a console that never
+// answers stops the update between them with a sentence naming what was not done.
+func TestTheUpdateStopsBetweenTheSteps(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		machineOnly bool
+		step1       error
+		proves      bool
+		step2       error
+		wantSteps   string // the steps that ran, in order
+		wantRefused string // a fragment the error must name, empty for success
+	}{
+		{name: "both steps", proves: true, wantSteps: "1,2"},
+		{name: "the console never answers", wantSteps: "1", wantRefused: "step 2 (the host) was not taken"},
+		{name: "the machine fails", step1: errors.New("no route to the release"), wantSteps: "1", wantRefused: "step 1 (the machine)"},
+		{name: "the host fails", proves: true, step2: errors.New("the checksum does not match"), wantSteps: "1,2", wantRefused: "step 2 (the host)"},
+		{name: "machine only", machineOnly: true, proves: true, wantSteps: "1"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var ran []string
+			step1 := func(context.Context, string) error {
+				ran = append(ran, "1")
+				return c.step1
+			}
+			prove := func(context.Context, string) bool {
+				ran = append(ran, "prove")
+				return c.proves
+			}
+			step2 := func(context.Context, string) error {
+				ran = append(ran, "2")
+				return c.step2
+			}
+			err := updateSteps(context.Background(), "v0.10.0-beta.14", c.machineOnly, step1, prove, step2)
+			if c.wantRefused == "" {
+				if err != nil {
+					t.Fatalf("unexpected: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), c.wantRefused) {
+				t.Fatalf("want a sentence naming %q, got %v", c.wantRefused, err)
+			}
+			var steps []string
+			for _, step := range ran {
+				if step != "prove" {
+					steps = append(steps, step)
+				}
+			}
+			if got := strings.Join(steps, ","); got != c.wantSteps {
+				t.Errorf("steps %q, want %q", got, c.wantSteps)
+			}
+		})
+	}
+}

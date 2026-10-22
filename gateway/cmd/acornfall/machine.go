@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -38,6 +40,8 @@ func machineCommand(argv []string) {
 		machineDown(argv[1:])
 	case "serve":
 		machineServe(argv[1:])
+	case "update":
+		machineUpdate(argv[1:])
 	case "restart":
 		// A restart is what a person reaches for when the machine is not behaving; it is a down and
 		// an up, with the same flags, because everything the product needs is in the mount.
@@ -55,6 +59,7 @@ func machineUsage() {
   acornfall machine down     take it away; the mount and the appliance tarball stay
   acornfall machine restart  down, then up — what a person reaches for
   acornfall machine serve    keep it running, and apply the release the product asks for
+  acornfall machine update   update the machine and then the host, now, without waiting
 
 The machine runs the appliance: the gateway and the worker inside it, with ~/acornfall mounted
 as the product (config, state, workspaces). Nothing of the product runs on the host.
@@ -392,6 +397,122 @@ func applianceTag(tag string) string {
 	return update.BuildVersion
 }
 
+// updateSteps is the whole two-step update without the flags (ADR 0031). The order is the safety: the
+// machine first, its readiness second, the host's own binary last — so a release that breaks the machine
+// leaves the host that can repair it. `machine update` is this function with a lock around it.
+func updateSteps(ctx context.Context, tag string, machineOnly bool, step1 func(context.Context, string) error, ready func(context.Context, string) bool, step2 func(context.Context, string) error) error {
+	if err := step1(ctx, tag); err != nil {
+		return fmt.Errorf("step 1 (the machine): %w", err)
+	}
+	if machineOnly {
+		return nil
+	}
+	if !ready(ctx, tag) {
+		return fmt.Errorf("step 1 (the machine) did not prove %s: its state never reported a worker ready, so step 2 (the host) was not taken", tag)
+	}
+	if err := step2(ctx, tag); err != nil {
+		return fmt.Errorf("step 2 (the host): %w", err)
+	}
+	return nil
+}
+
+// machineUpdate runs the update now, in both steps (ADR 0031).
+// It holds the same lock the service's automatic step two takes, so two updates never write the same
+// binary or the same disk.
+func machineUpdate(argv []string) {
+	flags := flag.NewFlagSet("acornfall machine update", flag.ContinueOnError)
+	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
+	tag := flags.String("tag", "", "the release to update to (default: the newest one)")
+	machineOnly := flags.Bool("machine-only", false, "do step 1 and stop: the machine moves, the host keeps the binary it has")
+	port := flags.Int("port", 7777, "the host port the console is published on")
+	host := flags.String("host", "127.0.0.1", "the host address the console is published on")
+	cpus := flags.Int("cpus", 2, "virtual cpus for the machine")
+	memory := flags.String("memory", "4G", "memory for the machine")
+	wait := flags.Duration("wait", 3*time.Minute, "how long step 1's console has to answer before step 2 is not taken")
+	if err := flags.Parse(argv); err != nil {
+		os.Exit(2)
+	}
+	resolvedRoot, err := resolveRoot(*root, "")
+	if err != nil {
+		log.Fatalf("acornfall machine update: %v", err)
+	}
+	resolvedHome, err := resolveDataDir(*home)
+	if err != nil {
+		log.Fatalf("acornfall machine update: %v", err)
+	}
+	where := layout.New(resolvedRoot, resolvedHome)
+	if err := where.Ensure(); err != nil {
+		log.Fatalf("acornfall machine update: %v", err)
+	}
+	if err := layout.Migrate(where, log.Printf); err != nil {
+		log.Printf("machine update: moving the old layout: %v", err)
+	}
+	token := ""
+	if contents, err := os.ReadFile(where.Token()); err == nil {
+		token = strings.TrimSpace(string(contents))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	defer cancel()
+	if err := sandbox.NewMicrosandbox(resolvedHome).Install(ctx, log.Printf); err != nil {
+		log.Fatalf("acornfall machine update: %v", err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		log.Fatalf("acornfall machine update: %v", err)
+	}
+	manager := update.New(resolvedHome, resolvedRoot, "", "")
+	releaseTag := strings.TrimSpace(*tag)
+	if releaseTag == "" {
+		release, err := manager.Check(ctx)
+		if err != nil {
+			log.Fatalf("acornfall machine update: cannot find the newest release: %v", err)
+		}
+		releaseTag = release.Tag
+	}
+	unlock, note, err := update.AcquireLock(resolvedRoot, time.Now())
+	if err != nil {
+		log.Fatalf("acornfall machine update: %v", err)
+	}
+	defer unlock()
+	if note != "" {
+		log.Printf("machine update: %s", note)
+	}
+	machine := driverMachine{
+		home:   resolvedHome,
+		root:   resolvedRoot,
+		cpus:   *cpus,
+		memory: *memory,
+		port:   *port,
+		host:   *host,
+		token:  token,
+	}
+	step1 := func(ctx context.Context, tag string) error {
+		return applyRelease(ctx, resolvedHome, resolvedRoot, machine, tag)
+	}
+	ready := func(ctx context.Context, tag string) bool {
+		return awaitReady(ctx, consoleURL(*host, *port), token, *wait) == nil
+	}
+	step2 := func(ctx context.Context, tag string) error {
+		if !update.OwnsSelf(executable, resolvedHome) {
+			return fmt.Errorf("this binary is not %s, and the host will not write one it did not put there", update.OwnedBinary(resolvedHome))
+		}
+		binary, err := manager.DownloadSelf(ctx, tag)
+		if err != nil {
+			return err
+		}
+		return update.SwapSelf(resolvedHome, resolvedRoot, tag, binary)
+	}
+	if err := updateSteps(ctx, releaseTag, *machineOnly, step1, ready, step2); err != nil {
+		log.Fatalf("acornfall machine update: %v", err)
+	}
+	if *machineOnly {
+		log.Printf("machine update: the machine runs %s; --machine-only, so the host keeps %s", releaseTag, update.BuildVersion)
+		return
+	}
+	log.Printf("machine update: the machine runs %s and the host's binary is %s; restart the service (systemctl --user restart acornfall-machine, or launchctl kickstart) so it runs it", releaseTag, update.VersionedBinary(resolvedHome, releaseTag))
+}
+
 // declareMachine records what a person asked for, before the work it describes (ADR 0030, amended). A
 // failure here is loud: a command that does the work without leaving the intent is a machine the
 // service will not bring back.
@@ -665,6 +786,57 @@ func awaitConsole(ctx context.Context, url, token string, within time.Duration) 
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("the machine's console never answered on %s within %s", url, within)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// machineReady asks the machine's own state whether it is ready: a console that answers is not a
+// product that works, and the state's own answer — is a worker up — is what a release has to show
+// before the host takes it too (ADR 0031). One request, no wait: the service asks once a tick.
+func machineReady(ctx context.Context, url, token string) bool {
+	client := &http.Client{Timeout: 5 * time.Second}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/state", nil)
+	if err != nil {
+		return false
+	}
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return false
+	}
+	var state struct {
+		Workspace struct {
+			WorkerUp bool `json:"workerUp"`
+		} `json:"workspace"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&state); err != nil {
+		return false
+	}
+	return state.Workspace.WorkerUp
+}
+
+// awaitReady waits for the machine to report a worker ready within a bound, which is what
+// `machine update` does between its two steps. The service does not wait: it asks, and asks again on
+// the next tick.
+func awaitReady(ctx context.Context, url, token string, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	for {
+		if machineReady(ctx, url, token) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the machine's state never reported a worker ready on %s within %s", url, within)
 		}
 		select {
 		case <-ctx.Done():
