@@ -533,7 +533,7 @@ func untarImageStream(r io.Reader, dir string) error {
 
 // UnpackAppliance is the whole of what installing an appliance image does to a tarball: gunzip,
 // then every kind of entry a filesystem has. It is exported because the test that guards the
-// release's own artefact has to unpack it exactly as an install does.
+// release's own artifact has to unpack it exactly as an install does.
 func UnpackAppliance(tarball []byte, dir string) error {
 	// Streaming on purpose: the image is 575 MB unpacked, and reading the stream whole
 	// and then gunzipping it whole is another 575 MB of memory for no reason.

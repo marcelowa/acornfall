@@ -1,4 +1,4 @@
-# ADR 0024 — A release proves its own artefact
+# ADR 0024 — A release proves its own artifact
 
 Status: accepted, 2026-10-21
 Date: 2026-10-21
@@ -17,7 +17,7 @@ permitted` and ran the command anyway. Both were found by a person installing a 
 pipeline ever touched the bytes that person downloaded.
 
 That is the whole failure: the claim "the tests pass" was about a different object than the one
-shipped. It was not a gap in coverage — the tests were thorough about the wrong artefact.
+shipped. It was not a gap in coverage — the tests were thorough about the wrong artifact.
 
 ## Decision
 
@@ -55,7 +55,7 @@ shipped. It was not a gap in coverage — the tests were thorough about the wron
 - **Build the tarball inside the test** — proves the builder, not the shipped bytes. The unpack
   path, the checksums and the release upload all stay untested.
 - **Gate the publish on the proof** — build → prove → publish, so no broken release is ever public.
-  Not chosen: every failed proof would become a publish that never happened, and the artefacts would
+  Not chosen: every failed proof would become a publish that never happened, and the artifacts would
   move twice (the appliance alone is 193 MiB). Worth revisiting if a broken release ever reaches
   someone twice.
 - **A person smoke-testing before a tag** — the person installing the beta was the smoke test,

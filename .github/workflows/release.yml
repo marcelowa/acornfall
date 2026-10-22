@@ -384,7 +384,7 @@ jobs:
           d = json.load(sys.stdin)
           print(d["tag_name"], "is public: draft=" + str(d["draft"]), "prerelease=" + str(d["prerelease"]))'
 
-  # A release has to prove its own artefact boots. Two betas did not, and both were found by a
+  # A release has to prove its own artifact boots. Two betas did not, and both were found by a
   # person installing it: the tests boot a directory, releases ship a tarball, and what tar
   # carries — symlinks, hard links, device nodes — is exactly what broke. This job unpacks the
   # published tarball with the install's own code, boots it, and starts a machine with the
@@ -400,7 +400,7 @@ jobs:
           cache-dependency-path: gateway/go.sum
       # Deliberately the published release, not the runner's disk: what a person downloads is the
       # thing to boot. Reading the tarball the appliance job left in $HOME would prove the build.
-      - name: Download the release's own artefacts
+      - name: Download the release's own artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}

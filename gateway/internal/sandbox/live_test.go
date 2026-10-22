@@ -568,7 +568,7 @@ func firstMatch(text, prefix string) string {
 // Live: the appliance boots from the release's own tarball. Every other test here boots a
 // directory, and releases ship a tarball — the two differ exactly in what tar carries: symlinks,
 // hard links, device nodes. Two betas were broken that way, twice: an image with no shell, then
-// an image with no /dev. This unpacks the shipped artefact with the code an install uses, and
+// an image with no /dev. This unpacks the shipped artifact with the code an install uses, and
 // boots what comes out.
 //
 //	ACORNFALL_LXC=1 ACORNFALL_APPLIANCE_TARBALL=<appliance-linux-amd64.tar.gz> go test ./internal/sandbox -run LiveApplianceFromTheRelease

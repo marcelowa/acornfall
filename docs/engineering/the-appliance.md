@@ -128,10 +128,10 @@ Ceilings and shares, never reservations:
 
 - `binaries` (4 platforms) → `appliance` (built inside a microVM, so the runner needs no root) → `publish` → `prove`
 - `prove` boots the published tarball with the install's own code, and runs `machine up` with the
-  published binary as an unprivileged runner user — the artefact proving itself before anyone installs it
+  published binary as an unprivileged runner user — the artifact proving itself before anyone installs it
 - `prove.yml` runs the same boot on a branch push from the appliance the runner keeps on disk, so a
   fix is tested in minutes rather than a release cycle. On a hash the runner has not seen it **warns
-  and skips the boot**: the run is green and nothing booted ([ADR 0024](../adr/0024-a-release-proves-its-own-artefact.md))
+  and skips the boot**: the run is green and nothing booted ([ADR 0024](../adr/0024-a-release-proves-its-own-artifact.md))
 
 Two known costs, both being worked: `publish` moves ~260 MB through artifact storage (the fix is a
 draft release each job uploads to directly), and the appliance is stored as a 193 MiB artifact per
