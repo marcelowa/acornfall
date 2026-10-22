@@ -5,10 +5,11 @@
 #
 #   sh install.sh [--remote|--local] [--version TAG]
 #
-# --remote publishes the console on 0.0.0.0 with a token; --local keeps it on 127.0.0.1. With neither,
-# `machine install` asks (and refuses when there is no terminal to ask with).
+# --remote publishes the console on 0.0.0.0, where it has no authentication; --local keeps it on
+# 127.0.0.1. With neither, `machine install` asks, and a script with no terminal gets --remote. `--token`
+# locks the console if you want that (`acornfall --token <secret>`, not this script).
 #
-# Needs curl and sha256sum (or shasum). The repository is public, so no token is needed;
+# Needs curl and sha256sum (or shasum). The repository is public, so no GitHub token is needed;
 # ACORNFALL_GITHUB_TOKEN is optional and lifts GitHub's anonymous rate limit.
 set -eu
 
@@ -22,7 +23,7 @@ while [ $# -gt 0 ]; do
 		--version) VERSION="$2"; shift 2 ;;
 		-h|--help)
 			echo "usage: install.sh [--remote|--local] [--version TAG]"
-			echo "  --remote   publish the console on 0.0.0.0, with a token"
+			echo "  --remote   publish the console on 0.0.0.0: the console has no authentication"
 			echo "  --local    keep the console on 127.0.0.1"
 			echo "  with neither, machine install asks (it needs a terminal to ask with)"
 			exit 0

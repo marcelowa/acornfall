@@ -47,7 +47,7 @@ machine.
 
 ```
 sh install.sh --local      # the console on 127.0.0.1:7777
-sh install.sh --remote     # on 0.0.0.0, with a token
+sh install.sh --remote     # on 0.0.0.0, unauthenticated: a network you trust, or the tailnet
 ```
 
 The answer is written into `~/acornfall/state/machine.json` beside `wanted`, and into the generated unit,
