@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/acornfall/acornfall/gateway/internal/update"
 )
 
 // What the machine runs as its init, pinned: the product out of the image, the mount as its
@@ -260,5 +262,195 @@ func TestWhenTheImageIsReplaced(t *testing.T) {
 		if got := applianceWillReplace(c.image, c.tag, c.refresh, c.given); got != c.want {
 			t.Errorf("%s: applianceWillReplace = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// writeApplianceFiles makes dir pass checkAppliance, and writes mark into it when one is given.
+func writeApplianceFiles(t *testing.T, dir, mark string) {
+	t.Helper()
+	for _, path := range []string{"usr/local/bin/acornfall", "usr/local/lib/acornfall/worker/src/main.ts"} {
+		target := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if mark != "" {
+		path := filepath.Join(dir, applianceMark)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(mark+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// makeDisk lays out the disk this layout makes for home, as `machine up` would have left it.
+func makeDisk(t *testing.T, home, tag string) string {
+	t.Helper()
+	disk := applianceDisk(home)
+	writeApplianceFiles(t, disk, "")
+	if err := writeApplianceDiskTag(disk, tag); err != nil {
+		t.Fatal(err)
+	}
+	return disk
+}
+
+func releaseMark(tag string) string {
+	return "acornfall appliance " + tag + ", debian stable, lxc 6.0.4"
+}
+
+// The artifact is the tarball and the disk is made from it (ADR 0026, amended), so which directory
+// the machine boots is decided in one place: the disk for the release this launcher runs, then the
+// image directory an install had before this layout, then the release's tarball unpacked into a new
+// disk. Every row here was a bug in the shape this replaced: one directory was both the artifact
+// and the live disk, so an upgrade booted the previous appliance and the containers on it.
+func TestTheMachineBootsTheDiskItsTarballMade(t *testing.T) {
+	const release = "v0.10.0-beta.14"
+	const older = "v0.10.0-beta.13"
+	for _, c := range []struct {
+		name       string
+		diskTag    string // "" is no disk at all
+		legacyMark string // "" is no image directory from before this layout
+		refresh    bool
+		wantLegacy bool
+		wantUnpack bool
+	}{
+		{name: "a disk made for this release is the machine", diskTag: release},
+		{name: "a disk made for another release is made again", diskTag: older, wantUnpack: true},
+		{name: "a disk with no release beside it is not this release's", diskTag: "untagged", wantUnpack: true},
+		{name: "an install from before the layout boots the image it has", legacyMark: releaseMark(release), wantLegacy: true},
+		{name: "an older image is left alone and a disk is made beside it", legacyMark: releaseMark(older), wantUnpack: true},
+		{name: "an image that says nothing is left alone too", legacyMark: "acornfall appliance, debian stable, lxc 6.0.4", wantUnpack: true},
+		{name: "a refresh makes a new disk even for the same release", diskTag: release, legacyMark: releaseMark(release), refresh: true, wantUnpack: true},
+		{name: "nothing here is a disk to make", wantUnpack: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			disk := ""
+			if c.diskTag != "" {
+				disk = makeDisk(t, home, c.diskTag)
+			}
+			if c.legacyMark != "" {
+				writeApplianceFiles(t, legacyAppliance(home), c.legacyMark)
+			}
+			plan := applianceLayoutFor(home, release, c.refresh)
+			switch {
+			case c.wantUnpack:
+				if !plan.Unpack {
+					t.Fatalf("want a new disk, got %+v", plan)
+				}
+				if want := applianceDisk(home); plan.Image != want {
+					t.Errorf("the disk is %q, want %q", plan.Image, want)
+				}
+				if want := update.ApplianceTarball(home, release); plan.Tarball != want {
+					t.Errorf("the artifact is %q, want %q", plan.Tarball, want)
+				}
+			case c.wantLegacy:
+				if plan.Unpack || !plan.Legacy {
+					t.Fatalf("want the image this install has, got %+v", plan)
+				}
+				if want := legacyAppliance(home); plan.Image != want {
+					t.Errorf("the image is %q, want %q", plan.Image, want)
+				}
+			default:
+				if plan.Unpack || plan.Legacy {
+					t.Fatalf("want the disk that is already made, got %+v", plan)
+				}
+				if plan.Image != disk {
+					t.Errorf("the disk is %q, want %q", plan.Image, disk)
+				}
+			}
+		})
+	}
+}
+
+// The image directory an install already has is never deleted and never written into: it is what
+// boots when a fetch cannot happen, and a change that replaced it would take away the one machine a
+// person has. A new release makes a new disk beside it, and `machine down` leaves it alone.
+func TestTheImageAnInstallAlreadyHasIsNeverTouched(t *testing.T) {
+	home := t.TempDir()
+	legacy := legacyAppliance(home)
+	writeApplianceFiles(t, legacy, releaseMark("v0.10.0-beta.13"))
+	container := filepath.Join(legacy, "var", "lib", "lxc", "web", "config")
+	if err := os.MkdirAll(filepath.Dir(container), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(container, []byte("a container a previous machine left\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if plan := applianceLayoutFor(home, "v0.10.0-beta.14", false); !plan.Unpack || plan.Image == legacy {
+		t.Fatalf("a new release makes a new disk, not an edit of this one: %+v", plan)
+	}
+	if removed, err := removeMachineDisk(home, legacy); err != nil || removed {
+		t.Fatalf("the old image is not ours to delete: removed=%v err=%v", removed, err)
+	}
+	if body, err := os.ReadFile(container); err != nil {
+		t.Fatalf("the old image was touched: %v", err)
+	} else if string(body) != "a container a previous machine left\n" {
+		t.Errorf("the old image holds %q", body)
+	}
+}
+
+// `machine down` takes the disk and keeps the artifact: the tarball is what a machine is made of, so
+// the next up is a copy rather than a download, and an install with no network can still boot.
+func TestTakingTheMachineDownKeepsTheArtifact(t *testing.T) {
+	home := t.TempDir()
+	disk := makeDisk(t, home, "v0.10.0-beta.14")
+	tarball := update.ApplianceTarball(home, "v0.10.0-beta.14")
+	if err := os.MkdirAll(filepath.Dir(tarball), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tarball, []byte("the release's bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := removeMachineDisk(home, disk)
+	if err != nil || !removed {
+		t.Fatalf("the disk is the machine's and goes with it: removed=%v err=%v", removed, err)
+	}
+	if _, err := os.Stat(disk); !os.IsNotExist(err) {
+		t.Errorf("the disk is still there: %v", err)
+	}
+	if body, err := os.ReadFile(tarball); err != nil {
+		t.Fatalf("the artifact went with the disk: %v", err)
+	} else if string(body) != "the release's bytes" {
+		t.Errorf("the artifact holds %q", body)
+	}
+	if removed, err := removeMachineDisk(home, t.TempDir()); err != nil || removed {
+		t.Errorf("a tree a person named is not ours to delete: removed=%v err=%v", removed, err)
+	}
+}
+
+// A fetch that cannot happen must not leave an install that cannot start: what is here boots, and
+// the line says which release it is instead of pretending it is the one that was asked for.
+func TestAFetchThatCannotHappenBootsWhatIsHere(t *testing.T) {
+	original := fetchApplianceTarball
+	fetchApplianceTarball = func(context.Context, string, string, bool) (string, error) {
+		return "", errors.New("no route to the release")
+	}
+	t.Cleanup(func() { fetchApplianceTarball = original })
+
+	home := t.TempDir()
+	legacy := legacyAppliance(home)
+	writeApplianceFiles(t, legacy, releaseMark("v0.10.0-beta.13"))
+	plan := applianceLayoutFor(home, "v0.10.0-beta.14", false)
+	image, err := makeApplianceDisk(context.Background(), home, "v0.10.0-beta.14", plan, false)
+	if err != nil {
+		t.Fatalf("an image that is here should still boot: %v", err)
+	}
+	if image != legacy {
+		t.Errorf("booting %q, want the image that is here (%q)", image, legacy)
+	}
+
+	// With nothing here there is nothing to boot, so the failure is the answer.
+	empty := t.TempDir()
+	plan = applianceLayoutFor(empty, "v0.10.0-beta.14", false)
+	if _, err := makeApplianceDisk(context.Background(), empty, "v0.10.0-beta.14", plan, false); err == nil {
+		t.Error("a missing disk cannot be booted, so the fetch failure is fatal")
 	}
 }

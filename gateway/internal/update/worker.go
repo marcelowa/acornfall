@@ -411,51 +411,6 @@ func untarWorker(tarball []byte, dir string) error {
 // like a broken image rather than the wrong one.
 func applianceTarballName(arch string) string { return "appliance-linux-" + arch + ".tar.gz" }
 
-// FetchAppliance is a fresh install's answer to where the machine's rootfs comes from: the
-// release, once, verified against the release's own checksums the same way the worker's sources
-// are. It unpacks into dir, and a partial unpack is refused rather than half a machine.
-func (m *Manager) FetchAppliance(ctx context.Context, tag, dir string) error {
-	if tag == "" {
-		return fmt.Errorf("update: no tag to fetch the appliance for")
-	}
-	release, err := m.releaseFor(ctx, tag)
-	if err != nil {
-		return err
-	}
-	name := applianceTarballName(runtime.GOARCH)
-	asset := assetNamed(release, name)
-	if asset.URL == "" {
-		return fmt.Errorf("%w: release %s has no %s: this build is %s, and an appliance of another architecture cannot boot", ErrReleaseNotFound, release.Tag, name, runtime.GOARCH)
-	}
-	tarball, err := m.download(ctx, asset)
-	if err != nil {
-		return err
-	}
-	list, err := m.checksumList(ctx, release)
-	if err != nil {
-		return err
-	}
-	if err := verify(list, tarball, release.Tag); err != nil {
-		return err
-	}
-	// Unpacked beside the target and moved into place, so a failure leaves the old image (or
-	// none) rather than a rootfs with half its files.
-	staging := dir + ".partial"
-	if err := os.RemoveAll(staging); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(staging, 0o755); err != nil {
-		return err
-	}
-	if err := UnpackAppliance(tarball, staging); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	return os.Rename(staging, dir)
-}
-
 // untarImage unpacks a rootfs tarball: every kind of entry a filesystem has, not just regular
 // files. A symlink is not a detail here — /bin/sh on Debian is one, and an image whose shell is
 // missing is a machine whose init cannot start (measured: "handoff init binary not found at

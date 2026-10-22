@@ -51,7 +51,7 @@ func machineUsage() {
 
   acornfall machine up       boot it, and say where the console is
   acornfall machine status   whether it is there and running
-  acornfall machine down     take it away; the mount and the image stay
+  acornfall machine down     take it away; the mount and the appliance tarball stay
   acornfall machine restart  down, then up — what a person reaches for
 
 The machine runs the appliance: the gateway and the worker inside it, with ~/acornfall mounted
@@ -65,7 +65,7 @@ func machineUp(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine up", flag.ContinueOnError)
 	root := flags.String("root", "", "the folder the machine mounts: the product (default: ~/acornfall)")
 	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
-	image := flags.String("image", "", "the appliance image, an unpacked rootfs (default: <home>/appliance/rootfs)")
+	image := flags.String("image", "", applianceImageHelp)
 	tag := flags.String("tag", "", "the release to fetch the appliance from (default: this build's version)")
 	refresh := flags.Bool("refresh", false, "fetch the appliance again and recreate the machine: an init is fixed at boot, so an update is a new machine")
 	port := flags.Int("port", 7777, "the host port the console is published on")
@@ -89,10 +89,14 @@ func machineUp(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	resolvedImage := *image
-	if resolvedImage == "" {
-		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
+	// What the machine boots: a directory a person named, or the disk this install makes from the
+	// release's tarball (ADR 0026, amended). It is decided before the engine is wired, because the
+	// image is part of the machine's own configuration.
+	plan := applianceLayoutFor(resolvedHome, applianceTag(*tag), *refresh)
+	if *image != "" {
+		plan = applianceLayout{Image: *image}
 	}
+	resolvedImage := plan.Image
 	// The mount is the product, so it has to be there before the machine is: the machine mounts
 	// it, and a machine whose world is missing boots into a console with no workspaces.
 	where := layout.New(resolvedRoot, resolvedHome)
@@ -111,7 +115,10 @@ func machineUp(argv []string) {
 	if contents, err := os.ReadFile(where.Token()); err == nil {
 		token = strings.TrimSpace(string(contents))
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, *cpus, *memory, *port, *host, applianceInit(resolvedRoot, token))
+	build := func(image string) (*sandbox.LXC, error) {
+		return machineDriver(resolvedHome, image, resolvedRoot, *cpus, *memory, *port, *host, applianceInit(resolvedRoot, token))
+	}
+	driver, err := build(resolvedImage)
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -119,26 +126,53 @@ func machineUp(argv []string) {
 	if err := engine.Install(ctx, log.Printf); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	// The image is the machine's disk, and an init is fixed at boot: a new image is a machine that
-	// has to be made again. It is taken away *before* the tree under it changes — a running
-	// machine reading a disk that is being replaced is the shape of corruption nobody could
-	// diagnose — and the product is in the mount, so nothing of it is lost.
-	replacing := applianceWillReplace(resolvedImage, applianceTag(*tag), *refresh, *image != "")
-	if replacing {
+	switch {
+	case *image != "":
+		// A named directory is the person's own tree: compared with nothing, fetched into only when
+		// it is not an appliance at all, and cleaned of a previous machine's containers when a
+		// refresh asks. Nothing here decides anything about releases.
+		if applianceWillReplace(resolvedImage, applianceTag(*tag), *refresh, true) {
+			if err := driver.RemoveMachine(ctx); err != nil {
+				log.Fatalf("acornfall machine: removing the old machine: %v", err)
+			}
+		}
+		if err := ensureAppliance(ctx, resolvedHome, resolvedImage, *refresh, true, *tag); err != nil {
+			log.Fatalf("acornfall machine: %v", err)
+		}
+		if *refresh {
+			// A refresh asked for an image without the containers a previous machine left on it.
+			// After a fetch there are none; after a fetch that could not happen, this is the
+			// cleaning.
+			if err := os.RemoveAll(filepath.Join(resolvedImage, "var", "lib", "lxc")); err != nil {
+				log.Fatalf("acornfall machine: cleaning the image's containers: %v", err)
+			}
+		}
+	case plan.Legacy:
+		// An install from before the artifact was kept boots the directory it has, exactly as it
+		// did. This change never deletes it and never writes into it (ADR 0026, amended).
+		log.Printf("machine: booting the appliance this install already has (%s, %s)", resolvedImage, applianceDescribe(resolvedImage))
+	case plan.Unpack:
+		if applianceTag(*tag) == "" {
+			log.Fatalf("acornfall machine: this build does not know its own version, so it cannot say which release the appliance comes from: pass --tag, or --image for your own tree")
+		}
+		// The disk is the machine: it is taken away *before* the tree under it changes — a running
+		// machine reading a disk that is being replaced is the shape of corruption nobody could
+		// diagnose — and the product is in the mount, so nothing of it is lost.
 		if err := driver.RemoveMachine(ctx); err != nil {
 			log.Fatalf("acornfall machine: removing the old machine: %v", err)
 		}
-	}
-	if err := ensureAppliance(ctx, resolvedHome, resolvedImage, *refresh, *image != "", *tag); err != nil {
-		log.Fatalf("acornfall machine: %v", err)
-	}
-	if *refresh {
-		// A refresh asked for an image without the containers a previous machine left on it. After
-		// a fetch there are none; after a fetch that could not happen, this is the cleaning.
-		if err := os.RemoveAll(filepath.Join(resolvedImage, "var", "lib", "lxc")); err != nil {
-			log.Fatalf("acornfall machine: cleaning the image's containers: %v", err)
+		resolvedImage, err = makeApplianceDisk(ctx, resolvedHome, applianceTag(*tag), plan, *refresh)
+		if err != nil {
+			log.Fatalf("acornfall machine: %v", err)
+		}
+		if resolvedImage != plan.Image {
+			// A fetch that could not happen boots what is here, and that is another directory.
+			if driver, err = build(resolvedImage); err != nil {
+				log.Fatalf("acornfall machine: %v", err)
+			}
 		}
 	}
+
 	log.Printf("machine: booting the appliance from %s", resolvedImage)
 	if err := driver.EnsureMachine(ctx); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
@@ -192,7 +226,7 @@ func machineStatus(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine status", flag.ContinueOnError)
 	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
 	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
-	image := flags.String("image", "", "the appliance image (default: <home>/appliance/rootfs)")
+	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
@@ -206,7 +240,7 @@ func machineStatus(argv []string) {
 	}
 	resolvedImage := *image
 	if resolvedImage == "" {
-		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
+		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
 	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
 	if err != nil {
@@ -348,10 +382,141 @@ func applianceTag(tag string) string {
 	return update.BuildVersion
 }
 
-// fetchAppliance is the network, in one place: a test replaces it to ask what the launcher does
-// when GitHub cannot be reached.
+// applianceImageHelp is the --image flag's help in all four commands. An install has one directory
+// the machine boots, and which one it is depends on the layout the install was made in.
+const applianceImageHelp = "the appliance image, an unpacked rootfs (default: the disk this install boots, <home>/machines/<machine>/rootfs, or <home>/appliance/rootfs for an install that has one)"
+
+// The two directories the appliance can live in. The release's tarball is kept under the
+// machinery, and each machine's disk is unpacked from it (ADR 0026, amended): one directory was
+// both the artifact and the live disk, so a previous machine's containers were in the next
+// machine's image and a fetch replaced the disk of a machine that was using it.
+func applianceDisk(home string) string {
+	return filepath.Join(home, "machines", sandbox.MachineName(home), "rootfs")
+}
+
+// legacyAppliance is the directory every install made before the artifact was kept boots from: the
+// image and the disk in one tree.
+func legacyAppliance(home string) string {
+	return filepath.Join(home, "appliance", "rootfs")
+}
+
+// applianceDiskTag is the release a disk was unpacked from, written beside it when it was made. It
+// is the launcher's own note rather than a mark inside the image: the release of an artifact is the
+// artifact's name, and a disk that does not say which one made it is not this launcher's disk.
+func applianceDiskTag(disk string) string {
+	payload, err := os.ReadFile(filepath.Join(filepath.Dir(disk), "tag"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(payload))
+}
+
+func writeApplianceDiskTag(disk, tag string) error {
+	if err := os.MkdirAll(filepath.Dir(disk), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(filepath.Dir(disk), "tag"), []byte(tag+"\n"), 0o644)
+}
+
+// applianceLayout is what the machine boots, and when it has to be made first, the artifact it is
+// made from.
+type applianceLayout struct {
+	Image   string // the directory the engine boots
+	Tarball string // the artifact it is unpacked from, "" when the disk is already there
+	Unpack  bool   // whether the disk has to be made first
+	Legacy  bool   // the one directory an install had before this layout
+}
+
+// applianceLayoutFor decides which directory the machine boots, in the order ADR 0026's amendment
+// settles: the disk for the release this launcher runs, then the directory an install had before
+// this layout, then the release's tarball unpacked into a disk of its own.
+//
+// The old directory is booted exactly as it was, and is never deleted or written into: it is what
+// was working before this change, and it is still what boots when a fetch fails. It stops being
+// booted once this launcher's release differs from the mark inside it, which is decision 2 of the
+// ADR, with the old tree left where a person can find it.
+func applianceLayoutFor(home, tag string, refresh bool) applianceLayout {
+	disk := applianceDisk(home)
+	if !refresh && tag != "" && checkAppliance(disk) == nil && applianceDiskTag(disk) == tag {
+		return applianceLayout{Image: disk}
+	}
+	if legacy := legacyAppliance(home); !refresh && checkAppliance(legacy) == nil && applianceCurrent(legacy, tag, false) {
+		return applianceLayout{Image: legacy, Legacy: true}
+	}
+	return applianceLayout{Image: disk, Tarball: update.ApplianceTarball(home, tag), Unpack: true}
+}
+
+// makeApplianceDisk makes the machine's disk from the release's tarball, and says which directory to
+// boot. The artifact is fetched only when it is not here: it was verified when it was written, so a
+// machine can be made from it with no network at all.
+func makeApplianceDisk(ctx context.Context, home, tag string, plan applianceLayout, refresh bool) (string, error) {
+	tarball, err := fetchApplianceTarball(ctx, home, tag, refresh)
+	if err != nil {
+		// An install whose network is down is a machine that still boots (ADR 0026, decision 5).
+		// What is here is booted, and the line says which release it is instead of pretending.
+		if fallback := fallbackAppliance(home, plan.Image); fallback != "" {
+			log.Printf("machine: cannot fetch %s (%v): booting the appliance that is here (%s, %s)", tag, err, fallback, applianceDescribe(fallback))
+			return fallback, nil
+		}
+		return "", err
+	}
+	if err := update.UnpackApplianceFile(tarball, plan.Image); err != nil {
+		return "", err
+	}
+	if err := writeApplianceDiskTag(plan.Image, tag); err != nil {
+		return "", err
+	}
+	// The mark is what a person reads, not what an update decision reads: the release came from the
+	// tarball's name, and this keeps the file saying the same thing (ADR 0026, amended).
+	if err := stampAppliance(plan.Image, tag); err != nil {
+		return "", err
+	}
+	log.Printf("machine: made the machine's disk at %s from %s", plan.Image, tarball)
+	return plan.Image, nil
+}
+
+// fallbackAppliance is what a machine boots when the release's tarball cannot be fetched: the disk
+// the layout named when it is already an appliance, then the image directory of an install from
+// before this layout.
+func fallbackAppliance(home, disk string) string {
+	for _, candidate := range []string{disk, legacyAppliance(home)} {
+		if checkAppliance(candidate) == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// removeMachineDisk takes the machine's disk away and keeps the artifact it was made from: the
+// tarball is what a machine is made of, so the next up is a copy rather than a download. It removes
+// only the disk this layout made — the image directory of an install from before it, and a tree a
+// person named with --image, are not ours to delete.
+func removeMachineDisk(home, image string) (bool, error) {
+	disk := applianceDisk(home)
+	if filepath.Clean(image) != filepath.Clean(disk) {
+		return false, nil
+	}
+	if err := os.RemoveAll(filepath.Dir(disk)); err != nil {
+		return false, fmt.Errorf("the machine's disk is %s: %w", disk, err)
+	}
+	return true, nil
+}
+
+// fetchApplianceTarball is the network, in one place: a test replaces it to ask what the launcher
+// does when GitHub cannot be reached.
+var fetchApplianceTarball = func(ctx context.Context, home, tag string, refresh bool) (string, error) {
+	return update.New(home, filepath.Dir(home), "", "").EnsureApplianceTarball(ctx, tag, refresh)
+}
+
+// fetchAppliance is what a tree a person named gets when it is not an appliance yet: the release's
+// artifact, unpacked into it. The same artifact every other install keeps, so there is one way a
+// machine is made rather than two.
 var fetchAppliance = func(ctx context.Context, home, tag, image string) error {
-	return update.New(home, filepath.Dir(home), "", "").FetchAppliance(ctx, tag, image)
+	tarball, err := fetchApplianceTarball(ctx, home, tag, false)
+	if err != nil {
+		return err
+	}
+	return update.UnpackApplianceFile(tarball, image)
 }
 
 // applianceMark is the file the build writes into the image, naming it. It is the only thing that
@@ -463,7 +628,7 @@ func machineDown(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine down", flag.ContinueOnError)
 	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
 	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
-	image := flags.String("image", "", "the appliance image (default: <home>/appliance/rootfs)")
+	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
@@ -477,7 +642,7 @@ func machineDown(argv []string) {
 	}
 	resolvedImage := *image
 	if resolvedImage == "" {
-		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
+		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
 	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
 	if err != nil {
@@ -492,7 +657,13 @@ func machineDown(argv []string) {
 	if err := driver.RemoveMachine(ctx); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
-	log.Printf("machine: %s is gone (the mount, and the image, are not)", driver.MachineName())
+	if removed, err := removeMachineDisk(resolvedHome, resolvedImage); err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	} else if removed {
+		log.Printf("machine: %s is gone, and so is its disk at %s (the appliance tarball stays)", driver.MachineName(), resolvedImage)
+	} else {
+		log.Printf("machine: %s is gone (the mount, and the image at %s, are not)", driver.MachineName(), resolvedImage)
+	}
 }
 
 // machineStop shuts the machine down and leaves it there: the record stays, the image stays, and
@@ -501,7 +672,7 @@ func machineStop(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine stop", flag.ContinueOnError)
 	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
 	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
-	image := flags.String("image", "", "the appliance image (default: <home>/appliance/rootfs)")
+	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
@@ -515,7 +686,7 @@ func machineStop(argv []string) {
 	}
 	resolvedImage := *image
 	if resolvedImage == "" {
-		resolvedImage = filepath.Join(resolvedHome, "appliance", "rootfs")
+		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
 	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
 	if err != nil {
