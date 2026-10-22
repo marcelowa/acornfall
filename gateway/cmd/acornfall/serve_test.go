@@ -355,7 +355,7 @@ func TestAnInstallWithNothingHereIsMadeFromThisBuildsRelease(t *testing.T) {
 		fetched = tag
 		return "", errors.New("no route to the release")
 	}
-	if _, err := applianceUp(context.Background(), home, "v0.10.0-beta.14"); err == nil {
+	if _, err := applianceUp(context.Background(), home, t.TempDir(), "v0.10.0-beta.14"); err == nil {
 		t.Fatal("nothing here and no network must fail, not invent a machine")
 	}
 	if fetched != "v0.10.0-beta.14" {
@@ -363,7 +363,7 @@ func TestAnInstallWithNothingHereIsMadeFromThisBuildsRelease(t *testing.T) {
 	}
 
 	makeRunningDisk(t, home, "v0.10.0-beta.13")
-	image, err := applianceUp(context.Background(), home, "v0.10.0-beta.13")
+	image, err := applianceUp(context.Background(), home, t.TempDir(), "v0.10.0-beta.13")
 	if err != nil {
 		t.Fatal(err)
 	}

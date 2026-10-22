@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 // The appliance is an artifact and a disk, and they are two different things (ADR 0026, amended).
@@ -93,10 +94,10 @@ func UnpackApplianceFile(path, dir string) error {
 		return fmt.Errorf("update: the appliance at %s is not a gzip stream: %w", path, err)
 	}
 	defer func() { _ = compressed.Close() }()
-	staging := dir + ".partial"
-	if err := os.RemoveAll(staging); err != nil {
-		return err
-	}
+	// One staging directory per attempt, not one shared by every attempt: two processes that unpack the same
+	// appliance — an install and the service, on a host where both are running — deleted each other's files and
+	// failed with "unlinkat ...: directory not empty", which reads like a corrupt image and is a collision.
+	staging := fmt.Sprintf("%s.partial.%d.%d", dir, os.Getpid(), time.Now().UnixNano())
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}

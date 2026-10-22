@@ -432,10 +432,11 @@ func TestAFetchThatCannotHappenBootsWhatIsHere(t *testing.T) {
 	t.Cleanup(func() { fetchApplianceTarball = original })
 
 	home := t.TempDir()
+	root := t.TempDir()
 	legacy := legacyAppliance(home)
 	writeApplianceFiles(t, legacy, releaseMark("v0.10.0-beta.13"))
 	plan := applianceLayoutFor(home, "v0.10.0-beta.14", false)
-	image, err := makeApplianceDisk(context.Background(), home, "v0.10.0-beta.14", plan, false)
+	image, err := makeApplianceDisk(context.Background(), home, root, "v0.10.0-beta.14", plan, false)
 	if err != nil {
 		t.Fatalf("an image that is here should still boot: %v", err)
 	}
@@ -446,7 +447,7 @@ func TestAFetchThatCannotHappenBootsWhatIsHere(t *testing.T) {
 	// With nothing here there is nothing to boot, so the failure is the answer.
 	empty := t.TempDir()
 	plan = applianceLayoutFor(empty, "v0.10.0-beta.14", false)
-	if _, err := makeApplianceDisk(context.Background(), empty, "v0.10.0-beta.14", plan, false); err == nil {
+	if _, err := makeApplianceDisk(context.Background(), empty, t.TempDir(), "v0.10.0-beta.14", plan, false); err == nil {
 		t.Error("a missing disk cannot be booted, so the fetch failure is fatal")
 	}
 }

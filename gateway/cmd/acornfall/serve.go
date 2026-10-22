@@ -391,7 +391,7 @@ func applianceRunningVersion(home string) string {
 // applianceUp makes sure there is something to boot and says which directory it is. An install that
 // has a disk, or the image from before the layout, is left alone; one with neither is made from the
 // release this build runs, which is the same first boot `machine up` does.
-func applianceUp(ctx context.Context, home, tag string) (string, error) {
+func applianceUp(ctx context.Context, home, root, tag string) (string, error) {
 	plan := applianceLayoutFor(home, tag, false)
 	if plan.Legacy || !plan.Unpack {
 		return plan.Image, nil
@@ -399,7 +399,7 @@ func applianceUp(ctx context.Context, home, tag string) (string, error) {
 	if tag == "" {
 		return "", fmt.Errorf("this build does not know its own version, so it cannot say which release to boot: pass --tag")
 	}
-	return makeApplianceDisk(ctx, home, tag, plan, false)
+	return makeApplianceDisk(ctx, home, root, tag, plan, false)
 }
 
 // applyRelease is one update, in the order that keeps the running machine until the new one is
@@ -569,7 +569,7 @@ func machineServe(argv []string) {
 			if here == "" {
 				here = applianceTag(*tag)
 			}
-			return applianceUp(ctx, resolvedHome, here)
+			return applianceUp(ctx, resolvedHome, resolvedRoot, here)
 		},
 		apply: func(ctx context.Context, wanted string) (string, error) {
 			return applyRelease(ctx, resolvedHome, machine, wanted, func() bool {

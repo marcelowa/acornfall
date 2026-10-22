@@ -197,3 +197,28 @@ func TestAFailedUnpackLeavesTheDiskThatWasThere(t *testing.T) {
 		t.Errorf("a failed unpack leaves a half disk behind: %v", err)
 	}
 }
+
+// Two unpacks of the same appliance do not collide: each stages in a directory of its own, so a leftover from a
+// killed run — or a second process unpacking the same target — does not fail with "unlinkat ...: directory not
+// empty", which reads like a corrupt image and is a collision.
+func TestALeftoverStagingDirectoryDoesNotStopAnUnpack(t *testing.T) {
+	tarball := applianceFixture(t)
+	path := filepath.Join(t.TempDir(), "appliance.tar.gz")
+	if err := os.WriteFile(path, tarball, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	disk := filepath.Join(t.TempDir(), "machines", "m", "rootfs")
+	// What a killed unpack leaves: the old shared staging directory, half full.
+	if err := os.MkdirAll(filepath.Join(disk+".partial", "var", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(disk+".partial", "var", "lib", "half"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UnpackApplianceFile(path, disk); err != nil {
+		t.Fatalf("a leftover staging directory must not stop an unpack: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(disk, "usr", "local", "bin", "acornfall")); err != nil {
+		t.Errorf("the disk is not the image: %v", err)
+	}
+}

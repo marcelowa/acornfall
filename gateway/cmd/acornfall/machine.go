@@ -191,7 +191,7 @@ func machineUp(argv []string) {
 		if err := driver.RemoveMachine(ctx); err != nil {
 			log.Fatalf("acornfall machine: removing the old machine: %v", err)
 		}
-		resolvedImage, err = makeApplianceDisk(ctx, resolvedHome, applianceTag(*tag), plan, *refresh)
+		resolvedImage, err = makeApplianceDisk(ctx, resolvedHome, resolvedRoot, applianceTag(*tag), plan, *refresh)
 		if err != nil {
 			log.Fatalf("acornfall machine: %v", err)
 		}
@@ -717,7 +717,17 @@ func applianceLayoutFor(home, tag string, refresh bool) applianceLayout {
 // makeApplianceDisk makes the machine's disk from the release's tarball, and says which directory to
 // boot. The artifact is fetched only when it is not here: it was verified when it was written, so a
 // machine can be made from it with no network at all.
-func makeApplianceDisk(ctx context.Context, home, tag string, plan applianceLayout, refresh bool) (string, error) {
+func makeApplianceDisk(ctx context.Context, home, root, tag string, plan applianceLayout, refresh bool) (string, error) {
+	// One disk at a time per host: the service's own tick and a person's install both make one, and two unpacks
+	// into one target is how a machine ends up with half an image.
+	unlock, note, err := update.AcquireLock(root, time.Now())
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	if note != "" {
+		log.Printf("machine: %s", note)
+	}
 	tarball, err := fetchApplianceTarball(ctx, home, tag, refresh)
 	if err != nil {
 		// An install whose network is down is a machine that still boots (ADR 0026, decision 5).
