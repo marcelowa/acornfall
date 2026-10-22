@@ -54,7 +54,11 @@ jobs:
           ACORNFALL_LXC: "1"
           MSB_HOME: /tmp/msb-prove
           TMPDIR: /tmp
-          ACORNFALL_APPLIANCE_TARBALL: dist/appliance-linux-amd64.tar.gz
+          # Absolute, because the test below runs from gateway/: a relative `dist/...` resolves to
+          # gateway/dist/..., and the copy above lands in the workspace root. Every run before
+          # this one skipped the step, so the first one to find its hash failed on the path
+          # ("open dist/appliance-linux-amd64.tar.gz: no such file or directory").
+          ACORNFALL_APPLIANCE_TARBALL: ${{ github.workspace }}/dist/appliance-linux-amd64.tar.gz
         # The module is in gateway/, not at the root: go test from the root cannot find it.
         working-directory: gateway
         run: go test ./internal/sandbox -run TestLiveTheApplianceBootsFromItsReleaseTarball -v -timeout 25m
