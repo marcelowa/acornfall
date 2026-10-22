@@ -204,7 +204,11 @@ func (s *supervisor) reconcile(ctx context.Context, now time.Time) {
 	}
 	s.failedTag, s.failedAt = "", time.Time{}
 	s.lastErr = ""
-	log.Printf("machine serve: applied %s; the machine runs it now", want.Version)
+	// A request kept for a machine nobody declared running is not an apply, and the log must not say
+	// it was: the next tick after `up` picks it up with no other code (ADR 0030, amended).
+	if applianceRunningVersion(s.home) == want.Version {
+		log.Printf("machine serve: applied %s; the machine runs it now", want.Version)
+	}
 }
 
 // start boots the machine when this is a moment a restart is allowed. The count is what turns a
@@ -284,6 +288,15 @@ func applyRelease(ctx context.Context, home, root string, machine machineControl
 	if !update.IsReleaseVersion(tag) {
 		return fmt.Errorf("%q is not a release tag", tag)
 	}
+	// A machine nobody declared running is not given a body: `gone` says the machine is not here, and a
+	// disk made a second later is the same lie smaller — a person asked for it to be gone and would
+	// find 575 MB where they expected nothing (ADR 0030, amended). Nothing is lost by waiting: the
+	// request lives in the mount, which `down` does not touch, and the next tick after a person says
+	// `up` applies it.
+	if !update.WantsRunning(root) {
+		log.Printf("machine serve: keeping the request for %s; no person declared the machine running", tag)
+		return nil
+	}
 	// The release has to exist before anything is fetched: EnsureApplianceTarball asks the release
 	// list first, so a tag that names nothing is a sentence and not a download.
 	tarball, err := fetchApplianceTarball(ctx, home, tag, false)
@@ -311,12 +324,6 @@ func applyRelease(ctx context.Context, home, root string, machine machineControl
 	// release that was verified, not from what the image claims.
 	if err := stampAppliance(disk, tag); err != nil {
 		return err
-	}
-	// The new disk is in place; whether it boots is the person's call, not the product's. An update
-	// arriving is not a reason to start a machine somebody took down (ADR 0030, amended).
-	if !update.WantsRunning(root) {
-		log.Printf("machine serve: made the disk for %s, and left it stopped: no person declared the machine running", tag)
-		return nil
 	}
 	// Booting last: a machine that is gone and a disk that is in place is a machine the next tick
 	// starts, so a boot that fails is a retry and not a lost install.

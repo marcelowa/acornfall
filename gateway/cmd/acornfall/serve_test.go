@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"errors"
 	"os"
@@ -379,7 +381,13 @@ func TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact(t *testing.T) {
 		return "", errors.New("no route to the release")
 	}
 	machine := &fakeMachine{running: true}
-	if err := applyRelease(context.Background(), home, t.TempDir(), machine, "v0.10.0-beta.14"); err == nil {
+	// A person has declared the machine running, so this is the apply that fetches: a release that
+	// cannot be fetched is the failure this test is about.
+	root := t.TempDir()
+	if err := update.WriteMachineIntent(root, update.IntentRunning); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyRelease(context.Background(), home, root, machine, "v0.10.0-beta.14"); err == nil {
 		t.Fatal("a release that cannot be fetched must fail")
 	}
 	if machine.removes != 0 {
@@ -388,7 +396,7 @@ func TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact(t *testing.T) {
 	if got := applianceRunningVersion(home); got != "v0.10.0-beta.13" {
 		t.Errorf("a failed apply changed the disk: %q", got)
 	}
-	if err := applyRelease(context.Background(), home, t.TempDir(), machine, "../../etc/passwd"); err == nil {
+	if err := applyRelease(context.Background(), home, root, machine, "../../etc/passwd"); err == nil {
 		t.Error("a value that is not a release must be refused")
 	}
 	if _, err := os.Stat(filepath.Join(home, "appliance")); err == nil {
@@ -527,5 +535,132 @@ func TestRestartKeepsTheMachinePinned(t *testing.T) {
 	}
 	if got := rootFromFlags([]string{"--home", "/tmp/h"}); got != "" {
 		t.Errorf("no --root is the default root, got %q", got)
+	}
+}
+
+// applianceTarball is a rootfs tarball with one file in it, for the tests that need an unpack that
+// works: the real artifact is 155 MB, and the shape is what matters here, not the size.
+func applianceTarball(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "appliance.tar.gz")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed := gzip.NewWriter(file)
+	tarball := tar.NewWriter(compressed)
+	body := []byte("#!/bin/sh\n")
+	if err := tarball.WriteHeader(&tar.Header{Name: "usr/local/bin/acornfall", Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarball.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarball.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := compressed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A machine a person took down is given no body: `gone` says the machine is not here, and a 575 MB
+// tree made a second later is the same lie smaller — the person asked for it to be gone and would
+// find a tree where they expected nothing. The fetch is what makes the tree, so it must not happen.
+func TestAnUpdateForAGoneMachineMakesNoDisk(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		intent update.Intent
+	}{
+		{"gone", update.IntentGone},
+		{"stopped", update.IntentStopped},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			root := t.TempDir()
+			if err := update.WriteMachineIntent(root, c.intent); err != nil {
+				t.Fatal(err)
+			}
+			if err := update.WriteWant(root, "v0.10.0-beta.14"); err != nil {
+				t.Fatal(err)
+			}
+			original := fetchApplianceTarball
+			t.Cleanup(func() { fetchApplianceTarball = original })
+			fetches := 0
+			fetchApplianceTarball = func(context.Context, string, string, bool) (string, error) {
+				fetches++
+				return applianceTarball(t), nil
+			}
+			machine := &fakeMachine{running: true}
+			if err := applyRelease(context.Background(), home, root, machine, "v0.10.0-beta.14"); err != nil {
+				t.Fatalf("keeping a request is not a failure: %v", err)
+			}
+			if fetches != 0 {
+				t.Errorf("a %s machine fetched %d times", c.name, fetches)
+			}
+			if _, err := os.Stat(applianceDisk(home)); err == nil {
+				t.Errorf("a disk was made for a %s machine", c.name)
+			}
+			if machine.removes != 0 || machine.boots != 0 {
+				t.Errorf("a %s machine was taken away or booted: removes=%d boots=%d", c.name, machine.removes, machine.boots)
+			}
+			// The product's request is kept, not cleared, dropped or rewritten.
+			if want, err := update.ReadWant(root); err != nil || want.Version != "v0.10.0-beta.14" {
+				t.Errorf("the request was not kept: %+v, %v", want, err)
+			}
+		})
+	}
+}
+
+// When a person says `up`, the request that waited is applied on the next tick with no new code:
+// want.json was never touched, and the reconcile reads it again. This drives the real apply, so it
+// is the whole path — fetch, unpack, swap, boot — and not a stub of it.
+func TestAnUpdateHeldWhileDownIsAppliedWhenTheMachineIsUp(t *testing.T) {
+	machine := &fakeMachine{}
+	var home string
+	var root string
+	var service *supervisor
+	var clock *fakeClock
+	service, clock, home, root = newSupervisor(t, machine, func(ctx context.Context, tag string) error {
+		return applyRelease(ctx, home, root, machine, tag)
+	})
+	if err := update.WriteMachineIntent(root, update.IntentGone); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.WriteWant(root, "v0.10.0-beta.14"); err != nil {
+		t.Fatal(err)
+	}
+	original := fetchApplianceTarball
+	t.Cleanup(func() { fetchApplianceTarball = original })
+	fetches := 0
+	fetchApplianceTarball = func(context.Context, string, string, bool) (string, error) {
+		fetches++
+		return applianceTarball(t), nil
+	}
+	if state := service.tick(context.Background()); fetches != 0 || state.Running {
+		t.Fatalf("a gone machine applied the request: fetches=%d state=%+v", fetches, state)
+	}
+	// A person says up: the machine comes back on the release that is here, and the request that was
+	// held is what the next tick applies.
+	if err := update.WriteMachineIntent(root, update.IntentRunning); err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(restartCap)
+	state := service.tick(context.Background())
+	if fetches != 1 {
+		t.Fatalf("the held request was not fetched after up: fetches=%d", fetches)
+	}
+	if state.Version != "v0.10.0-beta.14" || !state.Running || state.LastError != "" {
+		t.Errorf("state = %+v", state)
+	}
+	if tag := applianceDiskTag(applianceDisk(home)); tag != "v0.10.0-beta.14" {
+		t.Errorf("the disk is %q, want v0.10.0-beta.14", tag)
+	}
+	if want, err := update.ReadWant(root); err != nil || want.Version != "v0.10.0-beta.14" {
+		t.Errorf("the request was rewritten: %+v, %v", want, err)
 	}
 }
