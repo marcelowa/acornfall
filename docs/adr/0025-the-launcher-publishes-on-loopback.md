@@ -97,3 +97,24 @@ The three hops, and who decides each:
   failure that names the wrong port. The repair is the same `machine down`, and the fix is to record
   the published address and report it; that needs a decision (report, or recreate), so it is not in
   this one.
+
+## Amendment, 2026-10-22 — no token, and the network is the default
+
+The owner, on a real install: MVP, the token is not needed. The decision above treats a token as the price of
+publishing anywhere but loopback; that price was never paid, because nothing in the launcher wrote one, and the
+one place it could have — `httpapi.ResolveToken` generating and storing a token for a reachable listener — was
+a lock nobody asked for.
+
+1. **The console asks for nothing by default**, on loopback and on a network address alike.
+   `httpapi.ResolveToken` generates nothing and reads nothing: a `config/token` an older install left behind
+   no longer turns authentication on. `--token` and `ACORNFALL_TOKEN` still lock a listener for whoever wants
+   one, and the flag beats the environment.
+2. **A network bind is the install's default.** The question is still asked — most installs on a server are
+   reached from another computer — but the answer defaults to yes, and a script with no terminal gets the
+   default rather than a refusal. `--local` is the one that keeps the console on `127.0.0.1`.
+3. **The warning stays, and it is the only protection left.** `machine up` prints one line when it publishes on
+   an address that is not loopback, saying the console has no authentication. That line is now the whole of
+   what stands between a beta and an open shell on a network: it is a sentence a person reads, not a lock.
+4. **The alternatives are unchanged in spirit.** The better end state named above — mint a token before
+   publishing anywhere — is what comes back when the console is shared; until then a token is a flag for the
+   person who wants one.

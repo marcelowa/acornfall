@@ -33,15 +33,17 @@ and an upgrade is the same command.
 It asks one question, and `--remote` / `--local` skip it:
 
 ```
-Is this machine reached from another computer? [y/N]
-  y: the console is published on 0.0.0.0 and asks for a token
-  n: the console stays on 127.0.0.1
+Is this machine reached from another computer? [Y/n]
+  y: the console is published on 0.0.0.0, so another computer can open it
+  n: the console stays on 127.0.0.1 only
 ```
 
-With no terminal to ask and no flag, it refuses and names both flags rather than guessing a network bind.
-`y` makes a token at `~/acornfall/config/token` if there is not one (32 random bytes as hex, 0600), and if
-that file cannot be written the remote install is refused — an unauthenticated console on a network
-address is the one outcome this must never produce.
+Yes is the default, and so is the answer for a script with no terminal: most installs on a server are
+reached from another computer. **The console asks for no token** — this is a beta, and the token is gone as
+a requirement. `machine up` prints one line when it publishes on an address that is not loopback, saying
+the console has no authentication: that line is the whole protection, so do not put it on a network you do
+not trust. `--token` still locks a listener if you want that, and `--local` keeps the console on this
+machine.
 
 ```
 sh install.sh --local      # the console on 127.0.0.1:7777
@@ -49,13 +51,12 @@ sh install.sh --remote     # on 0.0.0.0, with a token
 ```
 
 The answer is written into `~/acornfall/state/machine.json` beside `wanted`, and into the generated unit,
-so the two cannot disagree. `machine status` prints the address, so "where do I browse" has an answer.
+so the two cannot disagree. `machine status` prints the address, so "where do I browse" has an answer, and
+the install ends by printing it: `http://<hostname>:7777`, with no token and no cookie.
 
-A remote install ends by printing the address to open with the token in it once —
-`http://<hostname>:7777/?token=…` — because the cookie keeps it after that. If the person wants the other
-answer later, `machine install --remote` (or `--local`) writes both the declaration and the unit and
-restarts the service, and it recreates the machine when one is running on the old address, because a
-machine's address is fixed when it is created.
+If you want the other answer later, `machine install --remote` (or `--local`) writes both the declaration
+and the unit and restarts the service, and it recreates the machine when one is running on the old address,
+because a machine's address is fixed when it is created.
 
 ## Removing it
 
@@ -96,7 +97,7 @@ the operator's own file, and deleting it is theirs to do.
 | Flag | Default | Meaning |
 |---|---|---|
 | `--port` | the declaration's, `7777` | the host port the console is published on. Given, it is written into `state/machine.json` |
-| `--host` | the declaration's, `127.0.0.1` | the host address to publish on, written the same way. `0.0.0.0` exposes an unauthenticated console unless a token is there, and `machine install --remote` makes one |
+| `--host` | the declaration's | the host address to publish on, written the same way. A network address is an unauthenticated console: the launcher says so once |
 | `--memory` | half the host | the machine's ceiling. Ceilings, not reservations |
 | `--cpus` | half the host | proportional shares, not cores held |
 | `--refresh` | off | rebuild the machine from a fresh image, keeping the mount |

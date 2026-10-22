@@ -107,7 +107,7 @@ click, it restarts itself.
 
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
 `--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
-`--token <secret>`, `--worker-dir <dir>` (development: system bun over these
+`--token <secret>` (optional: the console asks for nothing by default), `--worker-dir <dir>` (development: system bun over these
 sources, no ensure), `--worker-bin <path>` (single compiled worker binary,
 explicit opt-in),
 `--migrate-dir <dir>` (default: scripts baked into the binary), `--workspaces-dir <dir>` (default
