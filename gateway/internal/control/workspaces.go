@@ -32,6 +32,16 @@ import (
 // in every install.
 const GeneralWorkspaceName = "general"
 
+// inside says whether a folder is the root itself or below it.
+func inside(path, root string) bool {
+	clean, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	root = filepath.Clean(root)
+	return clean == root || strings.HasPrefix(clean, root+string(os.PathSeparator))
+}
+
 // DefaultWorkspacesDir is where workspaces are created. It is deliberately outside the
 // hidden installation folder: this is the reader's own content, and it should be somewhere
 // they would look.
@@ -828,11 +838,27 @@ func (w *Workspaces) loadRegistry() error {
 	dir := w.opts.WorkspacesDir
 	if dir == "" {
 		dir = recorded
+		// A recorded folder outside the mount is the same bug as a default taken from a home: the machine
+		// cannot see it, so every workspace made there is a workspace with no sandbox. The registry remembers
+		// where workspaces live, which is how one bad run keeps making bad ones.
+		if root := w.opts.Layout.Root; dir != "" && root != "" && !inside(dir, root) {
+			workerpool.Log("workspaces folder %s is outside the mount %s: creating them inside it", dir, root)
+			dir = ""
+		}
 	}
 	if dir == "" {
-		dir, err = DefaultWorkspacesDir()
-		if err != nil {
-			return err
+		// The workspaces folder belongs inside the mount, because that is the only place the machine can see:
+		// the appliance runs with no home of its own, and $HOME/acornfall/workspaces there is
+		// /acornfall/workspaces — outside the share root, so every workspace created in it was a workspace with
+		// no sandbox, and the sentence said only that tools were off. An explicit --root settles it; only an
+		// install that names neither falls back to a home.
+		if root := w.opts.Layout.Root; root != "" {
+			dir = filepath.Join(root, "workspaces")
+		} else {
+			dir, err = DefaultWorkspacesDir()
+			if err != nil {
+				return err
+			}
 		}
 	}
 	absolute, err := filepath.Abs(dir)

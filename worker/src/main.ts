@@ -78,7 +78,12 @@ import {
 } from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
 import { routingFiles } from "./files.ts";
-import { refusedSandbox, type SandboxClient, type SandboxEngine } from "./sandbox.ts";
+import {
+	noSandboxReason,
+	refusedSandbox,
+	type SandboxClient,
+	type SandboxEngine,
+} from "./sandbox.ts";
 import { SandboxExecutionEnv } from "./sandbox-env.ts";
 import {
 	expandCommand,
@@ -103,6 +108,8 @@ interface Args {
 	sandbox: string;
 	/** Which engine that sandbox belongs to. The name is control's, and the two must agree. */
 	sandboxEngine: string;
+	/** Why there is no sandbox, when control knows: the reason the tools refuse, in its words. */
+	sandboxProblem: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -132,6 +139,7 @@ function parseArgs(argv: readonly string[]): Args {
 		credentials,
 		sandbox: values.get("sandbox") ?? "",
 		sandboxEngine: values.get("sandbox-engine") ?? "microsandbox",
+		sandboxProblem: values.get("sandbox-problem") ?? "",
 	};
 }
 
@@ -153,7 +161,7 @@ const sandbox: SandboxClient = await openSandboxForWorkspace(args);
 
 async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 	if (options.sandbox === "") {
-		return refusedSandbox("this workspace has no sandbox: tool execution is disabled");
+		return refusedSandbox(noSandboxReason(options.sandboxProblem));
 	}
 	const engine = await sandboxEngine(options.sandboxEngine);
 	if (engine === undefined) {

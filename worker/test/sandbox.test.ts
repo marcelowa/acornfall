@@ -3,6 +3,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { hostFiles, routingFiles, type Files } from "../src/files.ts";
 import { SandboxExecutionEnv } from "../src/sandbox-env.ts";
 import {
+	noSandboxReason,
 	refusedSandbox,
 	type DirEntry,
 	type ExecOptions,
@@ -167,6 +168,19 @@ test("the host filesystem answers for everything outside the workspace", async (
 });
 
 // -- the refusal ---------------------------------------------------------------------
+
+test("a workspace with no sandbox says why it has none", () => {
+	// What control sends when it could not make the sandbox. Without it the person is told the tools are
+	// off and nothing else, and the reason sits in a log on another machine.
+	expect(noSandboxReason("")).toBe("this workspace has no sandbox: tool execution is disabled");
+	expect(
+		noSandboxReason(
+			"/acornfall/workspaces/dev is outside the share root /root/acornfall, so the machine's VM cannot see it",
+		),
+	).toBe(
+		"this workspace has no sandbox: /acornfall/workspaces/dev is outside the share root /root/acornfall, so the machine's VM cannot see it",
+	);
+});
 
 test("a missing sandbox reads nothing and refuses everything else", async () => {
 	const sandbox = refusedSandbox("this workspace has no sandbox: tool execution is disabled");

@@ -87,6 +87,17 @@ export interface WriteSink {
  * make the sandbox advisory, and "unconfined" would be a state the system drifted into
  * rather than a decision somebody made.
  */
+/**
+ * What a workspace with no sandbox refuses with. Control sends the reason it could not make one — a folder
+ * outside the machine's share root, an engine that is not installed — and a person reading the transcript
+ * gets that sentence instead of being told only that tools are off.
+ */
+export function noSandboxReason(problem: string): string {
+	return problem === ""
+		? "this workspace has no sandbox: tool execution is disabled"
+		: `this workspace has no sandbox: ${problem}`;
+}
+
 export function refusedSandbox(reason: string): SandboxClient {
 	const fail = (): never => {
 		throw new Error(reason);

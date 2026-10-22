@@ -455,6 +455,30 @@ func (c *Control) adoptConversation(ctx context.Context, persistedActive string)
 	return nil
 }
 
+// sandboxArgs tells the worker which sandbox to attach to, or why it has none. It is split from startWorker so
+// the sentence a refused tool prints can be read without starting a process.
+func (c *Control) sandboxArgs(sandboxState SandboxState) []string {
+	if sandboxState.Tools {
+		args := []string{"--sandbox", sandbox.Name(c.opts.Workspace.Path)}
+		// The worker attaches with this engine's SDK: naming it here is how the two sides of one
+		// install cannot disagree about which engine is in use. The name comes from the report the
+		// manager just produced — Driver() can be nil on a manager that has not resolved one, and
+		// the worker then fell back to its own default, which read as "microsandbox" on an lxc
+		// install (measured).
+		if sandboxState.Engine != "" {
+			args = append(args, "--sandbox-engine", sandboxState.Engine)
+		}
+		return args
+	}
+	if sandboxState.Problem == "" {
+		return nil
+	}
+	// The refusal a person reads is the worker's, and on its own it says only that tools are off. The reason
+	// the sandbox was not made stayed in the log, which is the one place somebody looking at a transcript does
+	// not look: a workspace created at a path the machine cannot see said "no sandbox" and nothing else.
+	return []string{"--sandbox-problem", sandboxState.Problem}
+}
+
 // startWorker launches the harness process and arranges for its death to be noticed.
 //
 // It refuses to start a second one. A death is announced twice — the process's own exit, and
@@ -479,17 +503,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 	// anything without it. A failure is a state, not a stop: the workspace opens, the tools
 	// say what is missing, and the rest of the product works.
 	sandboxState := c.provisionSandbox(ctx)
-	if sandboxState.Tools {
-		args = append(args, "--sandbox", sandbox.Name(c.opts.Workspace.Path))
-		// The worker attaches with this engine's SDK: naming it here is how the two sides of one
-		// install cannot disagree about which engine is in use. The name comes from the report the
-		// manager just produced — Driver() can be nil on a manager that has not resolved one, and
-		// the worker then fell back to its own default, which read as "microsandbox" on an lxc
-		// install (measured).
-		if engine := sandboxState.Engine; engine != "" {
-			args = append(args, "--sandbox-engine", engine)
-		}
-	}
+	args = append(args, c.sandboxArgs(sandboxState)...)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
