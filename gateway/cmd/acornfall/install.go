@@ -9,9 +9,12 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
@@ -473,6 +476,39 @@ func kvmCheck() error {
 	return device.Close()
 }
 
+// consoleIsTheMachine asks the console which sandbox engine it has. The launcher's console is the machine's,
+// and the machine's is lxc — it runs its own containers. Anything else is another process answering on that
+// port: a gateway from a hand install, which is a console with no sandbox behind it and no tools, and which
+// would otherwise pass for the machine because it answers.
+func consoleIsTheMachine(ctx context.Context, url string) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/state", nil)
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		// A console that is not answering at all is the other check's sentence, not this one's.
+		return nil
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return nil
+	}
+	var state struct {
+		Sandbox struct {
+			Engine string `json:"engine"`
+		} `json:"sandbox"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&state); err != nil || state.Sandbox.Engine == "" {
+		return fmt.Errorf("the console at %s is not this machine's: its state is not this version's shape, so another acornfall is answering on that port", url)
+	}
+	if state.Sandbox.Engine != "lxc" {
+		return fmt.Errorf("the console at %s reports the %q sandbox: the machine's console reports lxc, so another acornfall is answering on that port", url, state.Sandbox.Engine)
+	}
+	return nil
+}
+
 // verifyUp is the real check after an install: the unit is active, the state the console reads has been
 // written, and the console answers on the declared address. A failure names the checks that failed, because
 // "one of these three" is a sentence that sends a person to read three things.
@@ -502,6 +538,9 @@ func failingChecks(ctx context.Context, init initSystem, root, url string) []str
 	}
 	if _, ok := update.ReadIs(root); !ok {
 		failing = append(failing, update.IsPath(root)+" was not written")
+	}
+	if err := consoleIsTheMachine(ctx, url); err != nil {
+		failing = append(failing, err.Error())
 	}
 	if err := awaitConsole(ctx, url, 2*time.Second); err != nil {
 		hint := ""

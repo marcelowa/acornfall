@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -786,5 +788,40 @@ func TestTheVerifySaysWhichCheckFailed(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "unit is not active") || strings.Contains(err.Error(), "was not written") {
 		t.Errorf("only the console failed: %v", err)
+	}
+}
+
+// The console the install verifies is the machine's, not whatever answers on that port. A gateway from a hand
+// install is the old shape and another engine: it would pass for the machine while having no sandbox behind it.
+func TestTheVerifyKnowsWhichConsoleItIsTalkingTo(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "the machine's console", body: `{"sandbox":{"engine":"lxc","tools":true}}`},
+		{name: "another engine", body: `{"sandbox":{"engine":"microsandbox"}}`, want: "microsandbox"},
+		{name: "an older shape", body: `{"sandbox":"microsandbox"}`, want: "not this version's shape"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(c.body))
+			}))
+			defer server.Close()
+			err := consoleIsTheMachine(context.Background(), server.URL)
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("the machine's console should pass: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want a sentence naming %q, got %v", c.want, err)
+			}
+		})
+	}
+	// A console that is not there is the other check's sentence, not this one's.
+	if err := consoleIsTheMachine(context.Background(), "http://127.0.0.1:1"); err != nil {
+		t.Errorf("a missing console is not this check's answer: %v", err)
 	}
 }
