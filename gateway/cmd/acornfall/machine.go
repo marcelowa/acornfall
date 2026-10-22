@@ -863,14 +863,16 @@ func awaitConsole(ctx context.Context, url string, within time.Duration) error {
 		}
 		response, requestErr := client.Do(request)
 		err = requestErr
+		last := "no answer"
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode == http.StatusOK {
 				return nil
 			}
+			last = response.Status
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the machine's console never answered on %s within %s", url, within)
+			return fmt.Errorf("the console never answered on %s within %s (last answer: %s)", url, within, last)
 		}
 		select {
 		case <-ctx.Done():

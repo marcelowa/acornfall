@@ -267,6 +267,7 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 	// The binary, under the release's own name, and the symlink the unit starts.
 	versioned := update.VersionedBinary(in.home, in.version)
 	written, err := writeIfDifferent(versioned, in.binary, 0o755)
+	binaryWritten := written
 	if err != nil {
 		return fmt.Errorf("putting the binary at %s: %w", versioned, err)
 	}
@@ -275,6 +276,7 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 	}
 	say(!written, "the binary at "+versioned)
 	linked, err := pointIfDifferent(update.OwnedBinary(in.home), versioned)
+	binaryWritten = binaryWritten || linked
 	if err != nil {
 		return fmt.Errorf("pointing %s at %s: %w", update.OwnedBinary(in.home), versioned, err)
 	}
@@ -320,13 +322,15 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		}
 	}
 	say(enabled && active && !unitWritten, "the service, enabled and running")
-	if unitWritten || addressChanged {
-		// The unit is what starts it and the address is read at start-up: a service that is already running
-		// would go on publishing the old one until something restarted it.
+	if unitWritten || addressChanged || binaryWritten {
+		// The unit is what starts it, the address is read at start-up, and the binary is the process itself: a
+		// service that is already running would go on being the previous release, publishing the previous
+		// address, until something restarted it. An upgrade that leaves the old process running is an upgrade
+		// that did nothing.
 		if err := in.init.Restart(ctx); err != nil {
 			return err
 		}
-		say(false, "restarted the service, so it publishes what the unit says")
+		say(false, "restarted the service, so it runs this release")
 	}
 	lingered, err := in.init.Linger(ctx)
 	if err != nil {
@@ -339,15 +343,25 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 	}
 	say(lingered, "linger, so it starts at boot without a login")
 
-	// A machine's address is fixed when it is created, so a machine that is running on the old one is taken
-	// away: the service makes it again on the new address, and says nothing when it was not running.
-	if addressChanged && in.machine != nil {
-		if running, err := in.machine.Running(ctx); err == nil && running {
-			if err := in.machine.Remove(ctx); err != nil {
-				return fmt.Errorf("recreating the machine on its new address: %w", err)
-			}
-			say(false, "recreated the machine, which was running on the old address")
+	// A machine's address and its init are fixed when it is created: a new address, or a release whose binary
+	// is not the one the machine was made from, means the machine that is running is the old one. It is taken
+	// away and the service makes it again; a machine that is not running is left, because its next start is the
+	// new one.
+	stale := addressChanged
+	wasRunning := false
+	if in.machine != nil {
+		if running, err := in.machine.Running(ctx); err == nil {
+			wasRunning = running
 		}
+		if tag := applianceRunningVersion(in.home); tag != "" && tag != in.version {
+			stale = true
+		}
+	}
+	if stale && wasRunning {
+		if err := in.machine.Remove(ctx); err != nil {
+			return fmt.Errorf("recreating the machine for this release: %w", err)
+		}
+		say(false, "recreated the machine, which was running the previous release or address")
 	}
 	// The check that it is actually up: the unit active, the state written, the console answering.
 	if in.verify != nil {
@@ -460,23 +474,41 @@ func kvmCheck() error {
 }
 
 // verifyUp is the real check after an install: the unit is active, the state the console reads has been
-// written, and the console answers on the declared address.
-func verifyUp(ctx context.Context, init initSystem, root string, cfg unitConfig, sleep func(time.Duration)) error {
+// written, and the console answers on the declared address. A failure names the checks that failed, because
+// "one of these three" is a sentence that sends a person to read three things.
+func verifyUp(ctx context.Context, init initSystem, root string, cfg unitConfig, now func() time.Time, sleep func(time.Duration)) error {
 	url := consoleURL(cfg.Host, cfg.Port)
-	deadline := time.Now().Add(20 * time.Second)
+	const within = 20 * time.Second
+	deadline := now().Add(within)
 	for {
-		if init.Active(ctx) {
-			if _, ok := update.ReadIs(root); ok {
-				if awaitConsole(ctx, url, 2*time.Second) == nil {
-					return nil
-				}
-			}
+		failing := failingChecks(ctx, init, root, url)
+		if len(failing) == 0 {
+			return nil
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("the service is not up: %s %s, %s, or the console at %s did not answer in 20s", init.Name(), "unit not active", update.IsPath(root), url)
+		if now().After(deadline) {
+			return fmt.Errorf("the service is not up after %s: %s", within, strings.Join(failing, "; "))
 		}
 		sleep(time.Second)
 	}
+}
+
+// failingChecks is every part of "up" that is not true, in the words of the thing that is wrong.
+func failingChecks(ctx context.Context, init initSystem, root, url string) []string {
+	var failing []string
+	if !init.Active(ctx) {
+		failing = append(failing, "the "+init.Name()+" unit is not active")
+	}
+	if _, ok := update.ReadIs(root); !ok {
+		failing = append(failing, update.IsPath(root)+" was not written")
+	}
+	if err := awaitConsole(ctx, url, 2*time.Second); err != nil {
+		hint := ""
+		if strings.Contains(err.Error(), "401") {
+			hint = " (it is asking for a token: a machine made by an earlier release carries one in its init, so `machine down` then `machine up` makes a new one)"
+		}
+		failing = append(failing, "the console at "+url+" did not answer"+hint+": "+err.Error())
+	}
+	return failing
 }
 
 // leftBehind is the sentence an uninstall and a purge both print: the mount is the person's, and saying so

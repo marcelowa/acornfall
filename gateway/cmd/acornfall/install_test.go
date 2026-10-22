@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/update"
@@ -701,5 +702,89 @@ func TestInstallingWithANewAddressRecreatesARunningMachine(t *testing.T) {
 				t.Errorf("the unit still says the old address:\n%s", body)
 			}
 		})
+	}
+}
+
+// An upgrade is a new binary, and a service that is already running would go on being the previous release:
+// the install restarts it. Without this, installing beta.N+1 changed the symlink and nothing else.
+func TestInstallRestartsTheServiceWhenTheBinaryChanges(t *testing.T) {
+	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+	fixture.run(t)
+	restarts := fixture.init.restarts
+	// The next release, with its own binary.
+	fixture.install.version = "v0.10.0-beta.17"
+	fixture.install.binary = []byte("the next running binary")
+	*fixture.say = nil
+	fixture.run(t)
+	if fixture.init.restarts <= restarts {
+		t.Errorf("the service was not restarted for a new binary: %d restarts", fixture.init.restarts)
+	}
+	found := false
+	for _, line := range *fixture.say {
+		if strings.Contains(line, "restarted the service") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the restart was not said: %v", *fixture.say)
+	}
+}
+
+// A machine made by an earlier release carries that release's init — its address and its flags — so an upgrade
+// makes a new machine when one is running. A machine that is not running is left: its next start is the new one.
+func TestInstallRecreatesTheMachineWhenTheReleaseChanges(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		running     bool
+		wantRemoves int
+	}{
+		{name: "running", running: true, wantRemoves: 1},
+		{name: "not running", running: false, wantRemoves: 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+			// The disk is the previous release's, and the machine is or is not running on it.
+			makeRunningDisk(t, fixture.install.home, "v0.10.0-beta.15")
+			machine := &fakeMachine{running: c.running}
+			fixture.install.machine = machine
+			fixture.run(t)
+			if machine.removes != c.wantRemoves {
+				t.Errorf("the machine was removed %d times, want %d", machine.removes, c.wantRemoves)
+			}
+		})
+	}
+}
+
+// The verification names the checks that failed: "one of these three" sends a person to read three things, and
+// a console that answers 401 is a machine from an earlier release, not a broken install.
+func TestTheVerifySaysWhichCheckFailed(t *testing.T) {
+	root := t.TempDir()
+	inactive := &fakeInit{unitPath: filepath.Join(root, "unit")}
+	clock := &fakeClock{at: time.Date(2026, 10, 22, 18, 0, 0, 0, time.UTC)}
+	// The wait advances the clock instead of sleeping, and the context is already over: the console check would
+	// otherwise sit out its own two-second retry on every pass.
+	wait := func(d time.Duration) { clock.advance(d + 20*time.Second) }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	err := verifyUp(ctx, inactive, root, unitConfig{UserHome: root, Home: root, Root: root, Host: "127.0.0.1", Port: 6553}, clock.now, wait)
+	if err == nil {
+		t.Fatal("an inactive unit is not up")
+	}
+	for _, want := range []string{"unit is not active", "was not written", "did not answer"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the sentence should name %q: %v", want, err)
+		}
+	}
+	// With the state written and the unit active, only the console is missing — and it says so alone.
+	if err := update.WriteIs(root, update.HostState{Running: true, At: update.StampedAt(time.Now())}); err != nil {
+		t.Fatal(err)
+	}
+	active := &fakeInit{unitPath: filepath.Join(root, "unit"), active: true}
+	err = verifyUp(ctx, active, root, unitConfig{UserHome: root, Home: root, Root: root, Host: "127.0.0.1", Port: 6553}, clock.now, wait)
+	if err == nil || !strings.Contains(err.Error(), "did not answer") {
+		t.Fatalf("want the console named, got %v", err)
+	}
+	if strings.Contains(err.Error(), "unit is not active") || strings.Contains(err.Error(), "was not written") {
+		t.Errorf("only the console failed: %v", err)
 	}
 }

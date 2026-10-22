@@ -94,7 +94,7 @@ func machineInstall(argv []string) {
 		machine:     driverMachine{home: resolvedHome, root: resolvedRoot, port: declaredPort, host: host},
 	}
 	install.verify = func(ctx context.Context, cfg unitConfig) error {
-		return verifyUp(ctx, install.init, resolvedRoot, cfg, time.Sleep)
+		return verifyUp(ctx, install.init, resolvedRoot, cfg, time.Now, time.Sleep)
 	}
 	say := line(os.Stdout)
 	if err := install.run(context.Background(), func(ok bool, sentence string) {
