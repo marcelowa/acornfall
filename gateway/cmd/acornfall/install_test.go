@@ -825,3 +825,18 @@ func TestTheVerifyKnowsWhichConsoleItIsTalkingTo(t *testing.T) {
 		t.Errorf("a missing console is not this check's answer: %v", err)
 	}
 }
+
+// A machine made before the disk carried a release tag is not this release's machine, and it cannot say so
+// itself: the install treats "does not say" as stale, which is what an upgrade from an older beta is.
+func TestInstallRecreatesAMachineFromBeforeTheTagRecord(t *testing.T) {
+	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+	// The disk of a machine from an older release: the files, and no tag beside them.
+	disk := applianceDisk(fixture.install.home)
+	writeApplianceFiles(t, disk, "")
+	machine := &fakeMachine{running: true}
+	fixture.install.machine = machine
+	fixture.run(t)
+	if machine.removes != 1 {
+		t.Errorf("a machine that does not say which release it is was kept: %d removals", machine.removes)
+	}
+}

@@ -356,7 +356,10 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		if running, err := in.machine.Running(ctx); err == nil {
 			wasRunning = running
 		}
-		if tag := applianceRunningVersion(in.home); tag != "" && tag != in.version {
+		// A disk that does not say which release it is — every machine made before the disk carried a tag, which
+		// includes every install that predates this release — is not this release's machine. That is the whole
+		// question, so "" is stale too.
+		if applianceRunningVersion(in.home) != in.version {
 			stale = true
 		}
 	}
