@@ -140,17 +140,13 @@ func machineUp(argv []string) {
 	}
 	// The token, when the install has one, comes from the mount: the appliance has no secrets of
 	// its own, and a port that answers without one is only safe while it is loopback.
-	token := ""
-	if contents, err := os.ReadFile(where.Token()); err == nil {
-		token = strings.TrimSpace(string(contents))
-	}
 	// The address is the declaration's: a flag that was given wrote it, and a flag that was not reads it.
 	*host, *port, err = declaredAddress(resolvedRoot, flags, host, port)
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	build := func(image string) (*sandbox.LXC, error) {
-		return machineDriver(resolvedHome, image, resolvedRoot, *cpus, *memory, *port, *host, applianceInit(resolvedRoot, token))
+		return machineDriver(resolvedHome, image, resolvedRoot, *cpus, *memory, *port, *host, applianceInit(resolvedRoot))
 	}
 	driver, err := build(resolvedImage)
 	if err != nil {
@@ -212,14 +208,14 @@ func machineUp(argv []string) {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	url := consoleURL(*host, *port)
-	if notice := publishNotice(*host, *port, token != ""); notice != "" {
+	if notice := publishNotice(*host, *port); notice != "" {
 		fmt.Fprint(os.Stderr, notice)
 	}
 	log.Printf("machine: the console is %s", url)
 	if *wait <= 0 {
 		return
 	}
-	if err := awaitConsole(ctx, url, token, *wait); err != nil {
+	if err := awaitConsole(ctx, url, *wait); err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	log.Printf("machine: the appliance is serving on %s", url)
@@ -244,14 +240,13 @@ func consoleURL(host string, port int) string {
 // Not an error: a lab VM or a tailnet is a real place to want this. Saying it once, with the
 // address it is actually on, is cheaper than the surprise of finding the console open to a network
 // later.
-func publishNotice(host string, port int, authenticated bool) string {
+func publishNotice(host string, port int) string {
 	if httpapi.IsLoopback(host) {
 		return ""
 	}
-	if authenticated {
-		return fmt.Sprintf("machine: publishing on %s:%d; the console asks for the token in config/token\n", host, port)
-	}
-	return fmt.Sprintf("machine: publishing on %s:%d, and the appliance has no authentication\n", host, port)
+	// One line, once: a console on a network address is reachable by whoever can route to it, and that is
+	// a decision a person should read rather than discover.
+	return fmt.Sprintf("machine: publishing on %s:%d, and the console has no authentication\n", host, port)
 }
 
 // machineStatus reports whether the machine is there, without making anything: asking a machine
@@ -276,7 +271,7 @@ func machineStatus(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -334,13 +329,12 @@ func machineDriver(home, image, root string, cpus int, memory string, port int, 
 // mount, which is the point of the layout (ADR 0022): the machine holds nothing of the
 // product's, so it can be replaced without losing any. The token, when there is one, comes from
 // the mount for the same reason; without one the port is only published on loopback.
-func applianceInit(root, token string) string {
+func applianceInit(root string) string {
 	machineHome := "/var/lib/acornfall"
 	workspace := filepath.Join(root, "workspaces", "general")
+	// No token: the console asks for nothing, which is the default everywhere (MVP). A launcher that
+	// published on a network address said so once, at the address it chose.
 	auth := "--insecure"
-	if token != "" {
-		auth = "--token " + token
-	}
 	return strings.Join([]string{
 		// The image is a tarball of files, links and directories: device nodes are the kernel's to
 		// make, and an unpacker run as a user cannot create them. A machine whose /dev is empty
@@ -499,10 +493,6 @@ func machineUpdate(argv []string) {
 	if err := layout.Migrate(where, log.Printf); err != nil {
 		log.Printf("machine update: moving the old layout: %v", err)
 	}
-	token := ""
-	if contents, err := os.ReadFile(where.Token()); err == nil {
-		token = strings.TrimSpace(string(contents))
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
 	if err := sandbox.NewMicrosandbox(resolvedHome).Install(ctx, log.Printf); err != nil {
@@ -539,7 +529,6 @@ func machineUpdate(argv []string) {
 		memory: *memory,
 		port:   *port,
 		host:   *host,
-		token:  token,
 	}
 	step1 := func(ctx context.Context, tag string) error {
 		// No gate: a person typed this command, so it is the declaration. The service's gate would
@@ -548,7 +537,7 @@ func machineUpdate(argv []string) {
 		return err
 	}
 	ready := func(ctx context.Context, tag string) bool {
-		return awaitReady(ctx, consoleURL(*host, *port), token, *wait) == nil
+		return awaitReady(ctx, consoleURL(*host, *port), *wait) == nil
 	}
 	step2 := func(ctx context.Context, tag string) error {
 		if !update.OwnsSelf(executable, resolvedHome) {
@@ -864,16 +853,13 @@ func checkAppliance(image string) error {
 
 // awaitConsole waits for the appliance's own state endpoint: a published port that answers is
 // the machine being ready, and anything earlier is a window that looks like a broken install.
-func awaitConsole(ctx context.Context, url, token string, within time.Duration) error {
+func awaitConsole(ctx context.Context, url string, within time.Duration) error {
 	deadline := time.Now().Add(within)
 	client := &http.Client{Timeout: 5 * time.Second}
 	for {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/state", nil)
 		if err != nil {
 			return err
-		}
-		if token != "" {
-			request.Header.Set("Authorization", "Bearer "+token)
 		}
 		response, requestErr := client.Do(request)
 		err = requestErr
@@ -897,14 +883,11 @@ func awaitConsole(ctx context.Context, url, token string, within time.Duration) 
 // machineReady asks the machine's own state whether it is ready: a console that answers is not a
 // product that works, and the state's own answer — is a worker up — is what a release has to show
 // before the host takes it too (ADR 0031). One request, no wait: the service asks once a tick.
-func machineReady(ctx context.Context, url, token string) bool {
+func machineReady(ctx context.Context, url string) bool {
 	client := &http.Client{Timeout: 5 * time.Second}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/state", nil)
 	if err != nil {
 		return false
-	}
-	if token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := client.Do(request)
 	if err != nil {
@@ -928,10 +911,10 @@ func machineReady(ctx context.Context, url, token string) bool {
 // awaitReady waits for the machine to report a worker ready within a bound, which is what
 // `machine update` does between its two steps. The service does not wait: it asks, and asks again on
 // the next tick.
-func awaitReady(ctx context.Context, url, token string, within time.Duration) error {
+func awaitReady(ctx context.Context, url string, within time.Duration) error {
 	deadline := time.Now().Add(within)
 	for {
-		if machineReady(ctx, url, token) {
+		if machineReady(ctx, url) {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -979,7 +962,7 @@ func takeMachineDown(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
@@ -1031,7 +1014,7 @@ func stopMachine(argv []string) {
 	if resolvedImage == "" {
 		resolvedImage = applianceLayoutFor(resolvedHome, applianceTag(""), false).Image
 	}
-	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot, ""))
+	driver, err := machineDriver(resolvedHome, resolvedImage, resolvedRoot, 2, "4G", 7777, "127.0.0.1", applianceInit(resolvedRoot))
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}

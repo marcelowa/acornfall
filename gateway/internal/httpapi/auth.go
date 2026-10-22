@@ -1,13 +1,9 @@
 package httpapi
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -32,38 +28,19 @@ func IsLoopback(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// ResolveToken returns the shared secret guarding this listener, or "" when the
-// listener is loopback-only or auth is disabled. A reachable listener without an
-// explicit token gets a generated one persisted in configDir — the install's config
-// folder inside the mount — so the URL stays stable across restarts.
-func ResolveToken(explicit, env, configDir, addr string, disabled bool) (string, error) {
-	if disabled {
-		return "", nil
-	}
+// ResolveToken returns the shared secret guarding this listener, or "" when there is none — which is
+// the default, on loopback and on a network address alike. MVP: the console asks for nothing, and a
+// listener that is reachable from the network is reachable by whoever can route to it; the launcher
+// says so once when it publishes one.
+//
+// `--token` (or ACORNFALL_TOKEN) still locks a listener, for anyone who wants that. Nothing is
+// generated and nothing is read from disk: a token file an older install left behind no longer turns
+// authentication on by surprise.
+func ResolveToken(explicit, env string) string {
 	if explicit != "" {
-		return explicit, nil
+		return explicit
 	}
-	if env != "" {
-		return env, nil
-	}
-	if IsLoopback(addr) {
-		return "", nil
-	}
-	path := filepath.Join(configDir, "token")
-	if payload, err := os.ReadFile(path); err == nil {
-		if token := strings.TrimSpace(string(payload)); token != "" {
-			return token, nil
-		}
-	}
-	buffer := make([]byte, 24)
-	if _, err := rand.Read(buffer); err != nil {
-		return "", err
-	}
-	token := hex.EncodeToString(buffer)
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", err
-	}
-	return token, nil
+	return env
 }
 
 // RequireToken guards a handler. A token may arrive as a bearer header, a

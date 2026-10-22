@@ -182,67 +182,55 @@ func TestInstallFixesAMissingSymlink(t *testing.T) {
 	}
 }
 
-// A remote install answers for a console anyone on the network can reach, so it needs a token, and the token is
-// the file the gateway reads: 0600, and not empty.
-func TestRemoteWithoutATokenCreatesOneWithMode0600(t *testing.T) {
-	root := t.TempDir()
-	created, err := ensureToken(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !created {
-		t.Error("a missing token was not created")
-	}
-	path := filepath.Join(root, "config", "token")
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("the token is %v, want 0600", info.Mode().Perm())
-	}
-	if body, _ := os.ReadFile(path); len(strings.TrimSpace(string(body))) != 64 {
-		t.Errorf("the token is %d characters, want 32 bytes as hex", len(strings.TrimSpace(string(body))))
-	}
-	// A token that is there is not replaced: rotating it is not an install's business.
-	if created, err := ensureToken(root); err != nil || created {
-		t.Errorf("an existing token was rewritten: created=%v err=%v", created, err)
-	}
-}
-
-// If the token cannot be written, a remote install is refused: falling back to an unauthenticated console on a
-// network address is the one outcome this must never have.
-func TestRemoteWithAnUnwritableConfigDirRefuses(t *testing.T) {
-	root := t.TempDir()
-	// A file where the config folder belongs: nothing can be created under it.
-	if err := os.WriteFile(filepath.Join(root, "config"), []byte("not a folder"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ensureToken(root); err == nil {
-		t.Fatal("an unwritable token must refuse the install")
+// Remote is the default answer, and there is no token: an install on a server is usually reached from another
+// computer, and the console asks for nothing (MVP).
+func TestRemoteIsTheDefaultAnswer(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		remote   bool
+		local    bool
+		terminal bool
+		want     bool
+		refused  bool
+	}{
+		{name: "no flag and no terminal is remote", want: true},
+		{name: "--remote", remote: true, want: true},
+		{name: "--local", local: true, want: false},
+		{name: "both is not an answer", remote: true, local: true, refused: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			remote, err := remoteAnswer(c.remote, c.local, c.terminal)
+			if c.refused {
+				if err == nil {
+					t.Fatal("--remote and --local together must be refused")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if remote != c.want {
+				t.Errorf("remote = %v, want %v", remote, c.want)
+			}
+		})
 	}
 }
 
-// No terminal and no flag is a refusal that names both flags: guessing a network bind is guessing a console open
-// to the network.
-func TestNoTTYAndNoFlagRefuses(t *testing.T) {
-	_, err := remoteAnswer(false, false, false)
-	if err == nil {
-		t.Fatal("an install with no answer must refuse")
+// The closing line is the address and one sentence about who can reach it. No token, because there is none.
+func TestTheInstallPrintsTheAddressAndNoToken(t *testing.T) {
+	remote := strings.Join(installClosing("0.0.0.0", 7777), "\n")
+	if !strings.Contains(remote, "http://") || !strings.Contains(remote, ":7777") {
+		t.Errorf("the address is not there:\n%s", remote)
 	}
-	for _, name := range []string{"--local", "--remote"} {
-		if !strings.Contains(err.Error(), name) {
-			t.Errorf("the refusal should name %s: %v", name, err)
-		}
+	if strings.Contains(remote, "token=") || strings.Contains(remote, "cookie") {
+		t.Errorf("a remote install mentions a token:\n%s", remote)
 	}
-	if remote, err := remoteAnswer(true, false, false); err != nil || !remote {
-		t.Errorf("--remote = %v, %v", remote, err)
+	if !strings.Contains(remote, "no token") {
+		t.Errorf("nothing says the console asks for nothing:\n%s", remote)
 	}
-	if remote, err := remoteAnswer(false, true, false); err != nil || remote {
-		t.Errorf("--local = %v, %v", remote, err)
-	}
-	if _, err := remoteAnswer(true, true, false); err == nil {
-		t.Error("--remote and --local together is not an answer")
+	local := strings.Join(installClosing("127.0.0.1", 7777), "\n")
+	if !strings.Contains(local, "http://127.0.0.1:7777") || !strings.Contains(local, "loopback") {
+		t.Errorf("a local install says it is loopback:\n%s", local)
 	}
 }
 
@@ -677,30 +665,6 @@ func TestInstallFixesAUnitThatIsNotEnabledAndAServiceThatIsNotRunning(t *testing
 	}
 	if !found {
 		t.Errorf("a service that was not running was not said to be fixed: %v", *fixture.say)
-	}
-}
-
-// A remote install prints the address to open with the token once, and the sentence that stops a person pasting
-// it every time. Loopback prints the address alone: there is nothing to authenticate.
-func TestARemoteInstallPrintsTheTokenURLOnce(t *testing.T) {
-	token := strings.Repeat("a", 64)
-	lines := installClosing("0.0.0.0", 7777, token, "/home/me/acornfall/config/token")
-	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "/?token="+token) {
-		t.Errorf("the address does not carry the token:\n%s", joined)
-	}
-	if !strings.Contains(joined, "cookie") {
-		t.Errorf("nothing says the cookie keeps it:\n%s", joined)
-	}
-	if !strings.Contains(joined, "/home/me/acornfall/config/token") {
-		t.Errorf("the token's path is missing:\n%s", joined)
-	}
-	if strings.Count(joined, token) != 1 {
-		t.Errorf("the token appears %d times, want once:\n%s", strings.Count(joined, token), joined)
-	}
-	local := strings.Join(installClosing("127.0.0.1", 7777, "", "/home/me/acornfall/config/token"), "\n")
-	if strings.Contains(local, "token=") || !strings.Contains(local, "http://127.0.0.1:7777") {
-		t.Errorf("a loopback install prints no token:\n%s", local)
 	}
 }
 

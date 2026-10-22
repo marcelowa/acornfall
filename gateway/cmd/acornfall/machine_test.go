@@ -17,10 +17,10 @@ import (
 // world, and its containers as this machine's own. No provider and no model appear here — they
 // come from the mount, which is what lets the machine be replaced without losing the product.
 func TestTheMachineRunsTheApplianceAsItsInit(t *testing.T) {
-	start := applianceInit("/home/me/acornfall", "sekrit")
+	start := applianceInit("/home/me/acornfall")
 	for _, want := range []string{
 		"exec /usr/local/bin/acornfall",
-		"--addr 0.0.0.0:7777 --token sekrit",
+		"--addr 0.0.0.0:7777 --insecure",
 		"--root /home/me/acornfall",
 		"--home /var/lib/acornfall",
 		"--workspace /home/me/acornfall/workspaces/general",
@@ -62,16 +62,15 @@ func TestAnImageThatIsNotAnApplianceIsRefusedByName(t *testing.T) {
 	}
 }
 
-// Without a token in the mount the port answers unauthenticated, which is only acceptable
-// because it is published on loopback: the init says which of the two it is, and never both.
-func TestTheApplianceUsesTheMountsTokenOrNothing(t *testing.T) {
-	withToken := applianceInit("/home/me/acornfall", "sekrit")
-	if !strings.Contains(withToken, "--token sekrit") || strings.Contains(withToken, "--insecure") {
-		t.Errorf("a token in the mount is what the port answers with:\n%s", withToken)
+// The console asks for nothing: the init starts it with --insecure and never with a token, whatever a file
+// from an older install says (MVP — the token is gone as a requirement).
+func TestTheApplianceStartsWithNoToken(t *testing.T) {
+	start := applianceInit("/home/me/acornfall")
+	if !strings.Contains(start, "--insecure") {
+		t.Errorf("the init should say it has no authentication:\n%s", start)
 	}
-	without := applianceInit("/home/me/acornfall", "")
-	if !strings.Contains(without, "--insecure") || strings.Contains(without, "--token") {
-		t.Errorf("no token is the loopback case, and it says so:\n%s", without)
+	if strings.Contains(start, "--token") {
+		t.Errorf("the init should carry no token:\n%s", start)
 	}
 }
 
@@ -96,23 +95,17 @@ func TestTheConsoleURLIsOneABrowserCanOpen(t *testing.T) {
 	}
 }
 
-// The notice is the whole warning: silent on loopback, and never claiming there is no
-// authentication over an install that carries a token — a false warning is one people learn to skip.
+// The notice is the whole warning: silent on loopback, and on a network address it names the address and says
+// there is no authentication, which is the one thing a person should read rather than discover.
 func TestPublishingOffLoopbackSaysWhatIsTrue(t *testing.T) {
 	for _, host := range []string{"127.0.0.1", "127.0.0.2", "::1", "localhost"} {
-		for _, authenticated := range []bool{false, true} {
-			if notice := publishNotice(host, 7777, authenticated); notice != "" {
-				t.Errorf("publishing on loopback (%q) needs no notice, got %q", host, notice)
-			}
+		if notice := publishNotice(host, 7777); notice != "" {
+			t.Errorf("publishing on loopback (%q) needs no notice, got %q", host, notice)
 		}
 	}
-	open := publishNotice("0.0.0.0", 7777, false)
+	open := publishNotice("0.0.0.0", 7777)
 	if !strings.Contains(open, "0.0.0.0:7777") || !strings.Contains(open, "no authentication") {
 		t.Errorf("a wildcard publish names its host and port and the missing authentication: %q", open)
-	}
-	guarded := publishNotice("0.0.0.0", 7777, true)
-	if strings.Contains(guarded, "no authentication") || !strings.Contains(guarded, "token") {
-		t.Errorf("an install with a token does not lack authentication: %q", guarded)
 	}
 }
 
@@ -523,33 +516,27 @@ func TestReadinessIsTheMachinesOwnState(t *testing.T) {
 		want   bool
 	}{
 		{name: "a worker is up", status: http.StatusOK, body: `{"workspace":{"workerUp":true}}`, want: true},
-		{name: "a worker is up, with a token", status: http.StatusOK, body: `{"workspace":{"workerUp":true}}`, token: "sekrit", want: true},
 		{name: "no worker yet", status: http.StatusOK, body: `{"workspace":{"workerUp":false}}`},
 		{name: "a state with no workspace", status: http.StatusOK, body: `{}`},
 		{name: "not JSON", status: http.StatusOK, body: "the console is not the state"},
 		{name: "a refusal", status: http.StatusUnauthorized, body: `{"workspace":{"workerUp":true}}`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			var gotAuth string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/api/state" {
 					t.Errorf("readiness asks %s, want /api/state", r.URL.Path)
 				}
-				gotAuth = r.Header.Get("Authorization")
 				w.WriteHeader(c.status)
 				_, _ = w.Write([]byte(c.body))
 			}))
 			defer server.Close()
-			if got := machineReady(context.Background(), server.URL, c.token); got != c.want {
+			if got := machineReady(context.Background(), server.URL); got != c.want {
 				t.Errorf("machineReady = %v, want %v", got, c.want)
-			}
-			if c.token != "" && gotAuth != "Bearer "+c.token {
-				t.Errorf("the state is asked with the mount's token, got %q", gotAuth)
 			}
 		})
 	}
 	// A console that is not there at all is not ready, and asking must not hang or panic.
-	if machineReady(context.Background(), "http://127.0.0.1:1", "") {
+	if machineReady(context.Background(), "http://127.0.0.1:1") {
 		t.Error("a console that never answers is not ready")
 	}
 }

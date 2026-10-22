@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -67,11 +66,10 @@ type driverMachine struct {
 	memory string
 	port   int
 	host   string
-	token  string
 }
 
 func (d driverMachine) driver(image string) (*sandbox.LXC, error) {
-	return machineDriver(d.home, image, d.root, d.cpus, d.memory, d.port, d.host, applianceInit(d.root, d.token))
+	return machineDriver(d.home, image, d.root, d.cpus, d.memory, d.port, d.host, applianceInit(d.root))
 }
 
 func (d driverMachine) Running(ctx context.Context) (bool, error) {
@@ -534,10 +532,6 @@ func machineServe(argv []string) {
 	if err := layout.Migrate(where, log.Printf); err != nil {
 		log.Printf("machine serve: moving the old layout: %v", err)
 	}
-	token := ""
-	if contents, err := os.ReadFile(where.Token()); err == nil {
-		token = strings.TrimSpace(string(contents))
-	}
 	// Before anything else: a marker that names this binary's version is the last start never reaching
 	// ready, and the answer is the binary before it (ADR 0031).
 	rollBackSelf(resolvedHome, resolvedRoot, update.BuildVersion, os.Exit)
@@ -563,7 +557,6 @@ func machineServe(argv []string) {
 		memory: *memory,
 		port:   *port,
 		host:   *host,
-		token:  token,
 	}
 	service := &supervisor{
 		home:    resolvedHome,
@@ -590,7 +583,7 @@ func machineServe(argv []string) {
 		downloadSelf: func(ctx context.Context, tag string) ([]byte, error) {
 			return manager.DownloadSelf(ctx, tag)
 		},
-		ready: func(ctx context.Context) bool { return machineReady(ctx, console, token) },
+		ready: func(ctx context.Context) bool { return machineReady(ctx, console) },
 		exit:  os.Exit,
 	}
 	if !service.ownsSelf {

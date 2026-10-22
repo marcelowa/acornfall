@@ -7,8 +7,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -58,27 +56,18 @@ func machineInstall(argv []string) {
 		log.Printf("machine install: moving the old layout: %v", err)
 	}
 	declaration := update.ReadDeclaration(resolvedRoot)
-	host, declaredPort := declaration.Address()
+	_, declaredPort := declaration.Address()
 	if *port > 0 {
 		declaredPort = *port
 	}
-	if reachable {
-		host = "0.0.0.0"
+	// The address is the answer: reachable from another computer is 0.0.0.0, and it is the default; --local is
+	// the one that keeps it on loopback. No token either way: the console asks for nothing (MVP).
+	host := "0.0.0.0"
+	if !reachable {
+		host = "127.0.0.1"
 	}
 	declaration.Wanted = update.IntentRunning
 	declaration.Host, declaration.Port = host, declaredPort
-	if reachable {
-		// A console on a network address with no authentication is a shell anyone on that network can use,
-		// so a token that cannot be written refuses the install rather than falling back to an open port.
-		created, err := ensureToken(resolvedRoot)
-		if err != nil {
-			log.Printf("acornfall machine install: refusing a remote install: %v", err)
-			os.Exit(1)
-		}
-		if created {
-			line(os.Stdout)("fixed", "the token at "+filepath.Join(resolvedRoot, "config", "token")+", which the console now asks for")
-		}
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		log.Printf("acornfall machine install: %v", err)
@@ -102,7 +91,7 @@ func machineInstall(argv []string) {
 		binary:      binary,
 		init:        initFor(runtime.GOOS),
 		kvm:         kvmCheck,
-		machine:     driverMachine{home: resolvedHome, root: resolvedRoot, port: declaredPort, host: host, token: tokenOf(resolvedRoot)},
+		machine:     driverMachine{home: resolvedHome, root: resolvedRoot, port: declaredPort, host: host},
 	}
 	install.verify = func(ctx context.Context, cfg unitConfig) error {
 		return verifyUp(ctx, install.init, resolvedRoot, cfg, time.Sleep)
@@ -118,22 +107,9 @@ func machineInstall(argv []string) {
 		log.Printf("acornfall machine install: %v", err)
 		os.Exit(1)
 	}
-	token := ""
-	if reachable {
-		token = tokenOf(resolvedRoot)
-	}
-	for _, sentence := range installClosing(host, declaredPort, token, filepath.Join(resolvedRoot, "config", "token")) {
+	for _, sentence := range installClosing(host, declaredPort) {
 		say("", sentence)
 	}
-}
-
-// tokenOf is the console's token when the install has one, and empty on loopback.
-func tokenOf(root string) string {
-	contents, err := os.ReadFile(filepath.Join(root, "config", "token"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(contents))
 }
 
 // line prints one item of an install or a removal: a state column, then the sentence.
@@ -152,8 +128,10 @@ func stdinIsTerminal() bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-// remoteAnswer is the one question an install asks, and the flags that skip it. No terminal and no flag is a
-// refusal naming both flags: guessing a network bind is guessing a console open to the network.
+// remoteAnswer is the one question an install asks, and the flags that skip it. The default is yes — most
+// installs on a server are reached from another computer — and no terminal means the default rather than a
+// refusal: there is no token to protect any more, so a network bind is a choice a person reads about in the
+// one line the launcher prints, not a hazard to be guarded against.
 func remoteAnswer(remote, local, terminal bool) (bool, error) {
 	switch {
 	case remote && local:
@@ -163,41 +141,21 @@ func remoteAnswer(remote, local, terminal bool) (bool, error) {
 	case local:
 		return false, nil
 	case !terminal:
-		return false, errors.New("no terminal to ask whether this machine is reached from another computer: pass --local or --remote")
+		return true, nil
 	}
-	fmt.Println("Is this machine reached from another computer? [y/N]")
-	fmt.Println("  y: the console is published on 0.0.0.0 and asks for a token")
-	fmt.Println("  n: the console stays on 127.0.0.1")
+	fmt.Println("Is this machine reached from another computer? [Y/n]")
+	fmt.Println("  y: the console is published on 0.0.0.0, so another computer can open it")
+	fmt.Println("  n: the console stays on 127.0.0.1 only")
 	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && !errors.Is(err, os.ErrClosed) && answer == "" {
-		return false, fmt.Errorf("reading the answer: %w", err)
+		return true, fmt.Errorf("reading the answer: %w", err)
 	}
 	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "y", "yes":
-		return true, nil
+	case "n", "no":
+		return false, nil
 	default:
-		return false, nil
+		return true, nil
 	}
-}
-
-// ensureToken makes the console's token exist and be a token: 32 random bytes as hex, readable by its owner
-// only. It says whether it made one.
-func ensureToken(root string) (bool, error) {
-	path := filepath.Join(root, "config", "token")
-	if contents, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(contents)) != "" {
-		return false, nil
-	}
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return false, fmt.Errorf("no random bytes for a token: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return false, fmt.Errorf("cannot make room for the token at %s: %w", path, err)
-	}
-	if err := writeFileAtomic(path, []byte(hex.EncodeToString(raw)+"\n"), 0o600); err != nil {
-		return false, fmt.Errorf("cannot write the token at %s: %w", path, err)
-	}
-	return true, nil
 }
 
 // uninstaller is `machine uninstall`: it stops what runs, removes what we installed, and keeps what a person

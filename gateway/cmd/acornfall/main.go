@@ -60,9 +60,10 @@ func main() {
 
 func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornfall", flag.ContinueOnError)
-	addr := flags.String("addr", "127.0.0.1:7777", "listen address; a non-loopback address requires a token")
-	token := flags.String("token", "", "shared secret; generated and stored when a non-loopback address has none")
-	insecure := flags.Bool("insecure", false, "listen without a token (trusted network or tunnel only)")
+	addr := flags.String("addr", "127.0.0.1:7777", "listen address; a network address is reachable by whoever can route to it")
+	token := flags.String("token", "", "a shared secret to require, if you want one: without it the console asks for nothing")
+	// The default, kept as a flag because the appliance's init names it: an old command line still works.
+	insecure := flags.Bool("insecure", false, "listen without a token: the default")
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
 	home := flags.String("home", "", "the machinery folder: the engine's install and store (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
@@ -148,7 +149,10 @@ func serve(argv []string) error {
 			log.Printf("worker: %v", err)
 		}
 	}
-	guard, err := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"), where.ConfigDir(), *addr, *insecure)
+	guard := ""
+	if !*insecure {
+		guard = httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"))
+	}
 	if err != nil {
 		return err
 	}

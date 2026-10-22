@@ -3,87 +3,40 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
 // The token is the boundary for a non-loopback bind, so what it protects against and what it
 // deliberately does not are both worth pinning: a loopback bind needs nothing, and exposing
 // the port without --insecure always ends up with a token.
+// The console asks for nothing by default: on loopback and on a network address alike. The flag and the
+// environment are still a lock for whoever wants one, and the flag wins.
 func TestResolveToken(t *testing.T) {
 	cases := []struct {
 		name     string
 		explicit string
 		env      string
-		addr     string
-		insecure bool
-		want     bool
+		want     string
 	}{
-		{name: "loopback needs no token", addr: "127.0.0.1:7777"},
-		{name: "loopback with ::1 needs none", addr: "[::1]:7777"},
-		{name: "localhost needs none", addr: "localhost:7777"},
-		// TEST-NET-3, so a test fixture never carries someone's real address.
-		{name: "an address off this machine needs one", addr: "203.0.113.7:7777", want: true},
-		{name: "binding every interface needs one", addr: "0.0.0.0:7777", want: true},
-		{name: "and --insecure is how you say otherwise", addr: "0.0.0.0:7777", insecure: true},
-		{name: "a given token is used", explicit: "given", addr: "0.0.0.0:7777", want: true},
-		{name: "the environment is next", env: "from-env", addr: "203.0.113.7:7777", want: true},
-		{name: "the flag beats the environment", explicit: "given", env: "from-env", addr: "203.0.113.7:7777", want: true},
+		{name: "no flag and no environment is no token"},
+		{name: "a given token is used", explicit: "given", want: "given"},
+		{name: "the environment is next", env: "from-env", want: "from-env"},
+		{name: "the flag beats the environment", explicit: "given", env: "from-env", want: "given"},
 	}
-
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			dir := t.TempDir()
-			token, err := ResolveToken(test.explicit, test.env, dir, test.addr, test.insecure)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if (token != "") != test.want {
-				t.Fatalf("token = %q, wanted one: %v", token, test.want)
-			}
-			if test.explicit != "" && token != test.explicit {
-				t.Errorf("the flag should win, got %q", token)
-			}
-			if test.explicit == "" && test.env != "" && token != test.env {
-				t.Errorf("the environment should be used, got %q", token)
-			}
-
-			// A generated token is stored so it survives a restart, privately.
-			if token != "" && test.explicit == "" && test.env == "" {
-				path := filepath.Join(dir, "token")
-				stored, err := os.ReadFile(path)
-				if err != nil {
-					t.Fatalf("a generated token should be written to %s: %v", path, err)
-				}
-				if strings.TrimSpace(string(stored)) != token {
-					t.Errorf("the stored token should be the one in use, got %q", stored)
-				}
-				info, err := os.Stat(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if mode := info.Mode().Perm(); mode != 0o600 {
-					t.Errorf("the token file should be private, got %o", mode)
-				}
+			if got := ResolveToken(test.explicit, test.env); got != test.want {
+				t.Fatalf("token = %q, want %q", got, test.want)
 			}
 		})
 	}
 }
 
-func TestResolveTokenReusesWhatItStored(t *testing.T) {
-	dir := t.TempDir()
-	first, err := ResolveToken("", "", dir, "0.0.0.0:7777", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := ResolveToken("", "", dir, "0.0.0.0:7777", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first != second {
-		t.Errorf("a restart should not invalidate every open link: %q then %q", first, second)
+// A token file an older install left in the mount no longer turns authentication on: the file is not
+// read at all, so an upgrade does not bring back a lock nobody asked for.
+func TestAnOldTokenFileIsNotPickedUp(t *testing.T) {
+	if got := ResolveToken("", ""); got != "" {
+		t.Errorf("the default is no token, got %q", got)
 	}
 }
 

@@ -358,10 +358,9 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 	return nil
 }
 
-// installClosing is what an install tells a person to open. On a network address it is the URL with the token
-// once — the cookie keeps it after that, which is the sentence that stops someone pasting it every time — and
-// on loopback it is the address alone, because there is nothing to authenticate.
-func installClosing(host string, port int, token, tokenPath string) []string {
+// installClosing is what an install tells a person to open: the address, and — on a network address — the one
+// line that says it is reachable by whoever can route to it. There is no token: the console asks for nothing.
+func installClosing(host string, port int) []string {
 	browsable := host
 	if browsable == "" || browsable == "0.0.0.0" || browsable == "::" {
 		browsable = "127.0.0.1"
@@ -372,14 +371,10 @@ func installClosing(host string, port int, token, tokenPath string) []string {
 		}
 	}
 	url := "http://" + net.JoinHostPort(browsable, strconv.Itoa(port))
-	if token == "" {
-		return []string{"open " + url, "it is on loopback: no token, and nothing outside this machine can reach it"}
+	if host == "127.0.0.1" || host == "" || host == "::1" {
+		return []string{"open " + url, "it is on loopback: nothing outside this machine can reach it"}
 	}
-	return []string{
-		"open " + url + "/?token=" + token,
-		"the cookie keeps it after that: this browser will not ask again",
-		"the token is in " + tokenPath,
-	}
+	return []string{"open " + url, "it is reachable from this network, and it asks for no token"}
 }
 
 // writeIfDifferent writes content when the file does not already hold it, and says whether it wrote. A file
@@ -467,16 +462,12 @@ func kvmCheck() error {
 // verifyUp is the real check after an install: the unit is active, the state the console reads has been
 // written, and the console answers on the declared address.
 func verifyUp(ctx context.Context, init initSystem, root string, cfg unitConfig, sleep func(time.Duration)) error {
-	token := ""
-	if contents, err := os.ReadFile(filepath.Join(root, "config", "token")); err == nil {
-		token = strings.TrimSpace(string(contents))
-	}
 	url := consoleURL(cfg.Host, cfg.Port)
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if init.Active(ctx) {
 			if _, ok := update.ReadIs(root); ok {
-				if awaitConsole(ctx, url, token, 2*time.Second) == nil {
+				if awaitConsole(ctx, url, 2*time.Second) == nil {
 					return nil
 				}
 			}
