@@ -428,6 +428,9 @@ export function usePlatform(): Platform {
 	// The view frame does not say which conversation it belongs to, so the claim in `onView`
 	// reads the one the stream is following from here.
 	const activeIdRef = useRef<string | undefined>(undefined);
+	// Whether the first fetch ever landed. A state frame clears a failure only while this is false: after
+	// that, `failure` is the app's own (a command that failed), and a state arriving must not wipe it.
+	const readyRef = useRef(false);
 	useEffect(() => {
 		activeIdRef.current = activeId;
 	}, [activeId]);
@@ -562,6 +565,7 @@ export function usePlatform(): Platform {
 				const next = await fetchState(workspace, route.conversation);
 				if (cancelled) return;
 				setState(next);
+				readyRef.current = true;
 				setReady(true);
 				setFailure(undefined);
 			} catch (cause) {
@@ -591,12 +595,16 @@ export function usePlatform(): Platform {
 					return;
 				}
 				setState(next);
-				// A state from the stream is the console answering, which is what a failed first fetch was
-				// waiting for. Without this, a page opened while the machine was being replaced keeps its
-				// "NetworkError when attempting to fetch resource" for ever, while the app behind it has
-				// recovered — the stream reconnects on its own, the sentence does not.
-				setReady(true);
-				setFailure(undefined);
+				// The first state is the console answering, which is what a failed first fetch was waiting for:
+				// without this, a page opened while the machine was being replaced keeps its "NetworkError when
+				// attempting to fetch resource" for ever, while the app behind it has recovered — the stream
+				// reconnects on its own, the sentence does not. Only the first: after that, a failure on screen
+				// is the app's own, and a state frame is not evidence about it.
+				if (!readyRef.current) {
+					readyRef.current = true;
+					setReady(true);
+					setFailure(undefined);
+				}
 			},
 			onView: (nextView, nextSenders) => {
 				if (cancelled) return;
