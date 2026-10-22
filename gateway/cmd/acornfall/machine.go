@@ -40,6 +40,12 @@ func machineCommand(argv []string) {
 		machineDown(argv[1:])
 	case "serve":
 		machineServe(argv[1:])
+	case "install":
+		machineInstall(argv[1:])
+	case "uninstall":
+		machineUninstall(argv[1:])
+	case "purge":
+		machinePurge(argv[1:])
 	case "update":
 		machineUpdate(argv[1:])
 	case "restart":
@@ -63,6 +69,9 @@ func machineUsage() {
   acornfall machine restart  down, then up — what a person reaches for
   acornfall machine serve    keep it running, and apply the release the product asks for
   acornfall machine update   update the machine and then the host, now, without waiting
+  acornfall machine install  install the service, or repair it: safe to run twice
+  acornfall machine uninstall remove the product; your workspaces and the mount stay
+  acornfall machine purge    remove everything, with --yes: this deletes your workspaces
 
 The machine runs the appliance: the gateway and the worker inside it, with ~/acornfall mounted
 as the product (config, state, workspaces). Nothing of the product runs on the host.
@@ -134,6 +143,11 @@ func machineUp(argv []string) {
 	token := ""
 	if contents, err := os.ReadFile(where.Token()); err == nil {
 		token = strings.TrimSpace(string(contents))
+	}
+	// The address is the declaration's: a flag that was given wrote it, and a flag that was not reads it.
+	*host, *port, err = declaredAddress(resolvedRoot, flags, host, port)
+	if err != nil {
+		log.Fatalf("acornfall machine: %v", err)
 	}
 	build := func(image string) (*sandbox.LXC, error) {
 		return machineDriver(resolvedHome, image, resolvedRoot, *cpus, *memory, *port, *host, applianceInit(resolvedRoot, token))
@@ -268,6 +282,7 @@ func machineStatus(argv []string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	fmt.Println(statusAddress(resolvedRoot))
 	name := driver.MachineName()
 	if !driver.Engine().Installed() {
 		// Asking how the machine is must not install anything: a machine that was never booted
@@ -512,6 +527,11 @@ func machineUpdate(argv []string) {
 		}
 		return update.UpdateTarget(strings.TrimSpace(*tag), releases, applianceRunningVersion(resolvedHome))
 	}
+	*host, *port, err = declaredAddress(resolvedRoot, flags, host, port)
+	if err != nil {
+		log.Printf("acornfall machine update: %v", err)
+		os.Exit(1)
+	}
 	machine := driverMachine{
 		home:   resolvedHome,
 		root:   resolvedRoot,
@@ -555,6 +575,40 @@ func machineUpdate(argv []string) {
 		return
 	}
 	log.Printf("machine update: the machine runs %s and the host's binary is %s; restart the service (systemctl --user restart acornfall-machine, or launchctl kickstart) so it runs it", releaseTag, update.VersionedBinary(resolvedHome, releaseTag))
+}
+
+// statusAddress is what `machine status` says about where the console is: a person asking "where do I
+// browse" gets an answer without opening a browser, and it is the declaration's address rather than a flag's.
+func statusAddress(root string) string {
+	host, port := update.ReadDeclaration(root).Address()
+	return "console: " + consoleURL(host, port)
+}
+
+// declaredAddress is the address the console is published on: the declaration's, which the flags write when
+// they are given. The machine's address is fixed when it is created, so one file says what it is and no two
+// processes can disagree about it (ADR 0030, amended).
+func declaredAddress(root string, flags *flag.FlagSet, host *string, port *int) (string, int, error) {
+	declaration := update.ReadDeclaration(root)
+	written := false
+	flags.Visit(func(set *flag.Flag) {
+		switch set.Name {
+		case "host":
+			if trimmed := strings.TrimSpace(*host); trimmed != "" {
+				declaration.Host, written = trimmed, true
+			}
+		case "port":
+			if *port > 0 {
+				declaration.Port, written = *port, true
+			}
+		}
+	})
+	if written {
+		if err := update.WriteDeclaration(root, declaration); err != nil {
+			return "", 0, fmt.Errorf("recording the address: %w", err)
+		}
+	}
+	address, addressPort := declaration.Address()
+	return address, addressPort, nil
 }
 
 // declareMachine records what a person asked for, before the work it describes (ADR 0030, amended). A

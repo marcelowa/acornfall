@@ -1,24 +1,26 @@
 #!/bin/sh
-# Install acornfall from a release: picks the binary for this machine,
-# verifies its checksum, and runs preflight. Needs curl and sha256sum.
+# Install acornfall, or upgrade it: the release's binary is downloaded, verified, and handed to
+# `machine install`, which writes the service's unit and starts it. Run it again to upgrade — install is
+# idempotent and repairs what drifted.
 #
-#   ACORNFALL_GITHUB_TOKEN=... sh install.sh [--dir DIR] [--version TAG]
+#   sh install.sh [--remote|--local] [--version TAG]
 #
-# The repository is public, so no token is needed. The token is optional
-# and lifts GitHub's anonymous rate limit (60 requests an hour), which a
-# shared address can exhaust — the failure then is a 403, not a 404.
-# --dir defaults to ~/.acornfall/bin, --version to the latest release.
+# --remote publishes the console on 0.0.0.0 with a token; --local keeps it on 127.0.0.1. With neither,
+# `machine install` asks (and refuses when there is no terminal to ask with).
+#
+# Needs curl and sha256sum (or shasum). The repository is public, so no token is needed;
+# ACORNFALL_GITHUB_TOKEN is optional and lifts GitHub's anonymous rate limit.
 set -eu
 
-DIR="${ACORNFALL_BIN_DIR:-$HOME/.acornfall/bin}"
 VERSION=""
 TOKEN="${ACORNFALL_GITHUB_TOKEN:-}"
+PASS=""
 
 while [ $# -gt 0 ]; do
 	case "$1" in
-		--dir) DIR="$2"; shift 2 ;;
+		--remote|--local) PASS="$PASS $1"; shift ;;
 		--version) VERSION="$2"; shift 2 ;;
-		-h|--help) echo "usage: install.sh [--dir DIR] [--version TAG]"; exit 0 ;;
+		-h|--help) echo "usage: install.sh [--remote|--local] [--version TAG]"; exit 0 ;;
 		*) echo "unknown flag $1"; exit 2 ;;
 	esac
 done
@@ -50,10 +52,10 @@ api() {
 	curl -fsSL ${TOKEN:+-H "Authorization: Bearer $TOKEN"} -H "Accept: application/vnd.github+json" "$1"
 }
 
-# The tag: explicit, or the latest release. Compact the JSON first so one
-# grep answers instead of a parser nobody guaranteed.
+# The tag: explicit, or the newest release. `/releases` rather than `/releases/latest`: latest excludes
+# pre-releases, and this project ships nothing but betas.
 if [ -z "$VERSION" ]; then
-	VERSION="$(api https://api.github.com/repos/marcelowa/acornfall/releases/latest | tr -d '\n ' | grep -o '"tag_name":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
+	VERSION="$(api 'https://api.github.com/repos/marcelowa/acornfall/releases?per_page=1' | tr -d '\n ' | grep -o '"tag_name":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
 	[ -n "$VERSION" ] || { echo "install.sh: no releases yet, or GitHub is rate-limiting this host (set ACORNFALL_GITHUB_TOKEN)"; exit 2; }
 fi
 echo "install.sh: release $VERSION, asset $asset"
@@ -69,26 +71,22 @@ gateway_id="$(asset_id "$asset")"
 sums_id="$(asset_id sha256sums.txt)"
 [ -n "$gateway_id" ] && [ -n "$sums_id" ] || { echo "install.sh: $VERSION holds no $asset"; exit 2; }
 
-mkdir -p "$DIR"
+# Its own folder, removed on the way out: the binary the installer copies from here is the only thing
+# that has to survive the download.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 get() {
 	curl -fsSL ${TOKEN:+-H "Authorization: Bearer $TOKEN"} -H "Accept: application/octet-stream" \
 		"https://api.github.com/repos/marcelowa/acornfall/releases/assets/$1" -o "$2"
 }
-get "$gateway_id" "$DIR/acornfall"
-get "$sums_id" "$DIR/sha256sums.txt"
+get "$gateway_id" "$tmp/acornfall"
+get "$sums_id" "$tmp/sha256sums.txt"
 
-want="$(grep " $asset\$" "$DIR/sha256sums.txt" | cut -d" " -f1)"
+want="$(grep " $asset\$" "$tmp/sha256sums.txt" | cut -d" " -f1)"
 [ -n "$want" ] || { echo "install.sh: checksum file names no $asset"; exit 2; }
-# Names differ (acornfall vs acornfall-<os>-<arch>), hashes do not: compare.
-[ "$(sum "$DIR/acornfall")" = "$want" ] || { echo "install.sh: CHECKSUM MISMATCH, refusing"; exit 1; }
+[ "$(sum "$tmp/acornfall")" = "$want" ] || { echo "install.sh: CHECKSUM MISMATCH, refusing"; exit 1; }
 echo "install.sh: checksum OK"
-chmod +x "$DIR/acornfall"
+chmod +x "$tmp/acornfall"
 
-echo "install.sh: preflight"
-"$DIR/acornfall" doctor || true
-cat <<EOF
-install.sh: next
-  export PATH="\$PATH:$DIR"
-  acornfall machine up                  # boots the appliance machine; the console prints its URL
-  acornfall provider add opencode-go "\$OPENCODE_API_KEY"
-EOF
+# shellcheck disable=SC2086
+"$tmp/acornfall" machine install $PASS

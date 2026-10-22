@@ -548,6 +548,12 @@ func machineServe(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall machine serve: %v", err)
 	}
+	// The address is the declaration's, and a flag that was given wrote it first: one file says what the
+	// machine is, so the unit and the command cannot disagree (ADR 0030, amended).
+	*host, *port, err = declaredAddress(resolvedRoot, flags, host, port)
+	if err != nil {
+		log.Fatalf("acornfall machine serve: %v", err)
+	}
 	console := consoleURL(*host, *port)
 	manager := update.New(resolvedHome, resolvedRoot, "", "")
 	machine := driverMachine{
