@@ -36,6 +36,8 @@ func machineCommand(argv []string) {
 		machineStop(argv[1:])
 	case "down":
 		machineDown(argv[1:])
+	case "serve":
+		machineServe(argv[1:])
 	case "restart":
 		// A restart is what a person reaches for when the machine is not behaving; it is a stop and
 		// a start, with the same flags, because everything the product needs is in the mount.
@@ -53,9 +55,14 @@ func machineUsage() {
   acornfall machine status   whether it is there and running
   acornfall machine down     take it away; the mount and the appliance tarball stay
   acornfall machine restart  down, then up — what a person reaches for
+  acornfall machine serve    keep it running, and apply the release the product asks for
 
 The machine runs the appliance: the gateway and the worker inside it, with ~/acornfall mounted
 as the product (config, state, workspaces). Nothing of the product runs on the host.
+
+serve is the host service (docs/adr/0030): it starts the machine at boot, restarts it when it
+exits, and applies the release the product declares in state/host/want.json. Run it under systemd
+or launchd (scripts/units/), not from a terminal you will close.
 `)
 }
 

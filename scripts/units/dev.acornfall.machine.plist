@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The host service on launchd (docs/adr/0030): the same process and the same two duties as the
+  systemd unit beside this file — start the machine, restart it, apply the release the product asks
+  for.
+
+  This file is not installed by anything. Copy it, point ProgramArguments at your own binary, and
+  load it:
+
+    cp dev.acornfall.machine.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.acornfall.machine.plist
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.acornfall.machine</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/acornfall</string>
+		<string>machine</string>
+		<string>serve</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/tmp/acornfall-machine.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/acornfall-machine.log</string>
+</dict>
+</plist>
