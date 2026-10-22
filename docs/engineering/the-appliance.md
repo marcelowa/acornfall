@@ -13,17 +13,21 @@ host                                    the machine (one microVM per install)
 ────────────────────────────────────    ────────────────────────────────────────────────────────
 ~/acornfall            ← the mount ─────→ /acornfall/workspaces/…   the product's files
 ~/.acornfall/          the machinery     /var/lib/acornfall/         the appliance's own state
-  appliance/rootfs       the image ─────→ PID 1 = the gateway
+  appliance/<tag>.tar.gz the artifact ──→ PID 1 = the gateway, from the disk below
+  machines/<machine>/    the disk: unpacked from the artifact above
   tools/microsandbox/    the engine         └─ worker (bun) ─ lxc ─→ containers for tool calls
-  sandboxes/<machine>    the disk
+  sandboxes/<machine>    the engine's own record of the machine
 ```
 
 Three rules fall out of that picture and each one cost a bug to learn:
 
 1. **The mount holds what the product is; `~/.acornfall` holds what runs it.** Deleting the second is
    a clean install. Deleting the first is losing the product's files.
-2. **The appliance is the machine's disk.** It is not a container image the engine mounts: it is a
-   rootfs tarball, unpacked onto a real filesystem, booted with the gateway as PID 1.
+2. **The appliance is an artifact and a disk, and they are two things.** The release ships a rootfs
+   tarball, which is kept as it was verified (`appliance/<tag>.tar.gz`); the disk a machine boots
+   (`machines/<machine>/rootfs`) is unpacked from it. One directory was both, which is how a
+   previous machine's containers ended up in the next machine's image, and how a fetch replaced the
+   disk of a machine that was using it. `machine down` takes the disk and keeps the artifact.
 3. **The console and the containers are different sandboxes.** The console runs in the machine. Tools
    run in containers inside it, which have their own `/dev`, their own network and their own config.
 
@@ -31,15 +35,20 @@ Three rules fall out of that picture and each one cost a bug to learn:
 
 | Piece | What it is | Where |
 |---|---|---|
-| appliance image | Debian-stable rootfs + the gateway binary + the worker sources and its production `node_modules` | built by `scripts/build-appliance.sh`, shipped as `appliance-linux-amd64.tar.gz` (~155 MB) |
+| appliance artifact | Debian-stable rootfs + the gateway binary + the worker sources and its production `node_modules` | built by `scripts/build-appliance.sh`, shipped as `appliance-linux-amd64.tar.gz` (~155 MB), kept verified at `~/.acornfall/appliance/<tag>.tar.gz` |
+| machine disk | the artifact unpacked onto a real filesystem, the machine's to dirty | `~/.acornfall/machines/acornfall-machine-<hash>/rootfs` |
 | engine | microsandbox `0.7.6`, the hypervisor wrapper | fetched by the launcher, pinned per release |
 | machine | one microVM, booted from the image, with the mount passed in | `acornfall-machine-<hash>` |
 | gateway | PID 1 inside the machine, serves the console and the API | `--in-machine --sandbox-engine lxc` |
 | worker | bun, the agent runtime, spawns the container engine | inside the machine |
 | container | one per workspace, lxc, unprivileged by default | `acornfall-<workspace>-<hash>` |
 
-The launcher (`machine up`) does four things and no more: fetch the image if the version is new, verify
-it against the release's checksums, boot it, publish its port. Everything after that is the machine's.
+The launcher (`machine up`) does four things and no more: fetch the release's tarball if the version
+is new, verify it against the release's checksums, unpack a disk from it if the machine has none for
+that release, boot it, publish its port. Everything after that is the machine's. An install that
+already has the tarball makes a machine with no network at all, and an install from before this
+layout keeps booting its own image directory (`appliance/rootfs`), which the launcher never deletes
+and never writes into.
 
 ## Boot, and why the gateway is PID 1
 
@@ -133,14 +142,12 @@ Ceilings and shares, never reservations:
   fix is tested in minutes rather than a release cycle. On a hash the runner has not seen it **warns
   and skips the boot**: the run is green and nothing booted ([ADR 0024](../adr/0024-a-release-proves-its-own-artifact.md))
 
-Two known costs, both being worked: `publish` moves ~260 MB through artifact storage (the fix is a
-draft release each job uploads to directly), and the appliance is stored as a 193 MiB artifact per
-release, which a private repository's quota cannot hold for more than two.
+A tag is one pass now: each job uploads what it built to the release's own draft, and `publish`
+assembles the checksum file from what the producers left on the runner, so no artifact storage sits
+between two jobs on one disk. A tag took 27m43 before that and 6m57 on beta.14.
 
 ## What is still open
 
-- **image pollution**: the image is the machine's `/`, so a machine writes into the image it booted
-  from. Either a copy per machine or an engine-side overlay.
 - **engine/catalog conflict**: the Go side and the worker have shipped different engine versions, and
   a newer engine migrates the shared catalog beyond what the older one can read. One version across
   both layers, or a catalog per layer.
