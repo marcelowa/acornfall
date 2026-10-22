@@ -188,3 +188,31 @@ that is not the service: the engine, the disk, and a person. The one thing it ow
 cost is that a machine taken down is not brought back by anything but a command, so a person who
 takes a machine down and expects an update to bring it back is wrong — and the screen shows which
 release was asked for, and that nothing is running under it.
+
+## Amendment, 2026-10-22 — installing and removing are the launcher's own work
+
+The owner installed a beta by hand from a runbook, and said the obvious thing: the launcher should do all
+of it, and it should be able to remove itself completely. A runbook is the product admitting it does not
+know its own shape.
+
+1. **`machine install` installs and repairs.** One command, no flags needed: the binary under its own
+   release name and the symlink, the unit, the reload and the enable, linger so it starts at boot, the
+   declaration, and a check that the console answers. A second run finds everything right and changes
+   nothing; a run after a drift fixes it. It asks one question — is this machine reached from another
+   computer — and `--remote`/`--local` are the answer for a script. With no terminal and no flag it
+   refuses, because guessing a network bind is guessing a console open to a network.
+2. **The unit is generated, never edited.** It comes from a copy embedded in the binary and it carries
+   the declaration's address, so a hand edit is a difference the next install repairs. That is why the
+   static unit files left `scripts/units/`: a second copy is a second truth.
+3. **The address is part of the declaration.** `state/machine.json` holds `"wanted"`, `"host"` and
+   `"port"`; the flags write it and every command that boots the machine reads it. The machine's address
+   is fixed when the machine is created, so whoever created it last used to decide — with the unit and a
+   command line able to disagree. Now one file says what the machine is.
+4. **`machine uninstall` removes the product and keeps the work**: the unit, the binary, the machine and
+   its disk, the artifacts, and our bookkeeping inside the mount. The mount, the workspaces and the
+   conversations stay, and it says so. No flag makes it delete them.
+5. **`machine purge` removes everything, and nothing without `--yes`.** Without it, it prints every path
+   with what is in each and exits non-zero: that listing is the dry run, and there is no second flag. It
+   refuses the root of the file system, a home directory itself, a symlink, and any path with fewer than
+   three components. A workspace the registry names outside the mount is printed and left: it is the
+   person's own folder, and a purge that removed it would be deleting something it never installed.

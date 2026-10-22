@@ -17,22 +17,62 @@ That split is the design (ADR 0022). The mount holds what the product *is*; `~/.
 ## Install
 
 ```sh
-curl -fsSL -o acornfall-linux-amd64 \
-  https://github.com/marcelowa/acornfall/releases/latest/download/acornfall-linux-amd64
-chmod +x acornfall-linux-amd64
-./acornfall-linux-amd64 machine up
+curl -fsSL https://raw.githubusercontent.com/marcelowa/acornfall/main/scripts/install.sh | sh
 ```
 
-`machine up` fetches the appliance (~155 MB), the engine (~93 MB) and boots. It prints
-`the console is http://127.0.0.1:7777` and then `the appliance is serving on …` once the gateway inside
-answers. The console has no authentication in this build: keep it on loopback.
+That downloads the release's binary, verifies its checksum, and hands it to `machine install`, which puts
+it at `~/.acornfall/bin/acornfall-<version>`, makes `~/.acornfall/bin/acornfall` a symlink to it, writes
+the service's unit (systemd on Linux, launchd on macOS), enables it, turns on linger so it starts at boot,
+and waits until the console answers. Then open the URL it printed.
+
+**Install is idempotent, and it is also the repair.** Running it again prints `ok` for everything that is
+right and `fixed` for what drifted — a unit with the wrong `ExecStart`, a missing symlink, linger off, a
+declaration that disagrees with the unit — so an install is the answer to "my service is not starting",
+and an upgrade is the same command.
+
+It asks one question, and `--remote` / `--local` skip it:
+
+```
+Is this machine reached from another computer? [y/N]
+  y: the console is published on 0.0.0.0 and asks for a token
+  n: the console stays on 127.0.0.1
+```
+
+With no terminal to ask and no flag, it refuses and names both flags rather than guessing a network bind.
+`y` makes a token at `~/acornfall/config/token` if there is not one (32 random bytes as hex, 0600), and if
+that file cannot be written the remote install is refused — an unauthenticated console on a network
+address is the one outcome this must never produce.
+
+```
+sh install.sh --local      # the console on 127.0.0.1:7777
+sh install.sh --remote     # on 0.0.0.0, with a token
+```
+
+The answer is written into `~/acornfall/state/machine.json` beside `wanted`, and into the generated unit,
+so the two cannot disagree. `machine status` prints the address, so "where do I browse" has an answer.
+
+## Removing it
+
+```sh
+acornfall machine uninstall   # stop the service, remove the unit, the binary, the machine, the artifacts
+acornfall machine purge --yes # the same, then the mount and ~/.acornfall: nothing left
+```
+
+`uninstall` keeps the mount: the workspaces, the conversations and the files are yours, and nothing in
+this product deletes them. It does stop the machine first, and it never removes the disk of a machine that
+is running.
+
+`purge` is the only command that destroys work, so without `--yes` it removes **nothing**: it prints every
+path it would take, with what is in each, and exits non-zero. That listing is the dry run — there is no
+second flag. It runs the uninstall first when the service is still installed, and it prints any workspace
+the registry names *outside* the mount without touching it, because those are your own folders.
 
 ## Flags
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--port` | `7777` | the host port the console is published on |
-| `--host` | `127.0.0.1` | the host address to publish on. `0.0.0.0` exposes an unauthenticated console, and the launcher says so once |
+| `--port` | the declaration's, `7777` | the host port the console is published on. Given, it is written into `state/machine.json` |
+| `--host` | the declaration's, `127.0.0.1` | the host address to publish on, written the same way. `0.0.0.0` exposes an unauthenticated console unless a token is there, and `machine install --remote` makes one |
 | `--memory` | half the host | the machine's ceiling. Ceilings, not reservations |
 | `--cpus` | half the host | proportional shares, not cores held |
 | `--refresh` | off | rebuild the machine from a fresh image, keeping the mount |
@@ -41,10 +81,12 @@ answers. The console has no authentication in this build: keep it on loopback.
 
 ```sh
 machine up         # fetch if needed, boot, publish the console
-machine status     # is it there, without making anything
+machine status     # is it there, without making anything; prints the declared address
 machine stop       # graceful: the appliance is asked to shut down
 machine down       # stop and remove the machine's disk; the mount and the image stay
 machine restart    # down, then up
+machine update     # both steps of an update now, without waiting for the service's own tick
+machine serve      # the service itself: started by the unit, not by a person
 ```
 
 `stop` and `down` differ in one important way: `down` deletes the machine's disk, which is where the
