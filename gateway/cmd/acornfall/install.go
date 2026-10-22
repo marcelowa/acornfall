@@ -478,7 +478,9 @@ func kvmCheck() error {
 // "one of these three" is a sentence that sends a person to read three things.
 func verifyUp(ctx context.Context, init initSystem, root string, cfg unitConfig, now func() time.Time, sleep func(time.Duration)) error {
 	url := consoleURL(cfg.Host, cfg.Port)
-	const within = 20 * time.Second
+	// Long enough for a machine that has to be made and booted: the unit is up in a second, the state follows,
+	// and the console is the last thing — a fresh microVM takes half a minute to answer on a quiet host.
+	const within = 90 * time.Second
 	deadline := now().Add(within)
 	for {
 		failing := failingChecks(ctx, init, root, url)
