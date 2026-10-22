@@ -364,10 +364,15 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		}
 	}
 	if stale {
-		if wasRunning {
+		// Always, not only when the engine says it is running: the disk is about to be replaced, and a VM still
+		// holding the old tree is a machine that boots into nothing while its port stays bound. Removing a machine
+		// that is not there is not an error.
+		if in.machine != nil {
 			if err := in.machine.Remove(ctx); err != nil {
-				return fmt.Errorf("recreating the machine for this release: %w", err)
+				return fmt.Errorf("taking the machine away for this release: %w", err)
 			}
+		}
+		if wasRunning {
 			say(false, "recreated the machine, which was running the previous release or address")
 		}
 		// Removing the machine is not upgrading it: the body is the disk, and the disk is the release's. Without
@@ -560,6 +565,9 @@ func failingChecks(ctx context.Context, init initSystem, root, url string) []str
 		hint := ""
 		if strings.Contains(err.Error(), "401") {
 			hint = " (it is asking for a token: a machine made by an earlier release carries one in its init, so `machine down` then `machine up` makes a new one)"
+		}
+		if state, ok := update.ReadIs(root); ok && state.LastError != "" {
+			hint += " (the service says: " + state.LastError + ")"
 		}
 		failing = append(failing, "the console at "+url+" did not answer"+hint+": "+err.Error())
 	}

@@ -678,8 +678,8 @@ func TestInstallFixesAUnitThatIsNotEnabledAndAServiceThatIsNotRunning(t *testing
 	}
 }
 
-// Changing the answer later is one command: the declaration and the unit move, and a machine that is running on
-// the old address is recreated, because a machine's address is fixed when it is created.
+// Changing the answer later is one command: the declaration and the unit move, and the machine is taken away so
+// it is made again on the new address — a machine's address is fixed when it is created.
 func TestInstallingWithANewAddressRecreatesARunningMachine(t *testing.T) {
 	for _, c := range []struct {
 		name        string
@@ -687,7 +687,7 @@ func TestInstallingWithANewAddressRecreatesARunningMachine(t *testing.T) {
 		wantRemoves int
 	}{
 		{name: "running", running: true, wantRemoves: 1},
-		{name: "not running", running: false, wantRemoves: 0},
+		{name: "not running", running: false, wantRemoves: 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
@@ -739,8 +739,9 @@ func TestInstallRestartsTheServiceWhenTheBinaryChanges(t *testing.T) {
 	}
 }
 
-// A machine made by an earlier release carries that release's init — its address and its flags — so an upgrade
-// makes a new machine when one is running. A machine that is not running is left: its next start is the new one.
+// A machine made by an earlier release carries that release's init and runs on that release's disk, so an
+// upgrade takes the machine away before it replaces the disk — whether or not the engine says it is running,
+// because a VM still holding the old tree boots into nothing while its port stays bound.
 func TestInstallRecreatesTheMachineWhenTheReleaseChanges(t *testing.T) {
 	for _, c := range []struct {
 		name        string
@@ -748,7 +749,7 @@ func TestInstallRecreatesTheMachineWhenTheReleaseChanges(t *testing.T) {
 		wantRemoves int
 	}{
 		{name: "running", running: true, wantRemoves: 1},
-		{name: "not running", running: false, wantRemoves: 0},
+		{name: "not running", running: false, wantRemoves: 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
