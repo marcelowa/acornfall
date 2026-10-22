@@ -80,6 +80,10 @@ with the machine untouched, the new disk is unpacked beside the live one, and on
 machine taken away and the disk swapped in. If anything before the swap fails, the machine that is
 running stays running and `is.json` names what failed.
 
+Nothing is fetched or unpacked for a machine nobody declared running: a `gone` machine is not given
+a body either, and the request waits in `want.json` — the mount survives `down` — until a person
+says `up` and the next tick applies it.
+
 ## Boot, and why the gateway is PID 1
 
 The engine has no entrypoint for a plain rootfs, so the launcher passes an interpreter and a script:

@@ -175,9 +175,9 @@ product.
    a person drives, which is what an install was before there was a service: nothing is started, the
    product's release is still applied, and the state is still reported.
 5. **`down` is final until someone says `up`.** A machine taken down does not come back because a
-   tick happened, and it does not come back because an update arrived: an apply still makes the disk
-   (that is the release, which the product asked for) and stops before booting when no person
-   declared the machine running.
+   tick happened, and it does not come back because an update arrived. The service builds nothing for
+   a machine nobody declared running — no fetch, no unpack, no disk — and the product's request waits
+   in the mount, which `down` does not touch, until a person says `up`.
 
 **Why the service is the enforcer and never the owner.** A process that starts a machine because it
 is written to start one cannot be told to stop; a process that enforces a file can. Every question
@@ -186,5 +186,5 @@ that is not the service: the engine, the disk, and a person. The one thing it ow
 
 **The consequence worth stating plainly**: `machine down` now reports something that stays true. The
 cost is that a machine taken down is not brought back by anything but a command, so a person who
-takes a machine down and expects an update to bring it back is wrong — and the screen says which
-release was asked for and what the host did, including "left it stopped".
+takes a machine down and expects an update to bring it back is wrong — and the screen shows which
+release was asked for, and that nothing is running under it.
