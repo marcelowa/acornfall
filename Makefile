@@ -109,6 +109,8 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# The interface's unit tests are milliseconds and its bundle has to build, or CI's word
 	# about the interface means nothing.
 	cd ui && bun test
+	# The runner's sweep deletes files, so what it keeps is a rule that needs a test (S2).
+	sh scripts/cleanup-runner.test.sh
 	$(MAKE) ui-build
 	# ACORNFALL_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
 	# the same command behaves the same on a machine with /dev/kvm and in CI. -short skips the
