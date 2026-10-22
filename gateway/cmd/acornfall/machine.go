@@ -336,6 +336,12 @@ func applianceInit(root string) string {
 	// published on a network address said so once, at the address it chose.
 	auth := "--insecure"
 	return strings.Join([]string{
+		// The machine's init is started by the engine, and its environment is the engine's, not a login's:
+		// PATH arrives without /usr/sbin, where iptables and sysctl live on Debian. The shim gives the
+		// containers their way out with iptables, so a machine without it in PATH has containers that cannot
+		// start — measured: `exec: "iptables": executable file not found in $PATH`, which reads like a missing
+		// package and is a missing directory in a variable.
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export PATH;",
 		// The image is a tarball of files, links and directories: device nodes are the kernel's to
 		// make, and an unpacker run as a user cannot create them. A machine whose /dev is empty
 		// cannot attach to a container at all (measured: "open_devnull: Operation not permitted"),

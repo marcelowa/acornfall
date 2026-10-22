@@ -86,6 +86,11 @@ says `up` and the next tick applies it.
 
 ## Boot, and why the gateway is PID 1
 
+The init is started by the engine, so its environment is the engine's rather than a login's: the script sets
+`PATH` first, because `/usr/sbin` is not in the PATH it arrives with and `iptables` and `sysctl` live there on
+Debian. A machine without it has containers that cannot start, and the error reads like a missing package
+(`exec: "iptables": executable file not found in $PATH`) when it is a missing directory in a variable.
+
 The engine has no entrypoint for a plain rootfs, so the launcher passes an interpreter and a script:
 
 ```

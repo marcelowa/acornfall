@@ -19,6 +19,7 @@ import (
 func TestTheMachineRunsTheApplianceAsItsInit(t *testing.T) {
 	start := applianceInit("/home/me/acornfall")
 	for _, want := range []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export PATH;",
 		"exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 --insecure",
 		"--root /home/me/acornfall",
