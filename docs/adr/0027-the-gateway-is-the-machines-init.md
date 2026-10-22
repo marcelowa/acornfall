@@ -1,6 +1,6 @@
 # ADR 0027 — The gateway is the machine's init
 
-Status: accepted, 2026-10-22
+Status: accepted, 2026-10-22; amended 2026-10-22 — recovery is the host service, not a person
 Date: 2026-10-22
 
 ## Context
@@ -40,3 +40,15 @@ This records that it is now a choice.
 - There is no "the API is up but the machine is broken" state to support, because the API is the
   machine's init.
 - Anything that restarts the product has to be outside the machine: the launcher, or a person.
+
+## Amendment, 2026-10-22 — recovery moved out of the person's hands
+
+Decision 2 said recovery is `machine up`, run by whoever notices the console is gone, and that
+there is no restart policy "because there is nothing to apply one with". There is now: the host
+service ([ADR 0030](0030-the-host-supervises-the-machine.md)) is outside the machine, which is the
+only place a policy can live, and it starts the machine at boot, restarts it when it exits, and
+stops after a bounded number of restarts with a plain line in the log.
+
+Nothing about the machine changed: the gateway is still PID 1, one process, one log. What changed
+is who is watching it — a service that is meant to run under systemd or launchd, instead of a person
+who happens to look.

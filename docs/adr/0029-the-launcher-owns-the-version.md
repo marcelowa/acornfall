@@ -1,6 +1,6 @@
 # ADR 0029 — The launcher owns the product's version
 
-Status: accepted, 2026-10-22
+Status: accepted, 2026-10-22; amended 2026-10-22 — the update completes by asking the host
 Date: 2026-10-22
 
 ## Context
@@ -48,3 +48,28 @@ Asked on 2026-10-22 who owns the version, the answer was the launcher.
 - The two shapes now differ in exactly one place, and a flag names it.
 - The update screen's copy still speaks of updating in place: the refusal is correct, the wording is
   the remaining piece of this decision.
+
+## Amendment, 2026-10-22 — the update completes by asking the host
+
+The decision above stops at a refusal: the product may tell, and may not act. What it left open is
+the last line of Consequences — *"the update screen's copy still speaks of updating in place"* —
+and the copy that replaced it was worse: run `acornfall machine up` on the host. That is an
+instruction to leave the console, find a terminal and do the thing the button was for.
+
+The host service ([ADR 0030](0030-the-host-supervises-the-machine.md)) is the other end. The rule
+here is unchanged and the copy is not: the product still does not patch its own image — it declares
+the release it wants in `state/host/want.json`, the service fetches and verifies that release,
+makes a new disk and replaces the machine, and the console shows what the service says in
+`state/host/is.json`. "Run `machine up` on the host" stops being the answer the screen gives.
+
+What stays exactly as this ADR says:
+
+- **One owner.** The host decides and acts; `Restart` and `Rollback` inside the machine still refuse
+  with `ErrLauncherOwnsIt`, because both rewrite the binary the machine is running.
+- **The product may tell.** The check, the notes, the dot and the picker remain, and the screen now
+  has somewhere to put the answer.
+- **A product on a host keeps the 0.9 path.** Without `--in-machine` nothing about this changes.
+
+What changes is that "may not act" has a form a person can use: asking is not acting, and a
+declaration in the mount is what asking looks like when the two sides are on either side of a
+boundary that only carries files.
