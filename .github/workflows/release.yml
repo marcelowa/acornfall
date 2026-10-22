@@ -8,9 +8,11 @@
 # of a 27m43 run (measured, v0.10.0-beta.13). `prove` still downloads from the release, because
 # downloading the published bytes is its whole point (ADR 0024).
 #
-# This runner has no `gh` and no `jq` (measured: exit 127 for both), so the release is written
-# through softprops/action-gh-release — the action the previous publish step already used — and
-# the two reads are curl plus python3, which the proof job has been using all along.
+# This runner has no `gh` and no `jq` (measured: exit 127 for both, HOME=/home/runner), so the
+# release is written and read with curl plus python3 — the two tools the proof job has used all
+# along — and everything goes through the release id rather than the tag: `releases/tags/<tag>`
+# answers 404 while the release is a draft (measured on this pipeline's first tag), which is the
+# whole lifetime of every job before `publish`.
 name: release
 
 on:
@@ -28,10 +30,7 @@ jobs:
     # changed" — written here rather than in `publish`, which needed a checkout only for this.
     runs-on: [self-hosted, linux, x64]
     outputs:
-      # A draft release is not reachable at `releases/tags/<tag>`: the API answers 404 for one
-      # (measured on this pipeline's first tag, while it was the read that broke the job). The id
-      # does reach it, so it travels to the jobs that read the draft.
-      release_id: ${{ steps.release.outputs.id }}
+      release_id: ${{ steps.open.outputs.release_id }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,19 +39,38 @@ jobs:
           sparse-checkout: .github
       - name: Read the tag message
         run: git tag -l --format='%(contents)' "${{ github.ref_name }}" > release-notes.md
-      # A re-run of a tag finds the release the first attempt opened and uploads over it, which is
-      # what re-running after a fix needs: `draft: true` keeps it a draft, and the action updates
-      # an existing release instead of creating a second one.
-      - uses: softprops/action-gh-release@v2
-        id: release
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body_path: release-notes.md
-          draft: true
-          # A hyphen tag (`v0.9.35-rc.1`) is a pre-release: GitHub's own flag, which the update
-          # page's picker reads, and which keeps the newest-GA mark pointed at production.
-          prerelease: ${{ contains(github.ref_name, '-') }}
+      - name: Open the tag's draft release
+        id: open
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A re-run of a tag finds the release the first attempt opened and uploads over it, which
+          # is what re-running after a fix needs. The list is scanned because a draft is not
+          # reachable by tag, and the id it yields is what every later job uses.
+          id=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            python3 -c 'import json, sys
+          print(next((str(r["id"]) for r in json.load(sys.stdin) if r["tag_name"] == sys.argv[1]), ""))' \
+            "$GITHUB_REF_NAME")
+          if [ -z "$id" ]; then
+            # python3 writes the body: quoting a tag message into JSON by hand is how a release
+            # body becomes invalid on the first apostrophe.
+            python3 - "$GITHUB_REF_NAME" release-notes.md > release.json <<'PYEOF'
+          import json, sys
+          tag, path = sys.argv[1], sys.argv[2]
+          with open(path, encoding="utf-8") as f:
+              body = f.read()
+          print(json.dumps({"tag_name": tag, "name": tag, "body": body, "draft": True}))
+          PYEOF
+            id=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" --data-binary @release.json \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases" |
+              python3 -c 'import json, sys
+          print(json.load(sys.stdin)["id"])')
+          fi
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+          echo "$GITHUB_REF_NAME's draft release is $id"
 
   binaries:
     needs: draft
@@ -104,14 +122,27 @@ jobs:
           mkdir -p "$sums"
           sha256sum "$file" > "$sums/$file.sums"
       - name: Upload the binary to the draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
-          draft: true
-          # A re-run replaces the asset instead of failing on the name the last attempt left.
-          overwrite_files: true
-          fail_on_unmatched_files: true
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          file="acornfall-${{ matrix.goos }}-${{ matrix.goarch }}"
+          # The API answers 422 for a name it already holds, so a re-run deletes its previous
+          # upload first: this is the `--clobber` the artifacts used to give for free.
+          old=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == sys.argv[1]))' "$file")
+          for a in $old; do
+            curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$a"
+          done
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" --data-binary @"$file" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$file" \
+            > /dev/null
+          echo "uploaded $file"
 
   worker-sources:
     needs: draft
@@ -129,13 +160,25 @@ jobs:
           mkdir -p "$sums"
           sha256sum worker.tar.gz > "$sums/worker-sources.sums"
       - name: Upload the worker sources to the draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: worker.tar.gz
-          draft: true
-          overwrite_files: true
-          fail_on_unmatched_files: true
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          file=worker.tar.gz
+          old=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == sys.argv[1]))' "$file")
+          for a in $old; do
+            curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$a"
+          done
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" --data-binary @"$file" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$file" \
+            > /dev/null
+          echo "uploaded $file"
 
   appliance:
     # The image the machine boots (ADR 0022) — built inside a machine of its own. The runner stays
@@ -149,8 +192,7 @@ jobs:
       # The image runs the release binary, not a fresh build: it is the same product the host
       # ships, with the same version stamped into it. It comes from the draft release — the one
       # hand-off every job uses — so this job pulls 19 MB instead of every artifact of the run.
-      # Both lookups go through the release id, because a draft has no tag to look it up by. `-L`
-      # is safe: curl drops the Authorization header when the redirect changes host, and the
+      # `-L` is safe: curl drops the Authorization header when the redirect changes host, and the
       # storage URL it lands on is already signed.
       - name: Take the release binary the image runs
         env:
@@ -168,6 +210,7 @@ jobs:
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$id"
           cp dist/acornfall-linux-amd64 bin/acornfall
           chmod +x bin/acornfall
+          sha256sum bin/acornfall
       # The engine is the worker's own dependency, and the builder's door: installed the way the
       # product installs it, from the lockfile, so the job boots the same engine the release ships.
       - uses: oven-sh/setup-bun@v2
@@ -226,13 +269,27 @@ jobs:
           # From inside dist, so the line names the file the way the release does, with no path.
           ( cd dist && sha256sum appliance-linux-amd64.tar.gz ) > "$sums/appliance.sums"
       - name: Upload the appliance to the draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: dist/appliance-linux-amd64.tar.gz
-          draft: true
-          overwrite_files: true
-          fail_on_unmatched_files: true
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          file=appliance-linux-amd64.tar.gz
+          # 193 MiB, so this is the one upload that matters: streamed from disk by curl, with a
+          # Content-Length the runner has already paid to compute.
+          old=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == sys.argv[1]))' "$file")
+          for a in $old; do
+            curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$a"
+          done
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" --data-binary @"dist/$file" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$file" \
+            > /dev/null
+          echo "uploaded $file"
       # Leave the appliance where the next push's proof can copy it: this runner's disk, named
       # by the hash prove.yml computes. Seconds here buy minutes there.
       - name: Keep the appliance on the runner
@@ -294,17 +351,38 @@ jobs:
             echo "::error::$GITHUB_REF_NAME holds assets its checksum list does not name, or is missing one it names"
             exit 1
           fi
-      # `draft: false` uploads the checksum file to the still-draft release and only then makes it
-      # public, so the update page never sees a release whose sums are not there yet.
-      - name: Publish the draft
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: sha256sums.txt
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          overwrite_files: true
-          fail_on_unmatched_files: true
+      - name: Add the checksum file and publish the draft
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+          # A hyphen tag (`v0.9.35-rc.1`) is a pre-release: GitHub's own flag, which the update
+          # page's picker reads, and which keeps the newest-GA mark pointed at production.
+          PRERELEASE: ${{ contains(github.ref_name, '-') }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = "true" ]; then pre=true; else pre=false; fi
+          old=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == "sha256sums.txt"))')
+          for a in $old; do
+            curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$a"
+          done
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" --data-binary @sha256sums.txt \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=sha256sums.txt" \
+            > /dev/null
+          # `draft` false is the only field that changes: the body is the tag message the draft
+          # job wrote, and the checksum file is already on the release, so the update page never
+          # sees a public release whose sums are not there yet.
+          curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"draft\": false, \"prerelease\": $pre}" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" |
+            python3 -c 'import json, sys
+          d = json.load(sys.stdin)
+          print(d["tag_name"], "is public: draft=" + str(d["draft"]), "prerelease=" + str(d["prerelease"]))'
 
   # A release has to prove its own artefact boots. Two betas did not, and both were found by a
   # person installing it: the tests boot a directory, releases ship a tarball, and what tar
