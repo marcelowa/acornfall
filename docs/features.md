@@ -160,8 +160,9 @@ The chain is **conversation → its definition → this workspace → the instal
 
 ## The worker protocol
 
-The seam a second harness implements (`docs/adr/0002-layers-and-protocol.md`), tested without a
-gateway in the way: `worker/test/protocol.test.ts`.
+The seam a second harness implements (`docs/adr/0002-layers-and-protocol.md`) — an internal
+seam today, with no version negotiation ([ADR 0028](adr/0028-the-harness-protocol-is-internal.md)) —
+tested without a gateway in the way: `worker/test/protocol.test.ts`.
 
 | # | Feature |
 |---|---|
