@@ -106,6 +106,10 @@ func SwapSelf(home, root, tag string, binary []byte) error {
 	return pruneBinaries(home, tag)
 }
 
+// PointAtPath points any link at any target, atomically: the install uses it for the symlink it makes, and
+// it is the same move a rollback makes.
+func PointAtPath(link, target string) error { return pointSymlink(link, target) }
+
 // PointAt points the owned symlink at the binary for tag, and is what a rollback uses too.
 func PointAt(home, tag string) error {
 	return pointSymlink(OwnedBinary(home), VersionedBinary(home, tag))

@@ -96,3 +96,50 @@ func TestADeclarationThatCannotBeWrittenSaysWhere(t *testing.T) {
 		t.Errorf("a write failure is not a refusal of the value: %v", err)
 	}
 }
+
+// The address is part of the declaration, and writing the intent does not drop it: a machine taken down and
+// brought back keeps the address it was created with (ADR 0030, amended).
+func TestTheAddressSurvivesTakingTheMachineDown(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteDeclaration(root, Declaration{Wanted: IntentRunning, Host: "0.0.0.0", Port: 8080}); err != nil {
+		t.Fatal(err)
+	}
+	if host, port := ReadDeclaration(root).Address(); host != "0.0.0.0" || port != 8080 {
+		t.Fatalf("the declaration says %s:%d", host, port)
+	}
+	if err := WriteMachineIntent(root, IntentGone); err != nil {
+		t.Fatal(err)
+	}
+	declaration := ReadDeclaration(root)
+	if declaration.Wanted != IntentGone {
+		t.Errorf("wanted = %q", declaration.Wanted)
+	}
+	if host, port := declaration.Address(); host != "0.0.0.0" || port != 8080 {
+		t.Errorf("the address was dropped by writing the intent: %s:%d", host, port)
+	}
+}
+
+// An older file — the two fields this used to have — reads as loopback and 7777, and a value that is not an
+// address is not obeyed: a declaration is data a person typed, and a broken one must not bind a port.
+func TestAnAddressThatIsNotOneFallsBackToLoopback(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(MachineIntentPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		payload, host string
+		port          int
+	}{
+		{`{"wanted":"running"}`, "127.0.0.1", 7777},
+		{`{"wanted":"running","host":"/etc","port":70000}`, "127.0.0.1", 7777},
+		{`{"wanted":"running","host":"100.64.1.2","port":9000}`, "100.64.1.2", 9000},
+	} {
+		if err := os.WriteFile(MachineIntentPath(root), []byte(c.payload), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		host, port := ReadDeclaration(root).Address()
+		if host != c.host || port != c.port {
+			t.Errorf("%s reads as %s:%d, want %s:%d", c.payload, host, port, c.host, c.port)
+		}
+	}
+}
