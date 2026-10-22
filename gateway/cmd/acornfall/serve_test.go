@@ -2,9 +2,11 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +78,12 @@ func newSupervisor(t *testing.T, machine machineControl, apply func(context.Cont
 		image:        applianceDisk(home),
 	}
 	return service, clock, home, root
+}
+
+// declared is the gate the service passes to an apply: the person's declaration, read at the moment of
+// the apply (ADR 0030, amended).
+func declared(root string) func() bool {
+	return func() bool { return update.WantsRunning(root) }
 }
 
 // makeRunningDisk lays out the machine this install boots, as the launcher would have left it: a
@@ -393,7 +401,7 @@ func TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact(t *testing.T) {
 	if err := update.WriteMachineIntent(root, update.IntentRunning); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyRelease(context.Background(), home, root, machine, "v0.10.0-beta.14"); err == nil {
+	if err := applyRelease(context.Background(), home, machine, "v0.10.0-beta.14", declared(root), serveName); err == nil {
 		t.Fatal("a release that cannot be fetched must fail")
 	}
 	if machine.removes != 0 {
@@ -402,7 +410,7 @@ func TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact(t *testing.T) {
 	if got := applianceRunningVersion(home); got != "v0.10.0-beta.13" {
 		t.Errorf("a failed apply changed the disk: %q", got)
 	}
-	if err := applyRelease(context.Background(), home, root, machine, "../../etc/passwd"); err == nil {
+	if err := applyRelease(context.Background(), home, machine, "../../etc/passwd", declared(root), serveName); err == nil {
 		t.Error("a value that is not a release must be refused")
 	}
 	if _, err := os.Stat(filepath.Join(home, "appliance")); err == nil {
@@ -602,7 +610,7 @@ func TestAnUpdateForAGoneMachineMakesNoDisk(t *testing.T) {
 				return applianceTarball(t), nil
 			}
 			machine := &fakeMachine{running: true}
-			if err := applyRelease(context.Background(), home, root, machine, "v0.10.0-beta.14"); err != nil {
+			if err := applyRelease(context.Background(), home, machine, "v0.10.0-beta.14", declared(root), serveName); err != nil {
 				t.Fatalf("keeping a request is not a failure: %v", err)
 			}
 			if fetches != 0 {
@@ -632,7 +640,7 @@ func TestAnUpdateHeldWhileDownIsAppliedWhenTheMachineIsUp(t *testing.T) {
 	var service *supervisor
 	var clock *fakeClock
 	service, clock, home, root = newSupervisor(t, machine, func(ctx context.Context, tag string) error {
-		return applyRelease(ctx, home, root, machine, tag)
+		return applyRelease(ctx, home, machine, tag, declared(root), serveName)
 	})
 	if err := update.WriteMachineIntent(root, update.IntentGone); err != nil {
 		t.Fatal(err)
@@ -841,5 +849,71 @@ func TestABootMarkerFromAnotherVersionIsIgnored(t *testing.T) {
 	}
 	if _, found := update.ReadBootAttempt(root); found {
 		t.Error("a stale marker was left behind")
+	}
+}
+
+// A command a person types is the declaration: `machine update` records `running` before step 1, and
+// step 1 runs under no gate — without this, the person's own command was refused for not having been
+// declared by a person, and the update never started.
+func TestTheUpdateDeclaresTheMachineRunning(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	// No machine.json: nobody has declared anything, and there is nothing here the gate could read.
+	original := fetchApplianceTarball
+	t.Cleanup(func() { fetchApplianceTarball = original })
+	fetches := 0
+	fetchApplianceTarball = func(context.Context, string, string, bool) (string, error) {
+		fetches++
+		return "", errors.New("no route to the release")
+	}
+	step2 := 0
+	tag, err := machineUpdateRun(context.Background(), root,
+		func() (string, error) { return "v0.10.0-beta.15", nil },
+		false,
+		func(ctx context.Context, tag string) error {
+			return applyRelease(ctx, home, &fakeMachine{}, tag, nil, commandName)
+		},
+		func(context.Context, string) bool { return false },
+		func(context.Context, string) error {
+			step2++
+			return nil
+		},
+	)
+	if tag != "v0.10.0-beta.15" {
+		t.Errorf("the run resolved %q", tag)
+	}
+	if got := update.ReadMachineIntent(root); got != update.IntentRunning {
+		t.Errorf("the command did not declare the machine running: %q", got)
+	}
+	if fetches != 1 {
+		t.Errorf("step 1 did not run: %d fetches", fetches)
+	}
+	if step2 != 0 {
+		t.Errorf("step 2 ran without the machine being ready: %d", step2)
+	}
+	if err == nil || !strings.Contains(err.Error(), "step 1 (the machine)") {
+		t.Errorf("the fetch failure is what stopped it: %v", err)
+	}
+}
+
+// The shared apply logs with its caller's name: a person reading a line while `machine update` fails is
+// not running a service, and a sentence about one is a sentence about something else.
+func TestTheCommandDoesNotSayMachineServe(t *testing.T) {
+	var logged bytes.Buffer
+	original := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(original) })
+	// The gate refuses, which is the only line the apply prints: named for the command, it is the
+	// command's sentence.
+	if err := applyRelease(context.Background(), t.TempDir(), &fakeMachine{}, "v0.10.0-beta.15", func() bool { return false }, commandName); err != nil {
+		t.Fatal(err)
+	}
+	// The standard logger prefixes the date and the time, so the name is checked where it sits.
+	line := logged.String()
+	if !strings.Contains(line, commandName+":") {
+		t.Errorf("the line carries the caller's name: %q", line)
+	}
+	if strings.Contains(line, serveName+":") {
+		t.Errorf("a command printed a sentence about the service: %q", line)
 	}
 }

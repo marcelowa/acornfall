@@ -416,6 +416,21 @@ func updateSteps(ctx context.Context, tag string, machineOnly bool, step1 func(c
 	return nil
 }
 
+// machineUpdateRun is `machine update` between its flags and the two steps. It declares the machine
+// running before step 1 — the same write `machine up` does — because a person typing the command is the
+// declaration, and a command cannot be kept by the gate that guards the service's automatic applies. Its
+// parts are arguments so a test drives that without a hypervisor.
+func machineUpdateRun(ctx context.Context, root string, resolve func() (string, error), machineOnly bool, step1 func(context.Context, string) error, ready func(context.Context, string) bool, step2 func(context.Context, string) error) (string, error) {
+	if err := update.WriteMachineIntent(root, update.IntentRunning); err != nil {
+		return "", fmt.Errorf("recording that a person asked for a running machine: %w", err)
+	}
+	tag, err := resolve()
+	if err != nil {
+		return "", err
+	}
+	return tag, updateSteps(ctx, tag, machineOnly, step1, ready, step2)
+}
+
 // machineUpdate runs the update now, in both steps (ADR 0031).
 // It holds the same lock the service's automatic step two takes, so two updates never write the same
 // binary or the same disk.
@@ -462,13 +477,19 @@ func machineUpdate(argv []string) {
 		log.Fatalf("acornfall machine update: %v", err)
 	}
 	manager := update.New(resolvedHome, resolvedRoot, "", "")
-	releaseTag := strings.TrimSpace(*tag)
-	if releaseTag == "" {
-		release, err := manager.Check(ctx)
-		if err != nil {
-			log.Fatalf("acornfall machine update: cannot find the newest release: %v", err)
+	resolve := func() (string, error) {
+		var releases []update.Release
+		if strings.TrimSpace(*tag) == "" {
+			// The release list, not `/releases/latest`: GitHub's latest excludes pre-releases, and this
+			// project ships nothing else — a command whose job is "update me" cannot read an answer
+			// that never names the release it should move to (ADR 0031).
+			list, err := manager.List(ctx, update.MaxListLimit, true)
+			if err != nil {
+				return "", fmt.Errorf("cannot read the release list: %w", err)
+			}
+			releases = list
 		}
-		releaseTag = release.Tag
+		return update.UpdateTarget(strings.TrimSpace(*tag), releases, applianceRunningVersion(resolvedHome))
 	}
 	unlock, note, err := update.AcquireLock(resolvedRoot, time.Now())
 	if err != nil {
@@ -488,7 +509,9 @@ func machineUpdate(argv []string) {
 		token:  token,
 	}
 	step1 := func(ctx context.Context, tag string) error {
-		return applyRelease(ctx, resolvedHome, resolvedRoot, machine, tag)
+		// No gate: a person typed this command, so it is the declaration. The service's gate would
+		// otherwise refuse the person's own command for not being declared by a person.
+		return applyRelease(ctx, resolvedHome, machine, tag, nil, commandName)
 	}
 	ready := func(ctx context.Context, tag string) bool {
 		return awaitReady(ctx, consoleURL(*host, *port), token, *wait) == nil
@@ -503,7 +526,8 @@ func machineUpdate(argv []string) {
 		}
 		return update.SwapSelf(resolvedHome, resolvedRoot, tag, binary)
 	}
-	if err := updateSteps(ctx, releaseTag, *machineOnly, step1, ready, step2); err != nil {
+	releaseTag, err := machineUpdateRun(ctx, resolvedRoot, resolve, *machineOnly, step1, ready, step2)
+	if err != nil {
 		log.Fatalf("acornfall machine update: %v", err)
 	}
 	if *machineOnly {

@@ -29,6 +29,11 @@ import (
 )
 
 const (
+	// The names a log line carries. A person reading "machine serve:" while `machine update` is failing
+	// is reading about a process they are not running, and the shared apply is called by both.
+	serveName   = "machine serve"
+	commandName = "machine update"
+
 	// serveInterval is how often the service looks. A person who presses update should see the
 	// machine change within a second or two, and two small files a second are nothing.
 	serveInterval = time.Second
@@ -376,7 +381,12 @@ func applianceUp(ctx context.Context, home, tag string) (string, error) {
 // ready (ADR 0030, decision 4): the release's artifact is fetched and verified with nothing touched,
 // a new disk is unpacked beside the live one, and only then is the machine taken away and the disk
 // swapped in. Any failure before the swap leaves the machine running on the disk it has.
-func applyRelease(ctx context.Context, home, root string, machine machineControl, tag string) error {
+// applyRelease is one update of the machine. `allowed` is the declaration it runs under, passed by the
+// caller: the service applies only what a person declared in machine.json, and a command a person typed
+// passes nothing, because typing it was the declaration (ADR 0031) — a command cannot be refused for
+// not being declared by a person. `name` is the caller's, so the line a refused apply leaves is not a
+// sentence about a service printed by a command.
+func applyRelease(ctx context.Context, home string, machine machineControl, tag string, allowed func() bool, name string) error {
 	if !update.IsReleaseVersion(tag) {
 		return fmt.Errorf("%q is not a release tag", tag)
 	}
@@ -385,8 +395,8 @@ func applyRelease(ctx context.Context, home, root string, machine machineControl
 	// find 575 MB where they expected nothing (ADR 0030, amended). Nothing is lost by waiting: the
 	// request lives in the mount, which `down` does not touch, and the next tick after a person says
 	// `up` applies it.
-	if !update.WantsRunning(root) {
-		log.Printf("machine serve: keeping the request for %s; no person declared the machine running", tag)
+	if allowed != nil && !allowed() {
+		log.Printf("%s: keeping the request for %s; no person declared the machine running", name, tag)
 		return nil
 	}
 	// The release has to exist before anything is fetched: EnsureApplianceTarball asks the release
@@ -526,7 +536,9 @@ func machineServe(argv []string) {
 			return applianceUp(ctx, resolvedHome, here)
 		},
 		apply: func(ctx context.Context, wanted string) error {
-			return applyRelease(ctx, resolvedHome, resolvedRoot, machine, wanted)
+			return applyRelease(ctx, resolvedHome, machine, wanted, func() bool {
+				return update.WantsRunning(resolvedRoot)
+			}, serveName)
 		},
 		now:   time.Now,
 		image: applianceLayoutFor(resolvedHome, applianceTag(*tag), false).Image,
