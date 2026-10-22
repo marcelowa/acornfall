@@ -44,6 +44,10 @@ func (s *Server) updateStatus(w http.ResponseWriter, _ *http.Request) {
 		"backups":         s.update.Backups(),
 		"runsActive":      len(runs) > 0,
 		"runs":            runs,
+		// The host's side of an update (ADR 0030): what the product asked for, and what the host
+		// service says it is running. Absent on a host install, where the product updates itself.
+		"wanted": status.Wanted,
+		"host":   status.Host,
 	})
 }
 
@@ -193,10 +197,20 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, update.ErrNotARelease) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.updateStatus(w, r)
+	// In the appliance there is nothing to restart here: the request declared the release this
+	// install wants, and the host service replaces the machine (ADR 0030). The screen follows
+	// is.json, which the status above already carries.
+	if s.update.LauncherOwned() {
+		return
+	}
 	// One click finishes the job: the answer is on its way, then this
 	// process becomes the new binary with the same args and environment.
 	// The stream drops and the client reconnects on its own; an Exec

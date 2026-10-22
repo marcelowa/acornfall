@@ -187,13 +187,26 @@ func serve(argv []string) error {
 		WorkerDir:     worker,
 		Update: func() control.UpdateSummary {
 			status := updates.Status()
-			return control.UpdateSummary{
+			summary := control.UpdateSummary{
 				Current:         status.Current,
 				Latest:          status.Latest,
 				Available:       status.Available,
 				Failed:          status.Failed,
 				RestartRequired: status.RestartRequired,
+				Wanted:          status.Wanted,
 			}
+			if status.Host != nil {
+				// Copied across the layer boundary as this tier's own shape: control does not
+				// import the update tier, and a pointer into it would couple the two.
+				summary.Host = &control.HostState{
+					Running:   status.Host.Running,
+					Version:   status.Host.Version,
+					Service:   status.Host.Service,
+					LastError: status.Host.LastError,
+					At:        status.Host.At,
+				}
+			}
+			return summary
 		},
 		Model:   *model,
 		Sandbox: engine,

@@ -81,6 +81,21 @@ type UpdateSummary struct {
 	Available       bool   `json:"available"`
 	Failed          string `json:"failed,omitempty"`
 	RestartRequired bool   `json:"restartRequired,omitempty"`
+	// Wanted is the release the product asked the host for, and Host is what the host service says
+	// it is running (ADR 0030). Both are absent on a host install, where the product updates itself.
+	Wanted string     `json:"wanted,omitempty"`
+	Host   *HostState `json:"host,omitempty"`
+}
+
+// HostState is what the host service says about the machine (ADR 0030), as the stream carries it:
+// whether it runs, which release it is, and the last thing that went wrong. It is a copy of a file,
+// so a console that cannot see the host draws what it knows instead of failing.
+type HostState struct {
+	Running   bool   `json:"running"`
+	Version   string `json:"version"`
+	Service   string `json:"service"`
+	LastError string `json:"lastError"`
+	At        string `json:"at"`
 }
 
 // SandboxState says what the agent's tools can reach here. When Tools is false the tools

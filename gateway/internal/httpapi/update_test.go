@@ -209,21 +209,38 @@ func TestHealthNamesVersion(t *testing.T) {
 	}
 }
 
-// The screen's "update now" reaches the appliance's refusal as a conflict with the command that
-// does work, rather than as a server error or a silent success that the next boot undoes.
-func TestTheApplianceSaysWhereItsUpdatesHappen(t *testing.T) {
+// The screen's "update now" in the appliance is a declaration, not a swap (ADR 0029, ADR 0030): the
+// answer carries what was asked for, the file is in the mount, and a value the channel does not
+// carry is refused as a client error instead of a server one.
+func TestTheApplianceAsksTheHostToUpdate(t *testing.T) {
 	server, manager := updateServer(t)
 	manager.WithLauncherOwner()
-	request := httptest.NewRequest(http.MethodPost, "/api/update/apply", strings.NewReader(`{"drain":"wait"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/update/apply", strings.NewReader(`{"drain":"wait","tag":"v0.9.0"}`))
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), "machine up") {
-		t.Errorf("the refusal should name the command that does update: %q", recorder.Body.String())
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["wanted"] != "v0.9.0" {
+		t.Errorf("the answer does not carry what was asked for: %v", body["wanted"])
+	}
+	for _, refused := range []string{`{"tag":""}`, `{"tag":"../../etc/passwd"}`, `{"tag":"v1.2.3; rm -rf /"}`} {
+		request := httptest.NewRequest(http.MethodPost, "/api/update/apply", strings.NewReader(refused))
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", refused, recorder.Code)
+		}
+		if !strings.Contains(recorder.Body.String(), "not a release tag") {
+			t.Errorf("%s: the refusal should name the channel's vocabulary: %q", refused, recorder.Body.String())
+		}
 	}
 
+	// Restarting and rolling back rewrite the image this process runs, so they stay refusals.
 	rollback := httptest.NewRequest(http.MethodPost, "/api/update/rollback", strings.NewReader(`{}`))
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, rollback)
