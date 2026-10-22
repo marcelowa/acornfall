@@ -24,12 +24,16 @@ type fakeMachine struct {
 	removes    int
 	bootErr    error
 	runningErr error
+	removeErr  error
 	lastImage  string
 }
 
 func (f *fakeMachine) Running(context.Context) (bool, error) { return f.running, f.runningErr }
 
-func (f *fakeMachine) Remove(context.Context) error { f.removes++; return nil }
+func (f *fakeMachine) Remove(context.Context) error {
+	f.removes++
+	return f.removeErr
+}
 
 func (f *fakeMachine) Boot(_ context.Context, image string) error {
 	f.boots++
@@ -48,13 +52,13 @@ type fakeClock struct{ at time.Time }
 func (c *fakeClock) now() time.Time          { return c.at }
 func (c *fakeClock) advance(d time.Duration) { c.at = c.at.Add(d) }
 
-func newSupervisor(t *testing.T, machine machineControl, apply func(context.Context, string) error) (*supervisor, *fakeClock, string, string) {
+func newSupervisor(t *testing.T, machine machineControl, apply func(context.Context, string) (string, error)) (*supervisor, *fakeClock, string, string) {
 	t.Helper()
 	home := t.TempDir()
 	root := t.TempDir()
 	clock := &fakeClock{at: time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)}
 	if apply == nil {
-		apply = func(context.Context, string) error { return nil }
+		apply = func(context.Context, string) (string, error) { return "", nil }
 	}
 	// The person's declaration, unless a test says otherwise: a machine the service is meant to keep
 	// up is one somebody asked for (ADR 0030, amended).
@@ -188,11 +192,11 @@ func TestTheReleaseTheProductAsksForIsAppliedOnce(t *testing.T) {
 	machine := &fakeMachine{}
 	var applied []string
 	var home string
-	service, _, dir, root := newSupervisor(t, machine, func(_ context.Context, tag string) error {
+	service, _, dir, root := newSupervisor(t, machine, func(_ context.Context, tag string) (string, error) {
 		applied = append(applied, tag)
 		// The real apply leaves the disk for that release: the next tick must see it.
 		makeRunningDisk(t, home, tag)
-		return nil
+		return "", nil
 	})
 	home = dir
 	makeRunningDisk(t, home, "v0.10.0-beta.13")
@@ -218,9 +222,9 @@ func TestTheReleaseTheProductAsksForIsAppliedOnce(t *testing.T) {
 func TestAFailedApplyLeavesTheMachineAloneAndIsNotRetriedEverySecond(t *testing.T) {
 	machine := &fakeMachine{}
 	attempts := 0
-	service, clock, home, root := newSupervisor(t, machine, func(context.Context, string) error {
+	service, clock, home, root := newSupervisor(t, machine, func(context.Context, string) (string, error) {
 		attempts++
-		return errors.New("no route to the release")
+		return "", errors.New("no route to the release")
 	})
 	makeRunningDisk(t, home, "v0.10.0-beta.13")
 	machine.running = true
@@ -254,9 +258,9 @@ func TestAFailedApplyLeavesTheMachineAloneAndIsNotRetriedEverySecond(t *testing.
 func TestAWantThatIsNotAReleaseIsRefusedByName(t *testing.T) {
 	machine := &fakeMachine{}
 	applied := 0
-	service, _, home, root := newSupervisor(t, machine, func(context.Context, string) error {
+	service, _, home, root := newSupervisor(t, machine, func(context.Context, string) (string, error) {
 		applied++
-		return nil
+		return "", nil
 	})
 	makeRunningDisk(t, home, "v0.10.0-beta.13")
 	machine.running = true
@@ -282,9 +286,9 @@ func TestAWantThatIsNotAReleaseIsRefusedByName(t *testing.T) {
 func TestNothingWantedChangesNothing(t *testing.T) {
 	machine := &fakeMachine{}
 	applied := 0
-	service, _, home, root := newSupervisor(t, machine, func(context.Context, string) error {
+	service, _, home, root := newSupervisor(t, machine, func(context.Context, string) (string, error) {
 		applied++
-		return nil
+		return "", nil
 	})
 	_ = root
 	makeRunningDisk(t, home, "v0.10.0-beta.13")
@@ -401,7 +405,7 @@ func TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact(t *testing.T) {
 	if err := update.WriteMachineIntent(root, update.IntentRunning); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyRelease(context.Background(), home, machine, "v0.10.0-beta.14", declared(root), serveName); err == nil {
+	if _, err := applyRelease(context.Background(), home, machine, "v0.10.0-beta.14", declared(root), serveName); err == nil {
 		t.Fatal("a release that cannot be fetched must fail")
 	}
 	if machine.removes != 0 {
@@ -410,7 +414,7 @@ func TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact(t *testing.T) {
 	if got := applianceRunningVersion(home); got != "v0.10.0-beta.13" {
 		t.Errorf("a failed apply changed the disk: %q", got)
 	}
-	if err := applyRelease(context.Background(), home, machine, "../../etc/passwd", declared(root), serveName); err == nil {
+	if _, err := applyRelease(context.Background(), home, machine, "../../etc/passwd", declared(root), serveName); err == nil {
 		t.Error("a value that is not a release must be refused")
 	}
 	if _, err := os.Stat(filepath.Join(home, "appliance")); err == nil {
@@ -610,7 +614,7 @@ func TestAnUpdateForAGoneMachineMakesNoDisk(t *testing.T) {
 				return applianceTarball(t), nil
 			}
 			machine := &fakeMachine{running: true}
-			if err := applyRelease(context.Background(), home, machine, "v0.10.0-beta.14", declared(root), serveName); err != nil {
+			if _, err := applyRelease(context.Background(), home, machine, "v0.10.0-beta.14", declared(root), serveName); err != nil {
 				t.Fatalf("keeping a request is not a failure: %v", err)
 			}
 			if fetches != 0 {
@@ -639,7 +643,7 @@ func TestAnUpdateHeldWhileDownIsAppliedWhenTheMachineIsUp(t *testing.T) {
 	var root string
 	var service *supervisor
 	var clock *fakeClock
-	service, clock, home, root = newSupervisor(t, machine, func(ctx context.Context, tag string) error {
+	service, clock, home, root = newSupervisor(t, machine, func(ctx context.Context, tag string) (string, error) {
 		return applyRelease(ctx, home, machine, tag, declared(root), serveName)
 	})
 	if err := update.WriteMachineIntent(root, update.IntentGone); err != nil {
@@ -871,7 +875,8 @@ func TestTheUpdateDeclaresTheMachineRunning(t *testing.T) {
 		func() (string, error) { return "v0.10.0-beta.15", nil },
 		false,
 		func(ctx context.Context, tag string) error {
-			return applyRelease(ctx, home, &fakeMachine{}, tag, nil, commandName)
+			_, err := applyRelease(ctx, home, &fakeMachine{}, tag, nil, commandName)
+			return err
 		},
 		func(context.Context, string) bool { return false },
 		func(context.Context, string) error {
@@ -905,7 +910,7 @@ func TestTheCommandDoesNotSayMachineServe(t *testing.T) {
 	t.Cleanup(func() { log.SetOutput(original) })
 	// The gate refuses, which is the only line the apply prints: named for the command, it is the
 	// command's sentence.
-	if err := applyRelease(context.Background(), t.TempDir(), &fakeMachine{}, "v0.10.0-beta.15", func() bool { return false }, commandName); err != nil {
+	if _, err := applyRelease(context.Background(), t.TempDir(), &fakeMachine{}, "v0.10.0-beta.15", func() bool { return false }, commandName); err != nil {
 		t.Fatal(err)
 	}
 	// The standard logger prefixes the date and the time, so the name is checked where it sits.
@@ -916,4 +921,93 @@ func TestTheCommandDoesNotSayMachineServe(t *testing.T) {
 	if strings.Contains(line, serveName+":") {
 		t.Errorf("a command printed a sentence about the service: %q", line)
 	}
+}
+
+// A failed update releases its lock: an exit in the middle skips a deferred unlock, so the command exits
+// once, after the release, and a lock whose pid is gone is nobody's next problem (ADR 0031).
+func TestAFailedUpdateLeavesNoLock(t *testing.T) {
+	root := t.TempDir()
+	_, err := updateUnderLock(root, func() (string, error) {
+		return machineUpdateRun(context.Background(), root,
+			func() (string, error) { return "../../etc/passwd", nil },
+			false,
+			func(ctx context.Context, tag string) error {
+				_, applyErr := applyRelease(ctx, t.TempDir(), &fakeMachine{}, tag, nil, commandName)
+				return applyErr
+			},
+			func(context.Context, string) bool { return false },
+			func(context.Context, string) error { return nil })
+	})
+	if err == nil {
+		t.Fatal("the update should have failed")
+	}
+	if _, statErr := os.Stat(update.LockPath(root)); !os.IsNotExist(statErr) {
+		t.Errorf("a failed update left the lock behind: %v", statErr)
+	}
+}
+
+// A failed apply leaves no half a machine either: the disk it was making is taken away on every way out
+// that is not a boot.
+func TestAFailedUpdateLeavesNoPartialDisk(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		broken bool
+		remove error
+	}{
+		{name: "a broken artifact", broken: true},
+		{name: "the machine cannot be taken away", remove: errors.New("the engine is not there")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			root := t.TempDir()
+			if err := update.WriteMachineIntent(root, update.IntentRunning); err != nil {
+				t.Fatal(err)
+			}
+			original := fetchApplianceTarball
+			t.Cleanup(func() { fetchApplianceTarball = original })
+			fetchApplianceTarball = func(context.Context, string, string, bool) (string, error) {
+				if c.broken {
+					broken := filepath.Join(t.TempDir(), "broken.tar.gz")
+					if err := os.WriteFile(broken, []byte("not a tarball"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					return broken, nil
+				}
+				return applianceTarball(t), nil
+			}
+			machine := &fakeMachine{running: true, removeErr: c.remove}
+			if _, err := applyRelease(context.Background(), home, machine, "v0.10.0-beta.14", nil, commandName); err == nil {
+				t.Fatal("the apply should have failed")
+			}
+			if _, err := os.Stat(applianceDisk(home) + ".next"); !os.IsNotExist(err) {
+				t.Errorf("a half-made disk was left beside the live one: %v", err)
+			}
+			if _, err := os.Stat(applianceDisk(home)); !os.IsNotExist(err) {
+				t.Errorf("a failed apply left a disk: %v", err)
+			}
+		})
+	}
+}
+
+// The service's own apply holds the same lock, and a tick that fails releases it: the next tick must not
+// be a lock-breaking exercise.
+func TestAFailedApplyLeavesNoLockBetweenTicks(t *testing.T) {
+	machine := &fakeMachine{running: true}
+	service, clock, home, root := newSupervisor(t, machine, func(context.Context, string) (string, error) {
+		return "", errors.New("no route to the release")
+	})
+	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	if err := update.WriteWant(root, "v0.10.0-beta.14"); err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(serveInterval)
+	state := service.tick(context.Background())
+	if !strings.Contains(state.LastError, "no route to the release") {
+		t.Errorf("the failure is not in the state: %q", state.LastError)
+	}
+	if _, err := os.Stat(update.LockPath(root)); !os.IsNotExist(err) {
+		t.Errorf("a failed tick left the lock behind: %v", err)
+	}
+	clock.advance(applyRetry)
+	service.tick(context.Background())
 }

@@ -45,7 +45,10 @@ func machineCommand(argv []string) {
 	case "restart":
 		// A restart is what a person reaches for when the machine is not behaving; it is a down and
 		// an up, with the same flags, because everything the product needs is in the mount.
-		restartMachine(argv[1:], takeMachineDown, machineUp)
+		if err := restartMachine(argv[1:], takeMachineDown, machineUp); err != nil {
+			log.Printf("acornfall machine: %v", err)
+			os.Exit(1)
+		}
 	default:
 		machineUsage()
 	}
@@ -111,7 +114,9 @@ func machineUp(argv []string) {
 	// The person asked for a running machine, and it is recorded before anything that can fail: a
 	// boot interrupted half way must leave the intent, or the service would leave the machine down
 	// because it never heard what the person wanted (ADR 0030, amended).
-	declareMachine(resolvedRoot, update.IntentRunning)
+	if err := declareMachine(resolvedRoot, update.IntentRunning); err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
 	// The mount is the product, so it has to be there before the machine is: the machine mounts
 	// it, and a machine whose world is missing boots into a console with no workspaces.
 	where := layout.New(resolvedRoot, resolvedHome)
@@ -416,6 +421,22 @@ func updateSteps(ctx context.Context, tag string, machineOnly bool, step1 func(c
 	return nil
 }
 
+// updateUnderLock runs one update with the host's lock held, and returns only after the lock is gone.
+// Every way an update can fail comes back as an error and the process exits once, here: an exit inside
+// would skip the deferred release, and a lock left by a process that is gone is the next update's
+// problem (ADR 0031).
+func updateUnderLock(root string, run func() (string, error)) (string, error) {
+	unlock, note, err := update.AcquireLock(root, time.Now())
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	if note != "" {
+		log.Printf("%s: %s", commandName, note)
+	}
+	return run()
+}
+
 // machineUpdateRun is `machine update` between its flags and the two steps. It declares the machine
 // running before step 1 — the same write `machine up` does — because a person typing the command is the
 // declaration, and a command cannot be kept by the gate that guards the service's automatic applies. Its
@@ -491,14 +512,6 @@ func machineUpdate(argv []string) {
 		}
 		return update.UpdateTarget(strings.TrimSpace(*tag), releases, applianceRunningVersion(resolvedHome))
 	}
-	unlock, note, err := update.AcquireLock(resolvedRoot, time.Now())
-	if err != nil {
-		log.Fatalf("acornfall machine update: %v", err)
-	}
-	defer unlock()
-	if note != "" {
-		log.Printf("machine update: %s", note)
-	}
 	machine := driverMachine{
 		home:   resolvedHome,
 		root:   resolvedRoot,
@@ -511,7 +524,8 @@ func machineUpdate(argv []string) {
 	step1 := func(ctx context.Context, tag string) error {
 		// No gate: a person typed this command, so it is the declaration. The service's gate would
 		// otherwise refuse the person's own command for not being declared by a person.
-		return applyRelease(ctx, resolvedHome, machine, tag, nil, commandName)
+		_, err := applyRelease(ctx, resolvedHome, machine, tag, nil, commandName)
+		return err
 	}
 	ready := func(ctx context.Context, tag string) bool {
 		return awaitReady(ctx, consoleURL(*host, *port), token, *wait) == nil
@@ -526,9 +540,15 @@ func machineUpdate(argv []string) {
 		}
 		return update.SwapSelf(resolvedHome, resolvedRoot, tag, binary)
 	}
-	releaseTag, err := machineUpdateRun(ctx, resolvedRoot, resolve, *machineOnly, step1, ready, step2)
+	// The lock is released before this function returns, and the one exit below happens after it: a
+	// `log.Fatalf` here would run no deferred unlock and leave the lock behind with a dead pid, which is
+	// what the next update then had to break (ADR 0031).
+	releaseTag, err := updateUnderLock(resolvedRoot, func() (string, error) {
+		return machineUpdateRun(ctx, resolvedRoot, resolve, *machineOnly, step1, ready, step2)
+	})
 	if err != nil {
-		log.Fatalf("acornfall machine update: %v", err)
+		log.Printf("acornfall machine update: %v", err)
+		os.Exit(1)
 	}
 	if *machineOnly {
 		log.Printf("machine update: the machine runs %s; --machine-only, so the host keeps %s", releaseTag, update.BuildVersion)
@@ -540,20 +560,18 @@ func machineUpdate(argv []string) {
 // declareMachine records what a person asked for, before the work it describes (ADR 0030, amended). A
 // failure here is loud: a command that does the work without leaving the intent is a machine the
 // service will not bring back.
-func declareMachine(root string, intent update.Intent) {
-	if err := update.WriteMachineIntent(root, intent); err != nil {
-		log.Fatalf("acornfall machine: %v", err)
-	}
+func declareMachine(root string, intent update.Intent) error {
+	return update.WriteMachineIntent(root, intent)
 }
 
 // declareFromFlags is declareMachine for a command whose own flag set does not exist yet: the
 // declaration comes before the command does its work, so it reads --root out of the arguments.
-func declareFromFlags(argv []string, intent update.Intent) {
+func declareFromFlags(argv []string, intent update.Intent) error {
 	root, err := resolveRoot(rootFromFlags(argv), "")
 	if err != nil {
-		log.Fatalf("acornfall machine: %v", err)
+		return err
 	}
-	declareMachine(root, intent)
+	return declareMachine(root, intent)
 }
 
 // rootFromFlags reads --root out of a command's arguments without parsing the rest: every command
@@ -574,10 +592,13 @@ func rootFromFlags(argv []string) string {
 // machine down and up. The two halves are arguments so the intent and its order are testable without
 // a hypervisor — the down half is what writes `gone`, and a restart that declared afterwards would
 // leave the service believing a person had taken the machine down.
-func restartMachine(argv []string, down, up func([]string)) {
-	declareFromFlags(argv, update.IntentRunning)
+func restartMachine(argv []string, down, up func([]string)) error {
+	if err := declareFromFlags(argv, update.IntentRunning); err != nil {
+		return err
+	}
 	down(argv)
 	up(argv)
+	return nil
 }
 
 // applianceImageHelp is the --image flag's help in all four commands. An install has one directory
@@ -874,7 +895,9 @@ func awaitReady(ctx context.Context, url, token string, within time.Duration) er
 // service from starting a machine a person took down, which it did within a second of the next tick
 // (ADR 0030, amended).
 func machineDown(argv []string) {
-	declareFromFlags(argv, update.IntentGone)
+	if err := declareFromFlags(argv, update.IntentGone); err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
 	takeMachineDown(argv)
 }
 
@@ -928,7 +951,9 @@ func takeMachineDown(argv []string) {
 // `machine up` starts the same machine again. `down` is the stronger verb — it removes it. The
 // declaration is what keeps the service from starting it again a second later.
 func machineStop(argv []string) {
-	declareFromFlags(argv, update.IntentStopped)
+	if err := declareFromFlags(argv, update.IntentStopped); err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
 	stopMachine(argv)
 }
 
