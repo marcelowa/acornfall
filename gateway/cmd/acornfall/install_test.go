@@ -853,3 +853,24 @@ func TestInstallRecreatesAMachineFromBeforeTheTagRecord(t *testing.T) {
 		t.Errorf("a machine that does not say which release it is was kept: %d removals", machine.removes)
 	}
 }
+
+// An install does not touch a machine while another process holds the disk: the removal is inside the lock, so a
+// refused lock means nothing was taken away — not a machine removed for a disk that was never made.
+func TestAnInstallDoesNotTouchTheMachineWhenTheDiskIsLocked(t *testing.T) {
+	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+	machine := &fakeMachine{running: true}
+	fixture.install.machine = machine
+	unlock, _, err := update.AcquireLock(fixture.install.root, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if err := fixture.install.run(context.Background(), func(bool, string) {}); err == nil {
+		t.Fatal("an install must refuse while another update holds the disk")
+	} else if !strings.Contains(err.Error(), "one update at a time") {
+		t.Errorf("the refusal should say what holds it: %v", err)
+	}
+	if machine.removes != 0 {
+		t.Errorf("the machine was taken away without the disk: %d removals", machine.removes)
+	}
+}

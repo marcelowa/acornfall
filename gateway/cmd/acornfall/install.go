@@ -364,22 +364,21 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		}
 	}
 	if stale {
-		// Always, not only when the engine says it is running: the disk is about to be replaced, and a VM still
-		// holding the old tree is a machine that boots into nothing while its port stays bound. Removing a machine
-		// that is not there is not an error.
-		if in.machine != nil {
-			if err := in.machine.Remove(ctx); err != nil {
-				return fmt.Errorf("taking the machine away for this release: %w", err)
-			}
-		}
 		if wasRunning {
 			say(false, "recreated the machine, which was running the previous release or address")
 		}
-		// Removing the machine is not upgrading it: the body is the disk, and the disk is the release's. Without
-		// this, an install replaced the binary, restarted the service, removed the machine — and the service made
-		// it again from the previous release's disk, which is an upgrade that changes nothing.
+		// Removing the machine is not upgrading it: the body is the disk, and the disk is the release's. The
+		// removal goes inside the lock that makes the disk — always, not only when the engine says the machine is
+		// running — because a VM still holding the old tree is a machine that boots into nothing while its port
+		// stays bound, and the service would make the next one from the disk that was there.
 		if update.IsReleaseVersion(in.version) {
-			if _, err := applianceUp(ctx, in.home, in.root, in.version); err != nil {
+			remove := func() error {
+				if in.machine == nil {
+					return nil
+				}
+				return in.machine.Remove(ctx)
+			}
+			if _, err := applianceUp(ctx, in.home, in.root, in.version, remove); err != nil {
 				return fmt.Errorf("making the machine's disk for %s: %w", in.version, err)
 			}
 			say(false, "made the machine's disk from "+in.version)

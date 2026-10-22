@@ -190,7 +190,13 @@ func (s *supervisor) tick(ctx context.Context) update.HostState {
 		// The backoff and the cap are for a machine that should be up and keeps dying; a machine a
 		// person stopped is not a crash loop and is not asked to come back.
 		if !running && wanted {
-			running = s.start(ctx, now)
+			// A disk that is being replaced must not be booted: the process holding the lock is writing the tree
+			// this would start a machine on. It is not a failure, and the next tick asks again.
+			if update.LockHeld(s.root, now) {
+				log.Printf("machine serve: not starting the machine: an update holds the disk")
+			} else {
+				running = s.start(ctx, now)
+			}
 		}
 	}
 	version := applianceRunningVersion(s.home)
@@ -391,7 +397,7 @@ func applianceRunningVersion(home string) string {
 // applianceUp makes sure there is something to boot and says which directory it is. An install that
 // has a disk, or the image from before the layout, is left alone; one with neither is made from the
 // release this build runs, which is the same first boot `machine up` does.
-func applianceUp(ctx context.Context, home, root, tag string) (string, error) {
+func applianceUp(ctx context.Context, home, root, tag string, before func() error) (string, error) {
 	plan := applianceLayoutFor(home, tag, false)
 	if plan.Legacy || !plan.Unpack {
 		return plan.Image, nil
@@ -399,7 +405,7 @@ func applianceUp(ctx context.Context, home, root, tag string) (string, error) {
 	if tag == "" {
 		return "", fmt.Errorf("this build does not know its own version, so it cannot say which release to boot: pass --tag")
 	}
-	return makeApplianceDisk(ctx, home, root, tag, plan, false)
+	return makeApplianceDisk(ctx, home, root, tag, plan, false, before)
 }
 
 // applyRelease is one update, in the order that keeps the running machine until the new one is
@@ -569,7 +575,9 @@ func machineServe(argv []string) {
 			if here == "" {
 				here = applianceTag(*tag)
 			}
-			return applianceUp(ctx, resolvedHome, resolvedRoot, here)
+			// The service never takes a machine away to make a disk: a person's command does that, and the
+			// service only boots what is there.
+			return applianceUp(ctx, resolvedHome, resolvedRoot, here, nil)
 		},
 		apply: func(ctx context.Context, wanted string) (string, error) {
 			return applyRelease(ctx, resolvedHome, machine, wanted, func() bool {

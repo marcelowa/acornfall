@@ -347,6 +347,16 @@ func AcquireLock(root string, now time.Time) (func(), string, error) {
 	return nil, "", fmt.Errorf("cannot take %s: another process keeps taking it", path)
 }
 
+// LockHeld says another process holds the host's update lock. The service asks it before starting a machine: a
+// disk that is being replaced must not be booted, and the process replacing it is the one holding the lock.
+func LockHeld(root string, now time.Time) bool {
+	held, err := readLock(LockPath(root))
+	if err != nil {
+		return false
+	}
+	return !lockStaleFor(held, now)
+}
+
 func readLock(path string) (Lock, error) {
 	payload, err := os.ReadFile(path)
 	if err != nil {

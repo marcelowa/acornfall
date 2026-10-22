@@ -355,7 +355,7 @@ func TestAnInstallWithNothingHereIsMadeFromThisBuildsRelease(t *testing.T) {
 		fetched = tag
 		return "", errors.New("no route to the release")
 	}
-	if _, err := applianceUp(context.Background(), home, t.TempDir(), "v0.10.0-beta.14"); err == nil {
+	if _, err := applianceUp(context.Background(), home, t.TempDir(), "v0.10.0-beta.14", nil); err == nil {
 		t.Fatal("nothing here and no network must fail, not invent a machine")
 	}
 	if fetched != "v0.10.0-beta.14" {
@@ -363,7 +363,7 @@ func TestAnInstallWithNothingHereIsMadeFromThisBuildsRelease(t *testing.T) {
 	}
 
 	makeRunningDisk(t, home, "v0.10.0-beta.13")
-	image, err := applianceUp(context.Background(), home, t.TempDir(), "v0.10.0-beta.13")
+	image, err := applianceUp(context.Background(), home, t.TempDir(), "v0.10.0-beta.13", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1014,4 +1014,29 @@ func TestAFailedApplyLeavesNoLockBetweenTicks(t *testing.T) {
 	}
 	clock.advance(applyRetry)
 	service.tick(context.Background())
+}
+
+// The service does not boot a machine on a disk that is being replaced: the process holding the update lock is
+// writing the tree this would start a machine on, and a machine that boots mid-unpack is a container engine
+// writing into a directory that is being deleted.
+func TestTheServiceDoesNotBootAMachineWhileItsDiskIsBeingReplaced(t *testing.T) {
+	machine := &fakeMachine{}
+	service, clock, _, root := newSupervisor(t, machine, nil)
+	unlock, _, err := update.AcquireLock(root, clock.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := service.tick(context.Background())
+	if machine.boots != 0 {
+		t.Fatalf("the service booted a machine on a disk under replacement: %d boots", machine.boots)
+	}
+	if state.Running {
+		t.Errorf("state = %+v", state)
+	}
+	// The update finishes, and the next tick starts the machine.
+	unlock()
+	clock.advance(serveInterval)
+	if state := service.tick(context.Background()); machine.boots != 1 || !state.Running {
+		t.Errorf("the machine was not started after the disk was free: boots=%d state=%+v", machine.boots, state)
+	}
 }

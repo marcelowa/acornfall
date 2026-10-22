@@ -185,13 +185,10 @@ func machineUp(argv []string) {
 		if applianceTag(*tag) == "" {
 			log.Fatalf("acornfall machine: this build does not know its own version, so it cannot say which release the appliance comes from: pass --tag, or --image for your own tree")
 		}
-		// The disk is the machine: it is taken away *before* the tree under it changes — a running
-		// machine reading a disk that is being replaced is the shape of corruption nobody could
-		// diagnose — and the product is in the mount, so nothing of it is lost.
-		if err := driver.RemoveMachine(ctx); err != nil {
-			log.Fatalf("acornfall machine: removing the old machine: %v", err)
-		}
-		resolvedImage, err = makeApplianceDisk(ctx, resolvedHome, resolvedRoot, applianceTag(*tag), plan, *refresh)
+		// The disk is the machine: it is taken away inside the lock that makes the disk, so nothing boots the
+		// tree while it is being replaced, and the product is in the mount, so nothing of it is lost.
+		remove := func() error { return driver.RemoveMachine(ctx) }
+		resolvedImage, err = makeApplianceDisk(ctx, resolvedHome, resolvedRoot, applianceTag(*tag), plan, *refresh, remove)
 		if err != nil {
 			log.Fatalf("acornfall machine: %v", err)
 		}
@@ -717,7 +714,7 @@ func applianceLayoutFor(home, tag string, refresh bool) applianceLayout {
 // makeApplianceDisk makes the machine's disk from the release's tarball, and says which directory to
 // boot. The artifact is fetched only when it is not here: it was verified when it was written, so a
 // machine can be made from it with no network at all.
-func makeApplianceDisk(ctx context.Context, home, root, tag string, plan applianceLayout, refresh bool) (string, error) {
+func makeApplianceDisk(ctx context.Context, home, root, tag string, plan applianceLayout, refresh bool, before func() error) (string, error) {
 	// One disk at a time per host: the service's own tick and a person's install both make one, and two unpacks
 	// into one target is how a machine ends up with half an image.
 	unlock, note, err := update.AcquireLock(root, time.Now())
@@ -727,6 +724,14 @@ func makeApplianceDisk(ctx context.Context, home, root, tag string, plan applian
 	defer unlock()
 	if note != "" {
 		log.Printf("machine: %s", note)
+	}
+	// The machine goes inside the same lock as the unpack: a machine running on a disk while it is replaced is a
+	// container engine writing into a tree that is being deleted ("unlinkat .../var/lib/lxc/...: directory not
+	// empty"), which reads like a corrupt image and is two processes using one disk.
+	if before != nil {
+		if err := before(); err != nil {
+			return "", err
+		}
 	}
 	tarball, err := fetchApplianceTarball(ctx, home, tag, refresh)
 	if err != nil {
