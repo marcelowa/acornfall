@@ -63,11 +63,17 @@ func newSupervisor(t *testing.T, machine machineControl, apply func(context.Cont
 		home:    home,
 		root:    root,
 		service: "v0.10.0-beta.14",
-		machine: machine,
-		up:      func(context.Context) (string, error) { return applianceDisk(home), nil },
-		apply:   apply,
-		now:     clock.now,
-		image:   applianceDisk(home),
+		// Step 2 is off unless a test turns it on: these tests are about the machine. The ones that
+		// are about the host's own binary set these fields themselves.
+		ownsSelf:     true,
+		downloadSelf: nil,
+		ready:        nil,
+		exit:         func(int) {},
+		machine:      machine,
+		up:           func(context.Context) (string, error) { return applianceDisk(home), nil },
+		apply:        apply,
+		now:          clock.now,
+		image:        applianceDisk(home),
 	}
 	return service, clock, home, root
 }
@@ -662,5 +668,178 @@ func TestAnUpdateHeldWhileDownIsAppliedWhenTheMachineIsUp(t *testing.T) {
 	}
 	if want, err := update.ReadWant(root); err != nil || want.Version != "v0.10.0-beta.14" {
 		t.Errorf("the request was rewritten: %+v, %v", want, err)
+	}
+}
+
+// Step 2 is one condition, asked on every tick: the machine is running, its own state reports a
+// worker ready, and the release it runs is not this service's. The first tick it holds is the tick the
+// host swaps — there is no timer, no record, and no wait.
+func TestStepTwoHappensOnTheFirstReadyTick(t *testing.T) {
+	machine := &fakeMachine{running: true}
+	service, clock, home, root := newSupervisor(t, machine, nil)
+	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	service.ready = func(context.Context) bool { return true }
+	service.downloadSelf = func(context.Context, string) ([]byte, error) { return []byte("new binary"), nil }
+	exited := -1
+	service.exit = func(code int) { exited = code }
+	// One tick forward: nothing waits for a clock any more, and this is the only time that passes.
+	clock.advance(serveInterval)
+	service.tick(context.Background())
+	if exited != 0 {
+		t.Fatalf("the host did not take a ready release on the first tick: exit=%d", exited)
+	}
+	if target, err := os.Readlink(update.OwnedBinary(home)); err != nil || target != update.VersionedBinary(home, "v0.10.0-beta.13") {
+		t.Errorf("the symlink is %q, %v", target, err)
+	}
+	if attempt, found := update.ReadBootAttempt(root); !found || attempt.Tag != "v0.10.0-beta.13" {
+		t.Errorf("the marker that lets a failed start undo itself is missing: %+v, %v", attempt, found)
+	}
+}
+
+// Readiness is the gate, not time: a machine that runs but has no worker behind it has not shown the
+// release works, so the host waits and asks again next tick.
+func TestAMachineThatIsRunningButNotReadyDoesNotTakeTheHost(t *testing.T) {
+	machine := &fakeMachine{running: true}
+	service, clock, home, _ := newSupervisor(t, machine, nil)
+	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	service.ready = func(context.Context) bool { return false }
+	downloads := 0
+	service.downloadSelf = func(context.Context, string) ([]byte, error) {
+		downloads++
+		return []byte("new binary"), nil
+	}
+	exited := -1
+	service.exit = func(code int) { exited = code }
+	for range 3 {
+		clock.advance(serveInterval)
+		service.tick(context.Background())
+	}
+	if downloads != 0 || exited != -1 {
+		t.Errorf("a machine that is not ready moved the host: downloads=%d exit=%d", downloads, exited)
+	}
+}
+
+// The host does not take the release it runs: three conditions, and the third is what makes a service
+// that is already the machine's version do nothing at all.
+func TestStepTwoDoesNotRepeatForTheVersionWeRun(t *testing.T) {
+	machine := &fakeMachine{running: true}
+	service, clock, home, _ := newSupervisor(t, machine, nil)
+	// The disk is the same release this service was built from.
+	makeRunningDisk(t, home, service.service)
+	service.ready = func(context.Context) bool { return true }
+	downloads := 0
+	service.downloadSelf = func(context.Context, string) ([]byte, error) {
+		downloads++
+		return []byte("new binary"), nil
+	}
+	exited := -1
+	service.exit = func(code int) { exited = code }
+	clock.advance(serveInterval)
+	service.tick(context.Background())
+	if downloads != 0 || exited != -1 {
+		t.Errorf("the host took its own version: downloads=%d exit=%d", downloads, exited)
+	}
+}
+
+// A step 2 that fails is held like a failed apply, and named: a release that cannot be fetched is not
+// one to ask GitHub for every second.
+func TestAStepTwoThatFailsIsHeldAndSaid(t *testing.T) {
+	machine := &fakeMachine{running: true}
+	service, clock, home, _ := newSupervisor(t, machine, nil)
+	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	service.ready = func(context.Context) bool { return true }
+	attempts := 0
+	service.downloadSelf = func(context.Context, string) ([]byte, error) {
+		attempts++
+		return nil, errors.New("no route to the release")
+	}
+	exited := -1
+	service.exit = func(code int) { exited = code }
+	state := service.tick(context.Background())
+	if attempts != 1 {
+		t.Fatalf("attempts = %d", attempts)
+	}
+	if exited != -1 {
+		t.Errorf("a failed step 2 exited: %d", exited)
+	}
+	if !strings.Contains(state.LastError, "no route to the release") {
+		t.Errorf("the failure is not in the state: %q", state.LastError)
+	}
+	clock.advance(time.Second)
+	service.tick(context.Background())
+	if attempts != 1 {
+		t.Errorf("a failed step 2 was retried a second later: %d", attempts)
+	}
+	clock.advance(applyRetry)
+	service.tick(context.Background())
+	if attempts != 2 {
+		t.Errorf("a failed step 2 was not retried after its delay: %d", attempts)
+	}
+}
+
+// The service replaces only a binary it put there: started from a package manager's tree, it serves
+// and says why it will not touch itself.
+func TestTheServiceRefusesToReplaceABinaryItDidNotPutThere(t *testing.T) {
+	machine := &fakeMachine{running: true}
+	service, clock, home, _ := newSupervisor(t, machine, nil)
+	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	service.ownsSelf = false
+	service.ready = func(context.Context) bool { return true }
+	downloads := 0
+	service.downloadSelf = func(context.Context, string) ([]byte, error) {
+		downloads++
+		return []byte("new binary"), nil
+	}
+	exited := -1
+	service.exit = func(code int) { exited = code }
+	clock.advance(serveInterval)
+	state := service.tick(context.Background())
+	if downloads != 0 || exited != -1 {
+		t.Errorf("a service outside the install replaced itself: downloads=%d exit=%d", downloads, exited)
+	}
+	if !strings.Contains(state.LastError, update.OwnedBinary(home)) {
+		t.Errorf("the refusal should name the path it expects: %q", state.LastError)
+	}
+}
+
+// A marker that names this binary's version is the last start never reaching ready: the symlink goes
+// back to the binary before it and this process exits 1, which is what makes a binary that cannot
+// start undo itself instead of looping.
+func TestABootMarkerThatNamesThisBinaryGoesBack(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	if err := update.SwapSelf(home, root, "v0.10.0-beta.13", []byte("thirteen")); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.SwapSelf(home, root, "v0.10.0-beta.14", []byte("fourteen")); err != nil {
+		t.Fatal(err)
+	}
+	exited := -1
+	rollBackSelf(home, root, "v0.10.0-beta.14", func(code int) { exited = code })
+	if exited != 1 {
+		t.Fatalf("a start that found its own marker should exit 1, exited %d", exited)
+	}
+	if target, err := os.Readlink(update.OwnedBinary(home)); err != nil || target != update.VersionedBinary(home, "v0.10.0-beta.13") {
+		t.Errorf("the symlink is %q, %v", target, err)
+	}
+	if _, found := update.ReadBootAttempt(root); found {
+		t.Error("the marker was left behind")
+	}
+}
+
+// A marker another version wrote is stale: that start got somewhere, and this one continues.
+func TestABootMarkerFromAnotherVersionIsIgnored(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	if err := update.SwapSelf(home, root, "v0.10.0-beta.14", []byte("fourteen")); err != nil {
+		t.Fatal(err)
+	}
+	exited := -1
+	rollBackSelf(home, root, "v0.10.0-beta.13", func(code int) { exited = code })
+	if exited != -1 {
+		t.Errorf("another version's marker sent this one back: exit=%d", exited)
+	}
+	if _, found := update.ReadBootAttempt(root); found {
+		t.Error("a stale marker was left behind")
 	}
 }

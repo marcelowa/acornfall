@@ -12,11 +12,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -132,6 +134,24 @@ type supervisor struct {
 	upHeld time.Time
 	// lastErr is the sentence is.json carries: the last thing that went wrong, or "".
 	lastErr string
+
+	// Step 2 of an update (ADR 0031): the host takes the release the machine runs and reports ready.
+	// `ownsSelf` is whether this process is the binary the install owns — a service started from
+	// anywhere else serves and does not replace itself — and the two host-specific parts are seams,
+	// so the decision is testable without a hypervisor.
+	ownsSelf     bool
+	downloadSelf func(ctx context.Context, tag string) ([]byte, error)
+	ready        func(ctx context.Context) bool
+	exit         func(code int)
+
+	// selfHeldTag and selfHeldAt hold a release whose step 2 failed: the same delay as a failed
+	// apply, because a release that cannot be fetched is not one to ask GitHub for every second.
+	selfHeldTag string
+	selfHeldAt  time.Time
+	// selfMissing is a release with no binary for this host: logged once and never retried.
+	selfMissing string
+	// selfRefused is the one line a service that was not started through the symlink says.
+	selfRefused bool
 }
 
 // tick is one pass of the service: reconcile the intent, keep the machine running, and answer what
@@ -170,9 +190,11 @@ func (s *supervisor) tick(ctx context.Context) update.HostState {
 			running = s.start(ctx, now)
 		}
 	}
+	version := applianceRunningVersion(s.home)
+	s.reconcileSelf(ctx, now, running, version)
 	return update.HostState{
 		Running:   running,
-		Version:   applianceRunningVersion(s.home),
+		Version:   version,
 		Service:   s.service,
 		LastError: s.lastErr,
 		At:        update.StampedAt(now),
@@ -206,8 +228,78 @@ func (s *supervisor) reconcile(ctx context.Context, now time.Time) {
 	s.lastErr = ""
 	// A request kept for a machine nobody declared running is not an apply, and the log must not say
 	// it was: the next tick after `up` picks it up with no other code (ADR 0030, amended).
-	if applianceRunningVersion(s.home) == want.Version {
-		log.Printf("machine serve: applied %s; the machine runs it now", want.Version)
+	if applianceRunningVersion(s.home) != want.Version {
+		return
+	}
+	log.Printf("machine serve: applied %s; the machine runs it now", want.Version)
+}
+
+// reconcileSelf is step 2 (ADR 0031): the host takes a release the machine runs and reports ready,
+// which is a different version from the one this process runs. There is no timer and no record of
+// evidence — the condition is asked on every tick, and the first tick it holds is the tick the host
+// swaps. A machine that is running but not ready does nothing, and is asked again next tick; a
+// machine that stops does nothing at all.
+func (s *supervisor) reconcileSelf(ctx context.Context, now time.Time, running bool, version string) {
+	if s.service == "" || version == "" || s.service == version {
+		// Nothing to take: this process already runs the release the machine does.
+		return
+	}
+	if !s.ownsSelf {
+		if !s.selfRefused {
+			s.selfRefused = true
+			s.lastErr = "this service was not started through " + update.OwnedBinary(s.home) + ", so it will not replace itself"
+			log.Printf("machine serve: %s", s.lastErr)
+		}
+		return
+	}
+	// Another process may have put this release in place — `machine update` does — and then the only
+	// thing left is to restart into it.
+	if update.PointsAt(s.home, version) {
+		log.Printf("machine serve: %s is in place for the host; this process exits so the supervisor starts it", version)
+		s.exit(0)
+		return
+	}
+	if !running {
+		return
+	}
+	// Readiness is the gate, not time: the machine's own state has to report a worker ready, and a
+	// release that boots into a console with no worker behind it has not shown it works.
+	if s.ready == nil || !s.ready(ctx) {
+		return
+	}
+	if s.selfHeldTag == version && now.Sub(s.selfHeldAt) < applyRetry {
+		return
+	}
+	if s.selfMissing == version {
+		return
+	}
+	if s.downloadSelf == nil {
+		return
+	}
+	binary, err := s.downloadSelf(ctx, version)
+	if err != nil {
+		s.holdSelf(version, now, err)
+		return
+	}
+	if err := update.SwapSelf(s.home, s.root, version, binary); err != nil {
+		s.holdSelf(version, now, err)
+		return
+	}
+	log.Printf("machine serve: the machine runs %s and reports ready; the host is now %s and this process exits so the supervisor starts it", version, version)
+	s.exit(0)
+}
+
+// holdSelf keeps a failed step 2 for the same delay a failed apply gets, and says why. A release with
+// no binary for this host is not a fault to retry at all: it is logged once and held.
+func (s *supervisor) holdSelf(tag string, now time.Time, err error) {
+	sentence := "taking " + tag + " for the host: " + err.Error()
+	if errors.Is(err, update.ErrNoSelfAsset) {
+		s.selfMissing = tag
+	}
+	s.selfHeldTag, s.selfHeldAt = tag, now
+	if s.lastErr != sentence {
+		s.lastErr = sentence
+		log.Printf("machine serve: %s", sentence)
 	}
 }
 
@@ -330,6 +422,38 @@ func applyRelease(ctx context.Context, home, root string, machine machineControl
 	return machine.Boot(ctx, disk)
 }
 
+// rollBackSelf is the first thing the service does (ADR 0031): a boot marker that names the version
+// this binary runs means the previous start never reached ready, so the symlink goes back to the
+// binary before it and this process exits 1. The supervisor starts the old one; a binary that cannot
+// start at all therefore undoes itself instead of looping.
+func rollBackSelf(home, root, service string, exit func(int)) {
+	attempt, found := update.ReadBootAttempt(root)
+	if !found {
+		return
+	}
+	if attempt.Tag != service {
+		// Another version's marker: the start that wrote it got somewhere, so it is stale.
+		update.RemoveBootAttempt(root)
+		return
+	}
+	previous, err := update.PreviousBinary(home, service)
+	if err != nil || previous == "" {
+		log.Printf("machine serve: %s did not reach ready last time, and there is no earlier binary to go back to", service)
+		update.RemoveBootAttempt(root)
+		exit(1)
+		return
+	}
+	if err := update.PointAt(home, filepath.Base(previous)[len("acornfall-"):]); err != nil {
+		log.Printf("machine serve: going back to %s failed: %v", previous, err)
+		update.RemoveBootAttempt(root)
+		exit(1)
+		return
+	}
+	update.RemoveBootAttempt(root)
+	log.Printf("machine serve: %s did not reach ready last time; the host is going back to %s", service, filepath.Base(previous))
+	exit(1)
+}
+
 // machineServe runs the service until it is asked to stop. The machine keeps running when it does:
 // stopping the supervisor is not taking the machine down.
 func machineServe(argv []string) {
@@ -367,9 +491,18 @@ func machineServe(argv []string) {
 	if contents, err := os.ReadFile(where.Token()); err == nil {
 		token = strings.TrimSpace(string(contents))
 	}
+	// Before anything else: a marker that names this binary's version is the last start never reaching
+	// ready, and the answer is the binary before it (ADR 0031).
+	rollBackSelf(resolvedHome, resolvedRoot, update.BuildVersion, os.Exit)
 	if err := sandbox.NewMicrosandbox(resolvedHome).Install(ctx, log.Printf); err != nil {
 		log.Fatalf("acornfall machine serve: %v", err)
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		log.Fatalf("acornfall machine serve: %v", err)
+	}
+	console := consoleURL(*host, *port)
+	manager := update.New(resolvedHome, resolvedRoot, "", "")
 	machine := driverMachine{
 		home:   resolvedHome,
 		root:   resolvedRoot,
@@ -397,12 +530,28 @@ func machineServe(argv []string) {
 		},
 		now:   time.Now,
 		image: applianceLayoutFor(resolvedHome, applianceTag(*tag), false).Image,
+		// Step 2 (ADR 0031): the machine runs a release and reports ready, and the host takes it.
+		ownsSelf: update.OwnsSelf(executable, resolvedHome),
+		downloadSelf: func(ctx context.Context, tag string) ([]byte, error) {
+			return manager.DownloadSelf(ctx, tag)
+		},
+		ready: func(ctx context.Context) bool { return machineReady(ctx, console, token) },
+		exit:  os.Exit,
+	}
+	if !service.ownsSelf {
+		log.Printf("machine serve: this is not %s, so the host will not replace it; the service still supervises and applies the product's releases", update.OwnedBinary(resolvedHome))
 	}
 	log.Printf("machine serve: supervising %s as %s; a release the product asks for in want.json is applied, and a machine that exits comes back", sandbox.MachineName(resolvedHome), update.BuildVersion)
+	ready := false
 	for {
 		state := service.tick(ctx)
 		if err := update.WriteIs(resolvedRoot, state); err != nil {
 			log.Printf("machine serve: cannot write %s, which the console reads: %v", update.IsPath(resolvedRoot), err)
+		} else if !ready {
+			// One full tick done — the machine asked about and the state written — is the service
+			// being ready, and it is what earns the marker's removal (ADR 0031).
+			ready = true
+			update.RemoveBootAttempt(resolvedRoot)
 		}
 		select {
 		case <-ctx.Done():

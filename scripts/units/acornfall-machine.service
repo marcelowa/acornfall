@@ -1,8 +1,9 @@
 # The host service (docs/adr/0030): it starts the machine at boot, restarts it when it exits, and
 # applies the release the product asks for in ~/acornfall/state/host/want.json.
 #
-# This file is not installed by anything. Copy it where your init reads units, point ExecStart at
-# your own binary, and enable it:
+# This file is not installed by anything. Copy it where your init reads units, and enable it. ExecStart
+# is the install's own symlink (`~/.acornfall/bin/acornfall`), which is what lets the service update
+# itself: a path anywhere else is a binary it will not touch.
 #
 #   cp acornfall-machine.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
@@ -19,11 +20,19 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/acornfall machine serve
+# The symlink is the contract, not a suggestion (ADR 0031): the service replaces only the binary this
+# path names, and a service started from anywhere else refuses to update itself. Point this at the
+# install's own symlink, never at a package manager's binary.
+ExecStart=%h/.acornfall/bin/acornfall machine serve
 # A service that exits is a machine with nobody watching it, so it comes back. The machine itself is
 # supervised inside, with a cap; this is the process, and a crash there is a crash to restart.
 Restart=always
 RestartSec=2
+# A binary that cannot run at all trips this instead of restarting for ever: three starts in a minute
+# and the unit goes to failed, which is a state a person can read (ADR 0031). The service's own record
+# of a boot that never reached ready goes back to the previous binary first.
+StartLimitIntervalSec=60
+StartLimitBurst=3
 # The machine is a VM that this service starts and then leaves running. Stopping the service is not
 # taking the machine down: it handles SIGTERM and exits without touching it.
 KillSignal=SIGTERM

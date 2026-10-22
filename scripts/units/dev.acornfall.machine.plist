@@ -5,8 +5,9 @@
   systemd unit beside this file — start the machine, restart it, apply the release the product asks
   for.
 
-  This file is not installed by anything. Copy it, point ProgramArguments at your own binary, and
-  load it:
+  This file is not installed by anything. Copy it, keep ProgramArguments on the install's own
+  symlink (~/.acornfall/bin/acornfall) unless you mean the service to stop updating itself, and load
+  it:
 
     cp dev.acornfall.machine.plist ~/Library/LaunchAgents/
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.acornfall.machine.plist
@@ -17,7 +18,9 @@
 	<string>dev.acornfall.machine</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/local/bin/acornfall</string>
+		<!-- The install's own symlink, which is what lets the service update itself (ADR 0031): a
+		     binary anywhere else is one it will not replace. -->
+		<string>~/.acornfall/bin/acornfall</string>
 		<string>machine</string>
 		<string>serve</string>
 	</array>
