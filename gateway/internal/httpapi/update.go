@@ -185,7 +185,7 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.update.Apply(r.Context(), update.ApplyOptions{CleanVMs: body.CleanVMs, Drain: body.Drain, Tag: strings.TrimSpace(body.Tag)}); err != nil {
-		if errors.As(err, &update.ErrRunsActive{}) || errors.As(err, &update.ErrRestartPending{}) {
+		if errors.Is(err, update.ErrLauncherOwnsIt) || errors.As(err, &update.ErrRunsActive{}) || errors.As(err, &update.ErrRestartPending{}) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -219,6 +219,10 @@ func (s *Server) updateRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.update.Rollback(errors.New("manual rollback from the update screen")); err != nil {
+		if errors.Is(err, update.ErrLauncherOwnsIt) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

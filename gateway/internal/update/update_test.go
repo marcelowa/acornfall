@@ -1233,3 +1233,26 @@ func TestTheImageKeepsItsSymlinksAndItsLinks(t *testing.T) {
 		t.Error("a hard link should be the same file")
 	}
 }
+
+// The appliance does not update itself: the image is replaced by the launcher on the host, so an
+// update applied here would be undone by the next `machine up` — with nothing said. Every way to
+// change the version refuses, and the refusal says where the update happens.
+func TestTheApplianceRefusesToUpdateItself(t *testing.T) {
+	manager := New(t.TempDir(), t.TempDir(), "", "").WithLauncherOwner()
+	for _, c := range []struct {
+		what string
+		call func() error
+	}{
+		{"apply", func() error { return manager.Apply(context.Background(), ApplyOptions{Tag: "v0.10.0-beta.14"}) }},
+		{"restart", manager.Restart},
+		{"rollback", func() error { return manager.Rollback(errors.New("test")) }},
+	} {
+		err := c.call()
+		if !errors.Is(err, ErrLauncherOwnsIt) {
+			t.Errorf("%s: %v, want the launcher-owns-it refusal", c.what, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "machine up") {
+			t.Errorf("%s: the refusal should name the command that does update: %v", c.what, err)
+		}
+	}
+}

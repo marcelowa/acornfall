@@ -124,6 +124,11 @@ func serve(argv []string) error {
 	// The self-update tier, owned early: boot readiness (migrate, bun, worker
 	// sources) is decided before anything serves.
 	updates := update.New(dir, where.Root, "", *migrateDir)
+	if *inMachine {
+		// The image is replaced by the launcher on the host, not patched from inside it: an update
+		// applied here would be undone by the next `machine up`, with nothing said (ADR 0029).
+		updates.WithLauncherOwner()
+	}
 	if err := updates.Open(); err != nil {
 		return err
 	}

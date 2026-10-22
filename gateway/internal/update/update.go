@@ -171,6 +171,12 @@ type ApplyOptions struct {
 	Tag string
 }
 
+// ErrLauncherOwnsIt is the appliance's answer to "update me": inside the machine this process is
+// not the thing that owns its version. The image is replaced by the launcher on the host
+// (ADR 0026, ADR 0029), so an update applied here would be undone by the next `machine up` —
+// silently, which is worse than a refusal.
+var ErrLauncherOwnsIt = errors.New("this install is updated from the host: run `acornfall machine up` there, which replaces the appliance rather than patching it")
+
 // ErrRunsActive is the refusal when runs are active and drain is "wait".
 type ErrRunsActive struct{}
 
@@ -217,7 +223,11 @@ type Manager struct {
 	notesMu    sync.Mutex
 	notesCache map[string]string
 	failed     string
-	restart    bool
+
+	// launcherOwned is set when this process runs inside the machine: the launcher that replaced
+	// the image is the only thing that may change the version, and this process refuses to try.
+	launcherOwned bool
+	restart       bool
 
 	// RunsActive reports whether any conversation is running. Injected so
 	// tests need no control plane.
@@ -264,6 +274,13 @@ func New(home, root, binPath, migrateDir string) *Manager {
 		settings:    DefaultSettings(),
 		IsAdmin:     func(*http.Request) bool { return true },
 	}
+}
+
+// WithLauncherOwner says this install's version belongs to a launcher on the host: the product
+// may tell a person a release exists, and may not apply it. It is the appliance's shape (ADR 0029).
+func (m *Manager) WithLauncherOwner() *Manager {
+	m.launcherOwned = true
+	return m
 }
 
 func (m *Manager) versionPath() string       { return filepath.Join(m.home, "version") }
@@ -1042,6 +1059,9 @@ func runScript(ctx context.Context, script, home, tag string) error {
 // The process is still the old build when Apply returns: restart it, and
 // the new binary migrates at boot before serving.
 func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
+	if m.launcherOwned {
+		return ErrLauncherOwnsIt
+	}
 	if options.Drain == "" {
 		options.Drain = "wait"
 	}
@@ -1381,6 +1401,9 @@ func (m *Manager) swap(payload []byte, tag string) error {
 // Rename-based like the swap: the failed binary may still be running, and a
 // running binary cannot be overwritten, only moved aside.
 func (m *Manager) Rollback(cause error) error {
+	if m.launcherOwned {
+		return ErrLauncherOwnsIt
+	}
 	if m.binPath == "" {
 		return fmt.Errorf("rollback: no binary path")
 	}
@@ -1424,6 +1447,9 @@ func (m *Manager) Rollback(cause error) error {
 // its own. A failure keeps the old process: the screen still says
 // restartRequired and a human restarts instead.
 func (m *Manager) Restart() error {
+	if m.launcherOwned {
+		return ErrLauncherOwnsIt
+	}
 	// Workers die first: an orphan would keep serving old code past the
 	// exec, and resurrect sandboxes a clean update just wiped.
 	if m.StopWorkers != nil {

@@ -208,3 +208,26 @@ func TestHealthNamesVersion(t *testing.T) {
 		t.Fatalf("bad health body %v", body)
 	}
 }
+
+// The screen's "update now" reaches the appliance's refusal as a conflict with the command that
+// does work, rather than as a server error or a silent success that the next boot undoes.
+func TestTheApplianceSaysWhereItsUpdatesHappen(t *testing.T) {
+	server, manager := updateServer(t)
+	manager.WithLauncherOwner()
+	request := httptest.NewRequest(http.MethodPost, "/api/update/apply", strings.NewReader(`{"drain":"wait"}`))
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "machine up") {
+		t.Errorf("the refusal should name the command that does update: %q", recorder.Body.String())
+	}
+
+	rollback := httptest.NewRequest(http.MethodPost, "/api/update/rollback", strings.NewReader(`{}`))
+	recorder = httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, rollback)
+	if recorder.Code != http.StatusConflict {
+		t.Errorf("rollback status = %d, want 409", recorder.Code)
+	}
+}
