@@ -363,11 +363,22 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 			stale = true
 		}
 	}
-	if stale && wasRunning {
-		if err := in.machine.Remove(ctx); err != nil {
-			return fmt.Errorf("recreating the machine for this release: %w", err)
+	if stale {
+		if wasRunning {
+			if err := in.machine.Remove(ctx); err != nil {
+				return fmt.Errorf("recreating the machine for this release: %w", err)
+			}
+			say(false, "recreated the machine, which was running the previous release or address")
 		}
-		say(false, "recreated the machine, which was running the previous release or address")
+		// Removing the machine is not upgrading it: the body is the disk, and the disk is the release's. Without
+		// this, an install replaced the binary, restarted the service, removed the machine — and the service made
+		// it again from the previous release's disk, which is an upgrade that changes nothing.
+		if update.IsReleaseVersion(in.version) {
+			if _, err := applianceUp(ctx, in.home, in.version); err != nil {
+				return fmt.Errorf("making the machine's disk for %s: %w", in.version, err)
+			}
+			say(false, "made the machine's disk from "+in.version)
+		}
 	}
 	// The check that it is actually up: the unit active, the state written, the console answering.
 	if in.verify != nil {

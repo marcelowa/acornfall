@@ -87,6 +87,13 @@ type installFixture struct {
 
 func newInstallFixture(t *testing.T, declaration update.Declaration) installFixture {
 	t.Helper()
+	// An install that recreates a machine unpacks the release's artifact: the fetch is stubbed with a real
+	// tarball, so the disk it makes is a disk.
+	original := fetchApplianceTarball
+	t.Cleanup(func() { fetchApplianceTarball = original })
+	fetchApplianceTarball = func(context.Context, string, string, bool) (string, error) {
+		return applianceTarball(t), nil
+	}
 	userHome := t.TempDir()
 	home := filepath.Join(userHome, ".acornfall")
 	root := filepath.Join(userHome, "acornfall")
@@ -752,6 +759,11 @@ func TestInstallRecreatesTheMachineWhenTheReleaseChanges(t *testing.T) {
 			fixture.run(t)
 			if machine.removes != c.wantRemoves {
 				t.Errorf("the machine was removed %d times, want %d", machine.removes, c.wantRemoves)
+			}
+			// And the disk is this release's, whether or not the machine was running: removing the machine is not
+			// upgrading it, and the service would make the next one from the disk that was there.
+			if tag := applianceDiskTag(applianceDisk(fixture.install.home)); tag != fixture.install.version {
+				t.Errorf("the disk is %q, want %q", tag, fixture.install.version)
 			}
 		})
 	}
