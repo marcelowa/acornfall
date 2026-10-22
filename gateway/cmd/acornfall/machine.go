@@ -39,10 +39,9 @@ func machineCommand(argv []string) {
 	case "serve":
 		machineServe(argv[1:])
 	case "restart":
-		// A restart is what a person reaches for when the machine is not behaving; it is a stop and
-		// a start, with the same flags, because everything the product needs is in the mount.
-		machineDown(argv[1:])
-		machineUp(argv[1:])
+		// A restart is what a person reaches for when the machine is not behaving; it is a down and
+		// an up, with the same flags, because everything the product needs is in the mount.
+		restartMachine(argv[1:], takeMachineDown, machineUp)
 	default:
 		machineUsage()
 	}
@@ -104,6 +103,10 @@ func machineUp(argv []string) {
 		plan = applianceLayout{Image: *image}
 	}
 	resolvedImage := plan.Image
+	// The person asked for a running machine, and it is recorded before anything that can fail: a
+	// boot interrupted half way must leave the intent, or the service would leave the machine down
+	// because it never heard what the person wanted (ADR 0030, amended).
+	declareMachine(resolvedRoot, update.IntentRunning)
 	// The mount is the product, so it has to be there before the machine is: the machine mounts
 	// it, and a machine whose world is missing boots into a console with no workspaces.
 	where := layout.New(resolvedRoot, resolvedHome)
@@ -389,6 +392,49 @@ func applianceTag(tag string) string {
 	return update.BuildVersion
 }
 
+// declareMachine records what a person asked for, before the work it describes (ADR 0030, amended). A
+// failure here is loud: a command that does the work without leaving the intent is a machine the
+// service will not bring back.
+func declareMachine(root string, intent update.Intent) {
+	if err := update.WriteMachineIntent(root, intent); err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
+}
+
+// declareFromFlags is declareMachine for a command whose own flag set does not exist yet: the
+// declaration comes before the command does its work, so it reads --root out of the arguments.
+func declareFromFlags(argv []string, intent update.Intent) {
+	root, err := resolveRoot(rootFromFlags(argv), "")
+	if err != nil {
+		log.Fatalf("acornfall machine: %v", err)
+	}
+	declareMachine(root, intent)
+}
+
+// rootFromFlags reads --root out of a command's arguments without parsing the rest: every command
+// below parses its own flags, and the declaration only needs the mount.
+func rootFromFlags(argv []string) string {
+	for index, arg := range argv {
+		if arg == "--root" && index+1 < len(argv) {
+			return argv[index+1]
+		}
+		if value, found := strings.CutPrefix(arg, "--root="); found {
+			return value
+		}
+	}
+	return ""
+}
+
+// restartMachine is what `machine restart` does: declare the intent a restart means, then take the
+// machine down and up. The two halves are arguments so the intent and its order are testable without
+// a hypervisor — the down half is what writes `gone`, and a restart that declared afterwards would
+// leave the service believing a person had taken the machine down.
+func restartMachine(argv []string, down, up func([]string)) {
+	declareFromFlags(argv, update.IntentRunning)
+	down(argv)
+	up(argv)
+}
+
 // applianceImageHelp is the --image flag's help in all four commands. An install has one directory
 // the machine boots, and which one it is depends on the layout the install was made in.
 const applianceImageHelp = "the appliance image, an unpacked rootfs (default: the disk this install boots, <home>/machines/<machine>/rootfs, or <home>/appliance/rootfs for an install that has one)"
@@ -628,10 +674,19 @@ func awaitConsole(ctx context.Context, url, token string, within time.Duration) 
 	}
 }
 
-// machineDown takes the machine away. Its disk is the image and the product is in the mount, so
-// what is lost is the containers and nothing of anyone's work: the next up makes a fresh machine
-// from the same image, booting in seconds.
+// machineDown takes the machine away and records that nobody wants it back: `gone` is what stops the
+// service from starting a machine a person took down, which it did within a second of the next tick
+// (ADR 0030, amended).
 func machineDown(argv []string) {
+	declareFromFlags(argv, update.IntentGone)
+	takeMachineDown(argv)
+}
+
+// takeMachineDown is the removal without the declaration — the same down, for `restart`, which has
+// already said what it wants and must not leave `gone` behind between its two halves. Its disk is
+// the image and the product is in the mount, so what is lost is the containers and nothing of
+// anyone's work: the next up makes a fresh machine from the same image, booting in seconds.
+func takeMachineDown(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine down", flag.ContinueOnError)
 	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
 	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")
@@ -674,8 +729,14 @@ func machineDown(argv []string) {
 }
 
 // machineStop shuts the machine down and leaves it there: the record stays, the image stays, and
-// `machine up` starts the same machine again. `down` is the stronger verb — it removes it.
+// `machine up` starts the same machine again. `down` is the stronger verb — it removes it. The
+// declaration is what keeps the service from starting it again a second later.
 func machineStop(argv []string) {
+	declareFromFlags(argv, update.IntentStopped)
+	stopMachine(argv)
+}
+
+func stopMachine(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine stop", flag.ContinueOnError)
 	home := flags.String("home", "", "the machinery folder (default: ~/.acornfall)")
 	root := flags.String("root", "", "the folder the machine mounts (default: ~/acornfall)")

@@ -52,6 +52,11 @@ func newSupervisor(t *testing.T, machine machineControl, apply func(context.Cont
 	if apply == nil {
 		apply = func(context.Context, string) error { return nil }
 	}
+	// The person's declaration, unless a test says otherwise: a machine the service is meant to keep
+	// up is one somebody asked for (ADR 0030, amended).
+	if err := update.WriteMachineIntent(root, update.IntentRunning); err != nil {
+		t.Fatal(err)
+	}
 	service := &supervisor{
 		home:    home,
 		root:    root,
@@ -374,7 +379,7 @@ func TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact(t *testing.T) {
 		return "", errors.New("no route to the release")
 	}
 	machine := &fakeMachine{running: true}
-	if err := applyRelease(context.Background(), home, machine, "v0.10.0-beta.14"); err == nil {
+	if err := applyRelease(context.Background(), home, t.TempDir(), machine, "v0.10.0-beta.14"); err == nil {
 		t.Fatal("a release that cannot be fetched must fail")
 	}
 	if machine.removes != 0 {
@@ -383,10 +388,144 @@ func TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact(t *testing.T) {
 	if got := applianceRunningVersion(home); got != "v0.10.0-beta.13" {
 		t.Errorf("a failed apply changed the disk: %q", got)
 	}
-	if err := applyRelease(context.Background(), home, machine, "../../etc/passwd"); err == nil {
+	if err := applyRelease(context.Background(), home, t.TempDir(), machine, "../../etc/passwd"); err == nil {
 		t.Error("a value that is not a release must be refused")
 	}
 	if _, err := os.Stat(filepath.Join(home, "appliance")); err == nil {
 		t.Errorf("a refused apply touched the artifact folder")
+	}
+}
+
+// The person's declaration is the only thing that says whether a machine should exist, and `machine
+// down` writes it before it removes anything. The service read no such file when it started the
+// machine again a second after a person took it down, which made `down` a lie whenever it ran.
+func TestDownIsNotUndoneByTheService(t *testing.T) {
+	machine := &fakeMachine{}
+	service, _, _, root := newSupervisor(t, machine, nil)
+	if err := update.WriteMachineIntent(root, update.IntentGone); err != nil {
+		t.Fatal(err)
+	}
+	state := service.tick(context.Background())
+	if machine.boots != 0 {
+		t.Fatalf("a machine a person took down was started: %d boots", machine.boots)
+	}
+	if state.Running {
+		t.Errorf("the state claims a running machine: %+v", state)
+	}
+	// And it stays that way: the next tick is not a second opinion.
+	service.tick(context.Background())
+	if machine.boots != 0 {
+		t.Errorf("the second tick started it: %d boots", machine.boots)
+	}
+}
+
+// The same for `stop`: the record and the disk stay, and the service leaves it stopped.
+func TestStopIsNotUndoneByTheService(t *testing.T) {
+	machine := &fakeMachine{}
+	service, _, home, root := newSupervisor(t, machine, nil)
+	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	if err := update.WriteMachineIntent(root, update.IntentStopped); err != nil {
+		t.Fatal(err)
+	}
+	state := service.tick(context.Background())
+	if machine.boots != 0 {
+		t.Fatalf("a stopped machine was started: %d boots", machine.boots)
+	}
+	if state.Running || state.Version != "v0.10.0-beta.13" {
+		t.Errorf("a stopped machine still says what it is, and is not running: %+v", state)
+	}
+}
+
+// A declaration of `running` is what the service acts on: the machine comes up, and it comes back
+// after an exit because the file still says so.
+func TestTheServiceStartsAMachineThatIsPinned(t *testing.T) {
+	machine := &fakeMachine{}
+	service, clock, _, _ := newSupervisor(t, machine, nil)
+	state := service.tick(context.Background())
+	if machine.boots != 1 || !state.Running {
+		t.Fatalf("a machine declared running was not started: boots=%d state=%+v", machine.boots, state)
+	}
+	machine.running = false
+	clock.advance(restartCap)
+	if state := service.tick(context.Background()); machine.boots != 2 || !state.Running {
+		t.Errorf("the pin did not bring it back: boots=%d state=%+v", machine.boots, state)
+	}
+}
+
+// No file is a host where a person drives, which is what an install was before there was a service:
+// the machine is neither made nor started, and nothing is reported as broken.
+func TestNoDeclarationStartsNothing(t *testing.T) {
+	machine := &fakeMachine{}
+	service, _, home, root := newSupervisor(t, machine, nil)
+	if err := os.Remove(update.MachineIntentPath(root)); err != nil {
+		t.Fatal(err)
+	}
+	state := service.tick(context.Background())
+	if machine.boots != 0 {
+		t.Errorf("a host with no declaration was started by the service: %d boots", machine.boots)
+	}
+	if state.Running {
+		t.Errorf("state = %+v", state)
+	}
+	if state.LastError != "" {
+		t.Errorf("no declaration is not an error: %q", state.LastError)
+	}
+	if _, err := os.Stat(applianceDisk(home)); err == nil {
+		t.Errorf("the service made a disk nobody asked for")
+	}
+}
+
+// A file the service cannot read is the same answer as no file: nothing is started, and the loop
+// keeps ticking rather than dying on it.
+func TestAnUnparseableDeclarationStartsNothing(t *testing.T) {
+	machine := &fakeMachine{}
+	service, clock, _, root := newSupervisor(t, machine, nil)
+	if err := os.MkdirAll(filepath.Dir(update.MachineIntentPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, payload := range []string{"{not json", `{"wanted":"maybe"}`, "   "} {
+		if err := os.WriteFile(update.MachineIntentPath(root), []byte(payload), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		state := service.tick(context.Background())
+		if machine.boots != 0 {
+			t.Fatalf("%q started the machine", payload)
+		}
+		if state.Running || state.LastError != "" {
+			t.Errorf("%q: state = %+v", payload, state)
+		}
+		clock.advance(serveInterval)
+	}
+}
+
+// A restart is a deliberate start: the declaration is `running` before the down half, so a failure
+// between the two halves leaves a machine the service keeps up rather than one it thinks was taken
+// down.
+func TestRestartKeepsTheMachinePinned(t *testing.T) {
+	root := t.TempDir()
+	var order []string
+	down := func([]string) {
+		order = append(order, "down")
+		if got := update.ReadMachineIntent(root); got != update.IntentRunning {
+			t.Errorf("the down half ran with %q declared, so a failure there would leave a machine nobody restarts", got)
+		}
+	}
+	up := func([]string) { order = append(order, "up") }
+	restartMachine([]string{"--root", root}, down, up)
+	if got, want := strings.Join(order, ","), "down,up"; got != want {
+		t.Errorf("restart did %q, want %q", got, want)
+	}
+	if got := update.ReadMachineIntent(root); got != update.IntentRunning {
+		t.Errorf("after a restart the declaration is %q, want running", got)
+	}
+	// The flags a person passes are the flags the declaration reads, whatever order they come in.
+	if got := rootFromFlags([]string{"--home", "/tmp/h", "--root", root}); got != root {
+		t.Errorf("rootFromFlags read %q, want %q", got, root)
+	}
+	if got := rootFromFlags([]string{"--root=" + root}); got != root {
+		t.Errorf("rootFromFlags read %q from --root=..., want %q", got, root)
+	}
+	if got := rootFromFlags([]string{"--home", "/tmp/h"}); got != "" {
+		t.Errorf("no --root is the default root, got %q", got)
 	}
 }

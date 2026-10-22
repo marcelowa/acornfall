@@ -5,6 +5,10 @@ package main
 // it, restart it when it exits, with backoff and a cap — and reconcile the intent the product
 // declares in the mount with what is running. It is meant to run under systemd or launchd
 // (scripts/units/), which is what makes it start at boot.
+//
+// It enforces two declarations and makes neither of them: the product's release in want.json, and a
+// person's "should this machine exist" in state/machine.json. Nothing is started unless a person
+// said `running`, so `machine down` is final instead of being undone by the next second's tick.
 
 import (
 	"context"
@@ -134,9 +138,14 @@ type supervisor struct {
 // goes into is.json.
 func (s *supervisor) tick(ctx context.Context) update.HostState {
 	now := s.now()
-	// The intent first, so the machine this state describes is the one the intent asked for.
+	// The product's intent first, so the machine this state describes is the one it asked for.
 	s.reconcile(ctx, now)
-	if !now.Before(s.upHeld) {
+	// A person decides whether the machine exists at all, and the service only enforces it: no
+	// declaration is a host where a person drives, and a machine taken down stays down (ADR 0030,
+	// amended). This is the one place the question is asked — the start below and the boot after an
+	// apply both come through here or through the same rule.
+	wanted := update.WantsRunning(s.root)
+	if wanted && !now.Before(s.upHeld) {
 		if image, err := s.up(ctx); err != nil {
 			s.lastErr = err.Error()
 			s.upHeld = now.Add(applyRetry)
@@ -155,7 +164,9 @@ func (s *supervisor) tick(ctx context.Context) update.HostState {
 			s.restarts = 0
 			s.startedAt = time.Time{}
 		}
-		if !running {
+		// The backoff and the cap are for a machine that should be up and keeps dying; a machine a
+		// person stopped is not a crash loop and is not asked to come back.
+		if !running && wanted {
 			running = s.start(ctx, now)
 		}
 	}
@@ -269,7 +280,7 @@ func applianceUp(ctx context.Context, home, tag string) (string, error) {
 // ready (ADR 0030, decision 4): the release's artifact is fetched and verified with nothing touched,
 // a new disk is unpacked beside the live one, and only then is the machine taken away and the disk
 // swapped in. Any failure before the swap leaves the machine running on the disk it has.
-func applyRelease(ctx context.Context, home string, machine machineControl, tag string) error {
+func applyRelease(ctx context.Context, home, root string, machine machineControl, tag string) error {
 	if !update.IsReleaseVersion(tag) {
 		return fmt.Errorf("%q is not a release tag", tag)
 	}
@@ -300,6 +311,12 @@ func applyRelease(ctx context.Context, home string, machine machineControl, tag 
 	// release that was verified, not from what the image claims.
 	if err := stampAppliance(disk, tag); err != nil {
 		return err
+	}
+	// The new disk is in place; whether it boots is the person's call, not the product's. An update
+	// arriving is not a reason to start a machine somebody took down (ADR 0030, amended).
+	if !update.WantsRunning(root) {
+		log.Printf("machine serve: made the disk for %s, and left it stopped: no person declared the machine running", tag)
+		return nil
 	}
 	// Booting last: a machine that is gone and a disk that is in place is a machine the next tick
 	// starts, so a boot that fails is a retry and not a lost install.
@@ -369,7 +386,7 @@ func machineServe(argv []string) {
 			return applianceUp(ctx, resolvedHome, here)
 		},
 		apply: func(ctx context.Context, wanted string) error {
-			return applyRelease(ctx, resolvedHome, machine, wanted)
+			return applyRelease(ctx, resolvedHome, resolvedRoot, machine, wanted)
 		},
 		now:   time.Now,
 		image: applianceLayoutFor(resolvedHome, applianceTag(*tag), false).Image,
