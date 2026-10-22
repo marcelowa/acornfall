@@ -213,39 +213,81 @@ func TestTheLockRefusesASecondUpdate(t *testing.T) {
 	}
 }
 
-// A lock whose process is gone, or one older than any update this host does, is stale: it is broken
-// with a line for the log, because a crashed update must not stop the next one for ever.
-func TestAStaleLockIsBroken(t *testing.T) {
-	now := time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)
-	for _, c := range []struct {
-		name string
-		lock Lock
-	}{
-		{name: "the process is gone", lock: Lock{PID: 999999, At: now}},
-		{name: "it is older than an update", lock: Lock{PID: os.Getpid(), At: now.Add(-2 * lockStale)}},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			root := t.TempDir()
-			if err := os.MkdirAll(filepath.Dir(LockPath(root)), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			payload := fmt.Sprintf(`{"pid":%d,"at":%q}`, c.lock.PID, c.lock.At.Format(time.RFC3339))
-			if err := os.WriteFile(LockPath(root), []byte(payload), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			release, note, err := AcquireLock(root, now)
-			if err != nil {
-				t.Fatalf("a stale lock should be broken: %v", err)
-			}
-			if !strings.Contains(note, "stale") {
-				t.Errorf("breaking a lock says so: %q", note)
-			}
-			release()
-		})
+// A lock whose process is alive is held, however long the update is taking: a 195 MB fetch takes
+// minutes, and a four-minute-old lock is a working update. Time alone broke a live one.
+func TestALiveLockIsNotBroken(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 10, 22, 14, 7, 0, 0, time.UTC)
+	if err := os.MkdirAll(filepath.Dir(LockPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Four minutes in, the pid is this test's and it is very much alive.
+	held := now.Add(-4 * time.Minute)
+	payload := fmt.Sprintf(`{"pid":%d,"at":%q}`, os.Getpid(), held.Format(time.RFC3339))
+	if err := os.WriteFile(LockPath(root), []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	release, note, err := AcquireLock(root, now)
+	if err == nil {
+		release()
+		t.Fatal("a live lock was taken")
+	}
+	if !strings.Contains(err.Error(), "one update at a time") || !strings.Contains(err.Error(), fmt.Sprint(os.Getpid())) {
+		t.Errorf("the refusal should name the holder: %v", err)
+	}
+	if note != "" {
+		t.Errorf("nothing was broken, so there is nothing to say: %q", note)
+	}
+	if got, readErr := os.ReadFile(LockPath(root)); readErr != nil || string(got) != payload {
+		t.Errorf("the held lock was rewritten: %q, %v", got, readErr)
 	}
 }
 
-// errorsIs keeps the import list honest for the one sentinel check above.
+// A lock whose process is gone is stale at once: nothing is going to finish what it started.
+func TestALockWhoseProcessIsGoneIsBroken(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 10, 22, 14, 7, 0, 0, time.UTC)
+	if err := os.MkdirAll(filepath.Dir(LockPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A pid no process has, one minute old: young enough that age could not be the reason.
+	payload := fmt.Sprintf(`{"pid":%d,"at":%q}`, 999999, now.Add(-time.Minute).Format(time.RFC3339))
+	if err := os.WriteFile(LockPath(root), []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	release, note, err := AcquireLock(root, now)
+	if err != nil {
+		t.Fatalf("a dead process's lock should be broken: %v", err)
+	}
+	defer release()
+	if !strings.Contains(note, "stale") {
+		t.Errorf("breaking a lock says so: %q", note)
+	}
+}
+
+// And age is the second condition, for the one thing a pid cannot answer for: reuse. A lock older than
+// any update this host does is not believed even when that pid is alive.
+func TestALockOlderThanAnyUpdateIsBroken(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 10, 22, 14, 7, 0, 0, time.UTC)
+	if err := os.MkdirAll(filepath.Dir(LockPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"pid":%d,"at":%q}`, os.Getpid(), now.Add(-2*lockStale).Format(time.RFC3339))
+	if err := os.WriteFile(LockPath(root), []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	release, note, err := AcquireLock(root, now)
+	if err != nil {
+		t.Fatalf("a lock older than any update should be broken: %v", err)
+	}
+	defer release()
+	if !strings.Contains(note, "stale") {
+		t.Errorf("breaking a lock says so: %q", note)
+	}
+}
+
+// errorsIs keeps the import list honest// errorsIs keeps the import list honest for the one sentinel check above.
 func errorsIs(err, target error) bool {
 	for err != nil {
 		if err == target {

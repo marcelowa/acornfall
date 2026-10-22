@@ -295,9 +295,11 @@ type Lock struct {
 // LockPath is the lock file, beside the rest of the host's records.
 func LockPath(root string) string { return filepath.Join(root, "state", "host", "update.lock") }
 
-// lockStale is when a lock is too old to believe even if its process still answers: an update that
-// takes an hour is not one this host is still doing.
-const lockStale = time.Hour
+// lockStale is the age at which a lock stops being believed even if its pid answers: a pid can be
+// reused, and an update three quarters of an hour long is not one this host is still doing. It is the
+// second condition and never the first — a 195 MB fetch takes minutes, and an update four minutes in
+// is normal, not stale. Time alone broke a live lock once; the process is what decides.
+const lockStale = 45 * time.Minute
 
 // AcquireLock takes the one update slot. The second return is a line for the caller's log when it
 // broke a lock a dead process left behind, and empty when the lock was free. A live lock is an
@@ -353,13 +355,15 @@ func readLock(path string) (Lock, error) {
 	return held, nil
 }
 
-// lockStaleFor says whether a lock may be taken: its process is gone, or it is older than any update
-// this host does.
+// lockStaleFor says whether a lock may be taken. The process decides first: a lock whose pid is gone is
+// stale at once, because nothing is going to finish what it started. Age is the second condition, and
+// only for the case a pid cannot answer for — one that was reused between two updates. An update that
+// is merely slow is a live lock, and breaking it would let a second update write the same disk.
 func lockStaleFor(held Lock, now time.Time) bool {
-	if held.At.IsZero() || now.Sub(held.At) > lockStale {
+	if !processAlive(held.PID) {
 		return true
 	}
-	return !processAlive(held.PID)
+	return held.At.IsZero() || now.Sub(held.At) > lockStale
 }
 
 func processAlive(pid int) bool {
