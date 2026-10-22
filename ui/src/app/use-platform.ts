@@ -591,6 +591,12 @@ export function usePlatform(): Platform {
 					return;
 				}
 				setState(next);
+				// A state from the stream is the console answering, which is what a failed first fetch was
+				// waiting for. Without this, a page opened while the machine was being replaced keeps its
+				// "NetworkError when attempting to fetch resource" for ever, while the app behind it has
+				// recovered — the stream reconnects on its own, the sentence does not.
+				setReady(true);
+				setFailure(undefined);
 			},
 			onView: (nextView, nextSenders) => {
 				if (cancelled) return;
