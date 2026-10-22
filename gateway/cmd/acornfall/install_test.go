@@ -623,6 +623,13 @@ func TestPurgeRefusesRoot(t *testing.T) {
 	if err := removablePath("the mount", filepath.Join(userHome, "acornfall"), userHome); err != nil {
 		t.Errorf("an install's own folder is removable: %v", err)
 	}
+	// The default install for root is /root/.acornfall, two components deep and inside the home. A purge that
+	// measured depth alone refused the install it was run from, and the person had no way to purge at all.
+	for _, path := range []string{"/root/.acornfall", "/root/acornfall"} {
+		if err := removablePath("the machinery", path, "/root"); err != nil {
+			t.Errorf("%q is the default install for root and must be removable: %v", path, err)
+		}
+	}
 }
 
 // A symlinked mount is refused rather than followed: what it points at is not the install, and a purge that

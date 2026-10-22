@@ -346,13 +346,22 @@ func removals(home, root string) []string {
 // followed.
 func removablePath(kind, path, userHome string) error {
 	clean := filepath.Clean(path)
+	home := ""
+	if userHome != "" {
+		home = filepath.Clean(userHome)
+	}
+	insideHome := home != "" && strings.HasPrefix(clean, home+string(os.PathSeparator))
 	switch {
 	case clean == "/" || clean == ".":
 		return fmt.Errorf("%s is %s: that is every file on this machine, and a purge removes the install only", kind, clean)
-	case clean == filepath.Clean(userHome) || clean == "/root":
-		return fmt.Errorf("%s is %s, a home directory itself: a purge removes the product's folders, not someone's home", kind, clean)
-	case len(strings.Split(strings.Trim(clean, string(os.PathSeparator)), string(os.PathSeparator))) < 3:
-		return fmt.Errorf("%s is %s, which is too close to the root of the file system: a purge removes a path with at least three components", kind, clean)
+	case clean == home || (home != "" && strings.HasPrefix(home, clean+string(os.PathSeparator))):
+		return fmt.Errorf("%s is %s, which holds a home directory: a purge removes the product's folders, not someone's home", kind, clean)
+	case filepath.Dir(clean) == string(os.PathSeparator):
+		return fmt.Errorf("%s is %s, a folder at the top of the file system: a purge removes what an install made, inside a home", kind, clean)
+	case !insideHome && len(strings.Split(strings.Trim(clean, string(os.PathSeparator)), string(os.PathSeparator))) < 3:
+		// Two components is a person's folder outside their home: /home/someone, /srv/data. The installs
+		// this refuses to guess about are the ones it does not own.
+		return fmt.Errorf("%s is %s, which is too close to the root of the file system: a purge removes a path with at least three components, or one inside a home", kind, clean)
 	}
 	if info, err := os.Lstat(clean); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%s is %s, which is a symlink: a purge refuses to follow it, because what it points at is not the install", kind, clean)
