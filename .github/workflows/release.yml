@@ -27,6 +27,11 @@ jobs:
     # know whether it exists. The body is the tag message — what the update page reads as "what
     # changed" — written here rather than in `publish`, which needed a checkout only for this.
     runs-on: [self-hosted, linux, x64]
+    outputs:
+      # A draft release is not reachable at `releases/tags/<tag>`: the API answers 404 for one
+      # (measured on this pipeline's first tag, while it was the read that broke the job). The id
+      # does reach it, so it travels to the jobs that read the draft.
+      release_id: ${{ steps.release.outputs.id }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,6 +44,7 @@ jobs:
       # what re-running after a fix needs: `draft: true` keeps it a draft, and the action updates
       # an existing release instead of creating a second one.
       - uses: softprops/action-gh-release@v2
+        id: release
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
@@ -143,19 +149,20 @@ jobs:
       # The image runs the release binary, not a fresh build: it is the same product the host
       # ships, with the same version stamped into it. It comes from the draft release — the one
       # hand-off every job uses — so this job pulls 19 MB instead of every artifact of the run.
-      # A draft's assets have no browser URL, so the id comes from the release and the bytes from
-      # the asset API. `-L` is safe: curl drops the Authorization header when the redirect changes
-      # host, and the storage URL it lands on is already signed.
+      # Both lookups go through the release id, because a draft has no tag to look it up by. `-L`
+      # is safe: curl drops the Authorization header when the redirect changes host, and the
+      # storage URL it lands on is already signed.
       - name: Take the release binary the image runs
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
         run: |
           set -euo pipefail
           mkdir -p bin dist
           id=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" |
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
             python3 -c 'import json, sys
-          print(next(a["id"] for a in json.load(sys.stdin)["assets"] if a["name"] == "acornfall-linux-amd64"))')
+          print(next(a["id"] for a in json.load(sys.stdin) if a["name"] == "acornfall-linux-amd64"))')
           curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: application/octet-stream" \
             -o dist/acornfall-linux-amd64 \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$id"
@@ -242,7 +249,7 @@ jobs:
     # it on a fresh install (ADR 0022), and a release without one cannot boot a machine.
     # It waits for every producer: the checksum file it assembles has a line per producer, and a
     # release missing one is worse than a release that is late.
-    needs: [binaries, worker-sources, appliance]
+    needs: [draft, binaries, worker-sources, appliance]
     runs-on: [self-hosted, linux, x64]
     steps:
       # The checksum file is what the gateway verifies downloads against
@@ -274,12 +281,13 @@ jobs:
       - name: The draft holds what the checksum list names
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
         run: |
           set -euo pipefail
           curl -fsS -H "Authorization: Bearer $TOKEN" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" |
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
             python3 -c 'import json, sys
-          print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))' |
+          print("\n".join(a["name"] for a in json.load(sys.stdin)))' |
             grep -vx sha256sums.txt | sort > assets.txt
           awk '{print $2}' sha256sums.txt | sort > listed.txt
           if ! diff -u listed.txt assets.txt; then
