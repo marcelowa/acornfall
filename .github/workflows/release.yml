@@ -7,6 +7,10 @@
 # artifacts, and pulling 272 MB of them back onto the runner that had just made them took 15m57
 # of a 27m43 run (measured, v0.10.0-beta.13). `prove` still downloads from the release, because
 # downloading the published bytes is its whole point (ADR 0024).
+#
+# This runner has no `gh` and no `jq` (measured: exit 127 for both), so the release is written
+# through softprops/action-gh-release — the action the previous publish step already used — and
+# the two reads are curl plus python3, which the proof job has been using all along.
 name: release
 
 on:
@@ -16,12 +20,6 @@ on:
 
 permissions:
   contents: write
-
-env:
-  # Every job talks to the release with the same token. GH_REPO is named because `publish` has no
-  # checkout, and a step outside a git repository cannot infer the repository from a remote.
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  GH_REPO: ${{ github.repository }}
 
 jobs:
   draft:
@@ -35,17 +33,20 @@ jobs:
           fetch-depth: 1
           fetch-tags: true
           sparse-checkout: .github
-      - name: Open the tag's draft release
-        run: |
-          set -euo pipefail
-          # A re-run of a tag finds the release the first attempt opened and uploads over it,
-          # which is what re-running after a fix needs. The release is never deleted.
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "$GITHUB_REF_NAME already has a release; the jobs will upload over it"
-            exit 0
-          fi
-          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > release-notes.md
-          gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+      - name: Read the tag message
+        run: git tag -l --format='%(contents)' "${{ github.ref_name }}" > release-notes.md
+      # A re-run of a tag finds the release the first attempt opened and uploads over it, which is
+      # what re-running after a fix needs: `draft: true` keeps it a draft, and the action updates
+      # an existing release instead of creating a second one.
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          draft: true
+          # A hyphen tag (`v0.9.35-rc.1`) is a pre-release: GitHub's own flag, which the update
+          # page's picker reads, and which keeps the newest-GA mark pointed at production.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   binaries:
     needs: draft
@@ -87,16 +88,24 @@ jobs:
           -ldflags "-X github.com/acornfall/acornfall/gateway/internal/update.BuildVersion=${{ github.ref_name }}"
           -o ../acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
           ./cmd/acornfall
-      - name: Upload the binary to the draft release
-        # The checksum line goes to a file of its own on the runner, which `publish` concatenates:
-        # the matrix legs can overlap, and two appends to one file would interleave.
+      # The checksum line goes to a file of its own on the runner, which `publish` concatenates:
+      # the matrix legs can overlap, and two appends to one file would interleave.
+      - name: Leave the checksum line on the runner
         run: |
           set -euo pipefail
           file="acornfall-${{ matrix.goos }}-${{ matrix.goarch }}"
           sums="$HOME/acornfall-release/$GITHUB_REF_NAME/sums"
           mkdir -p "$sums"
           sha256sum "$file" > "$sums/$file.sums"
-          gh release upload "$GITHUB_REF_NAME" "$file" --clobber
+      - name: Upload the binary to the draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
+          draft: true
+          # A re-run replaces the asset instead of failing on the name the last attempt left.
+          overwrite_files: true
+          fail_on_unmatched_files: true
 
   worker-sources:
     needs: draft
@@ -107,13 +116,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: tar -czf worker.tar.gz -C worker package.json bun.lock src
-      - name: Upload the worker sources to the draft release
+      - name: Leave the checksum line on the runner
         run: |
           set -euo pipefail
           sums="$HOME/acornfall-release/$GITHUB_REF_NAME/sums"
           mkdir -p "$sums"
           sha256sum worker.tar.gz > "$sums/worker-sources.sums"
-          gh release upload "$GITHUB_REF_NAME" worker.tar.gz --clobber
+      - name: Upload the worker sources to the draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: worker.tar.gz
+          draft: true
+          overwrite_files: true
+          fail_on_unmatched_files: true
 
   appliance:
     # The image the machine boots (ADR 0022) — built inside a machine of its own. The runner stays
@@ -127,11 +143,22 @@ jobs:
       # The image runs the release binary, not a fresh build: it is the same product the host
       # ships, with the same version stamped into it. It comes from the draft release — the one
       # hand-off every job uses — so this job pulls 19 MB instead of every artifact of the run.
+      # A draft's assets have no browser URL, so the id comes from the release and the bytes from
+      # the asset API. `-L` is safe: curl drops the Authorization header when the redirect changes
+      # host, and the storage URL it lands on is already signed.
       - name: Take the release binary the image runs
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p bin dist
-          gh release download "$GITHUB_REF_NAME" --pattern acornfall-linux-amd64 --dir dist --clobber
+          id=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" |
+            python3 -c 'import json, sys
+          print(next(a["id"] for a in json.load(sys.stdin)["assets"] if a["name"] == "acornfall-linux-amd64"))')
+          curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: application/octet-stream" \
+            -o dist/acornfall-linux-amd64 \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$id"
           cp dist/acornfall-linux-amd64 bin/acornfall
           chmod +x bin/acornfall
       # The engine is the worker's own dependency, and the builder's door: installed the way the
@@ -184,14 +211,21 @@ jobs:
           "$MSB" exec appliance-builder -- sh -c \
             "cd '$PWD' && BINARY='$PWD/bin/acornfall' WORKER='$PWD/worker' VERSION='$VERSION' \
              sh scripts/build-appliance.sh '$PWD/dist/appliance-linux-amd64.tar.gz'"
-      - name: Upload the appliance to the draft release
+      - name: Leave the checksum line on the runner
         run: |
           set -euo pipefail
           sums="$HOME/acornfall-release/$GITHUB_REF_NAME/sums"
           mkdir -p "$sums"
           # From inside dist, so the line names the file the way the release does, with no path.
           ( cd dist && sha256sum appliance-linux-amd64.tar.gz ) > "$sums/appliance.sums"
-          gh release upload "$GITHUB_REF_NAME" dist/appliance-linux-amd64.tar.gz --clobber
+      - name: Upload the appliance to the draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/appliance-linux-amd64.tar.gz
+          draft: true
+          overwrite_files: true
+          fail_on_unmatched_files: true
       # Leave the appliance where the next push's proof can copy it: this runner's disk, named
       # by the hash prove.yml computes. Seconds here buy minutes there.
       - name: Keep the appliance on the runner
@@ -234,23 +268,35 @@ jobs:
             fi
           done
           cat sha256sums.txt
-      - name: Publish the draft
-        # A hyphen tag (`v0.9.35-rc.1`) is a pre-release: GitHub's own flag, which the update
-        # page's picker reads, and which keeps the newest-GA mark pointed at production.
+      # Public only once the release holds exactly the files the checksum list names: a release
+      # missing an asset is worse than one that stays a draft. This reads the draft, so it costs
+      # one API call and no download.
+      - name: The draft holds what the checksum list names
         env:
-          PRERELEASE: ${{ contains(github.ref_name, '-') && '--prerelease' || '' }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release upload "$GITHUB_REF_NAME" sha256sums.txt --clobber
-          # Public only once the release holds exactly the files the checksum list names: a
-          # release missing an asset is worse than one that stays a draft.
-          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | sort > assets.txt
-          { awk '{print $2}' sha256sums.txt; echo sha256sums.txt; } | sort > listed.txt
+          curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" |
+            python3 -c 'import json, sys
+          print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))' |
+            grep -vx sha256sums.txt | sort > assets.txt
+          awk '{print $2}' sha256sums.txt | sort > listed.txt
           if ! diff -u listed.txt assets.txt; then
             echo "::error::$GITHUB_REF_NAME holds assets its checksum list does not name, or is missing one it names"
             exit 1
           fi
-          gh release edit "$GITHUB_REF_NAME" --draft=false ${PRERELEASE:+"$PRERELEASE"}
+      # `draft: false` uploads the checksum file to the still-draft release and only then makes it
+      # public, so the update page never sees a release whose sums are not there yet.
+      - name: Publish the draft
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: sha256sums.txt
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          overwrite_files: true
+          fail_on_unmatched_files: true
 
   # A release has to prove its own artefact boots. Two betas did not, and both were found by a
   # person installing it: the tests boot a directory, releases ship a tarball, and what tar
