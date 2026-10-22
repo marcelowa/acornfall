@@ -362,6 +362,20 @@ export interface UpdateStatus {
 	/** The gateway's own runs gate, and what stopping would stop. */
 	runsActive: boolean;
 	runs: { workspace: string; runs: number }[];
+	/**
+	 * The host service's side of an update (ADR 0030): the release the product asked for, and what
+	 * is.json says. Absent on a host install, where the product updates itself.
+	 */
+	wanted?: string | undefined;
+	host?:
+		| {
+				running: boolean;
+				version: string;
+				service: string;
+				lastError: string;
+				at: string;
+		  }
+		| undefined;
 }
 
 /** One release, as the picker and the version page read it. */

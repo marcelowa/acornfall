@@ -25,6 +25,7 @@ import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { formatBytes } from "@/lib/format";
 import { betweenReleases, notesTags } from "./between";
+import { hostSentence } from "./host";
 import { cn } from "cn";
 
 export interface ReleaseScreenProps {
@@ -211,7 +212,15 @@ export function ReleaseScreen({
 	// build: any amount of waiting, and no give-up timer deciding what the page
 	// claims (R11). Once the running build is the target, there is nothing to
 	// follow.
-	const watching = applying || status?.restartRequired === true;
+	// An apply on a host is the same wait one file further away: the console already refreshes for a
+	// swap, so the host's gap rides the loop that is here rather than a second one. It stops when the
+	// asked-for release is what is running, and when the host says it could not.
+	const askedFor = status?.wanted ?? "";
+	const hostGap =
+		askedFor !== "" &&
+		askedFor !== (status?.host?.version ?? "") &&
+		(status?.host?.lastError ?? "") === "";
+	const watching = applying || status?.restartRequired === true || hostGap;
 	useEffect(() => {
 		if (!watching) return;
 		if (current !== "" && current === targetTag) return;
@@ -231,6 +240,10 @@ export function ReleaseScreen({
 	const runCount = runs.reduce((total, item) => total + item.runs, 0);
 	const workspaces = runs.map((item) => item.workspace).join(", ");
 	const failed = status?.failed !== undefined && status.failed !== "";
+	// The host's side of an update (ADR 0030). A console on a host install updates itself, so this
+	// sentence is empty there and the screen is the screen it always was.
+	const asking = hostSentence(status?.wanted ?? "", status?.host);
+	const hosted = status?.host !== undefined || (status?.wanted ?? "") !== "";
 	// A state that carries its own control does not get a second one below it.
 	const ownsCheck =
 		listError !== undefined ||
@@ -260,6 +273,32 @@ export function ReleaseScreen({
 							{isTag ? `acornfall ${current}` : "dev build — not a release tag"}
 						</Text>
 					</Stack>
+
+					{asking !== "" ? (
+						<Stack gap="2xs" data-slot="release-host">
+							<Badge
+								variant="soft"
+								tone={
+									status?.host?.lastError !== undefined &&
+									status.host.lastError !== ""
+										? "danger"
+										: "neutral"
+								}
+								size="sm"
+							>
+								{status?.host === undefined
+									? "Host: no answer yet"
+									: status.host.running
+										? "Host: running"
+										: "Host: stopped"}
+							</Badge>
+							<Text size="xs">{asking}</Text>
+							<Text size="2xs" tone="muted">
+								The host fetches the release and makes a new machine; the file it
+								reads is state/host/want.json.
+							</Text>
+						</Stack>
+					) : null}
 
 					{status?.runsActive === true ? (
 						<Text size="2xs" tone="muted" className="font-mono tabular-nums">
@@ -379,9 +418,13 @@ export function ReleaseScreen({
 					<DialogHeader>
 						<DialogTitle>Runs are active</DialogTitle>
 						<DialogDescription>
-							{runCount > 0
-								? `${runCount} runs are active across ${workspaces}. An update restarts the gateway.`
-								: "Runs are active. An update restarts the gateway."}
+							{hosted
+								? runCount > 0
+									? `${runCount} runs are active across ${workspaces}. An update asks the host, which replaces the machine.`
+									: "Runs are active. An update asks the host, which replaces the machine."
+								: runCount > 0
+									? `${runCount} runs are active across ${workspaces}. An update restarts the gateway.`
+									: "Runs are active. An update restarts the gateway."}
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
@@ -404,7 +447,11 @@ export function ReleaseScreen({
 								onApply(targetTag, cleanVMs, "stop");
 							}}
 						>
-							{applying ? "Installing…" : "Stop runs and install"}
+							{applying
+								? hosted
+									? "Asking the host…"
+									: "Installing…"
+								: "Stop runs and install"}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
