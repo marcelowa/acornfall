@@ -17,7 +17,7 @@ func TestTheBridgeForContainersIsMadeWithWhatItNeeds(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ip link add acornfall0 type bridge",
-		"ip addr add 10.7.0.1/24 dev acornfall0",
+		"ip addr replace 10.7.0.1/24 dev acornfall0",
 		"ip link set acornfall0 up",
 		"sysctl -q -w net.ipv4.ip_forward=1",
 		"iptables -t nat -C POSTROUTING -s 10.7.0.0/24 -j MASQUERADE",
@@ -40,12 +40,32 @@ func TestTheBridgeForContainersIsMadeWithWhatItNeeds(t *testing.T) {
 func TestTheBridgeIsMadeOnceForTheMachine(t *testing.T) {
 	runtime := &fakeRuntime{answers: map[string]string{
 		"ip link add":        "RTNETLINK answers: File exists",
-		"ip addr add":        "RTNETLINK answers: File exists",
 		"iptables -t nat -C": "",
 	}}
 	network := &NetworkPayload{Bridge: "acornfall0", Subnet: "10.7.0.0/24", Gateway: "10.7.0.1"}
 	if err := ensureBridge(runtime, network); err != nil {
 		t.Fatalf("a bridge that is already there is not a failure: %v", err)
+	}
+}
+
+// The address is replaced, not added: a second workspace in the same machine found the bridge's
+// address there, and `ip addr add` answered "Error: ipv4: Address already assigned." — which the
+// old code read as a failure and printed as a workspace with no sandbox.
+func TestTheBridgeAddressIsReplacedNotAdded(t *testing.T) {
+	runtime := &fakeRuntime{answers: map[string]string{
+		"ip link add":        "RTNETLINK answers: File exists",
+		"ip addr add":        "Error: ipv4: Address already assigned.",
+		"iptables -t nat -C": "",
+	}}
+	network := &NetworkPayload{Bridge: "acornfall0", Subnet: "10.7.0.0/24", Gateway: "10.7.0.1"}
+	if err := ensureBridge(runtime, network); err != nil {
+		t.Fatalf("an address that is already on the bridge is not a failure: %v", err)
+	}
+	if got := runtime.ran("ip addr add"); len(got) != 0 {
+		t.Errorf("add was used, and it cannot be run twice: %v", got)
+	}
+	if got := runtime.ran("ip addr replace 10.7.0.1/24 dev acornfall0"); got == nil {
+		t.Errorf("the address should be replaced, got %v", runtime.calls)
 	}
 }
 

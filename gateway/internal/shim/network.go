@@ -41,14 +41,20 @@ func ensureBridge(runner Runner, network *NetworkPayload) error {
 		return runner.Run(context.Background(), args...)
 	}
 	// AlreadyThere is the ordinary case after the first container, and the runtime says so in
-	// words ("File exists", "RTNETLINK answers: File exists") rather than in an exit code the
-	// caller can tell apart.
-	alreadyThere := func(out string) bool { return strings.Contains(out, "exists") }
+	// words rather than in an exit code the caller can tell apart: "File exists" for a link, and
+	// — measured on a second workspace in the same machine — "Error: ipv4: Address already
+	// assigned." for an address.
+	alreadyThere := func(out string) bool {
+		return strings.Contains(out, "exists") || strings.Contains(out, "already assigned")
+	}
 
 	if out, err := run("ip", "link", "add", network.Bridge, "type", "bridge"); err != nil && !alreadyThere(out) {
 		return fmt.Errorf("shim: making the containers' bridge %s: %w", network.Bridge, err)
 	}
-	if out, err := run("ip", "addr", "add", network.Gateway+"/"+bits, "dev", network.Bridge); err != nil && !alreadyThere(out) {
+	// replace, not add: the bridge is made once for the machine and every container after the
+	// first finds its address there. `add` says so with an error, and reading that error as one
+	// is a workspace with no sandbox whose refusal names an address that was already right.
+	if out, err := run("ip", "addr", "replace", network.Gateway+"/"+bits, "dev", network.Bridge); err != nil && !alreadyThere(out) {
 		return fmt.Errorf("shim: giving the containers' bridge its address: %w", err)
 	}
 	if _, err := run("ip", "link", "set", network.Bridge, "up"); err != nil {
