@@ -24,3 +24,18 @@ func TestTheWorkerIsToldWhyItHasNoSandbox(t *testing.T) {
 		t.Errorf("a workspace with a sandbox: %q", got)
 	}
 }
+
+// A workspace that has no conversation yet has nobody to subscribe to, and "nobody" is not an id to ask
+// the worker about: a policy for the empty id made the harness throw, and the workspace said only
+// "harness down".
+func TestNoConversationIsNotWatched(t *testing.T) {
+	c := New(Options{Workspace: Workspace{Name: "fresh", Path: "/tmp/fresh"}})
+	c.attachments[""] = 1
+	if got := c.watchedConversations(); len(got) != 0 {
+		t.Errorf("an empty conversation is not watched, got %q", got)
+	}
+	c.attachments["1"] = 1
+	if got := c.watchedConversations(); len(got) != 1 || got[0] != "1" {
+		t.Errorf("a real conversation is watched, got %q", got)
+	}
+}

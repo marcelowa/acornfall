@@ -689,7 +689,11 @@ func (c *Control) watchedConversations() []string {
 	seen := map[string]bool{}
 	list := make([]string, 0, len(c.attachments))
 	for id, count := range c.attachments {
-		if count > 0 && !seen[id] {
+		// A client that lands before the workspace has a conversation subscribes to nothing, and
+		// "nothing" is not a conversation to ask the worker about: a policy for the empty id made it
+		// throw, and the throw left two of its reads unawaited — the harness died, and the workspace
+		// said only "harness down".
+		if id != "" && count > 0 && !seen[id] {
 			seen[id] = true
 			list = append(list, id)
 		}
@@ -784,6 +788,12 @@ func (c *Control) Commands(ctx context.Context) (json.RawMessage, error) {
 // Policy reports what a conversation may do with other conversations, resolved
 // the same way its agent is.
 func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMessage, error) {
+	if conversationID == "" {
+		// No id is not a policy to compute: it is a workspace with no conversation yet. Asking the
+		// worker made it throw, and a throw on a command with an id that is not one is how a harness
+		// went down over a client that had simply landed early.
+		return nil, errors.New("this workspace has no conversation yet")
+	}
 	return c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 }
 
