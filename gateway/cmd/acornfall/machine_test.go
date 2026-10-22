@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -506,5 +508,48 @@ func TestTheUpdateStopsBetweenTheSteps(t *testing.T) {
 				t.Errorf("steps %q, want %q", got, c.wantSteps)
 			}
 		})
+	}
+}
+
+// Readiness is the machine's own state, not a console that answers: the JSON key is the contract with
+// the gateway, and a release that boots a console with no worker behind it must not be taken by the
+// host (ADR 0031).
+func TestReadinessIsTheMachinesOwnState(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		token  string
+		want   bool
+	}{
+		{name: "a worker is up", status: http.StatusOK, body: `{"workspace":{"workerUp":true}}`, want: true},
+		{name: "a worker is up, with a token", status: http.StatusOK, body: `{"workspace":{"workerUp":true}}`, token: "sekrit", want: true},
+		{name: "no worker yet", status: http.StatusOK, body: `{"workspace":{"workerUp":false}}`},
+		{name: "a state with no workspace", status: http.StatusOK, body: `{}`},
+		{name: "not JSON", status: http.StatusOK, body: "the console is not the state"},
+		{name: "a refusal", status: http.StatusUnauthorized, body: `{"workspace":{"workerUp":true}}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var gotAuth string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/state" {
+					t.Errorf("readiness asks %s, want /api/state", r.URL.Path)
+				}
+				gotAuth = r.Header.Get("Authorization")
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(c.body))
+			}))
+			defer server.Close()
+			if got := machineReady(context.Background(), server.URL, c.token); got != c.want {
+				t.Errorf("machineReady = %v, want %v", got, c.want)
+			}
+			if c.token != "" && gotAuth != "Bearer "+c.token {
+				t.Errorf("the state is asked with the mount's token, got %q", gotAuth)
+			}
+		})
+	}
+	// A console that is not there at all is not ready, and asking must not hang or panic.
+	if machineReady(context.Background(), "http://127.0.0.1:1", "") {
+		t.Error("a console that never answers is not ready")
 	}
 }
