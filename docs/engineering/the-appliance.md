@@ -50,6 +50,30 @@ already has the tarball makes a machine with no network at all, and an install f
 layout keeps booting its own image directory (`appliance/rootfs`), which the launcher never deletes
 and never writes into.
 
+## The host service, and the channel it reads
+
+The launcher is also a service: `acornfall machine serve` ([ADR 0030](../adr/0030-the-host-supervises-the-machine.md))
+starts the machine at boot, restarts it when it exits with backoff and a cap, and applies the
+release the product asks for. Unit files to copy are in `scripts/units/`; nothing installs them.
+
+The two sides talk through the mount, because the mount is the one thing both can reach:
+
+```
+~/acornfall/state/host/want.json   the product writes  { "version": "v0.10.0-beta.14" }
+~/acornfall/state/host/is.json     the service writes  { "running": true, "version": "v0.10.0-beta.13",
+                                                         "service": "…", "lastError": "", "at": "…" }
+```
+
+Both are written whole and renamed into place, and both are read tolerantly: a missing, empty or
+unparsable file is "nothing declared yet", never an error the console shows. `want.json` is the only
+thing the machine can ask for and it carries one release tag — a value that is not one is refused by
+name in `is.json.lastError`, and a tag that names no release is refused before anything is fetched.
+
+An apply is ordered so that a failure costs nothing: the release's artifact is fetched and verified
+with the machine untouched, the new disk is unpacked beside the live one, and only then is the
+machine taken away and the disk swapped in. If anything before the swap fails, the machine that is
+running stays running and `is.json` names what failed.
+
 ## Boot, and why the gateway is PID 1
 
 The engine has no entrypoint for a plain rootfs, so the launcher passes an interpreter and a script:
