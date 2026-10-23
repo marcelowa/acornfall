@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -40,8 +42,9 @@ type Microsandbox struct {
 	// engineUID/GID are the fixed owner the engine runs as, when the install has one. The
 	// engine writes the machine's disk and serves the share; running it as the share owner is
 	// what makes the host files belong to the container's uid instead of root.
-	engineUID int
-	engineGID int
+	engineUID    int
+	engineGID    int
+	engineGroups []uint32
 	// nestingMu guards the answer below, which is taken once: a running gateway does not
 	// swap engine builds under itself.
 	nestingMu sync.Mutex
@@ -81,6 +84,18 @@ func NewMicrosandbox(machinery string) *Microsandbox {
 	if os.Geteuid() == 0 {
 		if uid, gid, ok := ShareOwner(machinery); ok && uid > 0 {
 			m.engineUID, m.engineGID = uid, gid
+			// The engine needs the kvm group to open /dev/kvm, and any other group the owner
+			// has. A credential with only the primary gid is a user with no supplementary
+			// groups, which reads as permission denied on a 0660 device (measured on acornd).
+			if account, lookupErr := user.LookupId(strconv.Itoa(uid)); lookupErr == nil {
+				if groupIDs, groupErr := account.GroupIds(); groupErr == nil {
+					for _, groupID := range groupIDs {
+						if parsed, parseErr := strconv.Atoi(groupID); parseErr == nil {
+							m.engineGroups = append(m.engineGroups, uint32(parsed))
+						}
+					}
+				}
+			}
 		}
 	}
 	return m
@@ -458,7 +473,7 @@ func (m *Microsandbox) run(ctx context.Context, args ...string) (string, error) 
 		}
 	}
 	command := exec.CommandContext(ctx, m.binary(), args...)
-	runAsEngineOwner(command, m.engineUID, m.engineGID)
+	runAsEngineOwner(command, m.engineUID, m.engineGID, m.engineGroups)
 	command.Env = append(os.Environ(), m.Env()...)
 	output, commandErr := command.CombinedOutput()
 	text := strings.TrimSpace(string(output))
