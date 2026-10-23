@@ -236,9 +236,13 @@ func (x *MachineEngine) RemoveMachine(ctx context.Context) error {
 	// Every step is bounded. A machine stuck "draining" does not answer `msb exec`; without a
 	// deadline the install that called this waited twenty minutes on `kill -TERM 1` and left the
 	// update lock held. The timeout is the repair: a slow stop becomes a failed stop, not a hang.
+	// The exec is the one step that can wait on a machine that is not answering. Give it five
+	// seconds; the stop and the remove get the rest.
+	execCtx, cancelExec := context.WithTimeout(ctx, 5*time.Second)
+	_, _ = x.engine.run(execCtx, "exec", x.Name(), "--", "sh", "-c", "kill -TERM 1")
+	cancelExec()
 	bounded, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	_, _ = x.engine.run(bounded, "exec", x.Name(), "--", "sh", "-c", "kill -TERM 1")
 	_ = x.engine.Stop(bounded, x.Name())
 	return ignoreMissing(x.engine.Remove(bounded, x.Name()))
 }
