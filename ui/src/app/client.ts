@@ -360,6 +360,11 @@ export interface UpdateStatus {
 	checkError?: string | undefined;
 	failed?: string | undefined;
 	restartRequired?: boolean | undefined;
+	/** The update lifecycle, as the gateway computes it. */
+	phase?: "idle" | "requested" | "starting" | "ready" | "failed" | undefined;
+	target?: string | undefined;
+	blocking?: boolean | undefined;
+	phaseReason?: string | undefined;
 	backups: string[];
 	/** The gateway's own runs gate, and what stopping would stop. */
 	runsActive: boolean;

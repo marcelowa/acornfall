@@ -85,6 +85,12 @@ type UpdateSummary struct {
 	// it is running (ADR 0030). Both are absent on a host install, where the product updates itself.
 	Wanted string     `json:"wanted,omitempty"`
 	Host   *HostState `json:"host,omitempty"`
+	// The update lifecycle, as the console reads it. Blocking is true while a write must be
+	// refused; Target is the release being installed; PhaseReason is the sentence to show.
+	Phase       string `json:"phase,omitempty"`
+	Target      string `json:"target,omitempty"`
+	Blocking    bool   `json:"blocking,omitempty"`
+	PhaseReason string `json:"phaseReason,omitempty"`
 }
 
 // HostState is what the host service says about the machine (ADR 0030), as the stream carries it:

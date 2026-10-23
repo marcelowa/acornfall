@@ -13,6 +13,8 @@ export interface WorkspacesPanelProps {
 	workspaces: WorkspaceSummary[];
 	/** Workspaces whose folder exists but whose harness is still starting. */
 	preparations: WorkspacePreparation[];
+	/** An update is installing: creating, opening, renaming and forgetting wait. */
+	paused?: boolean | undefined;
 	onSelect: (name: string) => void;
 	onOpenPrepared: (name: string) => void;
 	onDismissPrepared: (name: string) => void;
@@ -43,6 +45,7 @@ export interface WorkspacesPanelProps {
 export function WorkspacesPanel({
 	workspaces,
 	preparations,
+	paused = false,
 	onSelect,
 	onOpenPrepared,
 	onDismissPrepared,
@@ -74,6 +77,7 @@ export function WorkspacesPanel({
 					<WorkspacePreparationRow
 						key={preparation.name}
 						preparation={preparation}
+						paused={paused}
 						onOpen={() => onOpenPrepared(preparation.name)}
 						onDismiss={() => onDismissPrepared(preparation.name)}
 						onRetry={() => onRetryPrepared(preparation.name)}
@@ -90,6 +94,7 @@ export function WorkspacesPanel({
 						<WorkspaceRow
 							key={workspace.name}
 							workspace={workspace}
+							paused={paused}
 							onSelect={onSelect}
 							onRename={setRenaming}
 							onSandbox={setSandboxFor}
@@ -107,6 +112,7 @@ export function WorkspacesPanel({
 						value={name}
 						placeholder="a folder name"
 						aria-label="New workspace name"
+						disabled={paused}
 						onChange={(event) => setName(event.target.value)}
 						onKeyDown={(event) => {
 							if (event.key !== "Enter") return;
@@ -117,7 +123,7 @@ export function WorkspacesPanel({
 					<Button
 						size="sm"
 						variant="outline"
-						disabled={name.trim() === ""}
+						disabled={paused || name.trim() === ""}
 						onClick={create}
 					>
 						Create

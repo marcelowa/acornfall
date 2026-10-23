@@ -9,6 +9,8 @@ import { cn } from "cn";
 
 export interface WorkspacePreparationProps {
 	preparation: WorkspacePreparation;
+	/** An update is installing: the row's actions wait. */
+	paused?: boolean | undefined;
 	onOpen: () => void;
 	onDismiss: () => void;
 	onRetry: () => void;
@@ -66,6 +68,7 @@ function sentenceOf(preparation: WorkspacePreparation, seconds: number): string 
  */
 export function WorkspacePreparationRow({
 	preparation,
+	paused = false,
 	onOpen,
 	onDismiss,
 	onRetry,
@@ -107,12 +110,12 @@ export function WorkspacePreparationRow({
 			</div>
 			<div className="flex shrink-0 items-center gap-2">
 				{preparation.phase === "ready" ? (
-					<Button variant="outline" onClick={onOpen}>
+					<Button variant="outline" disabled={paused} onClick={onOpen}>
 						Open
 					</Button>
 				) : null}
 				{preparation.phase === "failed" ? (
-					<Button variant="outline" onClick={onRetry}>
+					<Button variant="outline" disabled={paused} onClick={onRetry}>
 						Try again
 					</Button>
 				) : null}
@@ -121,6 +124,7 @@ export function WorkspacePreparationRow({
 					variant="ghost"
 					size="icon-xs"
 					aria-label={`Dismiss ${preparation.name}`}
+					disabled={paused}
 					onClick={onDismiss}
 				>
 					<X />

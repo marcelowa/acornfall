@@ -320,6 +320,8 @@ export interface Platform {
 	refreshProviders: () => void;
 	/** The self-update state, if the gateway answered yet. One dot, not a list. */
 	update?: UpdateStatus | undefined;
+	/** True while an update is installing or starting: writes are paused. */
+	updateBlocking: boolean;
 	/** Ask the gateway for the update state again; a success clears the last refusal. */
 	refreshUpdate: () => void;
 	/** An apply is in flight: the update button is disabled until it settles. */
@@ -1370,8 +1372,32 @@ export function usePlatform(): Platform {
 					// summary does not carry it: the page's fetch does.
 					runsActive: false,
 					runs: [],
+					wanted: state.update.wanted,
+					host: state.update.host,
+					phase: state.update.phase,
+					target: state.update.target,
+					blocking: state.update.blocking,
+					phaseReason: state.update.phaseReason,
 				};
-	const update = fetchedUpdate ?? updateFromState;
+	// The stream summary is the freshest sighting of the update phase: the host writes
+	// is.json and the state carries it. The fetched status fills the rest (notes, sizes).
+	const update =
+		fetchedUpdate === undefined
+			? updateFromState
+			: {
+					...fetchedUpdate,
+					current: updateFromState?.current ?? fetchedUpdate.current,
+					// The full status is the fresh read of the host's files; the state summary is
+					// the fallback when a fetch has not landed. The build itself comes from the
+					// stream, because the stream is what reloads this page after a swap.
+					wanted: fetchedUpdate.wanted ?? updateFromState?.wanted,
+					host: fetchedUpdate.host ?? updateFromState?.host,
+					phase: fetchedUpdate.phase ?? updateFromState?.phase,
+					target: fetchedUpdate.target ?? updateFromState?.target,
+					blocking: fetchedUpdate.blocking ?? updateFromState?.blocking,
+					phaseReason: fetchedUpdate.phaseReason ?? updateFromState?.phaseReason,
+				};
+	const updateBlocking = update?.blocking === true;
 	// The build this page first saw: an apply or rollback restarts the server
 	// under us, the stream's next state names the new build, and this bundle
 	// is old — reload to fetch the new one. The stream summary is the
@@ -1406,10 +1432,36 @@ export function usePlatform(): Platform {
 			window.clearInterval(timer);
 		};
 	}, []);
+	// While an update is blocking, follow its phase once a second. The state stream does not
+	// watch is.json, and the screen has to move from requested to starting to ready while the
+	// machine is replaced. A failed poll is expected while the console is down; the connection
+	// is what says so.
+	useEffect(() => {
+		if (!updateBlocking) return;
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const next = await fetchUpdateStatus();
+				if (!cancelled) setFetchedUpdate(next);
+			} catch {
+				// The machine is between consoles; keep the last phase and try again.
+			}
+		};
+		void load();
+		const timer = window.setInterval(() => {
+			void load();
+		}, 1000);
+		return () => {
+			cancelled = true;
+			window.clearInterval(timer);
+		};
+	}, [updateBlocking]);
 
 	const refreshUpdate = useCallback((): void => {
-		void fetchUpdateStatus().then(setFetchedUpdate, reportError);
-	}, [reportError]);
+		// During the machine restart the status is expected to fail for a while. The
+		// connection says that; a status poll is not an action to report as a failure.
+		void fetchUpdateStatus().then(setFetchedUpdate, () => undefined);
+	}, []);
 	const checkUpdateNow = useCallback((): void => {
 		act(checkUpdate().then(setFetchedUpdate));
 	}, [act]);
@@ -1594,6 +1646,7 @@ export function usePlatform(): Platform {
 		logoutProvider: logoutProviderById,
 		refreshProviders: refreshProvidersNow,
 		update,
+		updateBlocking,
 		refreshUpdate,
 		applyingUpdate,
 		checkUpdateNow,

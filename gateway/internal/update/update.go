@@ -92,6 +92,24 @@ type Running struct {
 }
 
 // Status is what GET /api/update/status answers.
+// Phase is where an update is between "asked for" and "running". It is derived from the
+// product's want, the host's is.json, and the build this gateway runs: no third file, because
+// the two sides already write the two facts. `requested` and `starting` block writes; `ready`
+// and `failed` do not.
+type Phase string
+
+const (
+	PhaseIdle      Phase = "idle"
+	PhaseRequested Phase = "requested"
+	PhaseStarting  Phase = "starting"
+	PhaseReady     Phase = "ready"
+	PhaseFailed    Phase = "failed"
+)
+
+// updateBlockMax bounds a block. A host that stops answering must not lock the console for
+// ever; after this the phase becomes failed, the block lifts, and the screen says what happened.
+const updateBlockMax = 15 * time.Minute
+
 type Status struct {
 	Current  string `json:"current"`
 	Latest   string `json:"latest"`
@@ -117,6 +135,12 @@ type Status struct {
 	// it is running (ADR 0030). Both are empty on a host install, where the product updates itself.
 	Wanted string     `json:"wanted,omitempty"`
 	Host   *HostState `json:"host,omitempty"`
+	// Phase is the update lifecycle the console reads. Blocking is true while a write must be
+	// refused; Target is the release being installed; PhaseReason is the sentence to show.
+	Phase       Phase  `json:"phase,omitempty"`
+	Target      string `json:"target,omitempty"`
+	Blocking    bool   `json:"blocking,omitempty"`
+	PhaseReason string `json:"phaseReason,omitempty"`
 }
 
 // Preflight is doctor's update section: what runs, what the worker is,
@@ -242,6 +266,10 @@ type Manager struct {
 	// the image is the only thing that may change the version, and this process refuses to try.
 	launcherOwned bool
 	restart       bool
+	// blockingSince and blockingTarget are the clock and release of the current block, so a
+	// host that stops answering becomes a failure after updateBlockMax instead of a lock.
+	blockingSince  time.Time
+	blockingTarget string
 
 	// RunsActive reports whether any conversation is running. Injected so
 	// tests need no control plane.
@@ -427,6 +455,7 @@ func (m *Manager) Status() Status {
 	wanted, host := m.hostChannel()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	phase, target, blocking, reason := m.progressLocked(wanted, host)
 	return Status{
 		Current:         m.current,
 		Latest:          m.latest.Tag,
@@ -441,7 +470,76 @@ func (m *Manager) Status() Status {
 		WorkerSize:      WorkerTarballAsset(m.latest).Size,
 		Wanted:          wanted,
 		Host:            host,
+		Phase:           phase,
+		Target:          target,
+		Blocking:        blocking,
+		PhaseReason:     reason,
 	}
+}
+
+// progressLocked is the one update lifecycle. It reads the two files before the lock (G4), so
+// this is called with the lock and only compares what it was handed.
+//
+// The old console sees requested: the product runs the old build while the host is preparing
+// the new machine. The new console sees starting until the host service is the target too;
+// only then is the update ready. A host error, or a block that outlives updateBlockMax, is
+// failed and does not block: the machine that is up is usable, and the update screen says why.
+func (m *Manager) progressLocked(wanted string, host *HostState) (Phase, string, bool, string) {
+	now := time.Now()
+	clear := func() {
+		m.blockingSince = time.Time{}
+		m.blockingTarget = ""
+	}
+	if !m.launcherOwned {
+		// A host install updates its own files and then restarts. Nothing moves the machine.
+		if !m.restart {
+			clear()
+			return PhaseIdle, "", false, ""
+		}
+		target := m.latest.Tag
+		if target == "" {
+			target = m.current
+		}
+		if m.blockingTarget != target {
+			m.blockingTarget, m.blockingSince = target, now
+		}
+		if now.Sub(m.blockingSince) > updateBlockMax {
+			clear()
+			return PhaseFailed, target, false, "the update did not finish within 15 minutes"
+		}
+		return PhaseRequested, target, true, "the update is ready; restart to finish"
+	}
+	if wanted == "" {
+		clear()
+		return PhaseIdle, "", false, ""
+	}
+	if host != nil && host.LastError != "" {
+		clear()
+		return PhaseFailed, wanted, false, host.LastError
+	}
+	phase := PhaseRequested
+	if wanted == m.current {
+		phase = PhaseStarting
+		if host != nil && (host.Service == wanted || (host.Service != "" && Newer(host.Service, wanted))) {
+			clear()
+			return PhaseReady, wanted, false, ""
+		}
+	}
+	if m.blockingTarget != wanted {
+		m.blockingTarget, m.blockingSince = wanted, now
+	}
+	if now.Sub(m.blockingSince) > updateBlockMax {
+		clear()
+		return PhaseFailed, wanted, false, "the update did not finish within 15 minutes"
+	}
+	reason := "the host is preparing the machine"
+	if phase == PhaseStarting {
+		reason = "the new machine is starting"
+	}
+	if host == nil {
+		reason = "the host has not answered yet"
+	}
+	return phase, wanted, true, reason
 }
 
 // hostChannel is the declared intent and the observed state, for an install a host supervises. A

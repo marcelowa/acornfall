@@ -27,6 +27,7 @@ import { ProvidersSection } from "@/components/settings/providers-section";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesPanel } from "@/components/workspace/workspaces-panel";
 import { WorkspacePreparationNotice } from "@/components/workspace/workspace-preparation";
+import { UpdateBanner } from "@/components/release/update-banner";
 import { WorkspaceButton } from "@/components/workspace/workspace-button";
 import { Transcript } from "@/components/transcript/transcript";
 import { Button } from "@/components/ui/button";
@@ -355,6 +356,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				<WorkspacesPanel
 					workspaces={platform.workspaces}
 					preparations={platform.preparations}
+					paused={platform.updateBlocking}
 					onSelect={platform.selectWorkspace}
 					onOpenPrepared={platform.openPreparedWorkspace}
 					onDismissPrepared={platform.dismissPreparedWorkspace}
@@ -382,14 +384,21 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					conversations={platform.conversations}
 					deleted={platform.deleted}
 					activeId={platform.active?.id}
-					onSelect={platform.select}
-					onRename={(id) =>
-						setRenaming(
-							platform.conversations.find((conversation) => conversation.id === id),
-						)
+					onSelect={platform.updateBlocking ? undefined : platform.select}
+					onRename={
+						platform.updateBlocking
+							? undefined
+							: (id) =>
+									setRenaming(
+										platform.conversations.find(
+											(conversation) => conversation.id === id,
+										),
+									)
 					}
-					onHide={(id) => platform.hide(id, true)}
-					onRestore={(id) => platform.hide(id, false)}
+					onHide={platform.updateBlocking ? undefined : (id) => platform.hide(id, true)}
+					onRestore={
+						platform.updateBlocking ? undefined : (id) => platform.hide(id, false)
+					}
 				/>
 			}
 			foot={
@@ -400,7 +409,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 						className="justify-start"
 						aria-label="New conversation"
 						title={platform.readiness}
-						disabled={!platform.workspaceReady}
+						disabled={!platform.workspaceReady || platform.updateBlocking}
 						onClick={platform.newConversation}
 					>
 						<Plus />
@@ -580,6 +589,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			status={platform.update}
 			tag={platform.updateTag}
 			applying={platform.applyingUpdate}
+			connection={platform.connection}
 			onOpenTag={platform.showUpdate}
 			onClose={() => platform.showScreen("conversation")}
 			onCheck={platform.checkUpdateNow}
@@ -696,7 +706,16 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				railWidth={platform.railWidth}
 				onRailWidthChange={platform.setRailWidth}
 				notice={
-					platform.failure !== undefined ? (
+					platform.update !== undefined &&
+					(platform.updateBlocking || platform.update.phase === "failed") ? (
+						<Measure size="wide" padding="md">
+							<UpdateBanner
+								status={platform.update}
+								connection={platform.connection}
+								onDetails={() => platform.showUpdate()}
+							/>
+						</Measure>
+					) : platform.failure !== undefined ? (
 						<Measure size="wide" padding="md">
 							<ErrorStrip
 								message={platform.failure}
@@ -751,15 +770,25 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							onCompact={platform.openCompactDialog}
 							onSteer={() => sendText("steer")}
 							onQueue={() => sendText("followUp")}
-							disabled={platform.active === undefined || !platform.workspaceReady}
-							placeholder={
-								platform.active === undefined
-									? "Pick a conversation"
-									: platform.workspaceReady
-										? "Send a message"
-										: (platform.readiness ?? "This workspace is not ready")
+							disabled={
+								platform.active === undefined ||
+								!platform.workspaceReady ||
+								platform.updateBlocking
 							}
-							title={platform.readiness}
+							title={
+								platform.updateBlocking
+									? (platform.update?.phaseReason ?? "An update is in progress")
+									: platform.readiness
+							}
+							placeholder={
+								platform.updateBlocking
+									? "Updating — actions are paused"
+									: platform.active === undefined
+										? "Pick a conversation"
+										: platform.workspaceReady
+											? "Send a message"
+											: (platform.readiness ?? "This workspace is not ready")
+							}
 							above={
 								visibleSlash.length === 0 ? undefined : (
 									<SlashMenu

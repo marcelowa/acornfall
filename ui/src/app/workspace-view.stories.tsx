@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { UpdateStatus } from "./client";
 import type { Platform } from "./use-platform";
 import type { ConversationSummary, TranscriptEntry } from "./view-models";
 import { WorkspaceView } from "./workspace-view";
@@ -280,6 +281,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		logoutProvider: noop,
 		refreshProviders: noop,
 		update: undefined,
+		updateBlocking: false,
 		restartUpdateNow: noop,
 		refreshUpdate: noop,
 		applyingUpdate: false,
@@ -404,6 +406,39 @@ export const RefusedAction: Story = {
 	args: {
 		platform: makePlatform({
 			failure: 'a workspace name cannot contain a slash or a space: "ui-check/refused"',
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/**
+ * An update is installing. The banner is install-wide; the composer and the workspace actions
+ * are disabled until the phase says ready or failed.
+ */
+const blockedUpdate: UpdateStatus = {
+	current: "v0.10.0-beta.46",
+	latest: "v0.10.0-beta.47",
+	notes: "",
+	channel: "releases",
+	autoCheck: true,
+	checking: false,
+	downloadSize: 0,
+	workerSize: 0,
+	available: true,
+	backups: [],
+	runsActive: false,
+	runs: [],
+	phase: "requested",
+	target: "v0.10.0-beta.47",
+	blocking: true,
+	phaseReason: "the host is preparing the machine",
+};
+
+export const Updating: Story = {
+	args: {
+		platform: makePlatform({
+			update: blockedUpdate,
+			updateBlocking: true,
 		}),
 	},
 	globals: { viewport: { value: "laptop" } },

@@ -222,6 +222,44 @@ export const RunsAreLive: Story = {
 	),
 };
 
+/** The machine is being replaced: the page says so and the Install button waits. */
+export const Updating: Story = {
+	render: () => (
+		<Frame
+			label="Updating — the machine is restarting"
+			note="The status phase is blocking; the page reads the connection to say restarting, and the Install control has nothing to press."
+		>
+			<ReleaseScreen
+				status={status({
+					phase: "starting",
+					target: "v0.9.33",
+					blocking: true,
+					phaseReason: "the new machine is starting",
+					wanted: "v0.9.33",
+					host: {
+						running: true,
+						version: "v0.9.28",
+						service: "v0.9.28",
+						lastError: "",
+						at: "2026-10-23T16:00:00Z",
+					},
+				})}
+				tag=""
+				applying={false}
+				connection="reconnecting"
+				onOpenTag={noop}
+				onClose={noop}
+				onCheck={noop}
+				onRefresh={noop}
+				onApply={noop}
+				onRestart={noop}
+				onRollback={noop}
+				{...fixtureFor("v0.9.28")}
+			/>
+		</Frame>
+	),
+};
+
 /** The notes read in flight: the rows are already there, and say so. */
 export const NotesLoading: Story = {
 	render: () => (

@@ -35,6 +35,8 @@ export interface ReleaseScreenProps {
 	tag: string;
 	/** An apply is in flight: the button says so until it settles. */
 	applying: boolean;
+	/** The stream, when the machine is being replaced. */
+	connection?: "live" | "reconnecting" | undefined;
 	/** Open a release's own page. */
 	onOpenTag: (tag: string) => void;
 	/** Back to the conversation behind the screen. */
@@ -66,6 +68,7 @@ export function ReleaseScreen({
 	status,
 	tag,
 	applying,
+	connection = "live",
 	onOpenTag,
 	onClose,
 	onCheck,
@@ -220,7 +223,8 @@ export function ReleaseScreen({
 		askedFor !== "" &&
 		askedFor !== (status?.host?.version ?? "") &&
 		(status?.host?.lastError ?? "") === "";
-	const watching = applying || status?.restartRequired === true || hostGap;
+	const watching =
+		applying || status?.blocking === true || status?.restartRequired === true || hostGap;
 	useEffect(() => {
 		if (!watching) return;
 		if (current !== "" && current === targetTag) return;
@@ -229,6 +233,7 @@ export function ReleaseScreen({
 	}, [watching, current, targetTag, onRefresh]);
 
 	const startUpdate = (): void => {
+		if (status?.blocking === true) return;
 		if (status?.runsActive === true) {
 			setDialogOpen(true);
 			return;
@@ -324,6 +329,7 @@ export function ReleaseScreen({
 						tag={tag}
 						checking={status?.checking === true}
 						applying={applying}
+						connection={connection}
 						listError={listError}
 						now={answeredAt}
 						onCheck={onCheck}
@@ -350,7 +356,7 @@ export function ReleaseScreen({
 						</Stack>
 					) : null}
 
-					{targetError !== undefined ? (
+					{targetError !== undefined && status?.blocking !== true ? (
 						<Stack gap="2xs" data-slot="release-missing">
 							<Text size="sm" weight="semibold">
 								No such release
@@ -372,7 +378,7 @@ export function ReleaseScreen({
 							readingNotes={readingNotes}
 							cleanVMs={cleanVMs}
 							onCleanVMs={setCleanVMs}
-							applying={applying}
+							applying={applying || status?.blocking === true}
 							swapped={status?.restartRequired === true}
 							onInstall={startUpdate}
 						/>
@@ -681,6 +687,7 @@ function StateLine({
 	tag,
 	checking,
 	applying,
+	connection,
 	listError,
 	now,
 	onCheck,
@@ -691,11 +698,33 @@ function StateLine({
 	tag: string;
 	checking: boolean;
 	applying: boolean;
+	connection: "live" | "reconnecting";
 	listError: string | undefined;
 	now: Date;
 	onCheck: () => void;
 	onRestart: () => void;
 }) {
+	if (status !== undefined && status.blocking === true) {
+		const targetTag = status.target ?? target?.tag ?? "the new release";
+		const restarting = connection === "reconnecting";
+		return (
+			<Stack gap="2xs" data-slot="release-state">
+				<Text size="sm" weight="semibold">
+					{restarting ? `The machine is restarting` : `Updating to ${targetTag}`}
+				</Text>
+				<Text size="xs">
+					{restarting
+						? "The console reconnects when the new version answers."
+						: status.phase === "starting"
+							? "The new machine is starting; the host update follows."
+							: "The host is preparing the machine. Writes are paused."}
+				</Text>
+				<Text size="2xs" tone="muted" className="font-mono tabular-nums">
+					{status.current} · {status.phase ?? "updating"} · {status.phaseReason ?? ""}
+				</Text>
+			</Stack>
+		);
+	}
 	if (status === undefined) {
 		return (
 			<Stack gap="2xs" data-slot="release-state">

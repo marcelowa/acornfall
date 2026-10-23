@@ -198,6 +198,10 @@ func serve(argv []string) error {
 				Failed:          status.Failed,
 				RestartRequired: status.RestartRequired,
 				Wanted:          status.Wanted,
+				Phase:           string(status.Phase),
+				Target:          status.Target,
+				Blocking:        status.Blocking,
+				PhaseReason:     status.PhaseReason,
 			}
 			if status.Host != nil {
 				// Copied across the layer boundary as this tier's own shape: control does not

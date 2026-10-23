@@ -61,6 +61,20 @@ export interface WireUpdateSummary {
 	available: boolean;
 	failed?: string | undefined;
 	restartRequired?: boolean | undefined;
+	wanted?: string | undefined;
+	host?:
+		| {
+				running: boolean;
+				version: string;
+				service: string;
+				lastError: string;
+				at: string;
+		  }
+		| undefined;
+	phase?: "idle" | "requested" | "starting" | "ready" | "failed" | undefined;
+	target?: string | undefined;
+	blocking?: boolean | undefined;
+	phaseReason?: string | undefined;
 }
 
 /** Where a workspace is between "asked for" and "can be used", reported by the gateway. */

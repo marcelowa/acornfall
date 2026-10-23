@@ -24,6 +24,8 @@ import { Text } from "@/components/typography/text";
  */
 export interface WorkspaceRowProps {
 	workspace: WorkspaceSummary;
+	/** An update is installing: opening and the row's menu wait. */
+	paused?: boolean | undefined;
 	onSelect: (name: string) => void;
 	onRename: (workspace: WorkspaceSummary) => void;
 	onSandbox: (workspace: WorkspaceSummary) => void;
@@ -32,6 +34,7 @@ export interface WorkspaceRowProps {
 
 export function WorkspaceRow({
 	workspace,
+	paused = false,
 	onSelect,
 	onRename,
 	onSandbox,
@@ -59,6 +62,7 @@ export function WorkspaceRow({
 					<Button
 						variant="outline"
 						aria-label={`Open ${workspace.title}`}
+						disabled={paused}
 						onClick={() => onSelect(workspace.name)}
 					>
 						Open
@@ -71,6 +75,7 @@ export function WorkspaceRow({
 							variant="ghost"
 							size="icon-xs"
 							aria-label={`Actions for ${workspace.title}`}
+							disabled={paused}
 						>
 							<Ellipsis />
 						</Button>

@@ -110,6 +110,31 @@ func (s *Server) started(next http.HandlerFunc) http.HandlerFunc {
 	return s.withControl(next, s.existingControl)
 }
 
+// updating refuses a write while an update is in progress. Reads, state, stream, drafts and the
+// update's own status stay open: the console has to be able to report what is happening.
+func (s *Server) updating(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.update == nil {
+			next(w, r)
+			return
+		}
+		status := s.update.Status()
+		if !status.Blocking {
+			next(w, r)
+			return
+		}
+		target := status.Target
+		if target == "" {
+			target = "a new release"
+		}
+		reason := status.PhaseReason
+		if reason != "" {
+			reason = ": " + reason
+		}
+		http.Error(w, fmt.Sprintf("an update to %s is in progress%s; actions are paused until it finishes", target, reason), http.StatusConflict)
+	}
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -120,39 +145,39 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET "+base+"/state", s.state)
 		mux.HandleFunc("GET "+base+"/stream", s.stream)
 		mux.HandleFunc("GET "+base+"/conversations", s.ready(s.conversations))
-		mux.HandleFunc("POST "+base+"/conversations", s.ready(s.createConversation))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/select", s.ready(s.selectConversation))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/rename", s.ready(s.renameConversation))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/hide", s.ready(s.hideConversation))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/fork", s.ready(s.forkConversation))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.ready(s.compactConversation))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/compact-preview", s.ready(s.compactPreview))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.ready(s.messages))
+		mux.HandleFunc("POST "+base+"/conversations", s.updating(s.ready(s.createConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/select", s.updating(s.ready(s.selectConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/rename", s.updating(s.ready(s.renameConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/hide", s.updating(s.ready(s.hideConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/fork", s.updating(s.ready(s.forkConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.updating(s.ready(s.compactConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/compact-preview", s.updating(s.ready(s.compactPreview)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.updating(s.ready(s.messages)))
 		mux.HandleFunc("POST "+base+"/conversations/{id}/draft", s.started(s.draft))
-		mux.HandleFunc("POST "+base+"/attachments", s.ready(s.attachments))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.ready(s.abort))
-		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.ready(s.agent))
+		mux.HandleFunc("POST "+base+"/attachments", s.updating(s.ready(s.attachments)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.updating(s.ready(s.abort)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.updating(s.ready(s.agent)))
 		mux.HandleFunc("GET "+base+"/conversations/{id}/policy", s.ready(s.policy))
 		mux.HandleFunc("GET "+base+"/conversations/{id}/messages", s.ready(s.messagesDoc))
 		mux.HandleFunc("GET "+base+"/agents", s.ready(s.agents))
 		mux.HandleFunc("GET "+base+"/commands", s.ready(s.commands))
-		mux.HandleFunc("POST "+base+"/agents/reload", s.ready(s.reload))
+		mux.HandleFunc("POST "+base+"/agents/reload", s.updating(s.ready(s.reload)))
 		mux.HandleFunc("GET "+base+"/usage", s.ready(s.usage))
-		mux.HandleFunc("POST "+base+"/providers/login", s.ready(s.login))
-		mux.HandleFunc("POST "+base+"/providers/logout", s.ready(s.logout))
-		mux.HandleFunc("POST "+base+"/providers/refresh", s.ready(s.refresh))
-		mux.HandleFunc("POST "+base+"/auth/answer", s.ready(s.authAnswer))
-		mux.HandleFunc("POST "+base+"/auth/cancel", s.ready(s.authCancel))
-		mux.HandleFunc("POST "+base+"/default-model", s.ready(s.setDefaultModel))
-		mux.HandleFunc("POST "+base+"/default-thinking", s.ready(s.setDefaultThinking))
-		mux.HandleFunc("POST "+base+"/default-agent", s.ready(s.setDefaultAgent))
+		mux.HandleFunc("POST "+base+"/providers/login", s.updating(s.ready(s.login)))
+		mux.HandleFunc("POST "+base+"/providers/logout", s.updating(s.ready(s.logout)))
+		mux.HandleFunc("POST "+base+"/providers/refresh", s.updating(s.ready(s.refresh)))
+		mux.HandleFunc("POST "+base+"/auth/answer", s.updating(s.ready(s.authAnswer)))
+		mux.HandleFunc("POST "+base+"/auth/cancel", s.updating(s.ready(s.authCancel)))
+		mux.HandleFunc("POST "+base+"/default-model", s.updating(s.ready(s.setDefaultModel)))
+		mux.HandleFunc("POST "+base+"/default-thinking", s.updating(s.ready(s.setDefaultThinking)))
+		mux.HandleFunc("POST "+base+"/default-agent", s.updating(s.ready(s.setDefaultAgent)))
 	}
 
 	// Install-wide defaults: no workspace in the path, because the point of them is that
 	// they are not any one workspace's.
-	mux.HandleFunc("POST /api/defaults/model", s.setInstallDefaultModel)
-	mux.HandleFunc("POST /api/defaults/thinking", s.setInstallDefaultThinking)
-	mux.HandleFunc("POST /api/defaults/agent", s.setInstallDefaultAgent)
+	mux.HandleFunc("POST /api/defaults/model", s.updating(s.setInstallDefaultModel))
+	mux.HandleFunc("POST /api/defaults/thinking", s.updating(s.setInstallDefaultThinking))
+	mux.HandleFunc("POST /api/defaults/agent", s.updating(s.setInstallDefaultAgent))
 
 	mux.HandleFunc("GET /healthz", s.health)
 
@@ -162,14 +187,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/update/notes", s.updateNotes)
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
-	mux.HandleFunc("POST /api/update/restart", s.updateRestart)
-	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
-	mux.HandleFunc("POST /api/update/settings", s.updateSettings)
+	mux.HandleFunc("POST /api/update/restart", s.updating(s.updateRestart))
+	mux.HandleFunc("POST /api/update/rollback", s.updating(s.updateRollback))
+	mux.HandleFunc("POST /api/update/settings", s.updating(s.updateSettings))
 
 	mux.HandleFunc("GET /api/workspaces", s.workspaceList)
-	mux.HandleFunc("POST /api/workspaces", s.workspaceCreate)
-	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.workspaceUpdate)
-	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.workspaceRemove)
+	mux.HandleFunc("POST /api/workspaces", s.updating(s.workspaceCreate))
+	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.updating(s.workspaceUpdate))
+	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.updating(s.workspaceRemove))
 
 	// /c/<workspace>/<conversation> is a conversation, /w/<workspace> is a workspace with
 	// whichever conversation it lands on, and the interface's own screens are routes too so a
