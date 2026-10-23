@@ -19,3 +19,8 @@ export const Reconnecting: Story = {
 export const HarnessDown: Story = {
 	args: { state: "harness-down", detail: "the harness process ended: signal: killed" },
 };
+
+/** A new workspace has not answered yet: it is starting, not down. */
+export const Starting: Story = {
+	args: { state: "starting", detail: "the harness is starting" },
+};

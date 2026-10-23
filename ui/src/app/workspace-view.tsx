@@ -760,16 +760,21 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 									 * before choosing a model, and it stays in the folded row — a fold that hid
 									 * it would make a dead run look alive (step 06, J11). Nothing renders while
 									 * everything is well. */}
-									{platform.workerUp ? (
-										platform.connection === "reconnecting" ? (
-											<StatusPill state="reconnecting" />
-										) : null
-									) : (
+									{platform.lifecycle.phase === "failed" ? (
 										<StatusPill
 											state="harness-down"
-											detail={platform.workerError}
+											detail={
+												platform.lifecycle.reason ?? platform.workerError
+											}
 										/>
-									)}
+									) : platform.lifecycle.phase === "starting" ? (
+										<StatusPill
+											state="starting"
+											detail={platform.lifecycle.reason}
+										/>
+									) : platform.connection === "reconnecting" ? (
+										<StatusPill state="reconnecting" />
+									) : null}
 								</>
 							}
 							controls={

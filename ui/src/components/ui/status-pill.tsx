@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "cn";
 
-export type StatusPillState = "reconnecting" | "harness-down";
+export type StatusPillState = "reconnecting" | "harness-down" | "starting";
 
 export interface StatusPillProps {
 	state: StatusPillState;
@@ -11,9 +11,10 @@ export interface StatusPillProps {
 }
 
 /**
- * Ambient state, not an event: the stream is being re-established, or the harness is gone.
- * It renders nothing while everything is well — a "connected" badge is noise — and it stays
- * as long as the condition does, because it is a condition and not a thing that happened.
+ * Ambient state, not an event: the stream is being re-established, the workspace is starting,
+ * or the harness is gone. It renders nothing while everything is well — a "connected" badge is
+ * noise — and it stays as long as the condition does, because it is a condition and not a thing
+ * that happened. "Starting" is not "down": a new workspace has not answered yet.
  */
 export function StatusPill({ state, detail, className }: StatusPillProps) {
 	return (
@@ -21,12 +22,16 @@ export function StatusPill({ state, detail, className }: StatusPillProps) {
 			data-slot="status-pill"
 			data-state={state}
 			variant="soft"
-			tone={state === "harness-down" ? "danger" : "warning"}
+			tone={state === "harness-down" ? "danger" : state === "starting" ? "info" : "warning"}
 			size="sm"
 			title={detail}
 			className={cn(className)}
 		>
-			{state === "harness-down" ? "harness down" : "reconnecting"}
+			{state === "harness-down"
+				? "harness down"
+				: state === "starting"
+					? "starting"
+					: "reconnecting"}
 		</Badge>
 	);
 }
