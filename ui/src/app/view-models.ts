@@ -21,6 +21,19 @@ export interface WorkspaceSummary {
 }
 
 /** What the agent's tools can reach, as the interface has to be able to say. */
+/**
+ * A workspace's phase, as the interface needs it: what to say, and whether to offer an action yet.
+ *
+ * The three phases are the gateway's (`control.Lifecycle`): starting, ready, failed. A workspace that is
+ * ready with an unusable sandbox is ready — it can be talked to, and the sandbox panel says why tools
+ * refuse — so the phase never stands in for "the tools are off".
+ */
+export interface WorkspaceLifecycle {
+	phase: "starting" | "ready" | "failed";
+	/** Why it is not ready, in the gateway's words. */
+	reason?: string | undefined;
+}
+
 export interface SandboxSummary {
 	engine: string;
 	version: string;

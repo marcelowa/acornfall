@@ -108,6 +108,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		entries,
 		active: streamConversation,
 		workerUp: true,
+		lifecycle: { phase: "ready" },
+		workspaceReady: true,
 		connection: "live",
 		clearFailure: noop,
 		reload: noop,

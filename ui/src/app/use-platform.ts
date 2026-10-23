@@ -60,6 +60,9 @@ import {
 	toModelChoices,
 	toModelGroups,
 	toProviders,
+	isReady,
+	readinessSentence,
+	toLifecycle,
 	toSandbox,
 	toScopeDefaults,
 	toThinkingGroups,
@@ -73,6 +76,7 @@ import type {
 	PickerGroup,
 	ProviderSummary,
 	SandboxSummary,
+	WorkspaceLifecycle,
 	SlashCommand,
 	TranscriptEntry,
 	WorkspaceSummary,
@@ -264,6 +268,14 @@ export interface Platform {
 	composerFocusToken: number;
 	/** Where the active workspace's tools actually run. */
 	sandbox?: SandboxSummary | undefined;
+	/** The active workspace's phase: starting, ready, or failed with a reason. */
+	lifecycle: WorkspaceLifecycle;
+	/** False until the workspace can make conversations and take prompts. The rail's "new
+	 * conversation" and the composer are off, and they say why. Not the page's own readiness,
+	 * which is above and about the first fetch having landed. */
+	workspaceReady: boolean;
+	/** The reason the workspace is not ready, in one sentence; undefined when it is. */
+	readiness?: string | undefined;
 	/** What each scope says, before resolution: one tab per scope in the settings screen. */
 	defaults: {
 		workspace: { model: string; thinking: string; agent: string };
@@ -732,6 +744,17 @@ export function usePlatform(): Platform {
 		() => (state === undefined ? undefined : toSandbox(state.sandbox)),
 		[state],
 	);
+	// A client that has no state yet is a client that is starting: the workspace exists as a request and
+	// nothing has answered about it, which is exactly what "starting" says.
+	const lifecycle = useMemo<WorkspaceLifecycle>(
+		() =>
+			state === undefined
+				? { phase: "starting", reason: "waiting for the workspace" }
+				: toLifecycle(state),
+		[state],
+	);
+	const workspaceReady = isReady(lifecycle);
+	const readiness = readinessSentence(lifecycle);
 	const deleted = useMemo(
 		() =>
 			(state?.conversations ?? [])
@@ -1376,6 +1399,9 @@ export function usePlatform(): Platform {
 		context: contextFold,
 		workspaces,
 		sandbox,
+		lifecycle,
+		workspaceReady,
+		readiness,
 		selectWorkspace,
 		defaults,
 		setDefault,

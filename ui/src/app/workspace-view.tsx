@@ -394,6 +394,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 						size="sm"
 						className="justify-start"
 						aria-label="New conversation"
+						title={platform.readiness}
+						disabled={!platform.workspaceReady}
 						onClick={platform.newConversation}
 					>
 						<Plus />
@@ -725,14 +727,15 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							onCompact={platform.openCompactDialog}
 							onSteer={() => sendText("steer")}
 							onQueue={() => sendText("followUp")}
-							disabled={platform.active === undefined || !platform.workerUp}
+							disabled={platform.active === undefined || !platform.workspaceReady}
 							placeholder={
 								platform.active === undefined
 									? "Pick a conversation"
-									: platform.workerUp
+									: platform.workspaceReady
 										? "Send a message"
-										: "The harness is down"
+										: (platform.readiness ?? "This workspace is not ready")
 							}
+							title={platform.readiness}
 							above={
 								visibleSlash.length === 0 ? undefined : (
 									<SlashMenu

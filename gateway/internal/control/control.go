@@ -137,6 +137,30 @@ type WorkspaceState struct {
 	Running          bool  `json:"running"`
 }
 
+// Lifecycle is where a workspace is between "asked for" and "can be used", in one field the console
+// does not have to assemble from three.
+//
+// The phases are the three states a person can act on:
+//
+//	starting  the harness has not answered yet: wait
+//	ready     the harness is up: conversations, prompts and tools work
+//	failed    the harness went down and has not come back: the reason says why
+//
+// A workspace that is ready with an unusable sandbox is ready: it can be talked to, and the sandbox
+// panel says in its own words why tools refuse. That is a different problem from "nothing works yet",
+// and folding the two together is how a person is told to wait for something that will never change.
+type Lifecycle struct {
+	Phase  string `json:"phase"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// The three phases. Strings, because they cross the wire and a reader of the JSON should see words.
+const (
+	LifecycleStarting = "starting"
+	LifecycleReady    = "ready"
+	LifecycleFailed   = "failed"
+)
+
 // Inherited reports which fields the active conversation left to the defaults.
 type Inherited struct {
 	Model    bool `json:"model"`
@@ -208,6 +232,9 @@ type State struct {
 	WorkerError string `json:"workerError,omitempty"`
 	// Sandbox is where this workspace's commands and file reads actually happen.
 	Sandbox SandboxState `json:"sandbox"`
+	// Lifecycle says whether the workspace can be used yet, and why not. A client that creates a
+	// conversation before this is ready is a client that writes into a harness that is not there.
+	Lifecycle Lifecycle `json:"lifecycle"`
 	// Update is the self-update summary: the header dot without fetching.
 	Update    UpdateSummary           `json:"update"`
 	Agents    []protocol.AgentSummary `json:"agents"`
@@ -966,6 +993,7 @@ func (c *Control) StateFor(conversationID string) State {
 		WorkerUp:    c.workerUp,
 		WorkerError: c.workerError,
 		Sandbox:     c.sandboxStatus(),
+		Lifecycle:   c.lifecycleLocked(),
 		Update:      c.updateSummary(),
 		Inherited: Inherited{
 			Model:    c.bindings[active].Provider == "",
@@ -1168,6 +1196,12 @@ func (c *Control) CompactPreview(ctx context.Context, conversationID string) (Co
 // transcript keeps a notice where it was.
 // Create makes a new conversation and selects it.
 func (c *Control) Create(ctx context.Context) error {
+	// Conversations are made by the harness, so a harness that is not up cannot make one: the write
+	// went to a process that was not there, and the console said "harness down" over an action it had
+	// offered a second earlier. A workspace says when it is ready, and this is the gate that honours it.
+	if lifecycle := c.Lifecycle(); lifecycle.Phase != LifecycleReady {
+		return fmt.Errorf("this workspace is not ready yet: %s", lifecycle.Reason)
+	}
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
@@ -2391,6 +2425,25 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 		c.mu.Unlock()
 	}
 	return data.Conversations, nil
+}
+
+// lifecycleLocked is the workspace's phase, for a caller already holding the lock for reading.
+func (c *Control) lifecycleLocked() Lifecycle {
+	switch {
+	case c.workerUp:
+		return Lifecycle{Phase: LifecycleReady}
+	case c.workerError != "":
+		return Lifecycle{Phase: LifecycleFailed, Reason: c.workerError}
+	default:
+		return Lifecycle{Phase: LifecycleStarting, Reason: "the harness is starting"}
+	}
+}
+
+// Lifecycle is the workspace's phase for a caller that is not holding the lock.
+func (c *Control) Lifecycle() Lifecycle {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lifecycleLocked()
 }
 
 func (c *Control) activeConversation() string {

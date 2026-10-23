@@ -59,6 +59,9 @@ export interface ComposerProps {
 	aborting?: boolean | undefined;
 	disabled?: boolean | undefined;
 	placeholder?: string | undefined;
+	/** Why it is disabled, when the reason is worth reading: a control that says only "off" is a
+	 * control a person pokes at. */
+	title?: string | undefined;
 	/** The pickers row: model, thinking, agent. Hidden while the card is folded — the folded row
 	 * keeps `ambient` instead, so a dropped stream never hides with the pickers. */
 	controls?: ReactNode | undefined;
@@ -122,6 +125,7 @@ export function Composer({
 	aborting = false,
 	disabled = false,
 	placeholder = "Send a message",
+	title,
 	controls,
 	ambient,
 	folded = false,
@@ -381,6 +385,7 @@ export function Composer({
 								}}
 								disabled={disabled}
 								placeholder={placeholder}
+								title={disabled ? title : undefined}
 								aria-label="Message"
 								// The direction follows the draft: Hebrew starts right,
 								// English starts left. The card around it stays put.

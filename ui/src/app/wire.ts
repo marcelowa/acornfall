@@ -63,6 +63,12 @@ export interface WireUpdateSummary {
 	restartRequired?: boolean | undefined;
 }
 
+/** Where a workspace is between "asked for" and "can be used", reported by the gateway. */
+export interface WireLifecycle {
+	phase: "starting" | "ready" | "failed";
+	reason?: string | undefined;
+}
+
 export interface WireSandbox {
 	engine?: string | undefined;
 	version?: string | undefined;
@@ -185,6 +191,8 @@ export interface WireState {
 	workerUp: boolean;
 	workerError?: string | undefined;
 	sandbox: WireSandbox;
+	/** Absent from a gateway older than the field: a client then falls back to its own reading. */
+	lifecycle?: WireLifecycle | undefined;
 	/** The self-update summary: the header dot without fetching. */
 	update: WireUpdateSummary;
 	capabilities: WireCapabilities;
