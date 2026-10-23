@@ -1436,6 +1436,14 @@ export function usePlatform(): Platform {
 	// watch is.json, and the screen has to move from requested to starting to ready while the
 	// machine is replaced. A failed poll is expected while the console is down; the connection
 	// is what says so.
+	// A write refused because an update was running is not a failure once the update is
+	// ready: the red strip would still say "an update is in progress" over a working console.
+	useEffect(() => {
+		if (updateBlocking) return;
+		setFailure((current) =>
+			current !== undefined && current.startsWith("an update to ") ? undefined : current,
+		);
+	}, [updateBlocking]);
 	useEffect(() => {
 		if (!updateBlocking) return;
 		let cancelled = false;
