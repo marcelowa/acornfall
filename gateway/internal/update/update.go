@@ -110,6 +110,10 @@ const (
 // ever; after this the phase becomes failed, the block lifts, and the screen says what happened.
 const updateBlockMax = 15 * time.Minute
 
+// hostCacheGrace is how long a missing is.json or want.json keeps the last good read. The
+// host writes is.json every second; a read that misses the rename is not the host stopping.
+const hostCacheGrace = 10 * time.Second
+
 type Status struct {
 	Current  string `json:"current"`
 	Latest   string `json:"latest"`
@@ -270,6 +274,15 @@ type Manager struct {
 	// host that stops answering becomes a failure after updateBlockMax instead of a lock.
 	blockingSince  time.Time
 	blockingTarget string
+
+	// hostMu guards the last good channel read. is.json is replaced once a second on the
+	// machine's share; a reader can miss the file in that window, and a phase that flaps
+	// ready -> starting would block writes for no reason. A short cache bridges the window.
+	hostMu     sync.Mutex
+	lastHost   HostState
+	lastHostAt time.Time
+	lastWant   Want
+	lastWantAt time.Time
 
 	// RunsActive reports whether any conversation is running. Injected so
 	// tests need no control plane.
@@ -549,12 +562,28 @@ func (m *Manager) hostChannel() (string, *HostState) {
 	if !m.launcherOwned {
 		return "", nil
 	}
+	now := time.Now()
 	want, _ := ReadWant(m.share)
-	state, ok := ReadIs(m.share)
-	if !ok {
-		return want.Version, nil
+	m.hostMu.Lock()
+	if want.Version != "" {
+		m.lastWant, m.lastWantAt = want, now
+	} else if !m.lastWantAt.IsZero() && now.Sub(m.lastWantAt) < hostCacheGrace {
+		want = m.lastWant
 	}
-	return want.Version, &state
+	m.hostMu.Unlock()
+
+	state, ok := ReadIs(m.share)
+	m.hostMu.Lock()
+	defer m.hostMu.Unlock()
+	if ok {
+		m.lastHost, m.lastHostAt = state, now
+		return want.Version, &state
+	}
+	if !m.lastHostAt.IsZero() && now.Sub(m.lastHostAt) < hostCacheGrace {
+		cached := m.lastHost
+		return want.Version, &cached
+	}
+	return want.Version, nil
 }
 
 // LauncherOwned says this process cannot change its own version: the host does (ADR 0029, ADR 0030).

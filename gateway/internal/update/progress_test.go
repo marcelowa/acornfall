@@ -1,6 +1,7 @@
 package update
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -79,5 +80,36 @@ func TestAnUpdateThatStopsAnsweringStopsBlocking(t *testing.T) {
 	status := manager.Status()
 	if status.Phase != PhaseFailed || status.Blocking || !strings.Contains(status.PhaseReason, "15 minutes") {
 		t.Fatalf("an update past its bound should fail and unblock, got %+v", status)
+	}
+}
+
+// is.json is replaced every second on the machine's share. A read that misses the rename is
+// not the host going away; the last good state bridges a short window instead of flapping the
+// phase back to starting and blocking writes.
+func TestATransientMissingIsKeepsTheReadyPhase(t *testing.T) {
+	root := t.TempDir()
+	manager := New(t.TempDir(), root, "", "")
+	manager.WithLauncherOwner()
+	manager.current = "v0.10.0-beta.50"
+	if err := WriteWant(root, "v0.10.0-beta.50"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIs(root, HostState{Running: true, Version: "v0.10.0-beta.50", Service: "v0.10.0-beta.50"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.Status(); got.Phase != PhaseReady {
+		t.Fatalf("fixture is not ready: %+v", got.Phase)
+	}
+	if err := os.Remove(IsPath(root)); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.Status(); got.Phase != PhaseReady || got.Blocking {
+		t.Fatalf("a missing read flapped the phase: %+v", got)
+	}
+	manager.hostMu.Lock()
+	manager.lastHostAt = time.Now().Add(-hostCacheGrace - time.Second)
+	manager.hostMu.Unlock()
+	if got := manager.Status(); got.Phase != PhaseStarting || !got.Blocking {
+		t.Fatalf("a host that stayed away should be starting and blocking, got %+v", got)
 	}
 }
