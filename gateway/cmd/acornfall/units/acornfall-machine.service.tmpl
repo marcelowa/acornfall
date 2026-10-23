@@ -19,7 +19,10 @@ ExecStart={{BINARY}} machine serve --share {{SHARE}} --machinery {{MACHINERY}} -
 Restart=always
 RestartSec=2
 # The machine is a VM this process starts and then leaves running: stopping the service is not taking the
-# machine down, and it handles SIGTERM by exiting without touching it.
+# machine down, and it handles SIGTERM by exiting without touching it. `process` is the promise: the default
+# `control-group` also kills the engine child, so the next service boots a second machine after every
+# step-two restart. `process` leaves the machine running; the new service attaches to it.
+KillMode=process
 KillSignal=SIGTERM
 TimeoutStopSec=30
 

@@ -1030,3 +1030,22 @@ func TestTheCommandLinkStillOwnsTheBinary(t *testing.T) {
 		t.Error("a command started through the PATH link is this install's binary")
 	}
 }
+
+// The unit must keep the machine when the service exits for step two. The default KillMode kills
+// the engine child with the service, so the next service boots a second machine; `process` leaves
+// the machine running and the new service attaches to it.
+func TestTheUnitLeavesTheMachineRunningWhenTheServiceStops(t *testing.T) {
+	_, content, err := unitFor("linux", unitConfig{
+		UserHome:  t.TempDir(),
+		Machinery: "/var/lib/acornfall",
+		Share:     "/srv/acornfall",
+		Host:      "0.0.0.0",
+		Port:      7777,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "KillMode=process") {
+		t.Fatalf("the unit does not leave the machine running:\n%s", content)
+	}
+}
