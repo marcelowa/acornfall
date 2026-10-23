@@ -681,6 +681,20 @@ func prepareTarget(rootfs string, bind Bind, owner, group int) error {
 		return err
 	}
 	if owner > 0 {
+		// The target is the workspace; its ancestors are the image's. A tool runs as the bind's
+		// owner, not as the container's root, so a 700 parent (the image's /root, a user's home)
+		// would keep it out of a mount that exists. Execute permission on the chain is enough;
+		// read and list stay as the image made them.
+		root := filepath.Clean(rootfs)
+		for parent := filepath.Dir(path); parent != root && strings.HasPrefix(parent, root+string(os.PathSeparator)); parent = filepath.Dir(parent) {
+			info, statErr := os.Stat(parent)
+			if statErr != nil {
+				break
+			}
+			if mode := info.Mode().Perm(); mode&0o111 != 0o111 {
+				_ = os.Chmod(parent, mode|0o111)
+			}
+		}
 		return chownTree(path, owner, group)
 	}
 	return nil

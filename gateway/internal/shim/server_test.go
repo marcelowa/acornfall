@@ -615,3 +615,41 @@ func TestStoppingOrRemovingWhatIsGoneIsNotAFailure(t *testing.T) {
 		t.Errorf("a container that is not there is already removed: %v", err)
 	}
 }
+
+// A mount can exist and still be unreachable: the target is chowned to the tool's user, but the
+// image's /root (or a user's home) is 700 and owned by the container's root. The tool runs as the
+// share owner, not as root, so it cannot reach a workspace mounted under that path. The parent
+// chain gets execute permission and nothing else.
+func TestAParentOfAMountIsTraversableForItsOwner(t *testing.T) {
+	rootfs := t.TempDir()
+	home := filepath.Join(rootfs, "root")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ownerID := os.Getuid()
+	if ownerID == 0 {
+		ownerID = 12345
+	}
+	target := Bind{Target: "/root/acornfall/workspaces/w"}
+	if err := prepareTarget(rootfs, target, ownerID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o111 != 0o111 {
+		t.Errorf("the parent should be traversable by the tool's user, mode %o", info.Mode().Perm())
+	}
+	if info.Mode().Perm()&0o044 != 0 {
+		t.Errorf("execute is enough; the parent should not gain group or other read, mode %o", info.Mode().Perm())
+	}
+	leaf := filepath.Join(rootfs, "root", "acornfall", "workspaces", "w")
+	leafInfo, err := os.Stat(leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leafInfo.Mode().Perm()&0o111 != 0o111 {
+		t.Errorf("a directory the tool must enter should be traversable, mode %o", leafInfo.Mode().Perm())
+	}
+}
