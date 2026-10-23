@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { engineName, isOngoingCreation, machinePath, rootfsOf } from "../src/lxc.ts";
+import { engineName, isOngoingCreation, lxcAttachArgs, machinePath, rootfsOf } from "../src/lxc.ts";
 
 // The name is the one control sends, so the two sides of one install cannot disagree about
 // which engine is in use.
@@ -35,4 +35,35 @@ test("a path inside the container maps to the machine", () => {
 test("a start that is still being made is not a failure", () => {
 	expect(isOngoingCreation("lxc-start: x: Ongoing container creation detected")).toBe(true);
 	expect(isOngoingCreation("lxc-start: x: Config file not found")).toBe(false);
+});
+
+// A command in an unprivileged container runs as the workspace's owner, or it cannot write the
+// bind: the id map keeps that uid as itself and leaves root outside. A root-owned share runs
+// privileged, where root is mapped, and the default attach is right.
+test("a tool runs as the workspace's owner", () => {
+	expect(lxcAttachArgs("acornfall-x", ["hostname"], { uid: 1001, gid: 1001 })).toEqual([
+		"lxc-attach",
+		"-n",
+		"acornfall-x",
+		"-u",
+		"1001",
+		"-g",
+		"1001",
+		"--",
+		"hostname",
+	]);
+	expect(lxcAttachArgs("acornfall-x", ["hostname"], { uid: 0, gid: 0 })).toEqual([
+		"lxc-attach",
+		"-n",
+		"acornfall-x",
+		"--",
+		"hostname",
+	]);
+	expect(lxcAttachArgs("acornfall-x", ["hostname"])).toEqual([
+		"lxc-attach",
+		"-n",
+		"acornfall-x",
+		"--",
+		"hostname",
+	]);
 });

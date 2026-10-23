@@ -58,15 +58,39 @@ export function machinePath(rootfs: string, workspace: string, path: string): st
 	return join(rootfs, clean);
 }
 
+/** The attach a command runs through: as the workspace's owner, so the bind is writable. */
+export function lxcAttachArgs(
+	name: string,
+	argv: readonly string[],
+	owner?: { uid: number; gid: number } | undefined,
+): string[] {
+	const args = ["lxc-attach", "-n", name];
+	if (owner !== undefined && owner.uid > 0) {
+		args.push("-u", String(owner.uid), "-g", String(owner.gid));
+	}
+	args.push("--", ...argv);
+	return args;
+}
+
 class LXCClient implements SandboxClient {
 	readonly name: string;
 	private readonly workspace: string;
 	private readonly rootfs: string;
+	private owner: { uid: number; gid: number } | undefined;
 
 	constructor(name: string, workspace: string) {
 		this.name = name;
 		this.workspace = workspace;
 		this.rootfs = rootfsOf(name);
+	}
+
+	/** Who owns the workspace: the uid a command must run as to write the bind. */
+	private async ownerOf(): Promise<{ uid: number; gid: number } | undefined> {
+		if (this.owner !== undefined) return this.owner;
+		const info = await stat(this.workspace).catch(() => null);
+		if (info === null) return undefined;
+		this.owner = { uid: info.uid, gid: info.gid };
+		return this.owner;
 	}
 
 	/** The container's state in the runtime's own words, or "" when there is no such container. */
@@ -122,7 +146,8 @@ class LXCClient implements SandboxClient {
 						...(options.cwd === undefined ? [] : [options.cwd]),
 						...inner,
 					];
-		const proc = Bun.spawn(["lxc-attach", "-n", this.name, "--", ...argv], {
+		const owner = await this.ownerOf();
+		const proc = Bun.spawn(lxcAttachArgs(this.name, argv, owner), {
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",
