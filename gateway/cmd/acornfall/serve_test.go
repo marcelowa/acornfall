@@ -943,6 +943,9 @@ func TestTheUpdateDeclaresTheMachineRunning(t *testing.T) {
 	if got := update.ReadMachineIntent(root); got != update.IntentRunning {
 		t.Errorf("the command did not declare the machine running: %q", got)
 	}
+	if want, err := update.ReadWant(root); err != nil || want.Version != "v0.10.0-beta.15" {
+		t.Errorf("the command did not declare the release it installs: %+v, %v", want, err)
+	}
 	if fetches != 1 {
 		t.Errorf("step 1 did not run: %d fetches", fetches)
 	}

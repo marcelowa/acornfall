@@ -322,6 +322,16 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		}
 	}
 	say(!declarationWritten, "the declaration at "+update.MachineIntentPath(in.share))
+	// The release this install just put in place is the one the product wants. A stale want.json
+	// from an earlier update would otherwise make the service apply that older release to the
+	// machine we just installed.
+	if update.IsReleaseVersion(in.version) {
+		if err := update.WriteWant(in.share, in.version); err != nil {
+			return fmt.Errorf("recording the installed release in want.json: %w", err)
+		}
+	} else {
+		_ = os.Remove(update.WantPath(in.share))
+	}
 	if addressChanged {
 		say(false, fmt.Sprintf("the address, from %s:%d to %s:%d (the declaration and the unit both)", previousHost, previousPort, cfg.Host, cfg.Port))
 	}

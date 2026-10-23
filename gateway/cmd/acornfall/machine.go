@@ -510,6 +510,14 @@ func machineUpdateRun(ctx context.Context, share string, resolve func() (string,
 	if err != nil {
 		return "", err
 	}
+	if !machineOnly {
+		// The person's command is the declaration, like `machine up` and the service's own
+		// apply. Leaving an older want.json behind is how a command that installed beta.52 was
+		// followed by the host applying beta.50 again: the machine moved, the declaration did not.
+		if err := update.WriteWant(share, tag); err != nil {
+			return "", fmt.Errorf("recording the release this update installs: %w", err)
+		}
+	}
 	return tag, updateSteps(ctx, tag, machineOnly, step1, ready, step2)
 }
 
