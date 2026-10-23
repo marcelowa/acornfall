@@ -253,9 +253,15 @@ func pointSymlink(link, target string) error {
 
 // BootAttempt is the marker a swap leaves behind: the version it pointed at, and when. The next
 // process through this binary is the one that finds it (ADR 0031).
+//
+// Started separates the two starts the marker has to tell apart. The swap writes it false; the
+// first start of the new binary claims it (writes true) and continues. Only a later start that
+// finds it claimed knows an earlier start of this version did not reach ready. Without the phase,
+// the first start reads the swap's own marker as a failure and every update rolls itself back.
 type BootAttempt struct {
-	Tag string `json:"tag"`
-	At  string `json:"at"`
+	Tag     string `json:"tag"`
+	At      string `json:"at"`
+	Started bool   `json:"started,omitempty"`
 }
 
 // BootAttemptPath is the marker, in the folder the host's own records live in.

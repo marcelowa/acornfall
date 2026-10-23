@@ -840,10 +840,10 @@ func TestTheServiceRefusesToReplaceABinaryItDidNotPutThere(t *testing.T) {
 	}
 }
 
-// A marker that names this binary's version is the last start never reaching ready: the symlink goes
-// back to the binary before it and this process exits 1, which is what makes a binary that cannot
-// start undo itself instead of looping.
-func TestABootMarkerThatNamesThisBinaryGoesBack(t *testing.T) {
+// The swap writes the marker before the new binary has run, so its first start must claim it and
+// continue. If it rolled back here, every update would undo itself before it could be tried — the
+// beta.43 to beta.44 host update did exactly that and left the service failed.
+func TestTheFirstStartClaimsTheBootMarker(t *testing.T) {
 	home := t.TempDir()
 	root := t.TempDir()
 	if err := update.SwapSelf(home, root, "v0.10.0-beta.13", []byte("thirteen")); err != nil {
@@ -854,8 +854,35 @@ func TestABootMarkerThatNamesThisBinaryGoesBack(t *testing.T) {
 	}
 	exited := -1
 	rollBackSelf(home, root, "v0.10.0-beta.14", func(code int) { exited = code })
+	if exited != -1 {
+		t.Fatalf("the first start after the swap rolled back: exit=%d", exited)
+	}
+	if target, err := os.Readlink(update.OwnedBinary(home)); err != nil || target != update.VersionedBinary(home, "v0.10.0-beta.14") {
+		t.Errorf("the first start did not stay on its own binary: %q, %v", target, err)
+	}
+	attempt, found := update.ReadBootAttempt(root)
+	if !found || !attempt.Started {
+		t.Errorf("the first start did not claim the marker: %+v, %v", attempt, found)
+	}
+}
+
+// The next start that finds the claimed marker knows the previous start did not reach ready: it
+// points the symlink back and exits 1. That is the rollback a binary that cannot start earns.
+func TestALaterStartThatFindsItsMarkerGoesBack(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	if err := update.SwapSelf(home, root, "v0.10.0-beta.13", []byte("thirteen")); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.SwapSelf(home, root, "v0.10.0-beta.14", []byte("fourteen")); err != nil {
+		t.Fatal(err)
+	}
+	// The first start claims the marker; it never reaches ready.
+	rollBackSelf(home, root, "v0.10.0-beta.14", func(int) {})
+	exited := -1
+	rollBackSelf(home, root, "v0.10.0-beta.14", func(code int) { exited = code })
 	if exited != 1 {
-		t.Fatalf("a start that found its own marker should exit 1, exited %d", exited)
+		t.Fatalf("a later start that found its marker should exit 1, exited %d", exited)
 	}
 	if target, err := os.Readlink(update.OwnedBinary(home)); err != nil || target != update.VersionedBinary(home, "v0.10.0-beta.13") {
 		t.Errorf("the symlink is %q, %v", target, err)

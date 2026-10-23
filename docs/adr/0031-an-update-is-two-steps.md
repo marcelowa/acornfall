@@ -1,6 +1,6 @@
 # ADR 0031 — An update is two steps, and the host takes the second one
 
-Status: accepted, 2026-10-22
+Status: accepted, 2026-10-22; amended 2026-10-23 — the first start claims the boot marker
 Date: 2026-10-22
 
 ## Context
@@ -111,3 +111,17 @@ away before anything had shown it was safe.
   person's file, in whatever init that host uses, and a command that calls `systemctl` assumes one.
 - Open, and named as the accepted exposure above: a binary that starts, serves, and then misbehaves has
   no automatic trigger. The marker covers binaries that cannot run; nothing covers one that runs badly.
+
+## Amendment, 2026-10-23 — the first start claims the boot marker
+
+Decision 5 as written made every host update undo itself. The swap writes a marker naming the new
+version, and the first start of that version read the swap's own marker as "the previous start never
+reached ready", pointed the symlink back, and exited 1. The old binary then saw the machine ready,
+swapped the new one in again, and the two starts repeated until systemd's burst limit left the
+service failed. This happened on the beta.43 to beta.44 update.
+
+The marker now has two phases. The swap writes it unclaimed (`started: false`). The first start of
+the new binary claims it (`started: true`) and continues. Only a later start that finds it claimed
+knows an earlier start of this version did not reach ready, and that start goes back. The rollback
+the decision promises is unchanged; the first start is no longer mistaken for the failure it is
+supposed to detect.

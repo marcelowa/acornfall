@@ -486,9 +486,14 @@ func applyRelease(ctx context.Context, machinery string, machine machineControl,
 }
 
 // rollBackSelf is the first thing the service does (ADR 0031): a boot marker that names the version
-// this binary runs means the previous start never reached ready, so the symlink goes back to the
-// binary before it and this process exits 1. The supervisor starts the old one; a binary that cannot
-// start at all therefore undoes itself instead of looping.
+// this binary runs means an earlier start of this version never reached ready, so the symlink goes
+// back to the binary before it and this process exits 1. The supervisor starts the old one; a binary
+// that cannot start at all therefore undoes itself instead of looping.
+//
+// The swap writes the marker before the new binary has ever run, so its first start must claim it
+// rather than read it as a failure. Claiming is writing Started; the next start that finds it claimed
+// is the one that knows the previous start died. Without this phase, the first start of every update
+// rolled back and the host never moved.
 func rollBackSelf(machinery, share, service string, exit func(int)) {
 	attempt, found := update.ReadBootAttempt(share)
 	if !found {
@@ -497,6 +502,17 @@ func rollBackSelf(machinery, share, service string, exit func(int)) {
 	if attempt.Tag != service {
 		// Another version's marker: the start that wrote it got somewhere, so it is stale.
 		update.RemoveBootAttempt(share)
+		return
+	}
+	if !attempt.Started {
+		// This is the first start after the swap. Claim the marker and go on; a later start that
+		// finds it claimed is the one that rolls back.
+		attempt.Started = true
+		if err := update.WriteBootAttempt(share, attempt); err != nil {
+			// The marker stays unclaimed, so the next start claims it again instead of rolling
+			// back. That is safer than treating an unwritable marker as a failed binary.
+			log.Printf("machine serve: cannot claim the boot marker for %s: %v", service, err)
+		}
 		return
 	}
 	previous, err := update.PreviousBinary(machinery, service)

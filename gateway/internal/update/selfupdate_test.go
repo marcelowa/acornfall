@@ -108,6 +108,9 @@ func TestTheMarkerIsWrittenBeforeTheSymlinkMoves(t *testing.T) {
 	if !found || attempt.Tag != "v0.10.0-beta.14" || attempt.At == "" {
 		t.Fatalf("the marker is what a failed start finds: %+v, %v", attempt, found)
 	}
+	if attempt.Started {
+		t.Error("the swap wrote a marker that is already claimed, so its first start would roll back")
+	}
 	target, err := os.Readlink(OwnedBinary(home))
 	if err != nil {
 		t.Fatal(err)
