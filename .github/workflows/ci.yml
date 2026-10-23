@@ -46,6 +46,10 @@ jobs:
       # missing install would look like a pass.
       - run: make deps
       - run: make tools
+      # The documented one-liner is a shell script no compiler sees. A syntax error there is
+      # discovered by the person installing, which is the worst place to discover it.
+      - name: install.sh parses
+        run: sh -n scripts/install.sh
       # What the tree holds has to build before anything is generated. `go:embed all:dist`
       # needs the placeholder in gateway/web/dist, and a local `make ui-build` cleaned it out
       # of the tree twice: the working copy builds (the bundle is there), a fresh clone does
