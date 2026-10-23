@@ -8,7 +8,7 @@ a tool runs in — lives inside it.
 
 | Path | What it is | Survives what |
 |---|---|---|
-| `~/acornfall` | the mount: workspaces, `config/credentials.json`, the console's token | reinstalls, machine rebuilds, `machine down` |
+| `~/acornfall` | the mount: workspaces, `config/credentials.json`, the product's state | reinstalls, machine rebuilds, `machine down` |
 | `~/.acornfall` | the machinery: the appliance image, the engine, the machine's disk | nothing — deleting it is a clean install |
 
 That split is the design (ADR 0022). The mount holds what the product *is*; `~/.acornfall` holds what

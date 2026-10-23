@@ -26,7 +26,7 @@ func machineInstall(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine install", flag.ContinueOnError)
 	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
 	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
-	remote := flags.Bool("remote", false, "publish the console on 0.0.0.0, with a token (asks if neither is given)")
+	remote := flags.Bool("remote", false, "publish the console on 0.0.0.0; it asks for no token (asks if neither is given)")
 	local := flags.Bool("local", false, "keep the console on 127.0.0.1 (asks if neither is given)")
 	port := flags.Int("port", 0, "the port the console is published on (default: the declaration's, or 7777)")
 	if err := flags.Parse(argv); err != nil {

@@ -1,7 +1,7 @@
 # ADR 0022 — The appliance runs in the machine, the host is a launcher
 
-Status: draft, not accepted — the owner's decisions of 2026-10-19, written down so they stop
-being lost. What exists in code: decision 5's guard (the policy mapping, with tests), the
+Status: accepted, 2026-10-22 — the shape the code follows. It began as the owner's decisions of
+2026-10-19, written down so they stopped being lost. What exists in code: decision 5's guard (the policy mapping, with tests), the
 appliance image (`scripts/build-appliance.sh`: a Debian-stable rootfs with lxc, skopeo, umoci,
 jq, the id ranges and a mark naming it — 133 MB, built and used), and **the layout move**
 (below): the root and the home are two folders the code knows (`internal/layout`), control and

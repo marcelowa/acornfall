@@ -70,7 +70,7 @@ By hand:
 
 ```bash
 mkdir -p ~/acornfall/release && cd ~/acornfall/release
-VERSION=v0.10.0-beta.11   # any tag from the releases page
+VERSION=v0.10.0-beta.33   # the newest tag on the releases page
 curl -fsSL -O https://github.com/marcelowa/acornfall/releases/download/$VERSION/acornfall-linux-amd64
 curl -fsSL -O https://github.com/marcelowa/acornfall/releases/download/$VERSION/sha256sums.txt
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
@@ -100,10 +100,10 @@ host that shares an IP and gets rate-limited by GitHub, or against a private mir
 A token that was ever pasted into chat should be rotated afterwards under the
 token's own settings.
 
-First boot downloads a pinned bun once and the worker sources for its
-tag, then installs dependencies — all under `~/.acornfall`, nothing on
-the host. After that it self-updates from Settings > Updates: one
-click, it restarts itself.
+`machine install` puts the binary under `~/.acornfall/bin/`, writes the service,
+and starts it. From then on the product runs inside the machine. The console's
+Updates page asks the host service to apply a release: the machine first, then
+the host, and only when the machine reports ready (ADR 0030, ADR 0031).
 
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
 `--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
@@ -129,17 +129,13 @@ wins over the variable.
 make dev                        # binds the tailnet address, no token
 ```
 
-A non-loopback bind requires a token. When none is given with `--token` or
-`ACORNFALL_TOKEN`, one is generated into `config/token` inside the mount (0600) and the
-startup line prints the URL to open once:
-
-```
-auth: token required; open http://desktop:7777/?token=e62b…
-```
-
-That query parameter sets an HttpOnly cookie and redirects to `/`, so it does not linger
-in the address bar. `Authorization: Bearer <token>` also works. EventSource cannot set
-headers, which is why the cookie exists.
+The console asks for no token by default, including on a network bind. That is a beta
+decision, not a promise of safety: a listener on a network address is reachable by
+whoever can route to it, and the launcher prints one line saying so. `--token <secret>`
+(or `ACORNFALL_TOKEN`) still locks it; the startup line then prints the URL with the
+token once, and that query parameter sets an HttpOnly cookie and redirects to `/`, so
+it does not linger in the address bar. `Authorization: Bearer <token>` also works.
+EventSource cannot set headers, which is why the cookie exists.
 
 The more secure alternative when you already have SSH access — and the one to prefer if
 the machine is on a network you do not control:

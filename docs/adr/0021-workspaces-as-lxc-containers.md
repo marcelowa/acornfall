@@ -1,8 +1,8 @@
 # ADR 0021 — One microVM per machine, workspaces as LXC containers
 
-Status: draft, not accepted — the owner's sketch, written down on 2026-10-17 so it stops
-being lost. Nothing here is decided by this file; the parts that exist in code are the seam it
-describes (`gateway/internal/sandbox/layers.go`: the machine layer and the policy-to-container
+Status: accepted, 2026-10-22 — the shape the code follows. The open questions below are still
+open. This began as the owner's sketch of 2026-10-17, written down so it stopped being lost; the
+parts that exist in code are the seam it describes (`gateway/internal/sandbox/layers.go`: the machine layer and the policy-to-container
 mapping), the machine itself (`machine.go`: one VM per install, created once, sized by config),
 the container's own configuration (`lxc.go`: the two profiles, as the spike measured them), the
 shim the gateway drives the runtime with (`gateway/internal/shim`, run as `acornfall shim`;
