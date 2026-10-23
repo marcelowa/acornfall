@@ -204,3 +204,11 @@ where the whole appliance is meant to run, not only its containers.
   before the machine is created, or the dial goes nowhere). Still open: what
   the share root is (the workspaces folder? the home?) and who chooses it, and whether a
   workspace may ask for a privileged container — the two things the engine refuses to invent.
+
+- **The share's owner decides the container's profile.** A non-root share keeps the
+  unprivileged profile and maps that uid as itself, so tools run as the person who owns the
+  workspace. Root is deliberately outside the user namespace's map, so a root-owned share uses
+  the privileged profile; an unprivileged container cannot traverse `/root` or write root's
+  files, and the workspace bind would be skipped. The workspace bind is mandatory, not an
+  optional mount: a tool that writes into the container's copy instead of the share is not a
+  workspace. Measured on acornd, 2026-10-23.
