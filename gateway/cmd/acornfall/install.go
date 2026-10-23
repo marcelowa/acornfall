@@ -537,6 +537,52 @@ func removePathLink(machinery string) string {
 	return link
 }
 
+// ensureShareOwner gives a root install one fixed, non-root owner. The machine presents that
+// uid to the containers, so the container profile no longer depends on whether the person ran
+// the installer as root; a normal-user install keeps its own uid and skips this.
+func ensureShareOwner(share, machinery string) error {
+	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
+		return nil
+	}
+	account, err := user.Lookup("acornfall")
+	if err != nil {
+		command := exec.Command("useradd", "--system", "--user-group", "--home-dir", share, "--shell", "/usr/sbin/nologin", "acornfall")
+		if output, addErr := command.CombinedOutput(); addErr != nil {
+			return fmt.Errorf("creating the acornfall user: %v: %s", addErr, strings.TrimSpace(string(output)))
+		}
+		account, err = user.Lookup("acornfall")
+		if err != nil {
+			return err
+		}
+	}
+	// The engine is a child of the service; it needs the hypervisor like the service does.
+	if output, addErr := exec.Command("usermod", "-aG", "kvm", "acornfall").CombinedOutput(); addErr != nil {
+		return fmt.Errorf("adding acornfall to the kvm group: %v: %s", addErr, strings.TrimSpace(string(output)))
+	}
+	uid, err := strconv.Atoi(account.Uid)
+	if err != nil {
+		return fmt.Errorf("reading the acornfall user's uid: %w", err)
+	}
+	gid, err := strconv.Atoi(account.Gid)
+	if err != nil {
+		return fmt.Errorf("reading the acornfall user's gid: %w", err)
+	}
+	for _, dir := range []string{share, machinery} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return err
+		}
+		if err := filepath.Walk(dir, func(path string, _ os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			return os.Lchown(path, uid, gid)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // installClosing is what an install tells a person to open: the address, and — on a network address — the one
 // line that says it is reachable by whoever can route to it. There is no token: the console asks for nothing.
 func installClosing(host string, port int) []string {

@@ -73,7 +73,7 @@ func machineUsage() {
   acornfall machine uninstall remove the product; your workspaces and the mount stay
   acornfall machine purge    remove everything, with --yes: this deletes your workspaces
 
-The machine runs the appliance: the gateway and the worker inside it, with ~/acornfall mounted
+The machine runs the appliance: the gateway and the worker inside it, with the share (/srv/acornfall as root, ~/acornfall otherwise) mounted
 as the product (config, state, workspaces). Nothing of the product runs on the host.
 
 serve is the host service (docs/adr/0030): it starts the machine at boot, restarts it when it
@@ -86,8 +86,8 @@ or launchd (scripts/units/), not from a terminal you will close.
 // machine: the engine finds the one this install has and leaves it alone.
 func machineUp(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine up", flag.ContinueOnError)
-	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: /srv/acornfall as root, ~/acornfall otherwise)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
 	image := flags.String("image", "", applianceImageHelp)
 	tag := flags.String("tag", "", "the release to fetch the appliance from (default: this build's version)")
 	refresh := flags.Bool("refresh", false, "fetch the appliance again and recreate the machine: an init is fixed at boot, so an update is a new machine")
@@ -137,6 +137,9 @@ func machineUp(argv []string) {
 	// thing of the past — the move the gateway does at boot, done for the host's own folder.
 	if err := layout.Migrate(where, log.Printf); err != nil {
 		log.Printf("machine: moving the old layout: %v", err)
+	}
+	if err := ensureShareOwner(resolvedShare, resolvedHome); err != nil {
+		log.Fatalf("acornfall machine: the share's owner: %v", err)
 	}
 	// The token, when the install has one, comes from the mount: the appliance has no secrets of
 	// its own, and a port that answers without one is only safe while it is loopback.
@@ -250,8 +253,8 @@ func publishNotice(host string, port int) string {
 // how it is must not be the thing that creates it.
 func machineStatus(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine status", flag.ContinueOnError)
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
-	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
+	share := flags.String("share", "", "the folder the machine mounts (default: /srv/acornfall as root, ~/acornfall otherwise)")
 	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
@@ -469,8 +472,8 @@ func machineUpdateRun(ctx context.Context, share string, resolve func() (string,
 // binary or the same disk.
 func machineUpdate(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine update", flag.ContinueOnError)
-	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: /srv/acornfall as root, ~/acornfall otherwise)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
 	tag := flags.String("tag", "", "the release to update to (default: the newest one)")
 	machineOnly := flags.Bool("machine-only", false, "do step 1 and stop: the machine moves, the host keeps the binary it has")
 	port := flags.Int("port", 7777, "the host port the console is published on")
@@ -495,6 +498,9 @@ func machineUpdate(argv []string) {
 	}
 	if err := layout.Migrate(where, log.Printf); err != nil {
 		log.Printf("machine update: moving the old layout: %v", err)
+	}
+	if err := ensureShareOwner(resolvedShare, resolvedHome); err != nil {
+		log.Fatalf("acornfall machine update: the share's owner: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
@@ -973,8 +979,8 @@ func machineDown(argv []string) {
 // anyone's work: the next up makes a fresh machine from the same image, booting in seconds.
 func takeMachineDown(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine down", flag.ContinueOnError)
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
-	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
+	share := flags.String("share", "", "the folder the machine mounts (default: /srv/acornfall as root, ~/acornfall otherwise)")
 	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
@@ -1025,8 +1031,8 @@ func machineStop(argv []string) {
 
 func stopMachine(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine stop", flag.ContinueOnError)
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
-	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
+	share := flags.String("share", "", "the folder the machine mounts (default: /srv/acornfall as root, ~/acornfall otherwise)")
 	image := flags.String("image", "", applianceImageHelp)
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)

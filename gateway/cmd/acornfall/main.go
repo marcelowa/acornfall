@@ -65,7 +65,7 @@ func serve(argv []string) error {
 	// The default, kept as a flag because the appliance's init names it: an old command line still works.
 	insecure := flags.Bool("insecure", false, "listen without a token: the default")
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
-	machinery := flags.String("machinery", "", "the machinery folder: the engine's install and store (default: ~/.acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder: the engine's install and store (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
 	dataDir := flags.String("data-dir", "", "alias for --machinery")
 	share := flags.String("share", "", "the folder the machine mounts: the bundle, the config, the state and the workspaces (default: the parent of --workspaces-dir)")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: <share>/workspaces, and <share> is ~/acornfall)")
@@ -367,7 +367,7 @@ func versionString(machinery string) (string, error) {
 func providers(argv []string) {
 	flags := flag.NewFlagSet("provider", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "the machinery folder")
-	rootDir := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	rootDir := flags.String("share", "", "the folder the machine mounts: the product (default: /srv/acornfall as root, ~/acornfall otherwise)")
 	args, ok := parseArgs(flags, argv)
 	if !ok {
 		return
@@ -555,7 +555,7 @@ func workspaceCommand(argv []string) {
 	command := argv[0]
 	flags := flag.NewFlagSet("workspace "+command, flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "the machinery folder")
-	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: /srv/acornfall as root, ~/acornfall otherwise)")
 	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
 	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
 	args, ok := parseArgs(flags, argv[1:])
@@ -704,6 +704,11 @@ func resolveDataDir(flagValue string) (string, error) {
 	if env := os.Getenv("ACORNFALL_SHARE"); env != "" {
 		return filepath.Abs(env)
 	}
+	// A root install keeps the machinery outside root's home, under a fixed non-root owner.
+	// The engine child runs as that owner, so a folder inside /root (mode 700) would lock it out.
+	if os.Geteuid() == 0 {
+		return "/var/lib/acornfall", nil
+	}
 	machinery, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -742,6 +747,12 @@ func resolveShare(share, workspacesDir string) (string, error) {
 			return "", err
 		}
 		return filepath.Dir(absolute), nil
+	}
+	// A root install gets a stable folder outside root's home. A workspace under /root is
+	// unreachable to a non-root tool uid: /root is 700, and the container's target path is under
+	// it too. A normal-user install keeps the folder in the user's home, where it belongs.
+	if os.Geteuid() == 0 {
+		return "/srv/acornfall", nil
 	}
 	machinery, err := os.UserHomeDir()
 	if err != nil {

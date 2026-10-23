@@ -100,6 +100,11 @@ func (d driverMachine) Remove(ctx context.Context) error {
 }
 
 func (d driverMachine) Boot(ctx context.Context, image string) error {
+	// The engine child runs as the share's owner. The image and the machinery were written by
+	// the root install; give them to that owner before the engine tries to boot the machine.
+	if err := ensureShareOwner(d.share, d.machinery); err != nil {
+		return err
+	}
 	driver, err := d.driver(image)
 	if err != nil {
 		return err
@@ -509,8 +514,8 @@ func rollBackSelf(machinery, share, service string, exit func(int)) {
 // stopping the supervisor is not taking the machine down.
 func machineServe(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine serve", flag.ContinueOnError)
-	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: /srv/acornfall as root, ~/acornfall otherwise)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
 	tag := flags.String("tag", "", "the release to boot when there is nothing here yet (default: this build's version)")
 	port := flags.Int("port", 7777, "the host port the console is published on")
 	// Loopback for the same reason `machine up` is: the appliance runs with --insecure.
@@ -537,6 +542,9 @@ func machineServe(argv []string) {
 	}
 	if err := layout.Migrate(where, log.Printf); err != nil {
 		log.Printf("machine serve: moving the old layout: %v", err)
+	}
+	if err := ensureShareOwner(resolvedShare, resolvedHome); err != nil {
+		log.Fatalf("acornfall machine serve: the share's owner: %v", err)
 	}
 	// Before anything else: a marker that names this binary's version is the last start never reaching
 	// ready, and the answer is the binary before it (ADR 0031).

@@ -20,8 +20,8 @@ import (
 func doctorCommand(argv []string) {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "data directory")
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
-	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: /srv/acornfall as root, ~/acornfall otherwise)")
 	sandboxEngine := flags.String("sandbox-engine", "", "which engine to report: microsandbox (default), lxc (containers in one machine), or host")
 	asJSON := flags.Bool("json", false, "print the report as JSON")
 	if err := flags.Parse(argv); err != nil {

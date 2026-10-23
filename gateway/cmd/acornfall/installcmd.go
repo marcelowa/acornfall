@@ -24,8 +24,8 @@ import (
 // machineInstall installs the host service, or repairs it: the same command, twice, is the same install.
 func machineInstall(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine install", flag.ContinueOnError)
-	share := flags.String("share", "", "the folder the machine mounts: the product (default: ~/acornfall)")
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: /srv/acornfall as root, ~/acornfall otherwise)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
 	remote := flags.Bool("remote", false, "publish the console on 0.0.0.0; it asks for no token (asks if neither is given)")
 	local := flags.Bool("local", false, "keep the console on 127.0.0.1 (asks if neither is given)")
 	port := flags.Int("port", 0, "the port the console is published on (default: the declaration's, or 7777)")
@@ -55,6 +55,10 @@ func machineInstall(argv []string) {
 	}
 	if err := layout.Migrate(where, log.Printf); err != nil {
 		log.Printf("machine install: moving the old layout: %v", err)
+	}
+	if err := ensureShareOwner(resolvedShare, resolvedHome); err != nil {
+		log.Printf("acornfall machine install: the share's owner: %v", err)
+		os.Exit(1)
 	}
 	declaration := update.ReadDeclaration(resolvedShare)
 	_, declaredPort := declaration.Address()
@@ -412,8 +416,8 @@ func humanSize(bytes int64) string {
 // removed a person's work would be the one mistake this command cannot make twice.
 func uninstallFlags() (*flag.FlagSet, *string, *string) {
 	flags := flag.NewFlagSet("acornfall machine uninstall", flag.ContinueOnError)
-	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts (default: /srv/acornfall as root, ~/acornfall otherwise)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
 	return flags, share, machinery
 }
 
@@ -450,8 +454,8 @@ func machineUninstall(argv []string) {
 // machinePurge removes everything, and refuses to do it without --yes.
 func machinePurge(argv []string) {
 	flags := flag.NewFlagSet("acornfall machine purge", flag.ContinueOnError)
-	share := flags.String("share", "", "the folder the machine mounts (default: ~/acornfall)")
-	machinery := flags.String("machinery", "", "the machinery folder (default: ~/.acornfall)")
+	share := flags.String("share", "", "the folder the machine mounts (default: /srv/acornfall as root, ~/acornfall otherwise)")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
 	yes := flags.Bool("yes", false, "remove everything listed; without it nothing is removed and the list is the dry run")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
