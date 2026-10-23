@@ -20,10 +20,16 @@ func TestTheLifecycleSaysWhenAWorkspaceCanBeUsed(t *testing.T) {
 	if got := c.Lifecycle(); got.Phase != LifecycleFailed || !strings.Contains(got.Reason, "exit status 1") {
 		t.Errorf("a harness that died is failed, with the reason, got %+v", got)
 	}
+	// A process that exists but has not answered is not ready: that is the window in which the
+	// console offered a conversation and the write went to a harness that could not take it.
 	c.mu.Lock()
 	c.workerUp = true
 	c.workerError = ""
 	c.mu.Unlock()
+	if got := c.Lifecycle(); got.Phase != LifecycleStarting {
+		t.Errorf("a harness that only spawned is still starting, got %+v", got)
+	}
+	c.markWorkerReady()
 	if got := c.Lifecycle(); got.Phase != LifecycleReady || got.Reason != "" {
 		t.Errorf("a harness that answers is ready, got %+v", got)
 	}

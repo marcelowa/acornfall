@@ -285,7 +285,11 @@ type Control struct {
 	conversations []protocol.ConversationInfo
 	active        string
 	workerUp      bool
-	workerError   string
+	// workerReady is whether the harness has answered a command, not merely whether its process
+	// exists. `workerUp` is process liveness (the rail's "running", the start guard); this is the
+	// promise the lifecycle makes: conversations, prompts and tools are served.
+	workerReady bool
+	workerError string
 	// sandbox is what the agent's tools can reach, refreshed when the worker starts. It is
 	// nil-free on purpose: "no sandbox" is a state the interface has to be able to show.
 	sandbox SandboxState
@@ -392,10 +396,11 @@ func (c *Control) Open(ctx context.Context) {
 	// anything, so a state is complete from the first client that asks.
 	c.loadDrafts()
 	if err := c.attachToWorker(ctx); err != nil {
-		c.mu.Lock()
-		c.workerUp = false
-		c.workerError = err.Error()
-		c.mu.Unlock()
+		// A worker that spawned but could not answer is still a live process. Marking it down
+		// without closing it was a second worker over one storage: the supervisor saw "down" and
+		// started another, while the first was still there. failWorker closes it and keeps the
+		// harness's own last words, which are the part a person can act on.
+		c.failWorker(err)
 		workerpool.Log("workspace %s: %v", c.opts.Workspace.Name, err)
 		go c.supervise(c.lifetime)
 		// Something for the supervisor to react to: it retries on a death, and this is the
@@ -421,6 +426,10 @@ func (c *Control) attachToWorker(ctx context.Context) error {
 	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return fmt.Errorf("describe worker: %w", err)
 	}
+	// The harness answered. Adoption creates the root conversation through the same external
+	// gate, so the gate has to be open by the time it is asked; a later failure marks the
+	// workspace failed and stops this worker.
+	c.markWorkerReady()
 	c.applyDescribe(describe)
 
 	if _, err := c.Agents(ctx); err != nil {
@@ -557,6 +566,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 	c.mu.Lock()
 	c.worker = worker
 	c.workerUp = true
+	c.workerReady = false
 	c.workerError = ""
 	c.sandbox = sandboxState
 	c.mu.Unlock()
@@ -613,6 +623,16 @@ func (c *Control) supervise(ctx context.Context) {
 		}
 		if err := c.recoverWithWorker(ctx); err != nil {
 			workerpool.Log("worker restart %d could not be resumed: %v", failures, err)
+			// The process exists but cannot serve, and nothing else will announce its end. Leaving
+			// it here made the supervisor wait for a death that never came, while the workspace
+			// said "ready" (before the readiness split) or "starting" for ever. End it and ask for
+			// the next attempt.
+			c.failWorker(err)
+			c.publish(protocol.Frame{Type: "state"})
+			select {
+			case c.workerExited <- struct{}{}:
+			default:
+			}
 			continue
 		}
 		workerpool.Log("worker restarted and resumed")
@@ -644,6 +664,7 @@ func (c *Control) workerFailed(worker *workerpool.Worker, err error) {
 		reason = fmt.Sprintf("%s — %s", reason, words)
 	}
 	c.workerUp = false
+	c.workerReady = false
 	c.workerError = reason
 	c.mu.Unlock()
 	workerpool.Log("worker died: %s", reason)
@@ -663,6 +684,7 @@ func (c *Control) recoverWithWorker(ctx context.Context) error {
 	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return err
 	}
+	c.markWorkerReady()
 	c.applyDescribe(describe)
 	if _, err := c.Agents(ctx); err != nil {
 		return err
@@ -834,6 +856,30 @@ func (c *Control) stopWorker() {
 	worker := c.worker
 	c.worker = nil
 	c.workerUp = false
+	c.workerReady = false
+	c.mu.Unlock()
+	if worker != nil {
+		worker.Close()
+	}
+}
+
+// failWorker marks the current worker down, keeps its own last words for the state, and closes
+// the process. It leaves the worker in place until the close so the exit notification can still
+// be matched: clearing it first made every message say "already replaced", and the state lost
+// the one line that named the broken file. Nothing starts a second worker over this one: the
+// close happens before startWorker is asked again, and WorkerUp is already false.
+func (c *Control) failWorker(err error) {
+	c.mu.Lock()
+	worker := c.worker
+	reason := err.Error()
+	if worker != nil {
+		if words := worker.LastWords(); words != "" && !strings.Contains(reason, words) {
+			reason = reason + " — " + words
+		}
+	}
+	c.workerUp = false
+	c.workerReady = false
+	c.workerError = reason
 	c.mu.Unlock()
 	if worker != nil {
 		worker.Close()
@@ -2003,6 +2049,7 @@ func (c *Control) Refresh(ctx context.Context) error {
 	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return err
 	}
+	c.markWorkerReady()
 	c.applyDescribe(describe)
 	if err := c.ensureLastResort(); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
@@ -2430,13 +2477,25 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 // lifecycleLocked is the workspace's phase, for a caller already holding the lock for reading.
 func (c *Control) lifecycleLocked() Lifecycle {
 	switch {
-	case c.workerUp:
+	case c.workerReady:
 		return Lifecycle{Phase: LifecycleReady}
 	case c.workerError != "":
 		return Lifecycle{Phase: LifecycleFailed, Reason: c.workerError}
+	case c.workerUp:
+		return Lifecycle{Phase: LifecycleStarting, Reason: "the harness is starting"}
 	default:
 		return Lifecycle{Phase: LifecycleStarting, Reason: "the harness is starting"}
 	}
+}
+
+// markWorkerReady records that the harness answered a command. The lifecycle's ready is this,
+// not the process's existence: a process that has not answered is a workspace that cannot yet
+// make a conversation, which is the exact action the console used to offer and then fail.
+func (c *Control) markWorkerReady() {
+	c.mu.Lock()
+	c.workerReady = true
+	c.workerError = ""
+	c.mu.Unlock()
 }
 
 // Lifecycle is the workspace's phase for a caller that is not holding the lock.
