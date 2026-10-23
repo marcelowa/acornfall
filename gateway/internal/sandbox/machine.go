@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // The machine half of the shape ADR 0021 proposes: one microVM per machine, created once,
@@ -231,9 +232,15 @@ func (x *MachineEngine) RemoveMachine(ctx context.Context) error {
 	// A running machine has to be asked to stop before it can be removed. The pinned engine's
 	// `rm --force` still refuses a running sandbox with "still running" (measured on acornd),
 	// so a bare remove is a `machine down` that leaves the machine up and says it failed.
-	_, _ = x.engine.run(ctx, "exec", x.Name(), "--", "sh", "-c", "kill -TERM 1")
-	_ = x.engine.Stop(ctx, x.Name())
-	return ignoreMissing(x.engine.Remove(ctx, x.Name()))
+	//
+	// Every step is bounded. A machine stuck "draining" does not answer `msb exec`; without a
+	// deadline the install that called this waited twenty minutes on `kill -TERM 1` and left the
+	// update lock held. The timeout is the repair: a slow stop becomes a failed stop, not a hang.
+	bounded, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	_, _ = x.engine.run(bounded, "exec", x.Name(), "--", "sh", "-c", "kill -TERM 1")
+	_ = x.engine.Stop(bounded, x.Name())
+	return ignoreMissing(x.engine.Remove(bounded, x.Name()))
 }
 
 // WithAppliance boots the machine as the product's world: start is what the machine runs as its
