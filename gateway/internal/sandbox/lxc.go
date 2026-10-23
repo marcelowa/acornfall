@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/acornfall/acornfall/gateway/internal/shim"
 )
@@ -255,6 +257,38 @@ func (s LXCSettings) RootfsGroup() int { return s.RootfsOwner() }
 // not know: the ceiling is then the workspace's own, which is what an engine tested in isolation
 // can say.
 func ContainerFor(policy Policy, shareRoot, dir string, privileged, nest bool, machineMemory int64) (Container, LXCSettings, error) {
+	return containerForOwner(policy, shareRoot, dir, privileged, nest, machineMemory, currentOwner())
+}
+
+// shareOwner is who owns the folder the machine mounts. It is the mapping the container needs:
+// a non-root owner is kept as itself in the user namespace so its tools can write the workspace,
+// and a root-owned share is the one case the unprivileged map cannot express. The process owner
+// is the fallback when the share does not exist yet.
+func shareOwner(share string) owner {
+	if uid, gid, ok := ShareOwner(share); ok {
+		return owner{uid: uid, gid: gid, mapFiles: true}
+	}
+	return currentOwner()
+}
+
+// ShareOwner is who owns the folder the machine mounts, for the callers that create files in it.
+// The gateway inside the machine runs as root, so a workspace it makes is root-owned unless it
+// asks: the person's tools then run as the share owner and cannot write their own folder.
+func ShareOwner(share string) (uid, gid int, ok bool) {
+	info, err := os.Stat(share)
+	if err != nil {
+		return 0, 0, false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, 0, false
+	}
+	return int(stat.Uid), int(stat.Gid), true
+}
+
+// containerForOwner is ContainerFor with the share's owner supplied, so the root case is a test
+// and not a property of the machine that happens to run it.
+func containerForOwner(policy Policy, shareRoot, dir string, privileged, nest bool, machineMemory int64, owner owner) (Container, LXCSettings, error) {
 	container, err := policy.Container(shareRoot)
 	if err != nil {
 		return Container{}, LXCSettings{}, err
@@ -262,16 +296,22 @@ func ContainerFor(policy Policy, shareRoot, dir string, privileged, nest bool, m
 	ceiling := containerCeiling(container.MemoryBytes, machineMemory)
 	settings := LXCSettings{
 		Dir:         filepath.Join(dir, container.Name),
-		UID:         currentOwner().uid,
-		GID:         currentOwner().gid,
+		UID:         owner.uid,
+		GID:         owner.gid,
 		MemoryBytes: ceiling,
 		MemoryHigh:  softLimit(ceiling),
 		CPUWeight:   cpuWeight(container.CPUs),
 	}
 	// A workspace can ask for the sharpest profile (ADR 0021's open question), and the engine
-	// can hold it for everyone; either is enough. The unprivileged profile stays the default
+	// can hold it for everyone; either is enough. The unprivileged profile is the default
 	// because a user namespace is the mitigation.
-	settings.Unprivileged = !(privileged || policy.Privileged)
+	//
+	// The exception is a share owned by root. idMap deliberately leaves root out of the
+	// container's map (a container root that is the host's root is not a mitigation), so an
+	// unprivileged container can neither traverse /root nor write a root-owned workspace. The
+	// mount is skipped and file tools write into the container's copy; that is not a workspace.
+	// A root install therefore uses the privileged profile, and the machine remains the boundary.
+	settings.Unprivileged = !(privileged || policy.Privileged || owner.uid == 0)
 	// The containers are where a workspace's own virtual machines would run, so the device goes
 	// in when the workspace allows nesting and the machine can grant it.
 	if !policy.DisableVMNesting && nest {

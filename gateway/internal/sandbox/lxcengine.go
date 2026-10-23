@@ -422,7 +422,7 @@ func (x *LXC) Remove(ctx context.Context, name string) error {
 // shared with the engine inside the machine (ContainerFor), so a workspace's container cannot
 // differ by which of the two is running.
 func (x *LXC) container(policy Policy) (Container, LXCSettings, error) {
-	return ContainerFor(policy, x.machine.Machine().Share, x.dir, x.privileged, x.engine.hostNesting().Available, x.machine.Machine().MemoryBytes())
+	return containerForOwner(policy, x.machine.Machine().Share, x.dir, x.privileged, x.engine.hostNesting().Available, x.machine.Machine().MemoryBytes(), shareOwner(x.machine.Machine().Share))
 }
 
 // WithAppliance is the machine booting as the product (ADR 0022): the script it runs as its init,

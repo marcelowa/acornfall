@@ -300,7 +300,10 @@ func (x *InMachine) forget(client *shim.Client) {
 // which of the two is running. The share root is this machine's mount, because that is the
 // folder the containers can see (ADR 0022).
 func (x *InMachine) container(policy Policy) (Container, LXCSettings, error) {
-	return ContainerFor(policy, x.share, x.dir, x.privileged, hostNestedSupport().Available, MachineMemoryBytes())
+	// The gateway inside the machine always runs as root; the owner the container needs is the
+	// owner of the folder the machine mounted — the person who installed it. Using the process
+	// owner would make every in-machine container root-owned and privileged.
+	return containerForOwner(policy, x.share, x.dir, x.privileged, hostNestedSupport().Available, MachineMemoryBytes(), shareOwner(x.share))
 }
 
 // MachineMemoryBytes is what this machine has, in bytes: the ceiling a container's limit is
