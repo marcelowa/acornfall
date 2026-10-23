@@ -720,7 +720,11 @@ function StateLine({
 							: "The host is preparing the machine. Writes are paused."}
 				</Text>
 				<Text size="2xs" tone="muted" className="font-mono tabular-nums">
-					{status.current} · {status.phase ?? "updating"} · {status.phaseReason ?? ""}
+					machine {status.host?.version || status.current} · host{" "}
+					{status.host?.service || "not answered"} · target {targetTag}
+					{status.phaseReason !== undefined && status.phaseReason !== ""
+						? ` · ${status.phaseReason}`
+						: ""}
 				</Text>
 			</Stack>
 		);
