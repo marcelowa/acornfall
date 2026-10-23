@@ -214,7 +214,7 @@ func (w *Workspaces) Open(ctx context.Context) error {
 	if err := w.loadRegistry(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(w.Dir(), 0o755); err != nil {
+	if err := makeOwnedDir(w.Dir(), w.opts.Layout.Share, 0o755); err != nil {
 		return err
 	}
 	if err := w.migrate(); err != nil {
@@ -295,7 +295,7 @@ func (w *Workspaces) Create(name string) (Workspace, error) {
 		return Workspace{}, fmt.Errorf("a workspace name cannot contain a slash or a space: %q", name)
 	}
 	path := filepath.Join(w.Dir(), name)
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := makeOwnedDir(path, w.opts.Layout.Share, 0o755); err != nil {
 		return Workspace{}, err
 	}
 	workspace := Workspace{Name: name, Path: path, Title: name}
@@ -881,7 +881,7 @@ func (w *Workspaces) loadRegistry() error {
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(absolute, 0o755); err != nil {
+		if err := makeOwnedDir(absolute, w.opts.Layout.Share, 0o755); err != nil {
 			return err
 		}
 		w.registry[GeneralWorkspaceName] = Workspace{
@@ -907,6 +907,27 @@ func (w *Workspaces) loadRegistry() error {
 			continue
 		}
 		seenGeneral = true
+	}
+	return nil
+}
+
+// makeOwnedDir makes a folder the gateway owns and gives it to the share's owner. The gateway
+// inside the machine runs as root, so without this every workspace the console creates is
+// root-owned, and the person's own tools run as the share owner and cannot write it. A folder
+// that was already there is the person's and is left as it is.
+func makeOwnedDir(path, share string, mode os.FileMode) error {
+	_, statErr := os.Stat(path)
+	created := os.IsNotExist(statErr)
+	if err := os.MkdirAll(path, mode); err != nil {
+		return err
+	}
+	if !created {
+		return nil
+	}
+	if uid, gid, ok := sandbox.ShareOwner(share); ok {
+		if err := os.Chown(path, uid, gid); err != nil {
+			return fmt.Errorf("giving %s to the share's owner: %w", path, err)
+		}
 	}
 	return nil
 }
