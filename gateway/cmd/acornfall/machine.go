@@ -920,15 +920,21 @@ func machineReady(ctx context.Context, url string) bool {
 	if response.StatusCode != http.StatusOK {
 		return false
 	}
+	// The state's worker is top-level (`workerUp`), and the lifecycle is the field ADR 0032
+	// added beside it. `workspace` carries the workspace record and `running` — whether its
+	// process exists — not whether a harness answers. Reading `workspace.workerUp` was a field
+	// that does not exist: the decode succeeded with false, so step 1 of every update failed and
+	// the host never took its own release, while the machine ran the new one.
 	var state struct {
-		Workspace struct {
-			WorkerUp bool `json:"workerUp"`
-		} `json:"workspace"`
+		WorkerUp  bool `json:"workerUp"`
+		Lifecycle struct {
+			Phase string `json:"phase"`
+		} `json:"lifecycle"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&state); err != nil {
 		return false
 	}
-	return state.Workspace.WorkerUp
+	return state.WorkerUp || state.Lifecycle.Phase == "ready"
 }
 
 // awaitReady waits for the machine to report a worker ready within a bound, which is what

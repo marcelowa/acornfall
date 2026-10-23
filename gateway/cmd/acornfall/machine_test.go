@@ -517,11 +517,14 @@ func TestReadinessIsTheMachinesOwnState(t *testing.T) {
 		token  string
 		want   bool
 	}{
-		{name: "a worker is up", status: http.StatusOK, body: `{"workspace":{"workerUp":true}}`, want: true},
-		{name: "no worker yet", status: http.StatusOK, body: `{"workspace":{"workerUp":false}}`},
+		{name: "the top-level worker is up", status: http.StatusOK, body: `{"workspace":{"name":"general","running":true},"workerUp":true,"lifecycle":{"phase":"ready"}}`, want: true},
+		{name: "the lifecycle is ready", status: http.StatusOK, body: `{"workspace":{"name":"general","running":true},"workerUp":false,"lifecycle":{"phase":"ready"}}`, want: true},
+		// The shape the old test used: `workspace.workerUp` is not a field the gateway writes.
+		// A process that exists is not a harness that answers.
+		{name: "a workspace process is running but no harness answers", status: http.StatusOK, body: `{"workspace":{"name":"general","running":true},"workerUp":false,"lifecycle":{"phase":"starting"}}`},
 		{name: "a state with no workspace", status: http.StatusOK, body: `{}`},
 		{name: "not JSON", status: http.StatusOK, body: "the console is not the state"},
-		{name: "a refusal", status: http.StatusUnauthorized, body: `{"workspace":{"workerUp":true}}`},
+		{name: "a refusal", status: http.StatusUnauthorized, body: `{"workspace":{"running":true},"workerUp":true,"lifecycle":{"phase":"ready"}}`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
