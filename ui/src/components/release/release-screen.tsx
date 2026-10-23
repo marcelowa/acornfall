@@ -274,6 +274,18 @@ export function ReleaseScreen({
 						</Text>
 					</Stack>
 
+					{status?.checkError !== undefined && status.checkError !== "" ? (
+						<Text
+							size="xs"
+							tone="muted"
+							className="wrap-anywhere"
+							data-slot="update-check-error"
+						>
+							Could not check for a newer release: {status.checkError}. The last known
+							release is still shown; try again later.
+						</Text>
+					) : null}
+
 					{asking !== "" ? (
 						<Stack gap="2xs" data-slot="release-host">
 							<Badge

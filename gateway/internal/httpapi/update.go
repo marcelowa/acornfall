@@ -39,6 +39,7 @@ func (s *Server) updateStatus(w http.ResponseWriter, _ *http.Request) {
 		"downloadSize":    status.DownloadSize,
 		"workerSize":      status.WorkerSize,
 		"available":       status.Available,
+		"checkError":      status.CheckError,
 		"failed":          status.Failed,
 		"restartRequired": status.RestartRequired,
 		"backups":         s.update.Backups(),
@@ -56,9 +57,11 @@ func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// A failed check is not a failed request. The page wants the state it can show: the newest
+	// release is unknown, the last good one still stands, and the reason is a sentence beside
+	// the button. A 502 made the console paint a red error over a check that was only rate-limited.
 	if _, err := s.update.Check(r.Context()); err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
+		log.Printf("update check: %v", err)
 	}
 	s.updateStatus(w, r)
 }

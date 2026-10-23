@@ -453,6 +453,33 @@ export const RolledBack: Story = {
 	),
 };
 
+export const CheckFailed: Story = {
+	render: () => (
+		<Frame
+			label="The check failed, and the page does not pretend nothing happened"
+			note="The check is a soft state: the newest release is unknown and the sentence says so. The last good answer stays on screen, and the page is still usable."
+		>
+			<ReleaseScreen
+				status={status({
+					checkError: "releases: github answered 403 Forbidden",
+					available: false,
+					latest: "v0.9.28",
+				})}
+				tag=""
+				applying={false}
+				onOpenTag={noop}
+				onClose={noop}
+				onCheck={noop}
+				onRefresh={noop}
+				onApply={noop}
+				onRestart={noop}
+				onRollback={noop}
+				{...fixtureFor("v0.9.28")}
+			/>
+		</Frame>
+	),
+};
+
 export const SourceRefused: Story = {
 	render: () => (
 		<Frame

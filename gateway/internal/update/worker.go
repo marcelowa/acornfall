@@ -273,6 +273,12 @@ func (m *Manager) releaseFor(ctx context.Context, tag string) (Release, error) {
 	if cached.Tag == tag {
 		return cached, nil
 	}
+	return m.releaseFromAPI(ctx, tag)
+}
+
+// releaseFromAPI reads one release by tag, including its asset ids. It never answers from the
+// check's cache: the cache may hold a feed entry with no files, and an apply needs the files.
+func (m *Manager) releaseFromAPI(ctx context.Context, tag string) (Release, error) {
 	url := m.apiBase() + "/releases/tags/" + tag
 	response, err := m.get(ctx, url)
 	if err != nil {
@@ -282,7 +288,6 @@ func (m *Manager) releaseFor(ctx context.Context, tag string) (Release, error) {
 	if response.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("releases: no release %s (%s): %w", tag, response.Status, ErrReleaseNotFound)
 	}
-	// Never cached: latest stays what the check found, or the dot lies.
 	return parseRelease(response.Body)
 }
 

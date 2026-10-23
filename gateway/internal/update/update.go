@@ -29,9 +29,6 @@ import (
 	"time"
 )
 
-// LatestURL is the v1 release source: GitHub releases only.
-const LatestURL = "https://api.github.com/repos/marcelowa/acornfall/releases/latest"
-
 // CheckInterval is how often the gateway checks on its own.
 const CheckInterval = time.Hour
 
@@ -105,10 +102,13 @@ type Status struct {
 	// release names no file for this platform.
 	DownloadSize int64 `json:"downloadSize"`
 	WorkerSize   int64 `json:"workerSize"`
-	// Available means the newest production release is newer than the
-	// running build — newer, not merely different: an rc installed from the
-	// picker must not leave the bar pointing at an older GA.
+	// Available means the newest release is newer than the running build — newer, not merely
+	// different: an rc installed from the picker must not leave the bar pointing at an older GA.
+	// The source is the public feed, so pre-releases count; this project ships nothing else.
 	Available bool `json:"available"`
+	// CheckError is the last failed check, in the check's own words. It is a soft state: the last
+	// good release stays on screen, and the page says the newest release is unknown.
+	CheckError string `json:"checkError,omitempty"`
 	// Failed carries the last rollback cause, so the screen can say it.
 	Failed string `json:"failed,omitempty"`
 	// RestartRequired is set after files are swapped but the process is old.
@@ -209,6 +209,13 @@ type Manager struct {
 	binPath    string
 	migrateDir string
 	latestURL  string
+	// feedURL is the releases feed the check reads. Empty means FeedURL. It is a field, like
+	// latestURL, so a test drives a local feed without touching the network.
+	feedURL string
+	// apiBaseURL overrides the API base. Empty derives it from latestURL, which is what every
+	// existing test does; the feed source has no /releases/ path to derive from, so a test that
+	// drives both sources sets this once.
+	apiBaseURL string
 	bunBaseURL string
 	client     *http.Client
 	// largeClient is for whole assets, where the 30-second metadata timeout is the wrong question.
@@ -219,6 +226,9 @@ type Manager struct {
 	current  string
 	latest   Release
 	checking bool
+	// checkError is the last failed check's sentence. A failed check is a state the page shows,
+	// not an HTTP error: the newest release is unknown, and the last good answer still stands.
+	checkError string
 
 	// notesMu guards the notes cache: a tag's notes never change, so one read
 	// per process is enough, and the page's "what changed in between" asks
@@ -270,6 +280,7 @@ func New(machinery, share, binPath, migrateDir string) *Manager {
 		binPath:    binPath,
 		migrateDir: migrateDir,
 		latestURL:  LatestURL,
+		feedURL:    FeedURL,
 		client:     &http.Client{Timeout: 30 * time.Second},
 		// Assets are not metadata: the appliance image is hundreds of megabytes, and a timeout
 		// sized for a JSON answer killed a download that was working (measured: 223 MB, forty
@@ -423,6 +434,7 @@ func (m *Manager) Status() Status {
 		Channel:         m.settings.Channel,
 		Checking:        m.checking,
 		Available:       newerThan(m.latest.Tag, m.current),
+		CheckError:      m.checkError,
 		Failed:          m.failed,
 		RestartRequired: m.restart,
 		DownloadSize:    AssetFor(m.latest).Size,
@@ -461,12 +473,20 @@ func (m *Manager) Check(ctx context.Context) (Release, error) {
 		m.mu.Unlock()
 	}()
 	release, err := m.fetch(ctx)
+	m.mu.Lock()
+	if err != nil {
+		// A check that failed is not a release that vanished: the last good answer stays on the
+		// screen, and the sentence says the newest release is unknown. Clearing latest here made
+		// the update bar disappear because the network blipped.
+		m.checkError = err.Error()
+	} else {
+		m.latest = release
+		m.checkError = ""
+	}
+	m.mu.Unlock()
 	if err != nil {
 		return Release{}, err
 	}
-	m.mu.Lock()
-	m.latest = release
-	m.mu.Unlock()
 	return release, nil
 }
 
@@ -497,7 +517,11 @@ func (m *Manager) get(ctx context.Context, url string) (*http.Response, error) {
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	request.Header.Set("Accept", "application/vnd.github+json")
+	if strings.HasSuffix(url, ".atom") {
+		request.Header.Set("Accept", "application/atom+xml")
+	} else {
+		request.Header.Set("Accept", "application/vnd.github+json")
+	}
 	return m.client.Do(request)
 }
 
@@ -513,6 +537,21 @@ func (m *Manager) fetch(ctx context.Context) (Release, error) {
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("releases: github answered %s", response.Status)
+	}
+	if strings.HasSuffix(url, ".atom") {
+		releases, err := parseAtomFeed(response.Body)
+		if err != nil {
+			return Release{}, err
+		}
+		// The feed lists recent releases newest first, but "first" is not the rule: the newest
+		// by version is, for the same reason UpdateTarget compares versions. A feed order we do
+		// not control must not decide which release is offered.
+		release, ok := NewestRelease(releases)
+		if !ok {
+			return Release{}, fmt.Errorf("releases: the feed at %s listed no release tag", url)
+		}
+		m.resolveNotes(ctx, &release)
+		return release, nil
 	}
 	release, err := parseRelease(response.Body)
 	if err != nil {
@@ -530,6 +569,12 @@ func (m *Manager) fetch(ctx context.Context) (Release, error) {
 func (m *Manager) Release(ctx context.Context, tag string) (Release, error) {
 	release, err := m.releaseFor(ctx, tag)
 	if err != nil {
+		// The picker and the target page must still say what changed when the API's quota is
+		// gone: the public feed carries the tag, the date and the notes. It carries no asset id,
+		// which is the apply's question and its own error.
+		if fromFeed, ok := m.feedRelease(ctx, tag); ok {
+			return fromFeed, nil
+		}
 		return Release{}, err
 	}
 	m.resolveNotes(ctx, &release)
@@ -750,15 +795,15 @@ func (m *Manager) List(ctx context.Context, limit int, includePrerelease bool) (
 	}
 	response, err := m.get(ctx, fmt.Sprintf("%s/releases?per_page=%d", m.apiBase(), limit))
 	if err != nil {
-		return nil, err
+		return m.feedList(ctx, limit, includePrerelease, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("releases: github answered %s", response.Status)
+		return m.feedList(ctx, limit, includePrerelease, fmt.Errorf("releases: github answered %s", response.Status))
 	}
 	releases, err := parseReleaseList(response.Body)
 	if err != nil {
-		return nil, err
+		return m.feedList(ctx, limit, includePrerelease, err)
 	}
 	visible := make([]Release, 0, len(releases))
 	for _, release := range releases {
@@ -1127,6 +1172,16 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 		}
 		release = fetched
 	}
+	// A release found by the check carries no asset ids: the feed has the tag and the notes, and
+	// the API has the files. Read the tag's own release before deciding there is no binary, or a
+	// check that worked would leave every install button failing on an empty asset.
+	if AssetFor(release).URL == "" && release.Tag != "" {
+		picked, err := m.releaseFromAPI(ctx, release.Tag)
+		if err != nil {
+			return fmt.Errorf("releases: cannot read the files of %s: %w", release.Tag, err)
+		}
+		release = picked
+	}
 	asset := AssetFor(release)
 	if asset.URL == "" {
 		return fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
@@ -1275,6 +1330,9 @@ func CleanSandboxes(ctx context.Context, names []string, remove func(context.Con
 const defaultAPIBase = "https://api.github.com/repos/marcelowa/acornfall"
 
 func (m *Manager) apiBase() string {
+	if m.apiBaseURL != "" {
+		return m.apiBaseURL
+	}
 	url := m.latestURL
 	if url == "" {
 		url = LatestURL

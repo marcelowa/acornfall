@@ -356,6 +356,8 @@ export interface UpdateStatus {
 	downloadSize: number;
 	workerSize: number;
 	available: boolean;
+	/** The last failed check, in the gateway's words: a soft state, not a red error. */
+	checkError?: string | undefined;
 	failed?: string | undefined;
 	restartRequired?: boolean | undefined;
 	backups: string[];

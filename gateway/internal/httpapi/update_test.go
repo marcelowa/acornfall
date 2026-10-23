@@ -43,7 +43,7 @@ func TestUpdateStatusNamesCurrentAndLatest(t *testing.T) {
 	if body["current"] != "v0.8.0" {
 		t.Fatalf("current = %v", body["current"])
 	}
-	for _, field := range []string{"available", "latest", "notes", "checking", "backups", "runsActive", "runs"} {
+	for _, field := range []string{"available", "latest", "notes", "checking", "checkError", "backups", "runsActive", "runs"} {
 		if _, ok := body[field]; !ok {
 			t.Fatalf("status must carry %q", field)
 		}
@@ -55,10 +55,18 @@ func TestUpdateCheckNeedsUpstream(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/update/check", strings.NewReader("{}"))
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
-	// No network in tests worth trusting: the point is the endpoint exists
-	// and answers JSON either way, never a panic or a redirect.
-	if recorder.Code != http.StatusOK && recorder.Code != http.StatusBadGateway {
-		t.Fatalf("check = %d", recorder.Code)
+	// A failed check is a soft state, not a failed request: the endpoint answers the state the
+	// page can show, with the reason beside it. A 502 made the console paint a red error over a
+	// check that was only rate-limited.
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("check = %d, want 200 with a checkError", recorder.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["checkError"]; !ok {
+		t.Fatal("the status must carry checkError, even when the check worked")
 	}
 }
 
