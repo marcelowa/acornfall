@@ -8,7 +8,7 @@ name: prove
 on:
   workflow_dispatch:
   push:
-    branches: [feat/one-vm-per-machine]
+    branches: [feat/one-vm-per-machine, main]
     paths:
       - "gateway/**"
       - "worker/src/**"
@@ -48,6 +48,14 @@ jobs:
             echo "hit=false" >> "$GITHUB_OUTPUT"
             echo "::warning::no appliance on this runner for $hash; the next tag builds and proves it"
           fi
+      # A proof that skips its subject is worse than a red one: it says the pipeline is green
+      # while nothing booted. A tree whose appliance this runner has not built is proved by the
+      # next tag's release job; until then, this job refuses to claim it.
+      - name: No appliance for this tree
+        if: steps.appliance.outputs.hit != 'true'
+        run: |
+          echo "::error::no appliance on this runner for ${{ steps.appliance.outputs.hash }}; tag a release to build and prove one"
+          exit 1
       - name: Unpack the release's tarball and boot it
         if: steps.appliance.outputs.hit == 'true'
         env:
