@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/acornfall/acornfall/gateway/internal/protocol"
 )
 
 // The three phases, from what the control knows: the harness is up, the harness is gone with a reason,
@@ -45,5 +47,55 @@ func TestAConversationIsNotMadeBeforeTheWorkspaceIsReady(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not ready yet") || !strings.Contains(err.Error(), "the harness is starting") {
 		t.Errorf("the refusal should say what is missing, got %v", err)
+	}
+}
+
+// Every action that needs the harness is refused by the control itself, not only by the
+// console. The beta.45 backend let a prompt reach a workspace that was registered but still
+// starting, and the person got "harness is not running" instead of the phase's sentence.
+func TestEveryHarnessActionIsRefusedBeforeTheWorkspaceIsReady(t *testing.T) {
+	c := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{"create", func() error { return c.Create(ctx) }},
+		{"prompt", func() error { return c.Prompt(ctx, "1", "hello", protocol.WhenBusyFollowUp, nil) }},
+		{"select", func() error { return c.Select(ctx, "1") }},
+		{"rename", func() error { return c.Rename(ctx, "1", "name") }},
+		{"hide", func() error { return c.Hide(ctx, "1", true) }},
+		{"fork", func() error { return c.Fork(ctx, "1", "0") }},
+		{"compact", func() error { return c.Compact(ctx, "1") }},
+		{"compact preview", func() error { _, err := c.CompactPreview(ctx, "1"); return err }},
+		{"abort", func() error { return c.Abort(ctx, "1") }},
+		{"agent", func() error { return c.SetAgent(ctx, "1", AgentChange{}) }},
+		{"commands", func() error { _, err := c.Commands(ctx); return err }},
+		{"agents", func() error { _, err := c.Agents(ctx); return err }},
+		{"usage", func() error { _, err := c.Usage(ctx); return err }},
+		{"policy", func() error { _, err := c.Policy(ctx, "1"); return err }},
+		{"worker call", func() error { _, err := c.WorkerCall(ctx, "messages", "1"); return err }},
+		{"refresh conversations", func() error { return c.RefreshConversations(ctx) }},
+		{"upload", func() error { _, err := c.UploadAttachment(ctx, "", "", "", 0); return err }},
+		{"default model", func() error { return c.SetDefaultModel(ctx, "p", "m") }},
+		{"default thinking", func() error { return c.SetDefaultThinking(ctx, "high") }},
+		{"default agent", func() error { return c.SetDefaultAgent(ctx, "") }},
+		{"reload", func() error { return c.Reload(ctx) }},
+		{"refresh", func() error { return c.Refresh(ctx) }},
+		{"login", func() error { _, err := c.Login(ctx, "p", "api_key"); return err }},
+		{"logout", func() error { return c.Logout(ctx, "p") }},
+		{"auth answer", func() error { return c.AnswerAuth(ctx, "a", "p", "", false) }},
+		{"auth cancel", func() error { return c.CancelAuth(ctx, "a") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			if err == nil {
+				t.Fatal("an action that needs the harness was allowed before ready")
+			}
+			if !strings.Contains(err.Error(), "not ready yet") {
+				t.Errorf("the refusal should name the phase, got %v", err)
+			}
+		})
 	}
 }

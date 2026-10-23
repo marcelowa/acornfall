@@ -1,6 +1,6 @@
 # ADR 0032 — A workspace says when it is ready, and nothing is created before it is
 
-Status: accepted, 2026-10-22
+Status: accepted, 2026-10-22; amended 2026-10-23 — every harness action is refused, not only creation
 Date: 2026-10-22
 
 ## Context
@@ -53,3 +53,20 @@ The gateway reports one field per workspace, `lifecycle`, with a phase and a rea
 - The phase is reported for the workspace in view. The rail's rows carry `Running`, which is about
   conversations; a workspace that is starting is not yet a row worth marking, and a per-row phase is
   a later question with its own answer.
+
+## Amendment, 2026-10-23 — every harness action is refused, not only creation
+
+The decision above refused only `Create`. The console refused everything else for itself, so a
+client that did not use the console could post a prompt to a workspace that was registered but
+starting; it reached the worker, or waited on the first start, and failed with "harness is not
+running" instead of the phase's sentence.
+
+The gateway now refuses **every route that needs the harness** with `409 this workspace is not
+ready yet: <reason>`. The gate lives in `Control.requireReady` and the HTTP routes resolve the
+control without starting it first. `GET /state` and `GET /stream` are the only requests that start
+a workspace. `POST /draft` may use a control that is already starting, but never starts one; a
+draft is words, not a harness action. Workspace list/create/update/remove, install defaults,
+update, and health stay open.
+
+The console still reads the phase and offers nothing that needs the harness; the gateway now
+enforces the same rule for every other client.

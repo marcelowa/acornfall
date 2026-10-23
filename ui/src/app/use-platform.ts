@@ -720,8 +720,19 @@ export function usePlatform(): Platform {
 	}, [theme, choice]);
 
 	// The commands the server would expand. They are fetched per workspace, once: the list
-	// changes when the workspace's resources change, not when a conversation does.
+	// changes when the workspace's resources change, not when a conversation does. The
+	// endpoint needs the harness, so a workspace that is starting is not asked: the state is
+	// what starts it, and the fetch waits for that state to be the one in view.
+	const commandsReady =
+		state?.workspace?.name === workspace &&
+		(state?.lifecycle !== undefined
+			? state.lifecycle.phase === "ready"
+			: state?.workerUp === true);
 	useEffect(() => {
+		if (!commandsReady) {
+			setCommands([]);
+			return;
+		}
 		let cancelled = false;
 		const load = async (): Promise<void> => {
 			try {
@@ -735,7 +746,7 @@ export function usePlatform(): Platform {
 		return () => {
 			cancelled = true;
 		};
-	}, [workspace, reportError]);
+	}, [workspace, commandsReady, reportError]);
 
 	const conversations = useMemo(
 		() =>

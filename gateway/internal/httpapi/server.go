@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,15 +30,84 @@ func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager) 
 // controlFor finds the workspace a request is about. The workspace-scoped routes name it;
 // the earlier paths do not, and mean the general workspace.
 func (s *Server) controlFor(r *http.Request) (*control.Control, error) {
-	name := r.PathValue("ws")
-	if name == "" {
-		name = r.URL.Query().Get("workspace")
+	// A handler behind ready or started already resolved the control without starting it.
+	if ctl, ok := r.Context().Value(controlContextKey{}).(*control.Control); ok {
+		return ctl, nil
 	}
-	_, ctl, err := s.workspaces.Route(r.Context(), name)
+	_, ctl, err := s.workspaces.Route(r.Context(), workspaceName(r))
 	if err != nil {
 		return nil, err
 	}
 	return ctl, nil
+}
+
+// controlContextKey carries a control that the readiness wrapper already resolved.
+type controlContextKey struct{}
+
+// workspaceName is the workspace a per-workspace route names: the path, or the query for the
+// older routes without one, or general.
+func workspaceName(r *http.Request) string {
+	name := r.PathValue("ws")
+	if name == "" {
+		name = r.URL.Query().Get("workspace")
+	}
+	if name == "" {
+		name = control.GeneralWorkspaceName
+	}
+	return name
+}
+
+// existingControl resolves a workspace that has already started. It never starts one: only
+// the state and stream requests are allowed to do that. A request for a sleeping workspace is
+// a sentence, not a boot.
+func (s *Server) existingControl(r *http.Request) (*control.Control, error) {
+	name := workspaceName(r)
+	if _, known := s.workspaces.Get(name); !known {
+		return nil, fmt.Errorf("no workspace %q", name)
+	}
+	ctl, started := s.workspaces.Control(name)
+	if !started {
+		return nil, fmt.Errorf("this workspace is not ready yet: it has not started; open it first")
+	}
+	return ctl, nil
+}
+
+// readyControl resolves a started workspace that can take a harness action. The phase is the
+// gateway's own, not a second reading of workerUp: a process that has not answered is starting.
+func (s *Server) readyControl(r *http.Request) (*control.Control, error) {
+	ctl, err := s.existingControl(r)
+	if err != nil {
+		return nil, err
+	}
+	if lifecycle := ctl.Lifecycle(); lifecycle.Phase != control.LifecycleReady {
+		return nil, fmt.Errorf("this workspace is not ready yet: %s", lifecycle.Reason)
+	}
+	return ctl, nil
+}
+
+// withControl resolves a control once and hands it to the handler through the context, so the
+// handler cannot start a second one or read a different phase.
+func (s *Server) withControl(next http.HandlerFunc, resolve func(*http.Request) (*control.Control, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctl, err := resolve(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), controlContextKey{}, ctl)))
+	}
+}
+
+// ready is every route that needs the harness: a workspace that is not ready gets the phase's
+// sentence instead of a write into a process that is not there.
+func (s *Server) ready(next http.HandlerFunc) http.HandlerFunc {
+	return s.withControl(next, s.readyControl)
+}
+
+// started is the draft route: it may use a control that is still starting, but it must never
+// start one. A draft is words, not a harness action.
+func (s *Server) started(next http.HandlerFunc) http.HandlerFunc {
+	return s.withControl(next, s.existingControl)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -49,33 +119,33 @@ func (s *Server) Handler() http.Handler {
 	for _, base := range []string{"/api/workspaces/{ws}", "/api"} {
 		mux.HandleFunc("GET "+base+"/state", s.state)
 		mux.HandleFunc("GET "+base+"/stream", s.stream)
-		mux.HandleFunc("GET "+base+"/conversations", s.conversations)
-		mux.HandleFunc("POST "+base+"/conversations", s.createConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/select", s.selectConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/rename", s.renameConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/hide", s.hideConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/fork", s.forkConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.compactConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/compact-preview", s.compactPreview)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.messages)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/draft", s.draft)
-		mux.HandleFunc("POST "+base+"/attachments", s.attachments)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.abort)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.agent)
-		mux.HandleFunc("GET "+base+"/conversations/{id}/policy", s.policy)
-		mux.HandleFunc("GET "+base+"/conversations/{id}/messages", s.messagesDoc)
-		mux.HandleFunc("GET "+base+"/agents", s.agents)
-		mux.HandleFunc("GET "+base+"/commands", s.commands)
-		mux.HandleFunc("POST "+base+"/agents/reload", s.reload)
-		mux.HandleFunc("GET "+base+"/usage", s.usage)
-		mux.HandleFunc("POST "+base+"/providers/login", s.login)
-		mux.HandleFunc("POST "+base+"/providers/logout", s.logout)
-		mux.HandleFunc("POST "+base+"/providers/refresh", s.refresh)
-		mux.HandleFunc("POST "+base+"/auth/answer", s.authAnswer)
-		mux.HandleFunc("POST "+base+"/auth/cancel", s.authCancel)
-		mux.HandleFunc("POST "+base+"/default-model", s.setDefaultModel)
-		mux.HandleFunc("POST "+base+"/default-thinking", s.setDefaultThinking)
-		mux.HandleFunc("POST "+base+"/default-agent", s.setDefaultAgent)
+		mux.HandleFunc("GET "+base+"/conversations", s.ready(s.conversations))
+		mux.HandleFunc("POST "+base+"/conversations", s.ready(s.createConversation))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/select", s.ready(s.selectConversation))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/rename", s.ready(s.renameConversation))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/hide", s.ready(s.hideConversation))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/fork", s.ready(s.forkConversation))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.ready(s.compactConversation))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/compact-preview", s.ready(s.compactPreview))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.ready(s.messages))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/draft", s.started(s.draft))
+		mux.HandleFunc("POST "+base+"/attachments", s.ready(s.attachments))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.ready(s.abort))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.ready(s.agent))
+		mux.HandleFunc("GET "+base+"/conversations/{id}/policy", s.ready(s.policy))
+		mux.HandleFunc("GET "+base+"/conversations/{id}/messages", s.ready(s.messagesDoc))
+		mux.HandleFunc("GET "+base+"/agents", s.ready(s.agents))
+		mux.HandleFunc("GET "+base+"/commands", s.ready(s.commands))
+		mux.HandleFunc("POST "+base+"/agents/reload", s.ready(s.reload))
+		mux.HandleFunc("GET "+base+"/usage", s.ready(s.usage))
+		mux.HandleFunc("POST "+base+"/providers/login", s.ready(s.login))
+		mux.HandleFunc("POST "+base+"/providers/logout", s.ready(s.logout))
+		mux.HandleFunc("POST "+base+"/providers/refresh", s.ready(s.refresh))
+		mux.HandleFunc("POST "+base+"/auth/answer", s.ready(s.authAnswer))
+		mux.HandleFunc("POST "+base+"/auth/cancel", s.ready(s.authCancel))
+		mux.HandleFunc("POST "+base+"/default-model", s.ready(s.setDefaultModel))
+		mux.HandleFunc("POST "+base+"/default-thinking", s.ready(s.setDefaultThinking))
+		mux.HandleFunc("POST "+base+"/default-agent", s.ready(s.setDefaultAgent))
 	}
 
 	// Install-wide defaults: no workspace in the path, because the point of them is that

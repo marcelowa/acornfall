@@ -282,6 +282,16 @@ func (w *Workspaces) Get(name string) (Workspace, bool) {
 	return workspace, ok
 }
 
+// Control returns a workspace's started control, and whether there is one. It never starts a
+// workspace: only the state and stream requests do that. A caller that needs the harness asks
+// this first, so a request for a sleeping workspace is a sentence rather than a boot.
+func (w *Workspaces) Control(name string) (*Control, bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	control, started := w.controls[name]
+	return control, started
+}
+
 // Create makes a workspace inside the workspaces folder. This is the only way the API
 // creates one, which is what keeps the interface inside a single directory: a folder
 // anywhere else on the machine is an operator's decision, not a form field.

@@ -32,8 +32,8 @@ func TestACommandWithNoHarnessIsRefusedNotAPanic(t *testing.T) {
 			if err == nil {
 				t.Fatal("a command with no harness must be refused")
 			}
-			if !strings.Contains(err.Error(), "harness is not running") {
-				t.Errorf("the refusal should say what is missing, got %v", err)
+			if !strings.Contains(err.Error(), "not ready yet") {
+				t.Errorf("the refusal should say the workspace is not ready, got %v", err)
 			}
 		})
 	}

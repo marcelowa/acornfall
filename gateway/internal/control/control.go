@@ -811,6 +811,9 @@ func (c *Control) callInto(ctx context.Context, command protocol.Command, out an
 // WorkerCall is an escape hatch for small read-only commands, so a diagnostic does
 // not need a method and an endpoint of its own.
 func (c *Control) WorkerCall(ctx context.Context, kind, conversationID string) (json.RawMessage, error) {
+	if err := c.requireReady(); err != nil {
+		return nil, err
+	}
 	return c.call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
 }
 
@@ -857,12 +860,18 @@ func (c *Control) SetWorkspace(workspace Workspace) {
 
 // Commands lists this workspace's slash commands, global first and workspace shadowing.
 func (c *Control) Commands(ctx context.Context) (json.RawMessage, error) {
+	if err := c.requireReady(); err != nil {
+		return nil, err
+	}
 	return c.call(ctx, protocol.Command{Type: "commands"})
 }
 
 // Policy reports what a conversation may do with other conversations, resolved
 // the same way its agent is.
 func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMessage, error) {
+	if err := c.requireReady(); err != nil {
+		return nil, err
+	}
 	if conversationID == "" {
 		// No id is not a policy to compute: it is a workspace with no conversation yet. Asking the
 		// worker made it throw, and a throw on a command with an id that is not one is how a harness
@@ -1103,6 +1112,9 @@ func (c *Control) StateFor(conversationID string) State {
 // Select attaches to one conversation, detaching the previous one so frames
 // describe a single transcript.
 func (c *Control) Select(ctx context.Context, conversationID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if conversationID == "" {
 		return errors.New("conversation id is required")
 	}
@@ -1143,6 +1155,9 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 // Rename gives a conversation a name. The name is committed into the
 // conversation itself, so it is durable and travels with the transcript.
 func (c *Control) Rename(ctx context.Context, conversationID, title string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(title) == "" {
 		return errors.New("title is required")
 	}
@@ -1163,6 +1178,9 @@ func (c *Control) Rename(ctx context.Context, conversationID, title string) erro
 // Hide tombstones a conversation. Nothing is removed: storage is append-only, so
 // a hidden conversation keeps its transcript and can be restored.
 func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if _, err := c.call(ctx, protocol.Command{
 		Type:           "hide",
 		ConversationID: conversationID,
@@ -1191,6 +1209,9 @@ func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) 
 // Fork branches a conversation at an entry. The fork inherits the transcript up
 // to that entry and the agent in effect at that point.
 func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
@@ -1235,6 +1256,9 @@ func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
 // the old prefix while the conversation keeps working, and the transcript
 // keeps a notice where the cut was.
 func (c *Control) Compact(ctx context.Context, conversationID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
@@ -1254,6 +1278,9 @@ func (c *Control) Compact(ctx context.Context, conversationID string) error {
 // CompactPreview says what a manual compaction would fold: entry and turn counts,
 // so the dialog states the scope. The cut itself stays the harness's call.
 func (c *Control) CompactPreview(ctx context.Context, conversationID string) (CompactPreview, error) {
+	if err := c.requireReady(); err != nil {
+		return CompactPreview{}, err
+	}
 	var response CompactPreview
 	if err := c.callInto(ctx, protocol.Command{
 		Type:           "compact_preview",
@@ -1271,8 +1298,8 @@ func (c *Control) Create(ctx context.Context) error {
 	// Conversations are made by the harness, so a harness that is not up cannot make one: the write
 	// went to a process that was not there, and the console said "harness down" over an action it had
 	// offered a second earlier. A workspace says when it is ready, and this is the gate that honours it.
-	if lifecycle := c.Lifecycle(); lifecycle.Phase != LifecycleReady {
-		return fmt.Errorf("this workspace is not ready yet: %s", lifecycle.Reason)
+	if err := c.requireReady(); err != nil {
+		return err
 	}
 	var response struct {
 		ConversationID string `json:"conversationId"`
@@ -1433,6 +1460,9 @@ type AgentChange struct {
 // SetAgent applies a change to one conversation. Only fields the caller sets
 // become explicit: anything left alone keeps inheriting.
 func (c *Control) SetAgent(ctx context.Context, conversationID string, change AgentChange) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	c.mu.RLock()
 	explicit := c.bindings[conversationID]
 	c.mu.RUnlock()
@@ -1801,6 +1831,9 @@ func (c *Control) supportedThinking(provider, modelID string) []string {
 // definition names one. It is validated against the scale, not against one model:
 // control clamps per model when it applies.
 func (c *Control) SetDefaultThinking(ctx context.Context, level string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if err := validateThinkingLevel(level); err != nil {
 		return err
 	}
@@ -1813,6 +1846,9 @@ func (c *Control) SetDefaultThinking(ctx context.Context, level string) error {
 // SetDefaultAgent changes which definition conversations run when they have none
 // of their own. An empty name means the layered defaults only.
 func (c *Control) SetDefaultAgent(ctx context.Context, name string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if name != "" {
 		c.mu.RLock()
 		found := false
@@ -1910,6 +1946,9 @@ func SaveDefaults(path string, defaults Defaults) error {
 
 // SetDefaultModel changes what conversations without an explicit model run.
 func (c *Control) SetDefaultModel(ctx context.Context, provider, modelID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if (provider == "") != (modelID == "") {
 		return errors.New("a model default needs both a provider and a model id")
 	}
@@ -2037,6 +2076,9 @@ func (c *Control) reapply(ctx context.Context, conversationID string) error {
 
 // Agents returns the overlay catalog: every definition and what it resolves to.
 func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
+	if err := c.requireReady(); err != nil {
+		return protocol.AgentsData{}, err
+	}
 	var data protocol.AgentsData
 	if err := c.callInto(ctx, protocol.Command{Type: "agents"}, &data); err != nil {
 		return protocol.AgentsData{}, err
@@ -2050,6 +2092,9 @@ func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
 // Reload re-reads definitions and config from disk, then re-applies every
 // conversation's binding so an edited file takes effect without a restart.
 func (c *Control) Reload(ctx context.Context) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if _, err := c.call(ctx, protocol.Command{Type: "reload"}); err != nil {
 		return err
 	}
@@ -2071,6 +2116,9 @@ func (c *Control) Reload(ctx context.Context) error {
 // Refresh re-reads the worker's provider catalog and adopt a usable agent
 // binding for the active conversation when the current one is unusable.
 func (c *Control) Refresh(ctx context.Context) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	var describe protocol.Describe
 	if err := c.callInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return err
@@ -2090,6 +2138,9 @@ func (c *Control) Refresh(ctx context.Context) error {
 // flow starts: the interaction arrives as `auth` frames, and a device flow can
 // take minutes.
 func (c *Control) Login(ctx context.Context, providerID, authType string) (string, error) {
+	if err := c.requireReady(); err != nil {
+		return "", err
+	}
 	c.mu.Lock()
 	c.nextSub++
 	authID := fmt.Sprintf("auth-%d", c.nextSub)
@@ -2116,6 +2167,9 @@ func (c *Control) Login(ctx context.Context, providerID, authType string) (strin
 // Logout forgets one provider's stored credential and re-adopts bindings, so a
 // revoked key cannot keep spending and the picker cannot keep offering it.
 func (c *Control) Logout(ctx context.Context, providerID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if _, err := c.call(ctx, protocol.Command{Type: "logout", ProviderID: providerID}); err != nil {
 		return err
 	}
@@ -2137,6 +2191,9 @@ func (c *Control) Logout(ctx context.Context, providerID string) error {
 
 // AnswerAuth answers one login prompt. Cancelled rejects it.
 func (c *Control) AnswerAuth(ctx context.Context, authID, promptID, value string, cancelled bool) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	return c.callInto(ctx, protocol.Command{
 		Type:      "auth_answer",
 		AuthID:    authID,
@@ -2148,10 +2205,16 @@ func (c *Control) AnswerAuth(ctx context.Context, authID, promptID, value string
 
 // CancelAuth aborts a running login flow.
 func (c *Control) CancelAuth(ctx context.Context, authID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	return c.callInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
 }
 
 func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy, attachments []string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	// Files may ride alone: a screenshot with no words is still a message.
 	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return errors.New("empty message")
@@ -2231,10 +2294,16 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 }
 
 func (c *Control) Abort(ctx context.Context, conversationID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	return c.callInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
 }
 
 func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
+	if err := c.requireReady(); err != nil {
+		return nil, err
+	}
 	return c.call(ctx, protocol.Command{Type: "usage"})
 }
 
@@ -2249,6 +2318,9 @@ type Attachment struct {
 // UploadAttachment stores staged bytes under the workspace's hidden folder.
 // The temp file stays the caller's to remove; the worker only reads it.
 func (c *Control) UploadAttachment(ctx context.Context, tempPath, name, mime string, size int64) (Attachment, error) {
+	if err := c.requireReady(); err != nil {
+		return Attachment{}, err
+	}
 	var response struct {
 		Attachment Attachment `json:"attachment"`
 	}
@@ -2467,6 +2539,9 @@ func queueFrame(channel chan protocol.Frame, frame protocol.Frame) {
 // RefreshConversations re-reads the list on demand, for callers that are not holding
 // an event stream open.
 func (c *Control) RefreshConversations(ctx context.Context) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	_, err := c.listConversations(ctx)
 	return err
 }
@@ -2529,6 +2604,17 @@ func (c *Control) Lifecycle() Lifecycle {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.lifecycleLocked()
+}
+
+// requireReady is the one gate for an action that needs the harness. It is here, in the
+// control, and not only at the HTTP edge: the command line and a test are callers too, and a
+// workspace that is starting must refuse them with the phase's own sentence.
+func (c *Control) requireReady() error {
+	lifecycle := c.Lifecycle()
+	if lifecycle.Phase != LifecycleReady {
+		return fmt.Errorf("this workspace is not ready yet: %s", lifecycle.Reason)
+	}
+	return nil
 }
 
 func (c *Control) activeConversation() string {
