@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { engineName, machinePath, rootfsOf } from "../src/lxc.ts";
+import { engineName, isOngoingCreation, machinePath, rootfsOf } from "../src/lxc.ts";
 
 // The name is the one control sends, so the two sides of one install cannot disagree about
 // which engine is in use.
@@ -27,4 +27,12 @@ test("a path inside the container maps to the machine", () => {
 	expect(machinePath(rootfs, "/home/me/work", "notes.txt")).toBe(
 		"/var/lib/lxc/acornfall-general-1234/rootfs/notes.txt",
 	);
+});
+
+// Control and the worker both start a stopped container; the second caller gets the runtime's
+// "Ongoing container creation detected" while the first is still working. That is a lock, not a
+// fault, and the worker waits for RUNNING instead of reporting a workspace with no sandbox.
+test("a start that is still being made is not a failure", () => {
+	expect(isOngoingCreation("lxc-start: x: Ongoing container creation detected")).toBe(true);
+	expect(isOngoingCreation("lxc-start: x: Config file not found")).toBe(false);
 });

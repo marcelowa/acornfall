@@ -510,9 +510,45 @@ func TestRemovingAWorkspaceStopsItFirst(t *testing.T) {
 	}
 	calls := runtime.all()
 	stop := strings.Index(calls, "lxc-stop -n acornfall-x -k")
-	destroy := strings.Index(calls, "lxc-destroy -n acornfall-x")
+	destroy := strings.Index(calls, "lxc-destroy -f -n acornfall-x")
 	if stop < 0 || destroy < 0 || stop > destroy {
 		t.Errorf("the kill has to come before the destroy, got:\n%s", calls)
+	}
+}
+
+// A create that was cut short leaves a rootfs.tmp the runtime cannot remove on virtiofs: it
+// asks the filesystem for flags and gets ENOTTY. The container never ran, so its folder is
+// removed directly. Measured on the appliance, beta.33: new-03 said "this workspace has no
+// sandbox" for ever while the leftover sat in /var/lib/lxc.
+func TestAHalfMadeContainerIsRemovedWhenTheRuntimeCannot(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "acornfall-x")
+	if err := os.MkdirAll(filepath.Join(dir, "rootfs.tmp", "rootfs", "usr", "share"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rootfs.tmp", "rootfs", "usr", "share", "Debconf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &fakeRuntime{
+		answers: map[string]string{
+			"lxc-info -n acornfall-x -s":                 "State: STOPPED",
+			"lxc-info -n acornfall-x -c lxc.rootfs.path": "lxc.rootfs.path = " + filepath.Join(dir, "rootfs"),
+		},
+		failures: map[string]error{
+			"lxc-destroy": errors.New("lxc-destroy: _recursive_rmdir: 162 Inappropriate ioctl for device - Failed to delete " + filepath.Join(dir, "rootfs.tmp", "rootfs", "usr", "share", "Debconf")),
+		},
+	}
+	client, _ := connected(t, runtime)
+	defer client.Close()
+	ctx, cancel := callContext(t)
+	defer cancel()
+	if err := client.Remove(ctx, "acornfall-x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the leftover folder should be gone, stat err = %v", err)
+	}
+	if !strings.Contains(runtime.all(), "lxc-info -n acornfall-x -c lxc.rootfs.path") {
+		t.Errorf("the runtime should be asked for the folder it refused, calls:\n%s", runtime.all())
 	}
 }
 
@@ -558,9 +594,9 @@ func TestCallsAreAnsweredBeforeTheConnectionEnds(t *testing.T) {
 // "is not running" and "is not defined", and a caller cannot tell those from a real error.
 func TestStoppingOrRemovingWhatIsGoneIsNotAFailure(t *testing.T) {
 	runtime := &fakeRuntime{answers: map[string]string{
-		"lxc-stop -n acornfall-x -k": "",
-		"lxc-destroy -n acornfall-x": "",
-		"lxc-start --version":        "6.0.4",
+		"lxc-stop -n acornfall-x -k":    "",
+		"lxc-destroy -f -n acornfall-x": "",
+		"lxc-start --version":           "6.0.4",
 	}}
 	runtime.failure = errors.New("lxc-stop: acornfall-x: permission denied")
 	client, _ := connected(t, runtime)

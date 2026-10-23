@@ -352,12 +352,45 @@ func (t *session) lifecycle(message Message, name string) error {
 		if _, err := t.server.run("lxc-stop", "-n", name, "-k"); err != nil && !alreadyThere(err) {
 			t.server.log("shim: stopping %s before removing it: %v", name, err)
 		}
-		if _, err := t.server.run("lxc-destroy", "-n", name); err != nil && !alreadyThere(err) {
-			return err
+		if _, err := t.server.run("lxc-destroy", "-f", "-n", name); err != nil && !alreadyThere(err) {
+			// A create that was cut short leaves a rootfs.tmp, and the runtime's own recursive
+			// remove asks the filesystem for flags it does not carry on virtiofs: measured on the
+			// appliance, "Inappropriate ioctl for device - Failed to delete .../rootfs.tmp/...".
+			// The container never ran, so removing its folder is the same end the destroy wanted.
+			if cleanErr := t.removeLeftover(name); cleanErr != nil {
+				return fmt.Errorf("%w (and its folder could not be removed: %v)", err, cleanErr)
+			}
+			t.server.log("shim: %s was left behind by a cut-short create; removed its folder", name)
 		}
 	}
 	t.succeed(message.ID, NamePayload{Name: name})
 	return nil
+}
+
+// removeLeftover removes a container's own folder after the runtime refused to destroy it. It
+// asks the runtime for the rootfs path, refuses anything that is not this container's folder,
+// and never touches a container that is still running.
+func (t *session) removeLeftover(name string) error {
+	if status, err := t.status(name); err == nil && status == "RUNNING" {
+		return fmt.Errorf("%s is still running: a running container's folder is not removed", name)
+	}
+	out, err := t.server.run("lxc-info", "-n", name, "-c", "lxc.rootfs.path")
+	if err != nil {
+		return err
+	}
+	rootfs := strings.TrimSpace(out)
+	if _, after, ok := strings.Cut(rootfs, "="); ok {
+		rootfs = strings.TrimSpace(after)
+	}
+	rootfs = strings.TrimPrefix(rootfs, "dir:")
+	if rootfs == "" || !filepath.IsAbs(rootfs) {
+		return fmt.Errorf("the runtime did not name an absolute rootfs for %s: %q", name, out)
+	}
+	dir := filepath.Clean(filepath.Dir(rootfs))
+	if filepath.Base(dir) != name {
+		return fmt.Errorf("refusing to remove %s: it is not %s's own folder", dir, name)
+	}
+	return os.RemoveAll(dir)
 }
 
 // start boots a container and refuses to call it started when it is not: the runtime's start
@@ -373,6 +406,13 @@ func (t *session) start(name string) error {
 		return nil
 	}
 	if _, err := t.server.run("lxc-start", "-n", name); err != nil {
+		// Two actors start one container: control makes it and the worker starts it when it is
+		// stopped, and both can be in lxc-start at the same moment. The runtime's second caller
+		// gets "Ongoing container creation detected", which is not a broken container — it is the
+		// first caller still working. Waiting for RUNNING is the repair; remaking it is not.
+		if ongoingCreation(err.Error()) && t.waitRunning(name, 2*time.Minute) {
+			return nil
+		}
 		return err
 	}
 	status, err := t.status(name)
@@ -383,6 +423,25 @@ func (t *session) start(name string) error {
 		return fmt.Errorf("shim: %s is %s after starting it: the image needs a program that stays alive as its init", name, status)
 	}
 	return nil
+}
+
+// ongoingCreation says whether the runtime refused a start because another start is still
+// creating the same container. The second caller has not found a fault; it has found a lock.
+func ongoingCreation(message string) bool {
+	return strings.Contains(message, "Ongoing container creation") || strings.Contains(message, "Ongoing container creation detected")
+}
+
+// waitRunning waits for a container another caller is starting. It asks the runtime, not a
+// timer: the container is running or it is not, and the wait ends on the answer.
+func (t *session) waitRunning(name string, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if status, err := t.status(name); err == nil && status == "RUNNING" {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return false
 }
 
 // create makes the container's rootfs from the image, writes the configuration the gateway

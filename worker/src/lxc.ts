@@ -25,6 +25,15 @@ export function engineName(): string {
 /** Where the machine keeps the containers it makes, which is the runtime's own layout. */
 const containerDir = "/var/lib/lxc";
 
+/** How long to wait for another caller's lxc-start to finish, and how often to ask. */
+const startWaitMs = 120_000;
+const startPollMs = 250;
+
+/** The runtime's words for "another start is still creating this container". */
+export function isOngoingCreation(message: string): boolean {
+	return message.includes("Ongoing container creation");
+}
+
 export async function openSandbox(name: string, workspace: string): Promise<SandboxClient> {
 	const client = new LXCClient(name, workspace);
 	// A container that was made and not started is the ordinary state after a machine boots:
@@ -80,6 +89,16 @@ class LXCClient implements SandboxClient {
 		const proc = Bun.spawn(["lxc-start", "-n", this.name], { stdout: "pipe", stderr: "pipe" });
 		const [err, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
 		if (code !== 0) {
+			// Control and the worker both start a stopped container, and the second caller gets
+			// "Ongoing container creation detected" while the first is still working. That is a
+			// lock, not a fault: wait for the runtime to say RUNNING before reporting a failure.
+			if (isOngoingCreation(err)) {
+				const deadline = Date.now() + startWaitMs;
+				while (Date.now() < deadline) {
+					await new Promise((resolve) => setTimeout(resolve, startPollMs));
+					if ((await this.state()) === "RUNNING") return;
+				}
+			}
 			throw new Error(`lxc-start ${this.name}: ${err.trim() || `exit ${code}`}`);
 		}
 	}
