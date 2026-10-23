@@ -10,7 +10,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -148,6 +150,29 @@ func machineUp(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall machine: %v", err)
 	}
+	// The service owns the machine when it is active: it reads the declaration this command just
+	// wrote and boots the machine itself. Booting here as well is a race the person sees as
+	// "failed to start" while the console comes up — the machine up from beta.40 did exactly that.
+	// So the default command waits for the service's console; a flag that changes what is booted
+	// stops the service first and boots directly, because the service does not know that flag.
+	if serviceOwnsMachine() {
+		custom := *image != "" || *refresh || *tag != "" || *cpus != 2 || *memory != "4G" || *share != "" || *machinery != ""
+		if !custom {
+			url := consoleURL(*host, *port)
+			if notice := publishNotice(*host, *port); notice != "" {
+				fmt.Fprint(os.Stderr, notice)
+			}
+			log.Printf("machine: the service keeps the machine; the console is %s", url)
+			if *wait > 0 {
+				if err := awaitConsole(ctx, url, *wait); err != nil {
+					log.Fatalf("acornfall machine: %v", err)
+				}
+				log.Printf("machine: the appliance is serving on %s", url)
+			}
+			return
+		}
+		stopServeUnit()
+	}
 	build := func(image string) (*sandbox.LXC, error) {
 		return machineDriver(resolvedHome, image, resolvedShare, *cpus, *memory, *port, *host, applianceInit(resolvedShare))
 	}
@@ -219,6 +244,27 @@ func machineUp(argv []string) {
 		log.Fatalf("acornfall machine: %v", err)
 	}
 	log.Printf("machine: the appliance is serving on %s", url)
+}
+
+// serveUnit is the user unit `machine install` writes. The name is also the launchd label.
+const serveUnit = "acornfall-machine"
+
+// serviceOwnsMachine reports whether the user's serve unit is running. It is the supervisor
+// (ADR 0030): when it is up, it boots the machine from the declaration, so `machine up` must wait
+// for that boot instead of starting a second one. Linux systemd only; elsewhere the command boots
+// directly.
+func serviceOwnsMachine() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	out, err := exec.Command("systemctl", "--user", "is-active", serveUnit).Output()
+	return err == nil && strings.TrimSpace(string(out)) == "active"
+}
+
+// stopServeUnit stops the supervisor before a direct boot that changes what the service would
+// boot. A failure is not fatal: the machine is started directly either way.
+func stopServeUnit() {
+	_ = exec.Command("systemctl", "--user", "stop", serveUnit).Run()
 }
 
 // consoleURL is the address a browser can open. "Every interface" is not an address, so the
