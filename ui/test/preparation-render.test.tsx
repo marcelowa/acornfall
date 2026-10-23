@@ -31,6 +31,7 @@ test("notice says preparing and does not offer Open", () => {
 		/>,
 	);
 	expect(html).toContain("is preparing");
+	expect(html).toContain("Started");
 	expect(html).not.toContain(">Open<");
 });
 

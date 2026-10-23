@@ -141,6 +141,8 @@ export function WorkspacePreparationNotice({
 	onDismiss,
 	onRetry,
 }: WorkspacePreparationProps) {
+	const waiting = preparation.phase === "preparing";
+	const seconds = useElapsed(preparation.startedAt, waiting);
 	const badge = badgeOf(preparation);
 	const failed = preparation.phase === "failed";
 	return (
@@ -168,11 +170,19 @@ export function WorkspacePreparationNotice({
 			)}
 			<span className="min-w-0 flex-1 text-sm break-words">
 				<strong className="font-medium">{preparation.name}</strong>{" "}
-				{preparation.phase === "ready"
-					? "is ready."
-					: failed
-						? `could not start: ${preparation.reason ?? "the harness did not answer"}`
-						: "is preparing. You can keep working here; you can open it when it is ready."}
+				{preparation.phase === "ready" ? (
+					"is ready."
+				) : failed ? (
+					`could not start: ${preparation.reason ?? "the harness did not answer"}`
+				) : (
+					<>
+						is preparing.{" "}
+						{/* The time moves every second; the live region must not, or a screen
+						 * reader would read the whole strip again on every tick. */}
+						<span aria-hidden="true">Started {elapsed(seconds)} ago. </span>
+						You can keep working here; you can open it when it is ready.
+					</>
+				)}
 			</span>
 			<Badge variant="soft" tone={badge.tone} size="sm">
 				{badge.label}
