@@ -32,21 +32,56 @@ update it, restart it, and recover it, and every message it prints is true.
 - Challenge a design with evidence, once. The bug is the enemy, not the person who reported it.
 - Do not perform certainty. "I do not know yet" is a complete answer when it is true.
 
+## Speed
+
+The owner's time is the scarce resource. Move in this order:
+
+1. **Spike before you build.** If a mechanism is uncertain — does `lxc-start` serialise, does the
+   engine see this path, does the feed parse, does the UI state clear — write a throwaway probe
+   and run it. A shell command, a small Go or TypeScript test, a temp binary. Time-box it, and
+   record the answer. Do not design around a guess.
+2. **Test on the real host, not through CI.** acornd is the environment the product actually runs
+   in, and the owner has given it to this work. Build, copy, run a separate share and gateway, or
+   purge and install fresh. A tag is for shipping, not for learning. CI is the last check, not the
+   first.
+3. **Delegate an outcome, not a file.** When a task is independent and only its result matters —
+   build an appliance, run a test matrix, read a subsystem and report — spawn a subagent with a
+   self-contained brief and acceptance criteria. Keep the critical path. Do not delegate edits to
+   a file you are editing.
+4. **Ask only when the answer changes the work.** A spike is cheaper than a question; a question
+   is cheaper than a wrong build.
+5. **Do not protect a test install.** On acornd, `machine purge --yes` and a fresh install are
+   allowed. Back up provider credentials or a workspace only when the owner names data worth
+   keeping. Migrations and recovery are later.
+
+Spike record, in the ledger:
+
+```text
+Question:
+Probe:
+Result:
+Decision:
+```
+
 ## Authority
 
 You may do these without asking:
 
 - read any file, run any local build, test, lint, or probe;
 - edit code on a scratch branch, add tests, update docs and the ledger;
-- run the product locally, including install and upgrade in a disposable environment.
+- run the product locally, including install and upgrade in a disposable environment;
+- on **acornd**, install, update, purge, and recreate the product and its test workspaces. That
+  host is the test bench. Back up the provider credentials before a purge; do not delete data the
+  owner has named as real.
 
 You must ask before:
 
 - pushing, tagging, merging, force-pushing, or opening a pull request;
 - releasing, changing a version, or changing an install default;
 - changing a recorded ADR decision, a user-visible behavior, or a persisted format;
-- deleting data, machines, images, workspaces, or the owner's files;
-- touching the owner's host, rotating a secret, or using a credential outside this sandbox;
+- deleting data, machines, images, or workspaces the owner has named as real;
+- touching a host other than acornd, rotating a secret, or using a credential outside this
+  sandbox;
 - accepting a known defect into the release.
 
 ## The loop
@@ -154,6 +189,9 @@ decision, stop and write the ADR proposal first.
 
 ### 4. Fix
 
+0. **Spike the mechanism first when it is uncertain.** A probe answers "does this work here" in
+   minutes; a production change built on a guess costs a release cycle. Put the probe's result in
+   the ledger before editing the product.
 1. Write the test or repro that fails. Run it and see it fail for the stated reason. A test that
    fails for a different reason has not proved the claim.
 2. Make the smallest change that removes the cause. No drive-by cleanup, no new abstraction with one
@@ -182,7 +220,8 @@ A fix is a hypothesis until you try to break it:
 - kill the process mid-operation; restart; check what was left behind;
 - run the rollback or the previous version; check the data still reads;
 - search for the same shape elsewhere; list the other places, even if you do not fix them now;
-- ask "what would make this fix wrong?" and test that.
+- ask "what would make this fix wrong?" and test that;
+- if the fix depends on runtime behaviour, spike that behaviour on acornd before believing it.
 
 If the fix only works on the happy path, it is not finished.
 
@@ -203,7 +242,8 @@ Run the full gate and record the output:
 
 Then report. A release gate is a separate decision. Say "ready" only when every S0 and S1 is
 closed, or the owner has explicitly accepted the risk in writing, and the install path has been
-proven from the artifact a user will download.
+proven from the artifact a user will download. A tag is how the fix reaches acornd; it is not how
+the fix is tested.
 
 ## The 0.10 release gate
 
