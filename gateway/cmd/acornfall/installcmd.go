@@ -29,6 +29,7 @@ func machineInstall(argv []string) {
 	remote := flags.Bool("remote", false, "publish the console on 0.0.0.0; it asks for no token (asks if neither is given)")
 	local := flags.Bool("local", false, "keep the console on 127.0.0.1 (asks if neither is given)")
 	port := flags.Int("port", 0, "the port the console is published on (default: the declaration's, or 7777)")
+	pathDir := flags.String("path-dir", "", "where to put the acornfall command link (default: the first writable directory already on PATH)")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
@@ -90,6 +91,7 @@ func machineInstall(argv []string) {
 		declaration: declaration,
 		binary:      binary,
 		init:        initFor(runtime.GOOS),
+		pathDir:     *pathDir,
 		kvm:         kvmCheck,
 		machine:     driverMachine{machinery: resolvedHome, share: resolvedShare, port: declaredPort, host: host},
 	}
@@ -197,6 +199,9 @@ func (u uninstaller) run(ctx context.Context) error {
 		if err := u.init.Reload(ctx); err != nil {
 			return err
 		}
+	}
+	if link := removePathLink(u.machinery); link != "" {
+		u.say("removed", "the command at "+link)
 	}
 	for _, path := range binaries(u.machinery) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

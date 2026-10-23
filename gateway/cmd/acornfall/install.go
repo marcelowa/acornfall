@@ -240,6 +240,10 @@ type installer struct {
 	// kvm and verify are the two host checks: a test replaces them.
 	kvm    func() error
 	verify func(ctx context.Context, cfg unitConfig) error
+	// pathDir is --path-dir: where the command link goes, overriding the search. pathDirs is the
+	// search itself, nil in production; a test passes an empty slice to keep the host untouched.
+	pathDir  string
+	pathDirs []string
 }
 
 // run installs, repairs, and says one line per item: `ok` for what was already right, `fixed` for what it
@@ -284,6 +288,20 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		return fmt.Errorf("pointing %s at %s: %w", update.OwnedBinary(in.machinery), versioned, err)
 	}
 	say(!linked, "the symlink at "+update.OwnedBinary(in.machinery))
+
+	// The command a person types. The unit starts the owned symlink; this link is only for the
+	// shell's PATH, so a fresh install does not document every command with ~/.acornfall/bin/.
+	// A directory already on PATH wins; a directory outside it is never chosen, because a link
+	// nobody's shell searches is a link that fixes nothing.
+	pathLink, pathWrote, err := installPathLink(in.machinery, in.userHome, in.pathDir, in.pathDirs)
+	if err != nil {
+		return err
+	}
+	if pathLink != "" {
+		say(!pathWrote, "the command at "+pathLink)
+	} else {
+		say(true, "acornfall is not on PATH: add "+filepath.Dir(update.OwnedBinary(in.machinery))+" to PATH, or run `machine install --path-dir <dir>`")
+	}
 
 	// The unit, generated from the embedded copy: never edited, and always the declaration's address.
 	unitPath, unitContent, err := in.init.Unit(cfg)
@@ -391,6 +409,132 @@ func (in installer) run(ctx context.Context, say func(ok bool, line string)) err
 		}
 	}
 	return nil
+}
+
+// pathLinkPath is where the install records the command link it made, so an uninstall removes that
+// one and not a binary somebody else put at the same name.
+func pathLinkPath(machinery string) string { return filepath.Join(machinery, "path-link") }
+
+// installPathLink puts `acornfall` on PATH. The link points at the owned symlink, never at a
+// versioned binary: an upgrade moves the owned symlink, and the command follows it.
+func installPathLink(machinery, userHome, explicit string, candidates []string) (string, bool, error) {
+	owned := update.OwnedBinary(machinery)
+	dir := explicit
+	onPath := true
+	if dir == "" {
+		dir, onPath = firstPathDir(candidates, userHome)
+	}
+	if dir == "" {
+		return "", false, nil
+	}
+	if !filepath.IsAbs(dir) {
+		return "", false, fmt.Errorf("--path-dir needs an absolute directory, got %q", dir)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", false, fmt.Errorf("making the PATH directory %s: %w", dir, err)
+	}
+	link := filepath.Join(dir, "acornfall")
+	wrote := false
+	if info, err := os.Lstat(link); err == nil {
+		if info.Mode()&os.ModeSymlink == 0 {
+			return "", false, fmt.Errorf("%s is a real file, not a link this install made: remove it, or pass --path-dir for another directory", link)
+		}
+		target, err := os.Readlink(link)
+		if err != nil {
+			return "", false, fmt.Errorf("reading the link at %s: %w", link, err)
+		}
+		if filepath.Clean(target) != filepath.Clean(owned) {
+			return "", false, fmt.Errorf("%s already points at %s, not at this install (%s): remove it, or pass --path-dir", link, target, owned)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", false, fmt.Errorf("looking at %s: %w", link, err)
+	} else {
+		if err := os.Symlink(owned, link); err != nil {
+			return "", false, fmt.Errorf("putting the command at %s: %w", link, err)
+		}
+		wrote = true
+	}
+	record := pathLinkPath(machinery)
+	recordWrote, err := writeIfDifferent(record, []byte(link+"\n"), 0o644)
+	if err != nil {
+		return "", false, fmt.Errorf("recording the command link: %w", err)
+	}
+	if recordWrote {
+		wrote = true
+	}
+	if !onPath {
+		return link, wrote, fmt.Errorf("%s is not on PATH: add it to PATH, or pass --path-dir for a directory that is", dir)
+	}
+	return link, wrote, nil
+}
+
+// firstPathDir is the first directory already on PATH that this install can write: /usr/local/bin
+// for root, ~/.local/bin otherwise. A directory that is not on PATH is not a candidate; a link
+// nobody's shell searches would only move the problem.
+func firstPathDir(candidates []string, userHome string) (string, bool) {
+	search := candidates
+	if search == nil {
+		search = []string{filepath.Join(userHome, ".local", "bin")}
+		if os.Geteuid() == 0 {
+			search = append([]string{"/usr/local/bin"}, search...)
+		}
+	}
+	path := os.Getenv("PATH")
+	for _, dir := range search {
+		if dir == "" || !onPath(dir, path) {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			continue
+		}
+		probe := filepath.Join(dir, ".acornfall-write-test")
+		file, err := os.OpenFile(probe, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			continue
+		}
+		_ = file.Close()
+		_ = os.Remove(probe)
+		return dir, true
+	}
+	return "", false
+}
+
+func onPath(dir, path string) bool {
+	clean := filepath.Clean(dir)
+	for _, entry := range filepath.SplitList(path) {
+		if entry != "" && filepath.Clean(entry) == clean {
+			return true
+		}
+	}
+	return false
+}
+
+// removePathLink removes the command link an install recorded, and only when it still points at
+// this install. A real file a person put at the same name is left alone.
+func removePathLink(machinery string) string {
+	record := pathLinkPath(machinery)
+	payload, err := os.ReadFile(record)
+	if err != nil {
+		return ""
+	}
+	link := strings.TrimSpace(string(payload))
+	if link == "" {
+		return ""
+	}
+	info, err := os.Lstat(link)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		_ = os.Remove(record)
+		return ""
+	}
+	target, err := os.Readlink(link)
+	if err != nil || filepath.Clean(target) != filepath.Clean(update.OwnedBinary(machinery)) {
+		return ""
+	}
+	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
+		return ""
+	}
+	_ = os.Remove(record)
+	return link
 }
 
 // installClosing is what an install tells a person to open: the address, and — on a network address — the one

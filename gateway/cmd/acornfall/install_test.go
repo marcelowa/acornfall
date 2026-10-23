@@ -111,6 +111,9 @@ func newInstallFixture(t *testing.T, declaration update.Declaration) installFixt
 			binary:      []byte("the running binary"),
 			init:        init,
 			kvm:         func() error { return nil },
+			// A test must not put a link in /usr/local/bin on the machine that runs it; the one
+			// test about PATH passes its own directory.
+			pathDirs: []string{},
 		},
 	}
 }
@@ -459,6 +462,7 @@ func TestInstallAfterUninstallKeepsTheWorkspaces(t *testing.T) {
 			binary:      []byte("the running binary"),
 			init:        fixture.init,
 			kvm:         func() error { return nil },
+			pathDirs:    []string{},
 		}
 		if err := again.run(context.Background(), func(bool, string) {}); err != nil {
 			t.Fatalf("install: %v", err)
@@ -879,5 +883,150 @@ func TestAnInstallDoesNotTouchTheMachineWhenTheDiskIsLocked(t *testing.T) {
 	}
 	if machine.removes != 0 {
 		t.Errorf("the machine was taken away without the disk: %d removals", machine.removes)
+	}
+}
+
+// A fresh install has to leave a command a person can type. The unit starts the owned symlink;
+// this link is only for the shell's PATH, and it points at the owned symlink so an upgrade moves
+// it without a second install.
+func TestAnInstallPutsTheCommandOnPath(t *testing.T) {
+	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	fixture.install.pathDir = dir
+	fixture.run(t)
+
+	link := filepath.Join(dir, "acornfall")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("the command link: %v", err)
+	}
+	if target != update.OwnedBinary(fixture.install.machinery) {
+		t.Errorf("the command points at %q, want the owned symlink %q", target, update.OwnedBinary(fixture.install.machinery))
+	}
+	// The second install finds it right and says so.
+	before := len(*fixture.say)
+	fixture.run(t)
+	for _, line := range (*fixture.say)[before:] {
+		if strings.HasPrefix(line, "fixed") && strings.Contains(line, "the command") {
+			t.Errorf("the second install changed the command link: %q", line)
+		}
+	}
+	if got := removePathLink(fixture.install.machinery); got != link {
+		t.Errorf("removePathLink = %q, want %q", got, link)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Errorf("the command link should be gone, stat err = %v", err)
+	}
+}
+
+// A real file at the command's name is not ours to replace: an install that overwrote it would
+// delete a person's binary and call the result a repair.
+func TestAnInstallRefusesToReplaceARealFileOnPath(t *testing.T) {
+	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	fixture.install.pathDir = dir
+	if err := os.WriteFile(filepath.Join(dir, "acornfall"), []byte("someone else's"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := fixture.install.run(context.Background(), func(bool, string) {})
+	if err == nil || !strings.Contains(err.Error(), "real file") {
+		t.Fatalf("a real file at the command's name must be refused, got %v", err)
+	}
+	if body, readErr := os.ReadFile(filepath.Join(dir, "acornfall")); readErr != nil || string(body) != "someone else's" {
+		t.Errorf("the file was changed: %q, %v", body, readErr)
+	}
+}
+
+// A link that points somewhere else is somebody's choice, not drift: refuse and name both.
+func TestAnInstallRefusesToMoveAnUnrelatedLink(t *testing.T) {
+	fixture := newInstallFixture(t, update.Declaration{Wanted: update.IntentRunning, Host: "127.0.0.1", Port: 7777})
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	fixture.install.pathDir = dir
+	if err := os.Symlink("/bin/true", filepath.Join(dir, "acornfall")); err != nil {
+		t.Fatal(err)
+	}
+	err := fixture.install.run(context.Background(), func(bool, string) {})
+	if err == nil || !strings.Contains(err.Error(), "already points at") {
+		t.Fatalf("an unrelated link must be refused, got %v", err)
+	}
+	if target, readErr := os.Readlink(filepath.Join(dir, "acornfall")); readErr != nil || target != "/bin/true" {
+		t.Errorf("the unrelated link was changed: %q, %v", target, readErr)
+	}
+}
+
+func TestThePathLinkIsOnlyRemovedWhenItIsOurs(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	machinery := filepath.Join(home, ".acornfall")
+	if err := os.MkdirAll(filepath.Dir(update.OwnedBinary(machinery)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(update.OwnedBinary(machinery), []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "acornfall")
+	if err := os.Symlink(update.OwnedBinary(machinery), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(machinery, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pathLinkPath(machinery), []byte(link+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Someone replaced our link with their own: it is left, and the record is dropped.
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/bin/true", link); err != nil {
+		t.Fatal(err)
+	}
+	if got := removePathLink(machinery); got != "" {
+		t.Errorf("an unrelated link should not be removed, got %q", got)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Errorf("the unrelated link should stay: %v", err)
+	}
+}
+
+// A directory outside PATH is not a candidate: the link would be there and the command still
+// missing from the shell.
+func TestThePathSearchSkipsADirectoryNotOnPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", "/usr/bin:/bin")
+	if got, ok := firstPathDir([]string{dir}, t.TempDir()); ok || got != "" {
+		t.Errorf("a directory not on PATH should not be chosen, got %q %v", got, ok)
+	}
+	t.Setenv("PATH", dir+":/usr/bin")
+	if got, ok := firstPathDir([]string{dir}, t.TempDir()); !ok || got != dir {
+		t.Errorf("a writable directory on PATH should be chosen, got %q %v", got, ok)
+	}
+}
+
+// The command is the owned symlink, not the versioned binary: an upgrade moves one link and the
+// shell keeps working. OwnsSelf resolves both, so the extra link cannot make the service refuse
+// to update itself.
+func TestTheCommandLinkStillOwnsTheBinary(t *testing.T) {
+	machinery := t.TempDir()
+	versioned := filepath.Join(machinery, "bin", "acornfall-v0.10.0-beta.34")
+	if err := os.MkdirAll(filepath.Dir(versioned), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(versioned, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	owned := update.OwnedBinary(machinery)
+	if err := os.Symlink(versioned, owned); err != nil {
+		t.Fatal(err)
+	}
+	command := filepath.Join(t.TempDir(), "acornfall")
+	if err := os.Symlink(owned, command); err != nil {
+		t.Fatal(err)
+	}
+	if !update.OwnsSelf(command, machinery) {
+		t.Error("a command started through the PATH link is this install's binary")
 	}
 }
