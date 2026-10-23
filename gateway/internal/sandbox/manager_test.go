@@ -18,6 +18,11 @@ type fakeDriver struct {
 	// nesting is what this engine says about nesting here; the zero value is a refusal
 	// with no reason, which is what a test that never asks about it wants.
 	nesting NestingSupport
+	// startErr fails Start alone, so "a container that will not start is remade" can be staged
+	// without failing the calls that do the remaking.
+	startErr error
+	// removeErr fails Remove alone: a leftover the runtime will not let go is its own failure.
+	removeErr error
 	// installed flips to true after Install, so "installs once" can be asserted.
 	installed   bool
 	installErrs []error
@@ -56,6 +61,9 @@ func (f *fakeDriver) Create(_ context.Context, policy Policy, _ string) error {
 }
 func (f *fakeDriver) Start(context.Context, string) error {
 	f.calls = append(f.calls, "start")
+	if f.startErr != nil {
+		return f.startErr
+	}
 	return f.err
 }
 func (f *fakeDriver) Stop(context.Context, string) error {
@@ -64,6 +72,9 @@ func (f *fakeDriver) Stop(context.Context, string) error {
 }
 func (f *fakeDriver) Remove(context.Context, string) error {
 	f.calls = append(f.calls, "rm")
+	if f.removeErr != nil {
+		return f.removeErr
+	}
 	return f.err
 }
 
@@ -360,5 +371,51 @@ func TestAnUnreadableContainerIsItsOwnWorkspacesProblem(t *testing.T) {
 	}
 	if own.ran("create") || own.ran("start") {
 		t.Errorf("an unreadable container is not silently replaced: %v", own.calls)
+	}
+}
+
+// A container that will not start is remade, not started again.
+//
+// Measured on a real host: an install was cancelled while the container was being made, the
+// runtime kept the leftover ("Ongoing container creation detected"), and every later start
+// failed — the workspace said "this workspace has no sandbox: lxc-start … Ongoing container
+// creation detected" for ever. Nothing ever ran in it, so the repair costs nothing.
+func TestAWorkspaceWhoseContainerWillNotStartIsRemade(t *testing.T) {
+	driver := &fakeDriver{
+		listed:   []Instance{{Name: Name("/home/me/work"), Status: "STOPPED"}},
+		startErr: errors.New("lxc-start: Ongoing container creation detected"),
+	}
+	manager := openWith(t, driver)
+	name, err := manager.Produce(context.Background(), Policy{Workspace: "/home/me/work", Image: "golang:1.24"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != Name("/home/me/work") {
+		t.Errorf("the workspace's container is %q, want %q", name, Name("/home/me/work"))
+	}
+	for _, want := range []string{"list", "start", "rm", "create"} {
+		if !driver.ran(want) {
+			t.Errorf("want %q to have run, got %v", want, driver.calls)
+		}
+	}
+}
+
+// And when the leftover cannot be removed, the sentence carries both halves: the reason it would
+// not start, and why it could not be taken away.
+func TestAFailedRemakeSaysBothReasons(t *testing.T) {
+	driver := &fakeDriver{
+		listed:    []Instance{{Name: Name("/home/me/work"), Status: "STOPPED"}},
+		startErr:  errors.New("Ongoing container creation detected"),
+		removeErr: errors.New("the runtime is gone"),
+	}
+	manager := openWith(t, driver)
+	_, err := manager.Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
+	if err == nil {
+		t.Fatal("a remake that cannot remove the leftover is a failure")
+	}
+	for _, want := range []string{"Ongoing container creation", "the runtime is gone"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error should carry %q:\n%v", want, err)
+		}
 	}
 }

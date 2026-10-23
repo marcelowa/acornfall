@@ -288,7 +288,18 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 			return name, nil
 		}
 		if err := m.driver.Start(ctx, name); err != nil {
-			return "", err
+			// A container that will not start is not repaired by asking again: its creation can have
+			// been cut short — a cancelled install, a machine stopped mid-pull — and the runtime then
+			// refuses it for ever with "Ongoing container creation detected". Nothing ever ran in it,
+			// so remaking it costs the workspace nothing it had.
+			m.say("sandbox: %s would not start (%v): remaking it", name, err)
+			if removeErr := m.driver.Remove(ctx, name); removeErr != nil {
+				return "", fmt.Errorf("%w (and it could not be removed: %v)", err, removeErr)
+			}
+			if createErr := m.driver.Create(ctx, policy, dir); createErr != nil {
+				return "", fmt.Errorf("%w (and remaking it: %v)", err, createErr)
+			}
+			return name, nil
 		}
 		return name, nil
 	}
