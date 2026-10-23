@@ -320,7 +320,7 @@ func AcquireLock(share string, now time.Time) (func(), string, error) {
 		return nil, "", fmt.Errorf("cannot make room for %s: %w", path, err)
 	}
 	note := ""
-	for attempt := 0; attempt < 2; attempt++ {
+	for range 2 {
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
 			_, writeErr := file.Write(append(payload, '\n'))
