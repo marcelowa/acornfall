@@ -217,6 +217,7 @@ func (w *Workspaces) Open(ctx context.Context) error {
 	if err := makeOwnedDir(w.Dir(), w.opts.Layout.Share, 0o755); err != nil {
 		return err
 	}
+	w.adoptOwnership()
 	if err := w.migrate(); err != nil {
 		return err
 	}
@@ -909,6 +910,23 @@ func (w *Workspaces) loadRegistry() error {
 		seenGeneral = true
 	}
 	return nil
+}
+
+// adoptOwnership gives every workspace directory to the share's owner. The gateway inside the
+// machine runs as root; a workspace directory copied in from an older root install was created
+// before the machine's mount and maps to uid 0 inside it, so the container sees nobody and the
+// shell cannot write. The gateway's own new directories already have this owner; this is the
+// repair for the ones that came from the host.
+func (w *Workspaces) adoptOwnership() {
+	uid, gid, ok := sandbox.ShareOwner(w.opts.Layout.Share)
+	if !ok || uid == 0 {
+		return
+	}
+	for _, workspace := range w.List() {
+		if err := os.Chown(workspace.Path, uid, gid); err != nil {
+			workerpool.Log("workspace %s: giving %s to the share owner: %v", workspace.Name, workspace.Path, err)
+		}
+	}
 }
 
 // makeOwnedDir makes a folder the gateway owns and gives it to the share's owner. The gateway
