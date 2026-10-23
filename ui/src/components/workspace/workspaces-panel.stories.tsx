@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type { WorkspaceSummary } from "@/app/view-models";
+import type { WorkspacePreparation, WorkspaceSummary } from "@/app/view-models";
 import { WorkspacesPanel } from "./workspaces-panel";
 
 const meta = {
@@ -52,11 +52,49 @@ const workspaces: WorkspaceSummary[] = [
 export const Default: Story = {
 	args: {
 		workspaces,
+		preparations: [],
 		onSelect: noop,
+		onOpenPrepared: noop,
+		onDismissPrepared: noop,
+		onRetryPrepared: noop,
 		onCreate: noop,
 		onRename: noop,
 		onForget: noop,
 		onUpdateSandbox: noop,
+	},
+};
+
+/** A workspace that is still starting: its row is a wait, not an invitation to open it. */
+const preparing: WorkspacePreparation = {
+	name: "new-one",
+	phase: "preparing",
+	startedAt: Date.now() - 12_000,
+};
+
+export const Preparing: Story = {
+	args: { ...Default.args, preparations: [preparing] },
+};
+
+/** The wait is over: the row says so and offers the first conversation. */
+export const Ready: Story = {
+	args: {
+		...Default.args,
+		preparations: [{ ...preparing, phase: "ready", startedAt: Date.now() - 24_000 }],
+	},
+};
+
+/** It did not start: the gateway's reason stays in the row, with a way to try again. */
+export const Failed: Story = {
+	args: {
+		...Default.args,
+		preparations: [
+			{
+				...preparing,
+				phase: "failed",
+				startedAt: Date.now() - 31_000,
+				reason: "the harness process ended: signal: killed",
+			},
+		],
 	},
 };
 

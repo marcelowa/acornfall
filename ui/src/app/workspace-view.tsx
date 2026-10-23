@@ -26,6 +26,7 @@ import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesPanel } from "@/components/workspace/workspaces-panel";
+import { WorkspacePreparationNotice } from "@/components/workspace/workspace-preparation";
 import { WorkspaceButton } from "@/components/workspace/workspace-button";
 import { Transcript } from "@/components/transcript/transcript";
 import { Button } from "@/components/ui/button";
@@ -353,7 +354,11 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			list={
 				<WorkspacesPanel
 					workspaces={platform.workspaces}
+					preparations={platform.preparations}
 					onSelect={platform.selectWorkspace}
+					onOpenPrepared={platform.openPreparedWorkspace}
+					onDismissPrepared={platform.dismissPreparedWorkspace}
+					onRetryPrepared={platform.retryPreparedWorkspace}
 					onCreate={platform.createWorkspace}
 					onRename={platform.renameWorkspace}
 					onForget={platform.removeWorkspace}
@@ -664,6 +669,14 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		</>
 	);
 
+	// The preparation the top strip speaks for: a ready one is the one worth opening; otherwise
+	// the newest failure or wait. The list is the fuller view when it is open, so the strip is
+	// for the person who went back to their conversation while the workspace started.
+	const preparation =
+		[...platform.preparations].reverse().find((item) => item.phase === "ready") ??
+		[...platform.preparations].reverse().find((item) => item.phase === "failed") ??
+		[...platform.preparations].reverse().find((item) => item.phase === "preparing");
+
 	return (
 		<>
 			<Shell
@@ -683,12 +696,23 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				railWidth={platform.railWidth}
 				onRailWidthChange={platform.setRailWidth}
 				notice={
-					platform.failure === undefined ? undefined : (
+					platform.failure !== undefined ? (
 						<Measure size="wide" padding="md">
 							<ErrorStrip
 								message={platform.failure}
 								onDismiss={platform.clearFailure}
 								onRetry={platform.reload}
+							/>
+						</Measure>
+					) : preparation === undefined || platform.workspacesOpen ? undefined : (
+						<Measure size="wide" padding="md">
+							<WorkspacePreparationNotice
+								preparation={preparation}
+								onOpen={() => platform.openPreparedWorkspace(preparation.name)}
+								onDismiss={() =>
+									platform.dismissPreparedWorkspace(preparation.name)
+								}
+								onRetry={() => platform.retryPreparedWorkspace(preparation.name)}
 							/>
 						</Measure>
 					)

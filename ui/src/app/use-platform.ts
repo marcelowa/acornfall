@@ -50,6 +50,7 @@ import {
 	type AuthWaiting,
 } from "./auth-flow";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
+import { watchWorkspacePreparation } from "./preparation";
 import { trackBuild } from "./update";
 import {
 	contextWindowFor,
@@ -79,6 +80,7 @@ import type {
 	WorkspaceLifecycle,
 	SlashCommand,
 	TranscriptEntry,
+	WorkspacePreparation,
 	WorkspaceSummary,
 } from "./view-models";
 import type { Draft, RoomDraft } from "./draft";
@@ -290,7 +292,13 @@ export interface Platform {
 	/** Any workspace's image and network, by name: the workspaces screen's rows are not the one
 	 * in view, and its menu is where a sandbox is changed. */
 	setWorkspaceSandbox: (name: string, change: { image: string; network: string }) => void;
+	/** A new workspace is made and prepared while the person keeps working where they are. */
 	createWorkspace: (name: string) => void;
+	/** Workspaces whose folder exists but whose harness is still starting. */
+	preparations: WorkspacePreparation[];
+	openPreparedWorkspace: (name: string) => void;
+	dismissPreparedWorkspace: (name: string) => void;
+	retryPreparedWorkspace: (name: string) => void;
 	removeWorkspace: (name: string) => void;
 	renameWorkspace: (name: string, title: string) => void;
 	/** Every provider, connected first: the settings screen lists these. */
@@ -414,6 +422,12 @@ export function usePlatform(): Platform {
 	const theme = choice === "system" ? system : choice;
 	const [connection, setConnection] = useState<"live" | "reconnecting">("live");
 	const [failure, setFailure] = useState<string | undefined>(undefined);
+	const [preparations, setPreparations] = useState<WorkspacePreparation[]>([]);
+	/**
+	 * One run per workspace name. A dismissed or opened preparation bumps or removes the id, and
+	 * the wait loop stops when it no longer owns the name; a retry starts a new one.
+	 */
+	const preparationRuns = useRef(new Map<string, number>());
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
 	const [ready, setReady] = useState(false);
 	const [authFlow, setAuthFlow] = useState<AuthFlow | undefined>(undefined);
@@ -736,10 +750,15 @@ export function usePlatform(): Platform {
 
 	const contextFold = useMemo(() => foldContext(view?.entries ?? []), [view]);
 
-	const workspaces = useMemo(
-		() => toWorkspaces(state?.workspaces ?? [], state?.workspace?.name ?? ""),
-		[state],
-	);
+	const workspaces = useMemo(() => {
+		// A workspace being prepared has its own row: the state stream may already list it, and
+		// two rows for one name would read as two workspaces.
+		const preparing = new Set(preparations.map((preparation) => preparation.name));
+		return toWorkspaces(
+			(state?.workspaces ?? []).filter((workspace) => !preparing.has(workspace.name)),
+			state?.workspace?.name ?? "",
+		);
+	}, [state, preparations]);
 	const sandbox = useMemo(
 		() => (state === undefined ? undefined : toSandbox(state.sandbox)),
 		[state],
@@ -1089,24 +1108,125 @@ export function usePlatform(): Platform {
 		[act, reload],
 	);
 
+	const updatePreparation = useCallback(
+		(name: string, change: Partial<Omit<WorkspacePreparation, "name">>): void => {
+			setPreparations((current) =>
+				current.map((preparation) =>
+					preparation.name === name ? { ...preparation, ...change } : preparation,
+				),
+			);
+		},
+		[],
+	);
+
+	/**
+	 * Watch a folder become a workspace. The first state fetch is the one that starts the
+	 * harness and its sandbox; until it answers, the person stays in the conversation they
+	 * were in. When the list they started from is still open, ready opens the workspace's
+	 * first conversation there and then; when they went back to their work, it becomes a
+	 * notice with an Open button instead of taking the screen from under them.
+	 */
+	const watchWorkspace = useCallback(
+		(name: string) => {
+			const run = (preparationRuns.current.get(name) ?? 0) + 1;
+			preparationRuns.current.set(name, run);
+			void (async () => {
+				const result = await watchWorkspacePreparation(name, {
+					fetch: (workspaceName, conversation) => fetchState(workspaceName, conversation),
+					isCurrent: () => preparationRuns.current.get(name) === run,
+				});
+				if (preparationRuns.current.get(name) !== run) return;
+				if (result.phase === "ready") {
+					if (workspacesOpenRef.current) {
+						preparationRuns.current.delete(name);
+						setPreparations((current) =>
+							current.filter((preparation) => preparation.name !== name),
+						);
+						selectWorkspace(name);
+						return;
+					}
+					updatePreparation(name, { phase: "ready", reason: undefined });
+					// The new workspace is now in the registry's list; the state the rail reads
+					// was fetched while it was still starting.
+					void reload();
+					return;
+				}
+				if (result.phase === "failed") {
+					updatePreparation(name, { phase: "failed", reason: result.reason });
+					void reload();
+				}
+			})();
+		},
+		[reload, selectWorkspace, updatePreparation],
+	);
+
 	const createWorkspace = useCallback(
 		(name: string) => {
-			act(createWorkspaceRequest(name), () => {
-				// The workspace opens on its first conversation, which the gateway makes for a
-				// workspace that has none — so there is nothing to create here, and creating one
-				// would leave the new workspace with two.
-				window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
-				setView(undefined);
-				setRoute({
-					screen: "conversation",
-					workspace: name,
-					conversation: "",
-					settingsTab: "general",
-					updateTag: "",
-				});
-			});
+			if (name.trim() === "" || preparationRuns.current.has(name)) return;
+			const startedAt = Date.now();
+			// A run id of zero means "created, waiting for the first state fetch". The watcher
+			// bumps it, so a late answer cannot match a run nobody is waiting for any more.
+			preparationRuns.current.set(name, 0);
+			setPreparations((current) => [
+				...current.filter((preparation) => preparation.name !== name),
+				{ name, phase: "preparing", startedAt },
+			]);
+			void (async () => {
+				try {
+					await createWorkspaceRequest(name);
+				} catch (cause) {
+					// The folder was never made, so there is nothing to prepare; the refusal is
+					// the form's answer, not a workspace row.
+					preparationRuns.current.delete(name);
+					setPreparations((current) =>
+						current.filter((preparation) => preparation.name !== name),
+					);
+					reportError(cause);
+					return;
+				}
+				if (!preparationRuns.current.has(name)) return;
+				// The gateway makes the first conversation when the workspace has none, so
+				// there is nothing to create here; the state fetch that prepares it attaches
+				// to that conversation and makes it the one `/w/<name>` opens.
+				watchWorkspace(name);
+			})();
 		},
-		[act],
+		[reportError, watchWorkspace],
+	);
+
+	const openPreparedWorkspace = useCallback(
+		(name: string) => {
+			preparationRuns.current.delete(name);
+			setPreparations((current) =>
+				current.filter((preparation) => preparation.name !== name),
+			);
+			selectWorkspace(name);
+		},
+		[selectWorkspace],
+	);
+
+	const dismissPreparedWorkspace = useCallback(
+		(name: string) => {
+			preparationRuns.current.delete(name);
+			setPreparations((current) =>
+				current.filter((preparation) => preparation.name !== name),
+			);
+			// The folder exists whether or not the person watched it; the list should show it.
+			void reload();
+		},
+		[reload],
+	);
+
+	const retryPreparedWorkspace = useCallback(
+		(name: string) => {
+			updatePreparation(name, {
+				phase: "preparing",
+				reason: undefined,
+				startedAt: Date.now(),
+			});
+			watchWorkspace(name);
+		},
+		[updatePreparation, watchWorkspace],
 	);
 
 	const removeWorkspace = useCallback(
@@ -1398,6 +1518,10 @@ export function usePlatform(): Platform {
 		commands,
 		context: contextFold,
 		workspaces,
+		preparations,
+		openPreparedWorkspace,
+		dismissPreparedWorkspace,
+		retryPreparedWorkspace,
 		sandbox,
 		lifecycle,
 		workspaceReady,

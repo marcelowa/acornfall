@@ -287,6 +287,10 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		applyUpdateNow: noop,
 		rollbackUpdateNow: noop,
 		setUpdatePrefs: noop,
+		preparations: [],
+		openPreparedWorkspace: noop,
+		dismissPreparedWorkspace: noop,
+		retryPreparedWorkspace: noop,
 		...overrides,
 	};
 }
@@ -408,6 +412,57 @@ export const RefusedAction: Story = {
 /** The workspace list, as the layer it is now: over the conversation, no X of its own. */
 export const WorkspacesLayer: Story = {
 	args: { platform: makePlatform({ workspacesOpen: true }) },
+	globals: { viewport: { value: "laptop" } },
+};
+
+/**
+ * A workspace is being created. The person is still in the conversation they were in; the strip
+ * says the new one is starting, and the list holds the row with the wait.
+ */
+export const WorkspacePreparing: Story = {
+	args: {
+		platform: makePlatform({
+			preparations: [{ name: "new-one", phase: "preparing", startedAt: Date.now() - 12_000 }],
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** The wait is over: a ready workspace is offered, not opened under the person's hands. */
+export const WorkspaceReady: Story = {
+	args: {
+		platform: makePlatform({
+			preparations: [{ name: "new-one", phase: "ready", startedAt: Date.now() - 24_000 }],
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** The workspace could not start; the strip carries the gateway's own reason. */
+export const WorkspaceFailed: Story = {
+	args: {
+		platform: makePlatform({
+			preparations: [
+				{
+					name: "new-one",
+					phase: "failed",
+					startedAt: Date.now() - 31_000,
+					reason: "the harness process ended: signal: killed",
+				},
+			],
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** The same preparation in the list, where the person started it. */
+export const WorkspacesLayerPreparing: Story = {
+	args: {
+		platform: makePlatform({
+			workspacesOpen: true,
+			preparations: [{ name: "new-one", phase: "preparing", startedAt: Date.now() - 12_000 }],
+		}),
+	},
 	globals: { viewport: { value: "laptop" } },
 };
 
