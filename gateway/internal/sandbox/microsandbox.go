@@ -37,6 +37,11 @@ type Microsandbox struct {
 	// hostNested is the machine half of Nesting: what this computer can grant. It is a field
 	// so that tests can answer for a machine that is not this one.
 	hostNested func() NestingSupport
+	// engineUID/GID are the fixed owner the engine runs as, when the install has one. The
+	// engine writes the machine's disk and serves the share; running it as the share owner is
+	// what makes the host files belong to the container's uid instead of root.
+	engineUID int
+	engineGID int
 	// nestingMu guards the answer below, which is taken once: a running gateway does not
 	// swap engine builds under itself.
 	nestingMu sync.Mutex
@@ -72,7 +77,13 @@ const statePathLimit = 50
 
 // NewMicrosandbox builds the driver. The engine is installed on first use.
 func NewMicrosandbox(machinery string) *Microsandbox {
-	return &Microsandbox{machinery: machinery, base: releaseBase + "/v" + Version, hostNested: hostNestedSupport}
+	m := &Microsandbox{machinery: machinery, base: releaseBase + "/v" + Version, hostNested: hostNestedSupport}
+	if os.Geteuid() == 0 {
+		if uid, gid, ok := ShareOwner(machinery); ok && uid > 0 {
+			m.engineUID, m.engineGID = uid, gid
+		}
+	}
+	return m
 }
 
 // WithRunner replaces the engine binary, which is how the driver is tested without one.
@@ -268,6 +279,9 @@ func (p Policy) render(o owner) []byte {
 // mount is the workspace mount: the folder at its own path, so that a path in the model's
 // world and in the user's world are the same string.
 func (p Policy) mount(o owner) string {
+	if p.mountOwner.mapFiles {
+		o = p.mountOwner
+	}
 	spec := p.Workspace + ":" + p.Workspace
 	if o.mapFiles {
 		spec += fmt.Sprintf(":uid=%d,gid=%d", o.uid, o.gid)
@@ -438,7 +452,13 @@ func (m *Microsandbox) run(ctx context.Context, args ...string) (string, error) 
 	if err := os.MkdirAll(m.StateDir(), 0o755); err != nil {
 		return "", err
 	}
+	if m.engineUID > 0 {
+		if err := os.Chown(m.StateDir(), m.engineUID, m.engineGID); err != nil {
+			return "", err
+		}
+	}
 	command := exec.CommandContext(ctx, m.binary(), args...)
+	runAsEngineOwner(command, m.engineUID, m.engineGID)
 	command.Env = append(os.Environ(), m.Env()...)
 	output, commandErr := command.CombinedOutput()
 	text := strings.TrimSpace(string(output))

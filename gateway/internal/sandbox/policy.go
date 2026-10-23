@@ -60,6 +60,10 @@ type Policy struct {
 	// user's folder, so that build artifacts cannot fight between host and guest. Not used
 	// yet, deliberately: see ADR 0012, "Not doing now, on purpose".
 	Owned []string
+	// mountOwner is the uid/gid the engine reports for the workspace mount, when the caller
+	// wants a fixed identity. The machine sets it to the share's owner; a per-workspace VM
+	// leaves it zero and uses the process owner. It never decides the container profile.
+	mountOwner owner
 }
 
 // Defaults, chosen to be unremarkable. The image matches this host's libc family so that

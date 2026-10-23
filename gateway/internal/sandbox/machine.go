@@ -85,6 +85,10 @@ func (m Machine) Policy() Policy {
 		Egress:      !m.NoEgress,
 		Workspace:   m.Share,
 		IdleTimeout: m.IdleTimeout,
+		// The machine's share is presented at a fixed owner, independent of the process that
+		// started the machine. The container inside then sees a non-root workspace and can stay
+		// unprivileged; the host user never reaches the container's id map.
+		mountOwner: shareOwner(m.Share),
 	}
 }
 

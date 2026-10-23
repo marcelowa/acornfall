@@ -581,3 +581,20 @@ func TestRenderNamesNoIdleTimeoutForASandboxThatMustNotStop(t *testing.T) {
 		t.Errorf("the machine's default is to stay up, got %q", DefaultMachineIdleTimeout)
 	}
 }
+
+// The engine writes the machine's disk and serves the share. If a root install gave the
+// machinery to a fixed non-root owner, the engine must run as that owner or every file it makes
+// belongs to root and the container cannot write it.
+func TestTheEngineRunsAsTheFoldersOwner(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("a fixed non-root owner on a root process needs root")
+	}
+	machinery := t.TempDir()
+	if err := os.Chown(machinery, 12345, 12345); err != nil {
+		t.Fatal(err)
+	}
+	engine := NewMicrosandbox(machinery)
+	if engine.engineUID != 12345 || engine.engineGID != 12345 {
+		t.Errorf("the engine should run as the machinery's owner, got %d:%d", engine.engineUID, engine.engineGID)
+	}
+}

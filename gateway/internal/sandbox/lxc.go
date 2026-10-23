@@ -304,14 +304,10 @@ func containerForOwner(policy Policy, shareRoot, dir string, privileged, nest bo
 	}
 	// A workspace can ask for the sharpest profile (ADR 0021's open question), and the engine
 	// can hold it for everyone; either is enough. The unprivileged profile is the default
-	// because a user namespace is the mitigation.
-	//
-	// The exception is a share owned by root. idMap deliberately leaves root out of the
-	// container's map (a container root that is the host's root is not a mitigation), so an
-	// unprivileged container can neither traverse /root nor write a root-owned workspace. The
-	// mount is skipped and file tools write into the container's copy; that is not a workspace.
-	// A root install therefore uses the privileged profile, and the machine remains the boundary.
-	settings.Unprivileged = !(privileged || policy.Privileged || owner.uid == 0)
+	// because a user namespace is the mitigation, and it is a separate decision from who owns
+	// the share: the machine presents the share at a fixed non-root uid, so no host user has to
+	// be mapped or privileged for the workspace to be writable.
+	settings.Unprivileged = !(privileged || policy.Privileged)
 	// The containers are where a workspace's own virtual machines would run, so the device goes
 	// in when the workspace allows nesting and the machine can grant it.
 	if !policy.DisableVMNesting && nest {

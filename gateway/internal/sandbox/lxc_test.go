@@ -256,15 +256,15 @@ func TestAWorkspaceOrTheEngineCanAskForThePrivilegedProfile(t *testing.T) {
 		t.Error("the default is the mitigation: unprivileged unless somebody asked")
 	}
 
-	// A share owned by root is the exception: root is outside the user namespace's map, so an
-	// unprivileged container can neither traverse /root nor write a root-owned workspace. The
-	// mount is skipped, and a tool writes into the container's copy instead of the workspace.
+	// The share's owner does not choose the profile. The machine presents the share at a fixed
+	// non-root uid, so a root-owned host folder is normalized before the container sees it; the
+	// privilege decision belongs to the workspace and the engine alone.
 	_, rootOwned, err := containerForOwner(Policy{Image: "debian:stable-slim", Workspace: workspace}, root, "/var/lib/lxc", false, false, 0, owner{uid: 0, gid: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rootOwned.Unprivileged {
-		t.Error("a root-owned share needs the privileged profile to write the workspace")
+	if !rootOwned.Unprivileged {
+		t.Error("a root host share must not make the container privileged")
 	}
 }
 

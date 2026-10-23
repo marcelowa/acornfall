@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -262,5 +263,24 @@ func TestTheMachineCanBootAsTheAppliance(t *testing.T) {
 	}
 	if args := strings.Join(plain.createArgs(), " "); strings.Contains(args, "--entrypoint") || strings.Contains(args, "--port") {
 		t.Errorf("a container host boots its image's own init, got %q", args)
+	}
+}
+
+// The machine presents the share at the share's own owner, not at the process owner. The gateway
+// inside always runs as root; that uid must not decide whether the containers are privileged.
+func TestTheMachineMountsTheShareAtItsOwner(t *testing.T) {
+	share := t.TempDir()
+	uid, gid := os.Getuid(), os.Getgid()
+	if uid == 0 {
+		uid, gid = 12345, 12345
+		if err := os.Chown(share, uid, gid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	machine := Machine{Image: "debian:stable-slim", CPUs: 1, Memory: "1G", Share: share}
+	rendered := string(machine.Policy().Render())
+	want := "uid=" + strconv.Itoa(uid) + ",gid=" + strconv.Itoa(gid)
+	if !strings.Contains(rendered, want) {
+		t.Errorf("the machine share should name its owner %q, got:\n%s", want, rendered)
 	}
 }
