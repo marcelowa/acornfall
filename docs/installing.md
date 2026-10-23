@@ -8,10 +8,12 @@ a tool runs in — lives inside it.
 
 | Path | What it is | Survives what |
 |---|---|---|
-| `~/acornfall` | the mount: workspaces, `config/credentials.json`, the product's state | reinstalls, machine rebuilds, `machine down` |
-| `~/.acornfall` | the machinery: the appliance image, the engine, the machine's disk | nothing — deleting it is a clean install |
+| `/srv/acornfall` as root, `~/acornfall` otherwise | the mount: workspaces, `config/credentials.json`, the product's state; owned by `acornfall` on a root install, by the user otherwise | reinstalls, machine rebuilds, `machine down` |
+| `/var/lib/acornfall` as root, `~/.acornfall` otherwise | the machinery: the appliance image, the engine, the machine's disk; owned by `acornfall` on a root install | nothing — deleting it is a clean install |
 
-That split is the design (ADR 0022). The mount holds what the product *is*; `~/.acornfall` holds what
+A root install creates a system user `acornfall`, uses `/srv/acornfall` and `/var/lib/acornfall`, and runs the engine as that user; the service stays root. The paths below show the normal-user shape. A normal-user install keeps `~/acornfall` and `~/.acornfall` and needs no system account.
+
+That split is the design (ADR 0022). The mount holds what the product *is*; the machinery holds what
 *runs* it. A broken install is repaired by deleting the second and keeping the first.
 
 ## Install
@@ -50,7 +52,7 @@ sh install.sh --local      # the console on 127.0.0.1:7777
 sh install.sh --remote     # on 0.0.0.0, unauthenticated: a network you trust, or the tailnet
 ```
 
-The answer is written into `~/acornfall/state/machine.json` beside `wanted`, and into the generated unit,
+The answer is written into the mount's `state/machine.json` (`/srv/acornfall` as root, `~/acornfall` otherwise) beside `wanted`, and into the generated unit,
 so the two cannot disagree. `machine status` prints the address, so "where do I browse" has an answer, and
 the install ends by printing it: `http://<hostname>:7777`, with no token and no cookie.
 

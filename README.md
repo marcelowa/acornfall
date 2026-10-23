@@ -78,6 +78,8 @@ chmod +x acornfall-linux-amd64
 ./acornfall-linux-amd64 machine up             # 0.10: boots the appliance machine
 ```
 
+A root install keeps the mount at `/srv/acornfall`, owned by a fixed `acornfall` user; a normal-user install keeps it at `~/acornfall`. Both present the containers with a non-root workspace, so the container profile is a separate choice.
+
 0.10 runs the whole product inside one machine per install, and the host is a launcher:
 `machine up`, `status`, `stop`, `down`, `restart`. What lives inside the mount, what a
 fresh install fetches, and how to read a failure are in
@@ -100,12 +102,12 @@ host that shares an IP and gets rate-limited by GitHub, or against a private mir
 A token that was ever pasted into chat should be rotated afterwards under the
 token's own settings.
 
-`machine install` puts the binary under `~/.acornfall/bin/`, writes the service,
+`machine install` puts the binary under the machinery (`/var/lib/acornfall/bin/` as root, `~/.acornfall/bin/` otherwise), writes the service,
 and starts it. From then on the product runs inside the machine. The console's
 Updates page asks the host service to apply a release: the machine first, then
 the host, and only when the machine reports ready (ADR 0030, ADR 0031).
 
-Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
+Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `/var/lib/acornfall` as root, `~/.acornfall` otherwise),
 `--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
 `--token <secret>` (optional: the console asks for nothing by default), `--worker-dir <dir>` (development: system bun over these
 sources, no ensure), `--worker-bin <path>` (single compiled worker binary,

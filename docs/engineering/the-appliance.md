@@ -41,7 +41,7 @@ Three rules fall out of that picture and each one cost a bug to learn:
 | machine | one microVM, booted from the image, with the mount passed in | `acornfall-machine-<hash>` |
 | gateway | PID 1 inside the machine, serves the console and the API | `--in-machine --sandbox-engine lxc` |
 | worker | bun, the agent runtime, spawns the container engine | inside the machine |
-| container | one per workspace, lxc, unprivileged for a non-root share and privileged for a root-owned one | `acornfall-<workspace>-<hash>` |
+| container | one per workspace, lxc, unprivileged by default; privileged only when a workspace asks for a capability | `acornfall-<workspace>-<hash>` |
 
 The launcher (`machine up`) does four things and no more: fetch the release's tarball if the version
 is new, verify it against the release's checksums, unpack a disk from it if the machine has none for
@@ -169,11 +169,10 @@ Ceilings and shares, never reservations:
 
 - `memory.max = min(ask, machine memory / 2)`, `memory.high` at three quarters of that
 - `cpu.weight = CPUs × 100`, proportional
-- a non-root share keeps the unprivileged profile and its tools run as the share's owner; a
-  root-owned share uses the privileged profile, because root is outside the unprivileged id map
-  and a workspace bind from `/root` is otherwise skipped. A workspace can still ask for the
-  privileged profile, and both configs are pinned by tests because the differences between them
-  are the point.
+- the machine presents the share at the share's owner. A root install gets a fixed non-root owner
+  (`acornfall`) and `/srv/acornfall`, so the container stays unprivileged; a normal-user install
+  keeps the user's own uid. A workspace can ask for the privileged profile for a capability, and
+  both configs are pinned by tests because the differences between them are the point.
 
 ## Release and CI
 
