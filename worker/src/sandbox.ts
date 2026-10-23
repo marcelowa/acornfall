@@ -98,6 +98,63 @@ export function noSandboxReason(problem: string): string {
 		: `this workspace has no sandbox: ${problem}`;
 }
 
+/**
+ * A sandbox that is opened lazily and tried again after a failure. The worker used to open its
+ * sandbox once at startup and keep the refusal for its whole life: a container that was still
+ * being created when the worker started — the ordinary race between control and the worker —
+ * made every later tool say "this workspace has no sandbox", even after the container was
+ * running. A transient failure is not a property of the workspace.
+ *
+ * Reads fall back to "nothing" while the sandbox is unreachable, the same shape the refused
+ * sandbox had; commands and writes throw the underlying reason, and the next call opens again.
+ */
+export function retryingSandbox(open: () => Promise<SandboxClient>): SandboxClient {
+	let client: SandboxClient | undefined;
+	let opening: Promise<SandboxClient> | undefined;
+	const current = async (): Promise<SandboxClient> => {
+		if (client !== undefined) return client;
+		opening ??= open()
+			.then((next) => {
+				client = next;
+				return next;
+			})
+			.finally(() => {
+				opening = undefined;
+			});
+		return await opening;
+	};
+	const orFallback = async <T>(fn: (c: SandboxClient) => Promise<T>, fallback: T): Promise<T> => {
+		try {
+			return await fn(await current());
+		} catch {
+			return fallback;
+		}
+	};
+	const must = async <T>(fn: (c: SandboxClient) => Promise<T>): Promise<T> => {
+		try {
+			return await fn(await current());
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			throw new Error(`this workspace's sandbox is not ready: ${reason}`);
+		}
+	};
+	return {
+		get name() {
+			return client?.name ?? "";
+		},
+		read: (path) => orFallback((c) => c.read(path), null),
+		list: (path) => orFallback((c) => c.list(path), []),
+		stat: (path) => orFallback((c) => c.stat(path), null),
+		readBytes: (path) => must((c) => c.readBytes(path)),
+		exec: (command, options) => must((c) => c.exec(command, options)),
+		write: (path, content) => must((c) => c.write(path, content)),
+		writeStream: (path) => must((c) => c.writeStream(path)),
+		mkdir: (path) => must((c) => c.mkdir(path)),
+		remove: (path, options) => must((c) => c.remove(path, options)),
+		rename: (from, to) => must((c) => c.rename(from, to)),
+	};
+}
+
 export function refusedSandbox(reason: string): SandboxClient {
 	const fail = (): never => {
 		throw new Error(reason);

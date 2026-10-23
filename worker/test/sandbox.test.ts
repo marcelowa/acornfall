@@ -5,6 +5,7 @@ import { SandboxExecutionEnv } from "../src/sandbox-env.ts";
 import {
 	noSandboxReason,
 	refusedSandbox,
+	retryingSandbox,
 	type DirEntry,
 	type ExecOptions,
 	type ExecResult,
@@ -194,6 +195,56 @@ test("a missing sandbox reads nothing and refuses everything else", async () => 
 		(error: unknown) => (error instanceof Error ? error.message : String(error)),
 	);
 	expect(refused).toContain("no sandbox");
+});
+
+// A sandbox that was still being created when the worker started is not a workspace that has
+// no sandbox for ever. The worker used to open once and keep the refusal; the owner's new-03
+// did exactly that, and every later "run hostname" said the same thing after the container was
+// running. A transient attach failure is tried again on the next use.
+test("a sandbox that could not attach yet is opened again", async () => {
+	const inner = new FakeSandbox();
+	inner.files.set("/work/README.md", new TextEncoder().encode("hello"));
+	let attempts = 0;
+	const sandbox = retryingSandbox(async () => {
+		attempts += 1;
+		if (attempts === 1) throw new Error("lxc-start: Ongoing container creation detected");
+		return inner;
+	});
+	// The first read is while the sandbox is still being made: nothing, not a permanent refusal.
+	expect(await sandbox.read("/work/README.md")).toBeNull();
+	// The next one opens again and finds the container.
+	expect(await sandbox.read("/work/README.md")).toBe("hello");
+	expect(attempts).toBe(2);
+});
+
+test("a command during the attach failure says why, and the next one works", async () => {
+	const inner = new FakeSandbox();
+	let attempts = 0;
+	const sandbox = retryingSandbox(async () => {
+		attempts += 1;
+		if (attempts === 1) throw new Error("lxc-start: Ongoing container creation detected");
+		return inner;
+	});
+	const first = await sandbox.exec("hostname", {}).then(
+		() => "it ran with no sandbox",
+		(error: unknown) => (error instanceof Error ? error.message : String(error)),
+	);
+	expect(first).toContain("sandbox is not ready");
+	expect(first).toContain("Ongoing container creation");
+	const second = await sandbox.exec("hostname", {});
+	expect(second.code).toBe(0);
+	expect(attempts).toBe(2);
+});
+
+test("a permanent refusal is not reopened on every call", async () => {
+	let opens = 0;
+	const sandbox = retryingSandbox(async () => {
+		opens += 1;
+		return refusedSandbox("this workspace has no sandbox: tool execution is disabled");
+	});
+	expect(await sandbox.read("/work/AGENTS.md")).toBeNull();
+	expect(await sandbox.read("/work/AGENTS.md")).toBeNull();
+	expect(opens).toBe(1);
 });
 
 // -- running commands ----------------------------------------------------------------

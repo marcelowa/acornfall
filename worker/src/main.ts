@@ -83,6 +83,7 @@ import {
 	refusedSandbox,
 	type SandboxClient,
 	type SandboxEngine,
+	retryingSandbox,
 } from "./sandbox.ts";
 import { SandboxExecutionEnv } from "./sandbox-env.ts";
 import {
@@ -157,7 +158,7 @@ const models = builtinModels({ credentials });
  * cannot be read simply has fewer of them. Running unconfined must be a decision somebody
  * made, never a state the system drifted into.
  */
-const sandbox: SandboxClient = await openSandboxForWorkspace(args);
+const sandbox: SandboxClient = retryingSandbox(() => openSandboxForWorkspace(args));
 
 async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 	if (options.sandbox === "") {
@@ -169,11 +170,9 @@ async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 			`this workspace's sandbox belongs to engine ${options.sandboxEngine}, which this build does not support`,
 		);
 	}
-	return await engine.openSandbox(options.sandbox, options.workspace).catch((error: unknown) => {
-		return refusedSandbox(
-			`cannot attach to the sandbox ${options.sandbox}: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	});
+	// A failure here is thrown, not frozen into a refused client: the sandbox may still be
+	// being created, and the wrapper tries again on the next use.
+	return await engine.openSandbox(options.sandbox, options.workspace);
 }
 
 /** The engine modules this build implements, by the name control sends. */
