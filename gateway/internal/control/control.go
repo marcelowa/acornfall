@@ -423,7 +423,7 @@ func (c *Control) attachToWorker(ctx context.Context) error {
 	if err := c.startWorker(ctx); err != nil {
 		return err
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return fmt.Errorf("describe worker: %w", err)
 	}
 	// The harness answered. Adoption creates the root conversation through the same external
@@ -681,7 +681,7 @@ func (c *Control) workerFailed(worker *workerpool.Worker, err error) {
 // a client is looking at, so a restart is invisible apart from the pause.
 func (c *Control) recoverWithWorker(ctx context.Context) error {
 	var describe protocol.Describe
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return err
 	}
 	c.markWorkerReady()
@@ -782,10 +782,36 @@ func (c *Control) conversationSignature() string {
 	return builder.String()
 }
 
+// call is the one way a control asks its harness something. A control whose harness never
+// started has no worker, and calling through the nil pointer was a panic in the HTTP server:
+// the console asked for its commands while the workspace was still starting, and the answer
+// was a closed connection instead of the sentence the page could show.
+func (c *Control) call(ctx context.Context, command protocol.Command) (json.RawMessage, error) {
+	c.mu.RLock()
+	worker := c.worker
+	c.mu.RUnlock()
+	if worker == nil {
+		return nil, errors.New("this workspace's harness is not running")
+	}
+	return worker.Call(ctx, command)
+}
+
+// callInto is call with the response decoded, matching workerpool.Worker.CallInto.
+func (c *Control) callInto(ctx context.Context, command protocol.Command, out any) error {
+	data, err := c.call(ctx, command)
+	if err != nil {
+		return err
+	}
+	if out == nil || len(data) == 0 {
+		return nil
+	}
+	return json.Unmarshal(data, out)
+}
+
 // WorkerCall is an escape hatch for small read-only commands, so a diagnostic does
 // not need a method and an endpoint of its own.
 func (c *Control) WorkerCall(ctx context.Context, kind, conversationID string) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
+	return c.call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
 }
 
 func (c *Control) workspaceList() []WorkspaceState {
@@ -831,7 +857,7 @@ func (c *Control) SetWorkspace(workspace Workspace) {
 
 // Commands lists this workspace's slash commands, global first and workspace shadowing.
 func (c *Control) Commands(ctx context.Context) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: "commands"})
+	return c.call(ctx, protocol.Command{Type: "commands"})
 }
 
 // Policy reports what a conversation may do with other conversations, resolved
@@ -843,7 +869,7 @@ func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMe
 		// went down over a client that had simply landed early.
 		return nil, errors.New("this workspace has no conversation yet")
 	}
-	return c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
+	return c.call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 }
 
 // stopWorker terminates the worker process and leaves everything else:
@@ -1087,11 +1113,11 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 		return nil
 	}
 	if previous != "" {
-		if _, err := c.worker.Call(ctx, protocol.Command{Type: "detach", ConversationID: previous}); err != nil {
+		if _, err := c.call(ctx, protocol.Command{Type: "detach", ConversationID: previous}); err != nil {
 			workerpool.Log("detach %s: %v", previous, err)
 		}
 	}
-	if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
+	if _, err := c.call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 		return err
 	}
 	c.mu.Lock()
@@ -1120,7 +1146,7 @@ func (c *Control) Rename(ctx context.Context, conversationID, title string) erro
 	if strings.TrimSpace(title) == "" {
 		return errors.New("title is required")
 	}
-	if _, err := c.worker.Call(ctx, protocol.Command{
+	if _, err := c.call(ctx, protocol.Command{
 		Type:           "rename",
 		ConversationID: conversationID,
 		Title:          title,
@@ -1137,7 +1163,7 @@ func (c *Control) Rename(ctx context.Context, conversationID, title string) erro
 // Hide tombstones a conversation. Nothing is removed: storage is append-only, so
 // a hidden conversation keeps its transcript and can be restored.
 func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) error {
-	if _, err := c.worker.Call(ctx, protocol.Command{
+	if _, err := c.call(ctx, protocol.Command{
 		Type:           "hide",
 		ConversationID: conversationID,
 		Hidden:         hidden,
@@ -1168,7 +1194,7 @@ func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "fork",
 		ConversationID: conversationID,
 		At:             at,
@@ -1212,7 +1238,7 @@ func (c *Control) Compact(ctx context.Context, conversationID string) error {
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "compact",
 		ConversationID: conversationID,
 	}, &response); err != nil {
@@ -1229,7 +1255,7 @@ func (c *Control) Compact(ctx context.Context, conversationID string) error {
 // so the dialog states the scope. The cut itself stays the harness's call.
 func (c *Control) CompactPreview(ctx context.Context, conversationID string) (CompactPreview, error) {
 	var response CompactPreview
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "compact_preview",
 		ConversationID: conversationID,
 	}, &response); err != nil {
@@ -1251,7 +1277,7 @@ func (c *Control) Create(ctx context.Context) error {
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "create"}, &response); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "create"}, &response); err != nil {
 		return err
 	}
 	if response.ConversationID == "" {
@@ -1466,7 +1492,7 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, change Ag
 	var response struct {
 		Agent protocol.ResolvedAgent `json:"agent"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "open",
 		ConversationID: conversationID,
 		Agent:          &effective,
@@ -1995,7 +2021,7 @@ func (c *Control) reapply(ctx context.Context, conversationID string) error {
 	var response struct {
 		Agent protocol.ResolvedAgent `json:"agent"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "open",
 		ConversationID: conversationID,
 		Agent:          &effective,
@@ -2012,7 +2038,7 @@ func (c *Control) reapply(ctx context.Context, conversationID string) error {
 // Agents returns the overlay catalog: every definition and what it resolves to.
 func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
 	var data protocol.AgentsData
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "agents"}, &data); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "agents"}, &data); err != nil {
 		return protocol.AgentsData{}, err
 	}
 	c.mu.Lock()
@@ -2024,7 +2050,7 @@ func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
 // Reload re-reads definitions and config from disk, then re-applies every
 // conversation's binding so an edited file takes effect without a restart.
 func (c *Control) Reload(ctx context.Context) error {
-	if _, err := c.worker.Call(ctx, protocol.Command{Type: "reload"}); err != nil {
+	if _, err := c.call(ctx, protocol.Command{Type: "reload"}); err != nil {
 		return err
 	}
 	if _, err := c.Agents(ctx); err != nil {
@@ -2046,7 +2072,7 @@ func (c *Control) Reload(ctx context.Context) error {
 // binding for the active conversation when the current one is unusable.
 func (c *Control) Refresh(ctx context.Context) error {
 	var describe protocol.Describe
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return err
 	}
 	c.markWorkerReady()
@@ -2070,7 +2096,7 @@ func (c *Control) Login(ctx context.Context, providerID, authType string) (strin
 	c.mu.Unlock()
 
 	go func() {
-		_, err := c.worker.Call(context.WithoutCancel(ctx), protocol.Command{
+		_, err := c.call(context.WithoutCancel(ctx), protocol.Command{
 			Type:       "login",
 			AuthID:     authID,
 			ProviderID: providerID,
@@ -2090,7 +2116,7 @@ func (c *Control) Login(ctx context.Context, providerID, authType string) (strin
 // Logout forgets one provider's stored credential and re-adopts bindings, so a
 // revoked key cannot keep spending and the picker cannot keep offering it.
 func (c *Control) Logout(ctx context.Context, providerID string) error {
-	if _, err := c.worker.Call(ctx, protocol.Command{Type: "logout", ProviderID: providerID}); err != nil {
+	if _, err := c.call(ctx, protocol.Command{Type: "logout", ProviderID: providerID}); err != nil {
 		return err
 	}
 	c.mu.Lock()
@@ -2111,7 +2137,7 @@ func (c *Control) Logout(ctx context.Context, providerID string) error {
 
 // AnswerAuth answers one login prompt. Cancelled rejects it.
 func (c *Control) AnswerAuth(ctx context.Context, authID, promptID, value string, cancelled bool) error {
-	return c.worker.CallInto(ctx, protocol.Command{
+	return c.callInto(ctx, protocol.Command{
 		Type:      "auth_answer",
 		AuthID:    authID,
 		PromptID:  promptID,
@@ -2122,7 +2148,7 @@ func (c *Control) AnswerAuth(ctx context.Context, authID, promptID, value string
 
 // CancelAuth aborts a running login flow.
 func (c *Control) CancelAuth(ctx context.Context, authID string) error {
-	return c.worker.CallInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
+	return c.callInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
 }
 
 func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy, attachments []string) error {
@@ -2144,7 +2170,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 			Command string `json:"command"`
 			Action  string `json:"action"`
 		}
-		if err := c.worker.CallInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
+		if err := c.callInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
 			workerpool.Log("expanding %q: %v", text, err)
 		} else if expanded.Action == "compact" || expanded.Action == "reset" {
 			// A builtin is an action, not a turn: the worker runs it, then records
@@ -2160,7 +2186,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 			var response struct {
 				ConversationID string `json:"conversationId"`
 			}
-			err := c.worker.CallInto(ctx, protocol.Command{
+			err := c.callInto(ctx, protocol.Command{
 				Type:           "action",
 				ConversationID: conversationID,
 				Text:           strings.TrimSpace(text),
@@ -2182,7 +2208,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 			text = expanded.Text
 		}
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "prompt",
 		ConversationID: conversationID,
 		Text:           text,
@@ -2205,11 +2231,11 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 }
 
 func (c *Control) Abort(ctx context.Context, conversationID string) error {
-	return c.worker.CallInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
+	return c.callInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
 }
 
 func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: "usage"})
+	return c.call(ctx, protocol.Command{Type: "usage"})
 }
 
 // Attachment is one stored file, answered with the id messages carry.
@@ -2226,7 +2252,7 @@ func (c *Control) UploadAttachment(ctx context.Context, tempPath, name, mime str
 	var response struct {
 		Attachment Attachment `json:"attachment"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:     "attachment",
 		TempPath: tempPath,
 		FileName: name,
@@ -2264,13 +2290,13 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 
 	// The worker subscribes per conversation, so the first watcher is what asks for it.
 	if first && conversationID != "" {
-		if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
+		if _, err := c.call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 			c.Unsubscribe(id)
 			return 0, nil, nil, nil, err
 		}
 		// Fetch its policy now rather than leaving a client to see state without one until
 		// the next refresh tick, which reads as a broken inspector for a few seconds.
-		if policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID}); err == nil {
+		if policy, err := c.call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID}); err == nil {
 			c.mu.Lock()
 			c.policies[conversationID] = policy
 			c.mu.Unlock()
@@ -2318,7 +2344,7 @@ func (c *Control) Unsubscribe(id int) {
 	c.mu.Unlock()
 
 	if last {
-		if _, err := c.worker.Call(context.Background(), protocol.Command{
+		if _, err := c.call(context.Background(), protocol.Command{
 			Type:           "detach",
 			ConversationID: conversationID,
 		}); err != nil {
@@ -2449,7 +2475,7 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 	var data struct {
 		Conversations []protocol.ConversationInfo `json:"conversations"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "conversations"}, &data); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "conversations"}, &data); err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
@@ -2463,7 +2489,7 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 	// Policy for every conversation a client is watching, so an inspector is correct in
 	// whichever tab it happens to be open.
 	for _, conversationID := range c.watchedConversations() {
-		policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
+		policy, err := c.call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 		if err != nil {
 			continue
 		}
