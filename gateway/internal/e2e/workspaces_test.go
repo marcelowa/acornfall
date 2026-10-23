@@ -204,6 +204,44 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 	}
 }
 
+// A workspace made after the first one runs tools too. The bridge, the id ranges, and the
+// engine's store are per machine; the rootfs, the mount, and the container are per workspace.
+// Measured on the owner's host: the first workspace ran tools and every one made afterwards
+// said "this workspace has no sandbox" (beta.29). A suite that only ran a tool in general
+// never asked the second workspace's container to exist.
+func TestASecondWorkspaceRunsTools(t *testing.T) {
+	t.Parallel()
+	maybeSandbox(t)
+	s := start(t, withScript(scriptRule{
+		Match: "prove the second workspace works",
+		Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+			"command": "printf ran > tool-ran.txt && pwd",
+		}}},
+		Reply: "the tool ran",
+	}))
+	c := s.client()
+
+	c.createWorkspace("second")
+	root := c.waitForConversation("second")
+	c.prompt("second", root, "prove the second workspace works")
+	got := c.waitForText("second", root, "the tool ran")
+
+	// The command ran in the second workspace's folder. The file is the proof that the mount
+	// and the container are that workspace's, not the first one's.
+	if _, err := os.Stat(filepath.Join(s.WorkspacesDir, "second", "tool-ran.txt")); err != nil {
+		t.Errorf("the tool did not run in the second workspace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.General, "tool-ran.txt")); err == nil {
+		t.Error("the tool wrote into the general workspace")
+	}
+	if strings.Contains(got.lastToolResult(), "[error]") {
+		t.Errorf("a tool that ran was reported with an error: %q", got.lastToolResult())
+	}
+	if state := c.state("second"); !state.Sandbox.Tools {
+		t.Errorf("the second workspace has no sandbox: %+v", state.Sandbox)
+	}
+}
+
 // The flag is gone, and a caller that still sends it is told so rather than humoured: a request
 // for the old behaviour that quietly gets the new one is a lie in the other direction.
 func TestTheTrustFlagIsGone(t *testing.T) {
