@@ -576,8 +576,19 @@ func (m *Manager) hostChannel() (string, *HostState) {
 	m.hostMu.Lock()
 	defer m.hostMu.Unlock()
 	if ok {
-		m.lastHost, m.lastHostAt = state, now
-		return want.Version, &state
+		// The host writes a newer state every second. The machine's share can still hand a
+		// reader the previous file after a rename; a read with an older timestamp must not
+		// undo a ready phase. Newest At wins; on the same second, the newer service wins.
+		fresher := m.lastHostAt.IsZero() ||
+			state.At == "" ||
+			state.At > m.lastHost.At ||
+			(state.At == m.lastHost.At && Newer(state.Service, m.lastHost.Service))
+		if fresher {
+			m.lastHost, m.lastHostAt = state, now
+			return want.Version, &state
+		}
+		cached := m.lastHost
+		return want.Version, &cached
 	}
 	if !m.lastHostAt.IsZero() && now.Sub(m.lastHostAt) < hostCacheGrace {
 		cached := m.lastHost

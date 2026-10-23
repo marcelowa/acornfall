@@ -113,3 +113,37 @@ func TestATransientMissingIsKeepsTheReadyPhase(t *testing.T) {
 		t.Fatalf("a host that stayed away should be starting and blocking, got %+v", got)
 	}
 }
+
+// A ready state must not be undone by an older is.json still visible on the machine share
+// after the host wrote the newer one. At is the host's own clock; the newer state wins.
+func TestAStaleHostReadDoesNotUndoReady(t *testing.T) {
+	root := t.TempDir()
+	manager := New(t.TempDir(), root, "", "")
+	manager.WithLauncherOwner()
+	manager.current = "v0.10.0-beta.53"
+	if err := WriteWant(root, "v0.10.0-beta.53"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIs(root, HostState{
+		Running: true,
+		Version: "v0.10.0-beta.53",
+		Service: "v0.10.0-beta.53",
+		At:      "2026-10-23T10:00:02Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.Status(); got.Phase != PhaseReady || got.Blocking {
+		t.Fatalf("fixture is not ready: %+v", got)
+	}
+	if err := WriteIs(root, HostState{
+		Running: true,
+		Version: "v0.10.0-beta.53",
+		Service: "v0.10.0-beta.52",
+		At:      "2026-10-23T10:00:01Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.Status(); got.Phase != PhaseReady || got.Blocking {
+		t.Fatalf("an older host read undid ready: %+v", got)
+	}
+}
