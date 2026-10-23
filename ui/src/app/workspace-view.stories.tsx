@@ -111,6 +111,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		workerUp: true,
 		lifecycle: { phase: "ready" },
 		workspaceReady: true,
+		wakingWorkspace: undefined,
 		connection: "live",
 		clearFailure: noop,
 		reload: noop,
@@ -439,6 +440,31 @@ export const Updating: Story = {
 		platform: makePlatform({
 			update: blockedUpdate,
 			updateBlocking: true,
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** Landing on a sleeping workspace: the state fetch is the wake, and the console says so. */
+export const Waking: Story = {
+	args: {
+		platform: makePlatform({
+			workspaceReady: false,
+			wakingWorkspace: "marc-02",
+			lifecycle: { phase: "starting", reason: "waking marc-02" },
+			active: undefined,
+			conversations: [],
+			entries: [],
+			workspaces: [
+				{
+					name: "marc-02",
+					title: "marc-02",
+					path: "/srv/acornfall/workspaces/marc-02",
+					general: false,
+					running: false,
+					active: true,
+				},
+			],
 		}),
 	},
 	globals: { viewport: { value: "laptop" } },

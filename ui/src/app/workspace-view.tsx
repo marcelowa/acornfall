@@ -26,6 +26,7 @@ import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesPanel } from "@/components/workspace/workspaces-panel";
+import { WorkspaceWakeNotice } from "@/components/workspace/workspace-wake-notice";
 import { WorkspacePreparationNotice } from "@/components/workspace/workspace-preparation";
 import { UpdateBanner } from "@/components/release/update-banner";
 import { WorkspaceButton } from "@/components/workspace/workspace-button";
@@ -373,7 +374,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		<Rail
 			head={
 				<WorkspaceButton
-					title={activeWorkspace?.title ?? "Workspaces"}
+					title={platform.wakingWorkspace ?? activeWorkspace?.title ?? "Workspaces"}
 					expanded={platform.workspacesOpen}
 					onClick={platform.openWorkspaces}
 				/>
@@ -438,7 +439,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const now = useNow();
 	const run = runState(busy, platform.active?.updatedAt, now);
 	const topbarTitle =
-		platform.screen === "settings" ? "Settings" : (platform.active?.title ?? "Acornfall");
+		platform.screen === "settings"
+			? "Settings"
+			: (platform.wakingWorkspace ?? platform.active?.title ?? "Acornfall");
 	const barTitle = (
 		<span className="flex min-w-0 items-center gap-2">
 			{run !== "idle" && platform.screen === "conversation" ? (
@@ -715,6 +718,10 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 								onDetails={() => platform.showUpdate()}
 							/>
 						</Measure>
+					) : platform.wakingWorkspace !== undefined ? (
+						<Measure size="wide" padding="md">
+							<WorkspaceWakeNotice name={platform.wakingWorkspace} />
+						</Measure>
 					) : platform.failure !== undefined ? (
 						<Measure size="wide" padding="md">
 							<ErrorStrip
@@ -783,11 +790,14 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							placeholder={
 								platform.updateBlocking
 									? "Updating — actions are paused"
-									: platform.active === undefined
-										? "Pick a conversation"
-										: platform.workspaceReady
-											? "Send a message"
-											: (platform.readiness ?? "This workspace is not ready")
+									: platform.wakingWorkspace !== undefined
+										? `Waking ${platform.wakingWorkspace}…`
+										: platform.active === undefined
+											? "Pick a conversation"
+											: platform.workspaceReady
+												? "Send a message"
+												: (platform.readiness ??
+													"This workspace is not ready")
 							}
 							above={
 								visibleSlash.length === 0 ? undefined : (

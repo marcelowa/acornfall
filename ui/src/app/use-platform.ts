@@ -276,6 +276,9 @@ export interface Platform {
 	 * conversation" and the composer are off, and they say why. Not the page's own readiness,
 	 * which is above and about the first fetch having landed. */
 	workspaceReady: boolean;
+	/** The workspace whose state is being fetched after a switch or a landing: it is waking.
+	 * Undefined once the state in hand belongs to the workspace in the route. */
+	wakingWorkspace?: string | undefined;
 	/** The reason the workspace is not ready, in one sentence; undefined when it is. */
 	readiness?: string | undefined;
 	/** What each scope says, before resolution: one tab per scope in the settings screen. */
@@ -776,17 +779,28 @@ export function usePlatform(): Platform {
 		() => (state === undefined ? undefined : toSandbox(state.sandbox)),
 		[state],
 	);
-	// A client that has no state yet is a client that is starting: the workspace exists as a request and
-	// nothing has answered about it, which is exactly what "starting" says.
+	// The state in hand belongs to the workspace in the route only after its own fetch lands.
+	// Until then a switch is a wake, not the previous workspace's readiness: keeping the old
+	// lifecycle let the composer offer a workspace whose harness had not started.
+	const stateForWorkspace = state !== undefined && state.workspace?.name === workspace;
+	const wakingWorkspace = stateForWorkspace ? undefined : workspace;
 	const lifecycle = useMemo<WorkspaceLifecycle>(
 		() =>
-			state === undefined
-				? { phase: "starting", reason: "waiting for the workspace" }
-				: toLifecycle(state),
-		[state],
+			stateForWorkspace && state !== undefined
+				? toLifecycle(state)
+				: { phase: "starting", reason: `waking ${workspace}` },
+		[state, stateForWorkspace, workspace],
 	);
 	const workspaceReady = isReady(lifecycle);
 	const readiness = readinessSentence(lifecycle);
+	// A route change is a new workspace. Keeping the old state would show its conversations
+	// and its readiness under the new name until the fetch landed; clearing makes the wake
+	// explicit. The route effect fetches the new state and opens its stream next.
+	useEffect(() => {
+		if (state === undefined || state.workspace?.name === workspace) return;
+		setState(undefined);
+		setView(undefined);
+	}, [state, workspace]);
 	const deleted = useMemo(
 		() =>
 			(state?.conversations ?? [])
@@ -1102,6 +1116,8 @@ export function usePlatform(): Platform {
 		setRailOpen(false);
 		// Opening a workspace leaves the layer: the row is the layer's own action.
 		setWorkspacesOpen(false);
+		setFailure(undefined);
+		setState(undefined);
 		setView(undefined);
 		setRoute({
 			screen: "conversation",
@@ -1249,6 +1265,8 @@ export function usePlatform(): Platform {
 				// takes over rather than an error about a workspace that just went away.
 				if (name === workspace) {
 					window.history.pushState(null, "", "/w/general");
+					setFailure(undefined);
+					setState(undefined);
 					setView(undefined);
 					setRoute({
 						screen: "conversation",
@@ -1596,6 +1614,7 @@ export function usePlatform(): Platform {
 		sandbox,
 		lifecycle,
 		workspaceReady,
+		wakingWorkspace,
 		readiness,
 		selectWorkspace,
 		defaults,
