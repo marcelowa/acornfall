@@ -103,7 +103,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | W8 | A tool call against a sandbox the engine stopped for being idle wakes it and runs, instead of failing or reporting files as missing. | `worker/test/microsandbox.test.ts` + `worker/test/sandbox.integration.test.ts` (real stop under a live client) |
 | W9 | The worker refuses a loaded SDK that is not the pinned engine, and doctor reports a store the pinned engine cannot read — so no side migrates the shared catalog past the other. | `worker/test/microsandbox.test.ts` + `TestVerifyReadsTheStoreThroughThePinnedEngine` + house-rules pin check |
 | W10 | A workspace says whether it can be used: starting, ready, or failed with the harness's own reason. Creating a conversation is refused until ready, in the gateway. | `TestTheLifecycleSaysWhenAWorkspaceCanBeUsed`, `TestAConversationIsNotMadeBeforeTheWorkspaceIsReady` |
-| W11 | A workspace made after the first one runs tools: its own container, its own mount, and the machine's shared bridge and id ranges. | `TestASecondWorkspaceRunsTools` |
+| W11 | A workspace made after the first one runs tools: its own container, its own mount, and the machine's shared bridge and id ranges. A command that writes the workspace lands in the share, owned by the share's owner; a root-owned share uses the privileged profile, a non-root one runs tools as the owner. | `TestASecondWorkspaceRunsTools`, `TestLiveTheApplianceBootsFromItsReleaseTarball`, `TestANewWorkspaceBelongsToTheSharesOwner`, `TestAWorkspaceOrTheEngineCanAskForThePrivilegedProfile` |
 
 ## Resources: rules, agents, skills
 
