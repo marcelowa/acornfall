@@ -829,6 +829,11 @@ func compareTags(a, b string) int {
 	return compareParsed(aNumbers, aPre, bNumbers, bPre)
 }
 
+// Newer reports whether a is a release newer than b. The host's own update uses it: a machine
+// that runs an older release than the service is not an update to take, it is an install that has
+// not finished.
+func Newer(a, b string) bool { return newerThan(a, b) }
+
 // newerThan reports whether a is a release newer than b. Two tags that do
 // not parse are never "newer": a mark that cannot say what it compares is a
 // lie, and the update page still lists every release by name.

@@ -271,6 +271,13 @@ func (s *supervisor) reconcileSelf(ctx context.Context, now time.Time, running b
 		// Nothing to take: this process already runs the release the machine does.
 		return
 	}
+	if !update.Newer(version, s.service) {
+		// The machine is older than this service. That is not an update to take: the host was
+		// installed ahead of the machine — a machine install that failed after swapping the host,
+		// for one — and taking the machine's release would move the host backwards. The machine
+		// is repaired by an install or an update; the host stays where it is.
+		return
+	}
 	if !s.ownsSelf {
 		if !s.selfRefused {
 			s.selfRefused = true

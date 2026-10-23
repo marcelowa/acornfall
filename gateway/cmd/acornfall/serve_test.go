@@ -693,7 +693,7 @@ func TestAnUpdateHeldWhileDownIsAppliedWhenTheMachineIsUp(t *testing.T) {
 func TestStepTwoHappensOnTheFirstReadyTick(t *testing.T) {
 	machine := &fakeMachine{running: true}
 	service, clock, home, root := newSupervisor(t, machine, nil)
-	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	makeRunningDisk(t, home, "v0.10.0-beta.15")
 	service.ready = func(context.Context) bool { return true }
 	service.downloadSelf = func(context.Context, string) ([]byte, error) { return []byte("new binary"), nil }
 	exited := -1
@@ -704,11 +704,33 @@ func TestStepTwoHappensOnTheFirstReadyTick(t *testing.T) {
 	if exited != 0 {
 		t.Fatalf("the host did not take a ready release on the first tick: exit=%d", exited)
 	}
-	if target, err := os.Readlink(update.OwnedBinary(home)); err != nil || target != update.VersionedBinary(home, "v0.10.0-beta.13") {
+	if target, err := os.Readlink(update.OwnedBinary(home)); err != nil || target != update.VersionedBinary(home, "v0.10.0-beta.15") {
 		t.Errorf("the symlink is %q, %v", target, err)
 	}
-	if attempt, found := update.ReadBootAttempt(root); !found || attempt.Tag != "v0.10.0-beta.13" {
+	if attempt, found := update.ReadBootAttempt(root); !found || attempt.Tag != "v0.10.0-beta.15" {
 		t.Errorf("the marker that lets a failed start undo itself is missing: %+v, %v", attempt, found)
+	}
+}
+
+// The host does not go backwards. A machine that runs an older release than the service is an
+// install that failed after swapping the host, not an update; taking the machine's release would
+// move the host down. This is the beta.40 install on acornd: host beta.40, machine beta.38.
+func TestAHostDoesNotGoBackwardsToTheMachine(t *testing.T) {
+	machine := &fakeMachine{running: true}
+	service, clock, home, _ := newSupervisor(t, machine, nil)
+	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	service.ready = func(context.Context) bool { return true }
+	downloads := 0
+	service.downloadSelf = func(context.Context, string) ([]byte, error) {
+		downloads++
+		return []byte("old binary"), nil
+	}
+	exited := -1
+	service.exit = func(code int) { exited = code }
+	clock.advance(serveInterval)
+	service.tick(context.Background())
+	if downloads != 0 || exited != -1 {
+		t.Errorf("the host went backwards to the machine: downloads=%d exit=%d", downloads, exited)
 	}
 }
 
@@ -717,7 +739,7 @@ func TestStepTwoHappensOnTheFirstReadyTick(t *testing.T) {
 func TestAMachineThatIsRunningButNotReadyDoesNotTakeTheHost(t *testing.T) {
 	machine := &fakeMachine{running: true}
 	service, clock, home, _ := newSupervisor(t, machine, nil)
-	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	makeRunningDisk(t, home, "v0.10.0-beta.15")
 	service.ready = func(context.Context) bool { return false }
 	downloads := 0
 	service.downloadSelf = func(context.Context, string) ([]byte, error) {
@@ -762,7 +784,7 @@ func TestStepTwoDoesNotRepeatForTheVersionWeRun(t *testing.T) {
 func TestAStepTwoThatFailsIsHeldAndSaid(t *testing.T) {
 	machine := &fakeMachine{running: true}
 	service, clock, home, _ := newSupervisor(t, machine, nil)
-	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	makeRunningDisk(t, home, "v0.10.0-beta.15")
 	service.ready = func(context.Context) bool { return true }
 	attempts := 0
 	service.downloadSelf = func(context.Context, string) ([]byte, error) {
@@ -798,7 +820,7 @@ func TestAStepTwoThatFailsIsHeldAndSaid(t *testing.T) {
 func TestTheServiceRefusesToReplaceABinaryItDidNotPutThere(t *testing.T) {
 	machine := &fakeMachine{running: true}
 	service, clock, home, _ := newSupervisor(t, machine, nil)
-	makeRunningDisk(t, home, "v0.10.0-beta.13")
+	makeRunningDisk(t, home, "v0.10.0-beta.15")
 	service.ownsSelf = false
 	service.ready = func(context.Context) bool { return true }
 	downloads := 0
