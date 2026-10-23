@@ -228,6 +228,11 @@ func (x *MachineEngine) RemoveMachine(ctx context.Context) error {
 	if !x.engine.Installed() {
 		return nil
 	}
+	// A running machine has to be asked to stop before it can be removed. The pinned engine's
+	// `rm --force` still refuses a running sandbox with "still running" (measured on acornd),
+	// so a bare remove is a `machine down` that leaves the machine up and says it failed.
+	_, _ = x.engine.run(ctx, "exec", x.Name(), "--", "sh", "-c", "kill -TERM 1")
+	_ = x.engine.Stop(ctx, x.Name())
 	return ignoreMissing(x.engine.Remove(ctx, x.Name()))
 }
 

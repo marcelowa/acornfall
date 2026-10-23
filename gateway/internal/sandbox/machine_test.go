@@ -284,3 +284,32 @@ func TestTheMachineMountsTheShareAtItsOwner(t *testing.T) {
 		t.Errorf("the machine share should name its owner %q, got:\n%s", want, rendered)
 	}
 }
+
+// A machine is stopped before it is removed. The pinned engine's `rm --force` still refuses a
+// running sandbox ("still running"), so a bare remove is a `machine down` that leaves it up and
+// reports a failure. Measured on acornd after a cut-short restart.
+func TestRemovingAMachineStopsItFirst(t *testing.T) {
+	runner := &machineRunner{}
+	machine := NewMachineEngine(machineDriver(t, runner), Machine{}, t.TempDir())
+	if err := machine.RemoveMachine(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	index := func(kind string) int {
+		for i, call := range runner.calls {
+			if len(call) > 0 && call[0] == kind {
+				return i
+			}
+		}
+		return -1
+	}
+	stop, remove := index("stop"), index("rm")
+	if stop < 0 || remove < 0 {
+		t.Fatalf("want a stop and a remove, got %v", runner.calls)
+	}
+	if stop > remove {
+		t.Errorf("the stop has to come before the remove, got %v", runner.calls)
+	}
+	if exec := index("exec"); exec < 0 || exec > stop {
+		t.Errorf("the appliance is asked to stop before the engine stop, got %v", runner.calls)
+	}
+}
