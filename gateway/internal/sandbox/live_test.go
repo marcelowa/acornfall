@@ -335,8 +335,15 @@ func TestLiveTheApplianceServesTheConsole(t *testing.T) {
 	// on: a workspace here gets a container, made and started in this machine. Everything it says
 	// goes to a file inside the machine: the gateway's log is the only place a start that failed
 	// explains itself, and the machine's console is not a place a person can read.
+	// The one command this proof asks for: a tool in the second workspace. The file it writes is
+	// read from the share afterwards, so the mount and the container are both proved.
+	script := filepath.Join(share, "dev-script.json")
+	rules := `{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"printf second > tool-ran.txt && hostname"}}],"reply":"the second workspace ran it"}]}`
+	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	start := strings.Join([]string{
-		"ACORNFALL_DEV_PROVIDER=1 exec /usr/local/bin/acornfall",
+		"ACORNFALL_DEV_SCRIPT=" + script + " exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 --insecure",
 		"--share " + share,
 		"--machinery /var/lib/acornfall",
@@ -551,6 +558,107 @@ func TestLiveAToolRunsInTheContainer(t *testing.T) {
 	t.Fatalf("no command ran in the container before the transcript closed")
 }
 
+// proveASecondWorkspaceRunsTools is the release gate's own journey: make a workspace after the
+// first one, ask it for a tool, and read what the tool wrote. The first workspace is the one a
+// fresh install has; every one after it is the case that broke repeatedly — a bridge address
+// that already existed, a folder outside the mount, a half-made container. The console answering
+// is not the same fact as a second workspace working, and only this asks the second one.
+func proveASecondWorkspaceRunsTools(t *testing.T, ctx context.Context, url, share string) {
+	t.Helper()
+	// Create it. The console makes the folder and starts the workspace's harness and container
+	// on the first read, which is why the wait below is a state read with a deadline.
+	response, err := http.Post(url+"/api/workspaces", "application/json", strings.NewReader(`{"name":"second"}`))
+	if err != nil {
+		t.Fatalf("making the second workspace: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
+		t.Fatalf("the console refused the second workspace: %s", response.Status)
+	}
+
+	type stateView struct {
+		Conversation *struct {
+			ID string `json:"id"`
+		} `json:"conversation"`
+		Lifecycle struct {
+			Phase  string `json:"phase"`
+			Reason string `json:"reason"`
+		} `json:"lifecycle"`
+		Sandbox struct {
+			Tools   bool   `json:"tools"`
+			Problem string `json:"problem"`
+		} `json:"sandbox"`
+	}
+	deadline := time.Now().Add(12 * time.Minute)
+	conversation := ""
+	for conversation == "" {
+		response, err := http.Get(url + "/api/workspaces/second/state")
+		if err == nil {
+			var view stateView
+			decodeErr := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&view)
+			response.Body.Close()
+			if decodeErr == nil {
+				if view.Lifecycle.Phase == "failed" {
+					t.Fatalf("the second workspace failed before it answered: %s", view.Lifecycle.Reason)
+				}
+				if view.Conversation != nil {
+					conversation = view.Conversation.ID
+				}
+				if !view.Sandbox.Tools && view.Sandbox.Problem != "" {
+					t.Logf("the second workspace's sandbox is not ready yet: %s", view.Sandbox.Problem)
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the second workspace never produced a conversation: %v", err)
+		}
+		time.Sleep(time.Second)
+	}
+
+	response, err = http.Post(url+"/api/workspaces/second/conversations/"+conversation+"/messages",
+		"application/json", strings.NewReader(`{"text":"prove the second workspace"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {
+		t.Fatalf("the second workspace refused the message: %s", response.Status)
+	}
+
+	// The stream is the transcript, replayed and then live. The container names itself as the
+	// command's hostname; the file it wrote is read from the share after the turn.
+	streamCtx, cancel := context.WithDeadline(ctx, time.Now().Add(6*time.Minute))
+	defer cancel()
+	request, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
+		fmt.Sprintf("%s/api/stream?workspace=second&conversation=%s", url, conversation), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("opening the second workspace's transcript: %v", err)
+	}
+	defer stream.Body.Close()
+	scanner := bufio.NewScanner(stream.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	transcript := &strings.Builder{}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		transcript.WriteString(strings.TrimPrefix(line, "data: "))
+		if strings.Contains(transcript.String(), "acornfall-second-") {
+			t.Logf("a tool ran in the second workspace's container: %s", firstMatch(transcript.String(), "acornfall-second-"))
+			if _, err := os.Stat(filepath.Join(share, "workspaces", "second", "tool-ran.txt")); err != nil {
+				t.Fatalf("the tool ran, but its file is not in the second workspace's mount: %v", err)
+			}
+			return
+		}
+	}
+	t.Fatalf("no tool ran in the second workspace before the transcript closed:\n%s", transcript.String())
+}
+
 // firstMatch is the container's name as it appeared, for the log: the identifier and the
 // characters after it, which is what a reader needs to see to believe it.
 func firstMatch(text, prefix string) string {
@@ -624,8 +732,15 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
+	// The one command this proof asks for: a tool in the second workspace. The file it writes is
+	// read from the share afterwards, so the mount and the container are both proved.
+	script := filepath.Join(share, "dev-script.json")
+	rules := `{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"printf second > tool-ran.txt && hostname"}}],"reply":"the second workspace ran it"}]}`
+	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	start := strings.Join([]string{
-		"ACORNFALL_DEV_PROVIDER=1 exec /usr/local/bin/acornfall",
+		"ACORNFALL_DEV_SCRIPT=" + script + " exec /usr/local/bin/acornfall",
 		"--addr 0.0.0.0:7777 --insecure",
 		"--share " + share,
 		"--machinery /var/lib/acornfall",
@@ -665,6 +780,7 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 			// turn asks for one, so waiting for "RUNNING" here waits forever (measured in CI).
 			if response.StatusCode == http.StatusOK {
 				t.Logf("the unpacked release boots and serves the console at %s: %.200s", url, body)
+				proveASecondWorkspaceRunsTools(t, ctx, url, share)
 				return
 			}
 		}
