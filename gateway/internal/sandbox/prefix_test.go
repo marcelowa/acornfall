@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,5 +86,41 @@ func TestDefaultPrefixesLiveInsideTheWorkspace(t *testing.T) {
 		if !strings.HasPrefix(prefix.Source, filepath.Join(workspace, ".acornfall")) {
 			t.Errorf("%s is not under the workspace's own .acornfall folder", prefix.Source)
 		}
+	}
+}
+
+// Beta 55's bug, pinned. The in-machine driver did not make a prefix's source folder, the runtime
+// skipped the optional mount, and the workspace installed into a rootfs that was about to be
+// thrown away — the tool ran, the file existed, and it was gone. The step lives in
+// prepareContainer, which is the one place both drivers go through, so this test is the guard on
+// the next driver as much as on this one.
+func TestPrepareContainerMakesAPrefixSource(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "prefix", "usr")
+	container := Container{
+		Name:        "app",
+		CPUs:        2,
+		MemoryBytes: 1 << 30,
+		Binds:       []Bind{{Source: source, Target: "/usr/local"}},
+	}
+	settings := LXCSettings{
+		Dir:         filepath.Join(dir, "container"),
+		UID:         os.Getuid(),
+		GID:         os.Getgid(),
+		MemoryBytes: 1 << 30,
+	}
+	config, err := prepareContainer(container, settings, filepath.Join(dir, "policy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatalf("the prefix source was not made, so the runtime would skip the mount: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("the prefix source is not a folder")
+	}
+	if !strings.Contains(string(config), "usr/local") {
+		t.Error("the configuration does not mount the prefix at all")
 	}
 }

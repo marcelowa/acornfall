@@ -2,11 +2,9 @@ package sandbox
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -177,19 +175,8 @@ func (x *InMachine) Create(ctx context.Context, policy Policy, policyDir string)
 	if err != nil {
 		return err
 	}
-	config, err := container.LXCConfig(settings)
+	config, err := prepareContainer(container, settings, policyDir)
 	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(policyDir) == "" {
-		return errors.New("sandbox: no directory for the container's configuration")
-	}
-	if err := os.MkdirAll(policyDir, 0o755); err != nil {
-		return err
-	}
-	// A person reads what the workspace's container is allowed to be, the way a microVM
-	// sandbox's policy file is readable.
-	if err := os.WriteFile(filepath.Join(policyDir, "container.conf"), config, 0o644); err != nil {
 		return err
 	}
 	client, err := x.containers(ctx)

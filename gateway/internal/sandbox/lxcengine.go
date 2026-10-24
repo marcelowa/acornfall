@@ -353,30 +353,11 @@ func (x *LXC) Create(ctx context.Context, policy Policy, policyDir string) error
 	if err != nil {
 		return err
 	}
-	// A mount whose source is absent is skipped by the runtime, quietly (`optional`), so a prefix
-	// that was never made would be a workspace with no prefix and no error anywhere. Make the
-	// folders this container declared, and nothing else.
-	for _, bind := range container.Binds {
-		if err := ensureBindSource(bind, settings.UID, settings.GID); err != nil {
-			return err
-		}
-	}
-	config, err := container.LXCConfig(settings)
-	if err != nil {
-		return err
-	}
 	if err := x.EnsureMachine(ctx); err != nil {
 		return err
 	}
-	if strings.TrimSpace(policyDir) == "" {
-		return errors.New("sandbox: no directory for the container's configuration")
-	}
-	if err := os.MkdirAll(policyDir, 0o755); err != nil {
-		return err
-	}
-	// A person reads what the workspace's container is allowed to be, the way a microVM
-	// sandbox's policy file is readable.
-	if err := os.WriteFile(filepath.Join(policyDir, "container.conf"), config, 0o644); err != nil {
+	config, err := prepareContainer(container, settings, policyDir)
+	if err != nil {
 		return err
 	}
 	client, err := x.shimClient(ctx)
@@ -456,6 +437,39 @@ func (x *LXC) RemoveMachine(ctx context.Context) error { return x.machine.Remove
 // gateway, which exits on SIGTERM, and an init that exits is a machine that powers off. The
 // engine's own stop asks the machine to stop gracefully, and nothing inside answers that — a
 // person reads the wait as "it does not stop" (measured on a real install).
+// prepareContainer makes everything a container needs before the runtime sees it: the folders its
+// binds come from, the configuration itself, and the copy a person can read. Both drivers do it,
+// and they used to do it twice, in two functions that were the same function — which is how beta
+// 55 mounted no prefix at all: the in-machine path did not make the source folder, the runtime
+// skipped the optional mount, and the workspace installed into a rootfs that was about to be
+// thrown away. One copy, so the next step added to one driver is added to both.
+func prepareContainer(container Container, settings LXCSettings, policyDir string) ([]byte, error) {
+	// A mount whose source is absent is skipped by the runtime, quietly (`optional`), so a prefix
+	// that was never made would be a workspace with no prefix and no error anywhere. Make the
+	// folders this container declared, and nothing else.
+	for _, bind := range container.Binds {
+		if err := ensureBindSource(bind, settings.UID, settings.GID); err != nil {
+			return nil, err
+		}
+	}
+	config, err := container.LXCConfig(settings)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(policyDir) == "" {
+		return nil, errors.New("sandbox: no directory for the container's configuration")
+	}
+	if err := os.MkdirAll(policyDir, 0o755); err != nil {
+		return nil, err
+	}
+	// A person reads what the workspace's container is allowed to be, the way a microVM
+	// sandbox's policy file is readable.
+	if err := os.WriteFile(filepath.Join(policyDir, "container.conf"), config, 0o644); err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
 // ensureBindSource makes a bind's source folder where it is missing, and gives it to the share's
 // owner. Only a folder that did not exist is touched: a workspace's own folder already belongs to
 // somebody, and this is not the place to say otherwise.
