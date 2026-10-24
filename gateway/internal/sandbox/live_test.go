@@ -836,7 +836,12 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	// container's rootfs instead of the workspace.
 	second := filepath.Join(share, "workspaces", "second")
 	script := filepath.Join(share, "dev-script.json")
-	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; id -un > %s/whoami.txt; test -s /etc/ssl/certs/ca-certificates.crt && echo present > %s/roots.txt || echo missing > %s/roots.txt; printf home-bytes > ~/home-proof.txt; { echo "HOME=${HOME-unset}"; grep ":999:" /etc/passwd; ls -ld /home/acornfall; grep " /home/acornfall " /proc/self/mountinfo; ls -la /home/acornfall; } > %s/diag.txt 2>&1; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second, second, second, second, second)
+	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; id -un > %s/whoami.txt; test -s /etc/ssl/certs/ca-certificates.crt && echo present > %s/roots.txt || echo missing > %s/roots.txt; printf home-bytes > ~/home-proof.txt; { echo HOME=${HOME-unset}; grep :999: /etc/passwd; ls -ld /home/acornfall; grep ' /home/acornfall ' /proc/self/mountinfo; ls -la /home/acornfall; } > %s/diag.txt 2>&1; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second, second, second, second, second)
+	// A rule that is not JSON is a turn the model never gets to ask, and the failure arrives as a
+	// harness SyntaxError a minute into a release proof. It is cheap to say so here.
+	if !json.Valid([]byte(rules)) {
+		t.Fatalf("the dev script is not JSON: %s", rules)
+	}
 	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
 		t.Fatal(err)
 	}
