@@ -10,6 +10,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -22,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
@@ -565,9 +567,14 @@ func ensureShareOwner(share, machinery string) error {
 			return err
 		}
 	}
-	// The engine is a child of the service; it needs the hypervisor like the service does.
-	if output, addErr := exec.Command("usermod", "-aG", "kvm", "acornfall").CombinedOutput(); addErr != nil {
-		return fmt.Errorf("adding acornfall to the kvm group: %v: %s", addErr, strings.TrimSpace(string(output)))
+	// The engine is a child of the service; it needs the hypervisor like the service does — where
+	// a group is what gates the device. A workspace's /dev/kvm is world-readable (the shim makes it
+	// so) and its image has never heard of a kvm group, so `usermod` there fails over a permission
+	// nobody needs, and the install stops before it starts (acornfall#99).
+	if group, needed := kvmGroupToJoin(); needed {
+		if output, addErr := exec.Command("usermod", "-aG", group, "acornfall").CombinedOutput(); addErr != nil {
+			return fmt.Errorf("adding acornfall to the %s group: %v: %s", group, addErr, strings.TrimSpace(string(output)))
+		}
 	}
 	uid, err := strconv.Atoi(account.Uid)
 	if err != nil {
@@ -581,16 +588,84 @@ func ensureShareOwner(share, machinery string) error {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return err
 		}
-		if err := filepath.Walk(dir, func(path string, _ os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			return os.Lchown(path, uid, gid)
-		}); err != nil {
+		if err := chownTree(dir, uid, gid); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// kvmDevice and kvmGroup are the device and the group a host gates it with; variables so a test
+// can name what it made.
+var (
+	kvmDevice = "/dev/kvm"
+	kvmGroup  = "kvm"
+)
+
+// kvmGroupToJoin is the group the service user has to join, when a group is what gates the device.
+//
+// Three of the four answers are "no group": a host with no device has nothing to join, a device
+// the world can open has nothing a group could add, and a device gated by a group that does not
+// exist is a host whose own check (ready.hypervisor) will say so — none of them should stop an
+// install, which is what happened inside an acornfall workspace.
+func kvmGroupToJoin() (string, bool) {
+	info, err := os.Stat(kvmDevice)
+	if err != nil {
+		return "", false
+	}
+	if info.Mode().Perm()&0o006 == 0o006 {
+		return "", false
+	}
+	group, err := user.LookupGroup(kvmGroup)
+	if err != nil {
+		return "", false
+	}
+	return group.Name, true
+}
+
+// chownTree gives a whole tree to uid:gid, and skips what the filesystem will not let it change.
+//
+// A share that is partly read-only — the global resources a workspace mounts so its instructions
+// cannot be rewritten from inside (ADR 0014) — is still a share the install can use. Refusing the
+// whole install over one mount is how acornfall inside an acornfall workspace stopped at
+// `lchown /srv/acornfall/.agents: read-only file system` (acornfall#99).
+func chownTree(path string, uid, gid int) error {
+	return chownTreeUsing(path, uid, gid, os.Lchown, readOnlyMount)
+}
+
+// chownTreeUsing is chownTree with the two calls it makes supplied, so a test can watch what it
+// skipped without a read-only mount and without root.
+func chownTreeUsing(path string, uid, gid int, chown func(string, int, int) error, readOnly func(string) bool) error {
+	return filepath.Walk(path, func(current string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() && readOnly(current) {
+			return filepath.SkipDir
+		}
+		if err := chown(current, uid, gid); err != nil {
+			// A read-only mount refuses the change itself, which is the same answer as the check
+			// above and not a reason to fail.
+			if errors.Is(err, syscall.EROFS) {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
+}
+
+// stReadOnly is ST_RDONLY from sys/mount.h: the syscall package does not name it, and it is the
+// one flag in Statfs_t.Flags this needs. It marks a filesystem mounted read-only.
+const stReadOnly = 1
+
+// readOnlyMount is whether the filesystem a path is on was mounted read-only.
+func readOnlyMount(path string) bool {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return false
+	}
+	return stat.Flags&stReadOnly != 0
 }
 
 // installClosing is what an install tells a person to open: the address, and — on a network address — the one

@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1047,5 +1049,104 @@ func TestTheUnitLeavesTheMachineRunningWhenTheServiceStops(t *testing.T) {
 	}
 	if !strings.Contains(content, "KillMode=process") {
 		t.Fatalf("the unit does not leave the machine running:\n%s", content)
+	}
+}
+
+// Inside an acornfall workspace the installer used to stop twice before doing anything: it joined
+// a kvm group that debian:stable-slim has never had, and it chowned a share whose globals are a
+// read-only mount. A device the world can open needs no group, and a mount that refuses a change
+// is not a mount to fail on (acornfall#99).
+func TestTheHypervisorGroupIsJoinedOnlyWhenItGatesTheDevice(t *testing.T) {
+	wasDevice, wasGroup := kvmDevice, kvmGroup
+	t.Cleanup(func() { kvmDevice, kvmGroup = wasDevice, wasGroup })
+
+	// A device the world can open: the group adds nothing, and a workspace's device is 0666.
+	world := filepath.Join(t.TempDir(), "kvm")
+	if err := os.WriteFile(world, nil, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	kvmDevice = world
+	if group, needed := kvmGroupToJoin(); needed {
+		t.Errorf("a world-readable device asked to join %q", group)
+	}
+
+	// No device at all: a machine without nesting is a supported state.
+	kvmDevice = filepath.Join(t.TempDir(), "absent")
+	if _, needed := kvmGroupToJoin(); needed {
+		t.Error("an absent device asked to join a group")
+	}
+
+	// Gated by a group, and the group exists: this is the host the install was written for.
+	gated := filepath.Join(t.TempDir(), "kvm")
+	if err := os.WriteFile(gated, nil, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	kvmDevice = gated
+	kvmGroup = "nogroup"
+	if group, needed := kvmGroupToJoin(); !needed || group != "nogroup" {
+		t.Errorf("a gated device did not ask for its group: needed=%v group=%q", needed, group)
+	}
+
+	// Gated, but the group is not on this machine: the device check reports that, not the install.
+	kvmGroup = "no-such-group-anywhere"
+	if _, needed := kvmGroupToJoin(); needed {
+		t.Error("a device gated by a group that does not exist asked to join it")
+	}
+}
+
+// The walk gives everything it can to the owner and leaves a read-only mount alone — including the
+// case where the mount refuses the change instead of being flagged read-only.
+func TestOwnershipSkipsWhatTheFilesystemWillNotChange(t *testing.T) {
+	root := t.TempDir()
+	stable := filepath.Join(root, "workspaces", "app")
+	globals := filepath.Join(root, ".agents")
+	for _, dir := range []string{stable, globals} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := filepath.Join(stable, "file.txt")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var chowned []string
+	refused := filepath.Join(globals, "README.md")
+	err := chownTreeUsing(root, 1000, 1000,
+		func(path string, _, _ int) error {
+			chowned = append(chowned, path)
+			if path == refused {
+				return syscall.EROFS
+			}
+			return nil
+		},
+		func(path string) bool { return path == globals },
+	)
+	if err != nil {
+		t.Fatalf("a read-only mount failed the walk: %v", err)
+	}
+	for _, path := range chowned {
+		if strings.HasPrefix(path, globals) {
+			t.Errorf("the read-only mount was walked into: %s", path)
+		}
+	}
+	if !slices.Contains(chowned, file) {
+		t.Errorf("the writable tree was not given to the owner: %v", chowned)
+	}
+
+	// A mount that is not flagged read-only but refuses the change is the same answer.
+	if err := chownTreeUsing(root, 1000, 1000,
+		func(string, int, int) error { return syscall.EROFS },
+		func(string) bool { return false },
+	); err != nil {
+		t.Errorf("a filesystem that refused the change failed the walk: %v", err)
+	}
+
+	// Anything else is a failure worth reporting.
+	if err := chownTreeUsing(root, 1000, 1000,
+		func(string, int, int) error { return syscall.EACCES },
+		func(string) bool { return false },
+	); err == nil {
+		t.Error("a permission error was swallowed")
 	}
 }
