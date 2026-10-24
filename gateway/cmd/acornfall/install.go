@@ -10,7 +10,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -588,6 +587,13 @@ func ensureShareOwner(share, machinery string) error {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return err
 		}
+		// One trial on the root decides the tree. A share this install cannot own is a share that
+		// is already somebody's — inside an acornfall workspace the outer install owns it — and
+		// stopping over that would fail a working install for the sake of a nicety. Every way a
+		// filesystem says no lands here: read-only, uid mapping, a file that is not ours.
+		if err := os.Lchown(dir, uid, gid); err != nil {
+			continue
+		}
 		if err := chownTree(dir, uid, gid); err != nil {
 			return err
 		}
@@ -623,12 +629,14 @@ func kvmGroupToJoin() (string, bool) {
 	return group.Name, true
 }
 
-// chownTree gives a whole tree to uid:gid, and skips what the filesystem will not let it change.
+// chownTree gives a whole tree to uid:gid, as far as the filesystem allows.
 //
-// A share that is partly read-only — the global resources a workspace mounts so its instructions
-// cannot be rewritten from inside (ADR 0014) — is still a share the install can use. Refusing the
-// whole install over one mount is how acornfall inside an acornfall workspace stopped at
-// `lchown /srv/acornfall/.agents: read-only file system` (acornfall#99).
+// Ownership is a normalization, not a requirement: the machine presents the share at a fixed uid
+// either way (ADR 0021), so a path that refuses the change is skipped and the walk carries on. A
+// share that is partly read-only — the global resources a workspace mounts so its instructions
+// cannot be rewritten from inside (ADR 0014) — and one whose mount maps uids both refuse, and
+// neither is a reason to stop an install. That is how acornfall inside an acornfall workspace
+// stopped twice before it started (acornfall#99).
 func chownTree(path string, uid, gid int) error {
 	return chownTreeUsing(path, uid, gid, os.Lchown, readOnlyMount)
 }
@@ -643,14 +651,8 @@ func chownTreeUsing(path string, uid, gid int, chown func(string, int, int) erro
 		if info.IsDir() && readOnly(current) {
 			return filepath.SkipDir
 		}
-		if err := chown(current, uid, gid); err != nil {
-			// A read-only mount refuses the change itself, which is the same answer as the check
-			// above and not a reason to fail.
-			if errors.Is(err, syscall.EROFS) {
-				return nil
-			}
-			return err
-		}
+		// The result is the filesystem's answer, and either answer is fine.
+		_ = chown(current, uid, gid)
 		return nil
 	})
 }

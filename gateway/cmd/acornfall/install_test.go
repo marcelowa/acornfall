@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -1111,13 +1110,9 @@ func TestOwnershipSkipsWhatTheFilesystemWillNotChange(t *testing.T) {
 	}
 
 	var chowned []string
-	refused := filepath.Join(globals, "README.md")
 	err := chownTreeUsing(root, 1000, 1000,
 		func(path string, _, _ int) error {
 			chowned = append(chowned, path)
-			if path == refused {
-				return syscall.EROFS
-			}
 			return nil
 		},
 		func(path string) bool { return path == globals },
@@ -1134,19 +1129,12 @@ func TestOwnershipSkipsWhatTheFilesystemWillNotChange(t *testing.T) {
 		t.Errorf("the writable tree was not given to the owner: %v", chowned)
 	}
 
-	// A mount that is not flagged read-only but refuses the change is the same answer.
+	// A filesystem that refuses every change — a uid-mapping mount, a virtiofs share — is the
+	// case that stopped a nested install, and it is not a failure of the walk.
 	if err := chownTreeUsing(root, 1000, 1000,
-		func(string, int, int) error { return syscall.EROFS },
+		func(string, int, int) error { return errors.New("permission denied") },
 		func(string) bool { return false },
 	); err != nil {
-		t.Errorf("a filesystem that refused the change failed the walk: %v", err)
-	}
-
-	// Anything else is a failure worth reporting.
-	if err := chownTreeUsing(root, 1000, 1000,
-		func(string, int, int) error { return syscall.EACCES },
-		func(string) bool { return false },
-	); err == nil {
-		t.Error("a permission error was swallowed")
+		t.Errorf("a filesystem that refused every change failed the walk: %v", err)
 	}
 }
