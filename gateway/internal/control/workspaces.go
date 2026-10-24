@@ -107,6 +107,10 @@ func (w Workspace) SandboxPolicy(share string, disableVMNesting bool) sandbox.Po
 		Privileged:       w.Privileged,
 		DisableVMNesting: disableVMNesting,
 		Global:           sandbox.GlobalPaths(share),
+		// Every workspace gets a writable prefix, because the alternative is a workspace whose
+		// tools cannot be installed at all: the container is unprivileged (ADR 0021) and a bigger
+		// image only moves the list of tools somebody guessed (ADR 0034).
+		Prefixes: sandbox.DefaultPrefixes(w.Path),
 	}
 }
 

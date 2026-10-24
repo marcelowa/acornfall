@@ -41,6 +41,11 @@ type Policy struct {
 	// things (its own mounts, its own devices) is asking for this. A workspace that does not ask
 	// gets the default.
 	Privileged bool
+	// Prefixes are folders of the share the container sees at fixed system paths, read-write, so
+	// a workspace can install tools without root. It is the answer to the one cost of the
+	// unprivileged profile that a bigger image cannot pay (ADR 0034): `apt` needs root, and the
+	// tools that do not still install into a folder the image owns.
+	Prefixes []Prefix
 	// Egress allows the sandbox to reach the network. On by default for new workspaces;
 	// ADR 0012 records what that exposes.
 	Egress bool
@@ -81,6 +86,35 @@ const (
 	// stops the machine out from under every workspace at once.
 	NoIdleStop = "never"
 )
+
+// Prefix is a folder in the share that the container sees at a fixed system path, read-write.
+// It is how a workspace installs its own tools without root: the unprivileged profile cannot
+// write the image's `/usr/local`, and `apt` is not the only way to get a toolchain — the one
+// that works everywhere is "put the binary where the shell already looks". See ADR 0034.
+type Prefix struct {
+	// Source is the folder in the share, which must be under the share root like every bind.
+	Source string
+	// Target is where the container sees it, from PrefixTargets and nothing else.
+	Target string
+}
+
+// PrefixTargets is the closed set of paths a prefix may be mounted at. `/usr/local` is where a
+// toolchain looks by default; `/opt` is where a self-contained install goes. Everything else —
+// `/usr`, `/etc`, `/bin`, `/lib` — would let a workspace replace the image's own programs or its
+// resolver configuration, which is a different threat from installing tools, so the set is
+// short and named rather than a rule about paths in general.
+var PrefixTargets = []string{"/usr/local", "/opt"}
+
+// DefaultPrefixes is where a workspace's own tools live: inside the workspace, under the dot
+// folder it already uses for local resources (the repository's own .gitignore covers
+// `.acornfall/`), so the toolchain is part of the folder the user backs up and never part of
+// what they commit.
+func DefaultPrefixes(workspace string) []Prefix {
+	return []Prefix{
+		{Source: filepath.Join(workspace, ".acornfall", "prefix", "usr"), Target: "/usr/local"},
+		{Source: filepath.Join(workspace, ".acornfall", "prefix", "opt"), Target: "/opt"},
+	}
+}
 
 func (p Policy) withDefaults() Policy {
 	if strings.TrimSpace(p.Image) == "" {

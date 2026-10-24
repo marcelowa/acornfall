@@ -353,6 +353,14 @@ func (x *LXC) Create(ctx context.Context, policy Policy, policyDir string) error
 	if err != nil {
 		return err
 	}
+	// A mount whose source is absent is skipped by the runtime, quietly (`optional`), so a prefix
+	// that was never made would be a workspace with no prefix and no error anywhere. Make the
+	// folders this container declared, and nothing else.
+	for _, bind := range container.Binds {
+		if err := ensureBindSource(bind, settings.UID, settings.GID); err != nil {
+			return err
+		}
+	}
 	config, err := container.LXCConfig(settings)
 	if err != nil {
 		return err
@@ -448,6 +456,27 @@ func (x *LXC) RemoveMachine(ctx context.Context) error { return x.machine.Remove
 // gateway, which exits on SIGTERM, and an init that exits is a machine that powers off. The
 // engine's own stop asks the machine to stop gracefully, and nothing inside answers that — a
 // person reads the wait as "it does not stop" (measured on a real install).
+// ensureBindSource makes a bind's source folder where it is missing, and gives it to the share's
+// owner. Only a folder that did not exist is touched: a workspace's own folder already belongs to
+// somebody, and this is not the place to say otherwise.
+func ensureBindSource(bind Bind, uid, gid int) error {
+	if bind.File || strings.TrimSpace(bind.Source) == "" {
+		return nil
+	}
+	if _, err := os.Stat(bind.Source); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(bind.Source, 0o755); err != nil {
+		return fmt.Errorf("sandbox: making the prefix %s: %w", bind.Source, err)
+	}
+	if uid > 0 {
+		// Best effort: the machine normalizes the share's owner (ADR 0021), so a chown the mount
+		// refuses is somebody else's rule doing its job, not a failure to report here.
+		_ = os.Chown(bind.Source, uid, gid)
+	}
+	return nil
+}
+
 func (x *LXC) MachineStop(ctx context.Context) error {
 	if !x.engine.Installed() {
 		return nil

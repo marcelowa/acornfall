@@ -675,6 +675,17 @@ func proveASecondWorkspaceRunsTools(t *testing.T, ctx context.Context, url, shar
 			if _, err := os.Stat(filepath.Join(share, "workspaces", "second", "tool-ran.txt")); err != nil {
 				t.Fatalf("the tool ran, but its file is not in the second workspace's mount: %v\n--- transcript ---\n%s", err, transcript.String())
 			}
+			// The prefix, and the whole reason it exists: an unprivileged container installed a
+			// tool into /usr/local, ran it, and the file is in the workspace afterwards. A bind
+			// that landed nowhere would leave this path empty and say nothing (ADR 0034).
+			if !strings.Contains(transcript.String(), "prefix-ok") {
+				t.Fatalf("the tool never ran from /usr/local/bin: the prefix did not mount\n--- transcript ---\n%s", transcript.String())
+			}
+			installed := filepath.Join(share, "workspaces", "second", ".acornfall", "prefix", "usr", "bin", "proof")
+			if _, err := os.Stat(installed); err != nil {
+				t.Fatalf("a tool wrote to /usr/local but nothing reached the workspace's prefix at %s: %v", installed, err)
+			}
+			t.Logf("the workspace installed into its own prefix: %s", installed)
 			return
 		}
 	}
@@ -777,13 +788,14 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
-	// The one command this proof asks for: a tool in the second workspace. The file it writes is
-	// read from the share afterwards, so the mount and the container are both proved. The
-	// absolute path is the point: the bash tool has no promise about its working directory, and
-	// a relative file landed in the container's rootfs instead of the workspace.
+	// The one command this proof asks for: a tool in the second workspace, and a tool installed
+	// into its own prefix. The files it writes are read from the share afterwards, so the mount,
+	// the container, and the prefix are all proved. The absolute paths are the point: the bash
+	// tool has no promise about its working directory, and a relative file landed in the
+	// container's rootfs instead of the workspace.
 	second := filepath.Join(share, "workspaces", "second")
 	script := filepath.Join(share, "dev-script.json")
-	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second)
+	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; { echo '#!/bin/sh'; echo 'echo prefix-ok'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second)
 	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
 		t.Fatal(err)
 	}

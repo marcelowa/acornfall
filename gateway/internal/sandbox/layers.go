@@ -90,7 +90,7 @@ func (p Policy) Container(shareRoot string) (Container, error) {
 	root := filepath.Clean(shareRoot)
 	// The workspace read-write at its own path, the globals read-only at theirs. Read-only is
 	// the decision (docs/adr/0014-global-resources-in-the-sandbox.md), not a detail.
-	binds := make([]Bind, 0, 1+len(p.Global))
+	binds := make([]Bind, 0, 1+len(p.Global)+len(p.Prefixes))
 	workspace, err := bindPath(root, p.Workspace, false)
 	if err != nil {
 		return Container{}, err
@@ -102,6 +102,13 @@ func (p Policy) Container(shareRoot string) (Container, error) {
 			return Container{}, err
 		}
 		binds = append(binds, global)
+	}
+	for _, prefix := range p.Prefixes {
+		bound, err := prefixBind(root, prefix)
+		if err != nil {
+			return Container{}, err
+		}
+		binds = append(binds, bound)
 	}
 	memory, err := parseMemory(p.Memory)
 	if err != nil {
@@ -166,6 +173,35 @@ func bindPath(root, path string, readOnly bool) (Bind, error) {
 	// and the kind it was told is the kind it would have made.
 	info, err := os.Stat(clean)
 	return Bind{Source: clean, Target: clean, ReadOnly: readOnly, File: err == nil && !info.IsDir()}, nil
+}
+
+// prefixBind is one declared prefix: a source inside the share, a target from the closed set.
+// The bind is read-write on purpose — installing into it is the whole point — and it is never a
+// file: a prefix is a folder a toolchain grows inside.
+func prefixBind(root string, prefix Prefix) (Bind, error) {
+	target := filepath.Clean(strings.TrimSpace(prefix.Target))
+	allowed := false
+	for _, candidate := range PrefixTargets {
+		if target == candidate {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return Bind{}, fmt.Errorf("sandbox: %q is not a prefix target: a prefix may be mounted at %s, and nowhere else", prefix.Target, strings.Join(PrefixTargets, " or "))
+	}
+	if strings.TrimSpace(prefix.Source) == "" {
+		return Bind{}, fmt.Errorf("sandbox: the prefix at %s names no source folder in the share", target)
+	}
+	bound, err := bindPath(root, prefix.Source, false)
+	if err != nil {
+		return Bind{}, err
+	}
+	// The target is what the policy said, not the source: this is the one bind whose two sides
+	// are allowed to differ, and it is why the render path already writes them separately.
+	bound.Target = target
+	bound.File = false
+	return bound, nil
 }
 
 // Memory as a policy writes it: a whole number and a binary unit, because "2G" in a policy
