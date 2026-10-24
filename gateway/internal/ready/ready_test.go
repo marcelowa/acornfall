@@ -33,6 +33,15 @@ func byName(requirements []Requirement, name string) Requirement {
 
 func TestSatisfiedInstallIsQuiet(t *testing.T) {
 	home := t.TempDir()
+	// The hypervisor is a device this machine either has or does not: point it at one the test
+	// made, or the test asserts whatever machine it happens to run on.
+	device := filepath.Join(t.TempDir(), "kvm")
+	if err := os.WriteFile(device, nil, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	was := devKVM
+	devKVM = device
+	t.Cleanup(func() { devKVM = was })
 	requirements := Check(testInput(home))
 	if !Satisfied(requirements) {
 		for _, requirement := range requirements {
@@ -113,5 +122,25 @@ func TestWorkerSkewAgainstBinarySatisfies(t *testing.T) {
 	input.Worker = "v0.9.9"
 	if requirement := byName(Check(input), "worker"); !requirement.OK {
 		t.Fatalf("sources matching the binary must satisfy: %+v", requirement)
+	}
+}
+
+// The state this was found in: the node exists, and the container cannot open it. "present" was
+// the wrong answer, and it was a green line that hid a /dev/kvm no workspace could use.
+func TestAKVMThatCannotBeOpenedIsNotAHypervisor(t *testing.T) {
+	device := filepath.Join(t.TempDir(), "kvm")
+	if err := os.WriteFile(device, nil, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	was := devKVM
+	devKVM = device
+	t.Cleanup(func() { devKVM = was })
+
+	requirement := byName(Check(testInput(t.TempDir())), "hypervisor")
+	if requirement.OK {
+		t.Fatal("a /dev/kvm this user cannot open was reported as a working hypervisor")
+	}
+	if requirement.Fix == "" {
+		t.Error("the refusal does not say what to do about it")
 	}
 }

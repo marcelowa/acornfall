@@ -131,3 +131,27 @@ func homeOf(containerDir string, uid int) string {
 	}
 	return ""
 }
+
+// kvmDevice is the machine's KVM node, a variable so a test can point at a file it owns.
+var kvmDevice = "/dev/kvm"
+
+// makeKVMOpenable makes the machine's /dev/kvm readable by the uid a workspace runs as.
+//
+// A fresh machine's node is 0600 root:root, so the device a container is handed is one it cannot
+// open: the bind lands, the cgroup rule allows it, and every attempt returns EACCES. ADR 0021
+// named all three pieces and the appliance was doing two of them. Measured on acornfall's own
+// workspace: /dev/kvm present, `dd if=/dev/kvm` → Permission denied, and `doctor` calling the
+// hypervisor "present" because it only stat'ed it.
+//
+// World-readable rather than a group: the machine is single-tenant and the boundary is the VM,
+// not the mode, so a group would be one more thing to keep in step with the share's owner.
+func makeKVMOpenable() error {
+	info, err := os.Stat(kvmDevice)
+	if err != nil {
+		return nil // no device to make readable: a machine without nesting is a supported state
+	}
+	if info.Mode().Perm() == 0o666 {
+		return nil
+	}
+	return os.Chmod(kvmDevice, 0o666)
+}

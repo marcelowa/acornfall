@@ -196,6 +196,7 @@ func (x *InMachine) Create(ctx context.Context, policy Policy, policyDir string)
 		RootfsOwner: settings.RootfsOwner(),
 		RootfsGroup: settings.RootfsGroup(),
 		Home:        ContainerHome,
+		KVM:         settings.KVM,
 	}
 	for _, bind := range container.Binds {
 		payload.Binds = append(payload.Binds, shim.Bind{Source: bind.Source, Target: bind.Target, File: bind.File})

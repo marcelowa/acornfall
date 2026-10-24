@@ -528,6 +528,13 @@ func (t *session) create(message Message, payload CreatePayload) error {
 	if err := passwdFor(rootfs, payload.Home, payload.Owner, payload.Group); err != nil {
 		return err
 	}
+	// The device this container was given has to be one it can open: a fresh machine's node is
+	// 0600 root:root, so the bind and the cgroup rule are two thirds of it (ADR 0021).
+	if payload.KVM {
+		if err := makeKVMOpenable(); err != nil {
+			return err
+		}
+	}
 	// The rootfs belongs to the container's own root, not to the share's owner: a container whose
 	// filesystem is someone else's can start and then not write it.
 	if payload.RootfsOwner > 0 {

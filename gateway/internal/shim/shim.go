@@ -138,6 +138,9 @@ type CreatePayload struct {
 	// choice and the shim's to make real: the bridge, its address and its way out of the machine
 	// are made here, once, before the first container that wants them starts.
 	Network *NetworkPayload `json:"network,omitempty"`
+	// KVM says this container was given the machine's /dev/kvm, so the node has to be openable
+	// by the uid its commands run as (makeKVMOpenable).
+	KVM bool `json:"kvm,omitempty"`
 }
 
 // Bind is one mount's two ends, enough for the shim to prepare the target.

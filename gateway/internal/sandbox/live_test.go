@@ -726,6 +726,15 @@ func proveASecondWorkspaceRunsTools(t *testing.T, ctx context.Context, url, shar
 			if strings.TrimSpace(string(home)) != "home-bytes" {
 				t.Errorf("~ is not the workspace's own home folder: %q", home)
 			}
+			// ADR 0021's third piece: the device a container is given has to be one it can open, or a
+			// workspace cannot run the kind of thing that needs a hypervisor — acornfall itself.
+			kvm, err := os.ReadFile(filepath.Join(share, "workspaces", "second", "kvm.txt"))
+			if err != nil {
+				t.Fatalf("the container did not report its hypervisor device: %v", err)
+			}
+			if strings.TrimSpace(string(kvm)) != "openable" {
+				t.Errorf("/dev/kvm is in the container and cannot be opened, so nothing nested can run: %q", kvm)
+			}
 			t.Logf("the workspace installed into its own prefix: %s", installed)
 			return
 		}
@@ -836,7 +845,7 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	// container's rootfs instead of the workspace.
 	second := filepath.Join(share, "workspaces", "second")
 	script := filepath.Join(share, "dev-script.json")
-	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; id -un > %s/whoami.txt; test -s /etc/ssl/certs/ca-certificates.crt && echo present > %s/roots.txt || echo missing > %s/roots.txt; printf home-bytes > ~/home-proof.txt; { echo HOME=${HOME-unset}; grep :999: /etc/passwd; ls -ld /home/acornfall; grep ' /home/acornfall ' /proc/self/mountinfo; ls -la /home/acornfall; } > %s/diag.txt 2>&1; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second, second, second, second, second)
+	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; id -un > %s/whoami.txt; test -s /etc/ssl/certs/ca-certificates.crt && echo present > %s/roots.txt || echo missing > %s/roots.txt; printf home-bytes > ~/home-proof.txt; [ -r /dev/kvm ] && echo openable > %s/kvm.txt || echo locked > %s/kvm.txt; { echo HOME=${HOME-unset}; grep :999: /etc/passwd; ls -ld /home/acornfall; grep ' /home/acornfall ' /proc/self/mountinfo; ls -la /home/acornfall; } > %s/diag.txt 2>&1; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second, second, second, second, second, second, second)
 	// A rule that is not JSON is a turn the model never gets to ask, and the failure arrives as a
 	// harness SyntaxError a minute into a release proof. It is cheap to say so here.
 	if !json.Valid([]byte(rules)) {

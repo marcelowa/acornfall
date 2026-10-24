@@ -234,3 +234,36 @@ func TestTheHomeComesFromTheContainersOwnPasswd(t *testing.T) {
 		t.Errorf("a container whose passwd cannot be read got a home: %q", got)
 	}
 }
+
+// The third piece ADR 0021 names: a fresh machine's node is 0600 root:root, so a container given
+// the device is given one it cannot open. Measured on acornfall's own workspace.
+func TestTheKVMAWorskpaceIsGivenCanBeOpened(t *testing.T) {
+	device := filepath.Join(t.TempDir(), "kvm")
+	if err := os.WriteFile(device, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	was := kvmDevice
+	kvmDevice = device
+	t.Cleanup(func() { kvmDevice = was })
+
+	if err := makeKVMOpenable(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o666 {
+		t.Errorf("mode = %o, want 666: the workspace's uid still cannot open it", info.Mode().Perm())
+	}
+}
+
+// A machine with no device is a supported state, not an error: nesting is optional.
+func TestAMachineWithNoKVMSaysSoQuietly(t *testing.T) {
+	was := kvmDevice
+	kvmDevice = filepath.Join(t.TempDir(), "no-device-here")
+	t.Cleanup(func() { kvmDevice = was })
+	if err := makeKVMOpenable(); err != nil {
+		t.Fatalf("no /dev/kvm failed the create: %v", err)
+	}
+}

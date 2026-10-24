@@ -144,14 +144,26 @@ func engine(input Input) Requirement {
 	return Requirement{"engine", true, name + " installed", ""}
 }
 
+// devKVM is the device a hypervisor would open. A variable so a test can point at a file it owns.
+var devKVM = "/dev/kvm"
+
 func hypervisor() Requirement {
 	if runtime.GOOS != "linux" {
 		return Requirement{"hypervisor", true, "not applicable on " + runtime.GOOS, ""}
 	}
-	if _, err := os.Stat("/dev/kvm"); err != nil {
-		return Requirement{"hypervisor", false, "no /dev/kvm", "run where KVM exists, or --sandbox-engine host (unconfined)"}
+	// Stat is not enough: a node that exists and cannot be opened is a real state, and this
+	// check used to call it "present". The install this was found on had /dev/kvm, a container
+	// that could not open it, and a green doctor line (sandbox.kvmHint says the same thing from
+	// the other side). Open it the way a hypervisor would.
+	device, err := os.OpenFile(devKVM, os.O_RDWR, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Requirement{"hypervisor", false, "no /dev/kvm", "run where KVM exists, or --sandbox-engine host (unconfined)"}
+		}
+		return Requirement{"hypervisor", false, "/dev/kvm present but not openable", "make /dev/kvm readable by this user: the appliance does it for a workspace, a host needs the user in the kvm group"}
 	}
-	return Requirement{"hypervisor", true, "/dev/kvm present", ""}
+	_ = device.Close()
+	return Requirement{"hypervisor", true, "/dev/kvm openable", ""}
 }
 
 func credentials(input Input) Requirement {
