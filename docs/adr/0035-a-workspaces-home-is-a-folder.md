@@ -59,8 +59,10 @@ environment variables to correct one field, and every workspace would have neede
   and a caller that passes the machine's own `HOME=/` turns every `~` into the root of the
   container's filesystem — measured on beta 60 to 62: the home bind was mounted and
   `~/home-proof.txt` landed in the rootfs, because the environment said `/`. The shim now reads
-  the container's own passwd for the uid it is about to run as and sets `HOME` from it, dropping
-  any `HOME` the caller sent. A container whose passwd cannot be read keeps the caller's.
+  the container's own passwd for the uid it is about to run as and sets `HOME` from it. The
+  appliance does not run the shim's exec — the worker spawns `lxc-attach` itself — so the same
+  lookup is in `worker/src/lxc.ts`, which is the one that ships. Two adapters, one rule, a test
+  each; the correction cost beta 63 to find.
 - **An image that already has a home keeps it.** The entry is written only when the uid is
   unnamed (acornfall#98), so an image with `node:x:1000:1000:…:/home/node` keeps `/home/node`,
   and this bind is then a folder nothing points at.
