@@ -716,6 +716,15 @@ func proveASecondWorkspaceRunsTools(t *testing.T, ctx context.Context, url, shar
 			if strings.TrimSpace(string(roots)) != "present" {
 				t.Errorf("the container has no certificate bundle, so its first https request fails on the CA: %q", roots)
 			}
+			// `~` is a folder of the workspace, not the repository (ADR 0035): a tool that writes its
+			// own settings must not appear in somebody's `git status`.
+			home, err := os.ReadFile(filepath.Join(share, "workspaces", "second", ".acornfall", "home", "home-proof.txt"))
+			if err != nil {
+				t.Fatalf("the container could not write to its home: %v", err)
+			}
+			if strings.TrimSpace(string(home)) != "home-bytes" {
+				t.Errorf("~ is not the workspace's own home folder: %q", home)
+			}
 			t.Logf("the workspace installed into its own prefix: %s", installed)
 			return
 		}
@@ -826,7 +835,7 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	// container's rootfs instead of the workspace.
 	second := filepath.Join(share, "workspaces", "second")
 	script := filepath.Join(share, "dev-script.json")
-	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; id -un > %s/whoami.txt; test -s /etc/ssl/certs/ca-certificates.crt && echo present > %s/roots.txt || echo missing > %s/roots.txt; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second, second, second, second)
+	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; id -un > %s/whoami.txt; test -s /etc/ssl/certs/ca-certificates.crt && echo present > %s/roots.txt || echo missing > %s/roots.txt; printf home-bytes > ~/home-proof.txt; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second, second, second, second)
 	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
 		t.Fatal(err)
 	}

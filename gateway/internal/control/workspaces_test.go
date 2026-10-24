@@ -135,4 +135,7 @@ func TestAWorkspacesPolicyCarriesItsWritablePrefix(t *testing.T) {
 	if !found {
 		t.Fatalf("the container has no /usr/local bind: %+v", container.Binds)
 	}
+	if policy.Home == "" {
+		t.Error("the derived policy names no home: ~ would be inside the rootfs")
+	}
 }

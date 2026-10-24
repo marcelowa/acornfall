@@ -90,12 +90,23 @@ func (p Policy) Container(shareRoot string) (Container, error) {
 	root := filepath.Clean(shareRoot)
 	// The workspace read-write at its own path, the globals read-only at theirs. Read-only is
 	// the decision (docs/adr/0014-global-resources-in-the-sandbox.md), not a detail.
-	binds := make([]Bind, 0, 1+len(p.Global)+len(p.Prefixes))
+	binds := make([]Bind, 0, 2+len(p.Global)+len(p.Prefixes))
 	workspace, err := bindPath(root, p.Workspace, false)
 	if err != nil {
 		return Container{}, err
 	}
 	binds = append(binds, workspace)
+	// The home is a folder of its own, not the workspace: `~` is where a tool writes its own
+	// settings, and the workspace is a repository whose `git status` belongs to whoever owns it
+	// (ADR 0035). A bind, for the same reason the prefix is: a home inside the rootfs would be
+	// thrown away with the container.
+	if strings.TrimSpace(p.Home) != "" {
+		home, err := bindAt(root, p.Home, ContainerHome, false)
+		if err != nil {
+			return Container{}, err
+		}
+		binds = append(binds, home)
+	}
 	for _, path := range p.Global {
 		global, err := bindPath(root, path, true)
 		if err != nil {
@@ -193,13 +204,20 @@ func prefixBind(root string, prefix Prefix) (Bind, error) {
 	if strings.TrimSpace(prefix.Source) == "" {
 		return Bind{}, fmt.Errorf("sandbox: the prefix at %s names no source folder in the share", target)
 	}
-	bound, err := bindPath(root, prefix.Source, false)
+	return bindAt(root, prefix.Source, target, false)
+}
+
+// bindAt is one bind whose two sides differ: a folder of the share, seen at a fixed path in the
+// container. The share-root rule is still bindPath's — a target is a name, never a way out of the
+// root — and the caller has already decided the target is one it means.
+func bindAt(root, source, target string, readOnly bool) (Bind, error) {
+	bound, err := bindPath(root, source, readOnly)
 	if err != nil {
 		return Bind{}, err
 	}
-	// The target is what the policy said, not the source: this is the one bind whose two sides
-	// are allowed to differ, and it is why the render path already writes them separately.
-	bound.Target = target
+	// The target is what was asked for, not the source: it is why the render path already writes
+	// the two sides separately.
+	bound.Target = filepath.Clean(target)
 	bound.File = false
 	return bound, nil
 }

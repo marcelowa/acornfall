@@ -46,6 +46,11 @@ type Policy struct {
 	// unprivileged profile that a bigger image cannot pay (ADR 0034): `apt` needs root, and the
 	// tools that do not still install into a folder the image owns.
 	Prefixes []Prefix
+	// Home is the folder of the share that becomes the container's `/home/acornfall`: `~` is where
+	// a tool writes its own settings, and the workspace is a repository whose `git status` is
+	// somebody else's (ADR 0035). Empty means the container keeps the image's home, which is
+	// inside the rootfs and is thrown away with it.
+	Home string
 	// Egress allows the sandbox to reach the network. On by default for new workspaces;
 	// ADR 0012 records what that exposes.
 	Egress bool
@@ -114,6 +119,19 @@ func DefaultPrefixes(workspace string) []Prefix {
 		{Source: filepath.Join(workspace, ".acornfall", "prefix", "usr"), Target: "/usr/local"},
 		{Source: filepath.Join(workspace, ".acornfall", "prefix", "opt"), Target: "/opt"},
 	}
+}
+
+// ContainerHome is where a workspace's home is inside the container. It is a fixed path, not the
+// workspace: `~` is where a tool writes its own settings, and a workspace is a repository whose
+// `git status` belongs to whoever owns it (ADR 0035). The folder behind it is the workspace's,
+// so it outlives the container.
+const ContainerHome = "/home/acornfall"
+
+// DefaultHome is the folder in the share that becomes ContainerHome: inside the workspace, under
+// the dot folder it already uses for local resources, so it is backed up with the workspace and
+// never part of what a user commits.
+func DefaultHome(workspace string) string {
+	return filepath.Join(workspace, ".acornfall", "home")
 }
 
 func (p Policy) withDefaults() Policy {

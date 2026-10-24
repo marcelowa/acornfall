@@ -187,7 +187,7 @@ func TestCreatingAContainerGivesItANameAndTheMachinesRoots(t *testing.T) {
 		Config: "lxc.uts.name = app\n",
 		Owner:  999,
 		Group:  991,
-		Home:   "/srv/acornfall/workspaces/app",
+		Home:   "/home/acornfall",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -198,7 +198,7 @@ func TestCreatingAContainerGivesItANameAndTheMachinesRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no passwd in the container the shim made: %v", err)
 	}
-	if !strings.Contains(string(passwd), "acornfall:x:999:991:acornfall:/srv/acornfall/workspaces/app:/bin/sh") {
+	if !strings.Contains(string(passwd), "acornfall:x:999:991:acornfall:/home/acornfall:/bin/sh") {
 		t.Errorf("the container has no entry for the uid its tools run as:\n%s", passwd)
 	}
 	roots, err := os.ReadFile(filepath.Join(rootfs, caBundleInContainer))

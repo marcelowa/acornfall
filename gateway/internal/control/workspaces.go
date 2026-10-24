@@ -111,6 +111,9 @@ func (w Workspace) SandboxPolicy(share string, disableVMNesting bool) sandbox.Po
 		// tools cannot be installed at all: the container is unprivileged (ADR 0021) and a bigger
 		// image only moves the list of tools somebody guessed (ADR 0034).
 		Prefixes: sandbox.DefaultPrefixes(w.Path),
+		// The home is the workspace's own folder too, for the same reason: it must outlive the
+		// container, and it must not be the repository (ADR 0035).
+		Home: sandbox.DefaultHome(w.Path),
 	}
 }
 

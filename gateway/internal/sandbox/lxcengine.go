@@ -376,7 +376,7 @@ func (x *LXC) Create(ctx context.Context, policy Policy, policyDir string) error
 		Group:       settings.GID,
 		RootfsOwner: settings.RootfsOwner(),
 		RootfsGroup: settings.RootfsGroup(),
-		Home:        policy.Workspace,
+		Home:        ContainerHome,
 	}
 	for _, bind := range container.Binds {
 		payload.Binds = append(payload.Binds, shim.Bind{Source: bind.Source, Target: bind.Target, File: bind.File})
