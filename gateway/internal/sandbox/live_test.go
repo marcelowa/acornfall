@@ -631,6 +631,17 @@ func proveASecondWorkspaceRunsTools(t *testing.T, ctx context.Context, url, shar
 		t.Fatal("the second workspace reported ready with no conversation")
 	}
 
+	// The source side of the prefix, before the turn: whether the engine made it at all, and what
+	// is in it, is the first thing to know when the mount does not land. The runtime skips an
+	// optional mount whose source is absent without a word, so this is the only place the absence
+	// is visible.
+	prefixSource := filepath.Join(share, "workspaces", "second", ".acornfall", "prefix", "usr")
+	if entries, err := os.ReadDir(prefixSource); err == nil {
+		t.Logf("prefix source exists before the turn: %s (%d entries)", prefixSource, len(entries))
+	} else {
+		t.Logf("prefix source is not there before the turn: %v", err)
+	}
+
 	response, err = http.Post(url+"/api/workspaces/second/conversations/"+conversation+"/messages",
 		"application/json", strings.NewReader(`{"text":"prove the second workspace"}`))
 	if err != nil {
@@ -676,14 +687,17 @@ func proveASecondWorkspaceRunsTools(t *testing.T, ctx context.Context, url, shar
 				t.Fatalf("the tool ran, but its file is not in the second workspace's mount: %v\n--- transcript ---\n%s", err, transcript.String())
 			}
 			// The prefix, and the whole reason it exists: an unprivileged container installed a
-			// tool into /usr/local, ran it, and the file is in the workspace afterwards. A bind
-			// that landed nowhere would leave this path empty and say nothing (ADR 0034).
-			if !strings.Contains(transcript.String(), "prefix-ok") {
-				t.Fatalf("the tool never ran from /usr/local/bin: the prefix did not mount\n--- transcript ---\n%s", transcript.String())
-			}
+			// tool into /usr/local and the bytes are in the workspace afterwards. Checking the
+			// transcript instead would be checking the command that was asked for — it contains
+			// the same words — so the assertion is the file, and the transcript's DIAG lines say
+			// which way it failed when it does.
 			installed := filepath.Join(share, "workspaces", "second", ".acornfall", "prefix", "usr", "bin", "proof")
-			if _, err := os.Stat(installed); err != nil {
-				t.Fatalf("a tool wrote to /usr/local but nothing reached the workspace's prefix at %s: %v", installed, err)
+			payload, readErr := os.ReadFile(installed)
+			if readErr != nil {
+				t.Fatalf("a tool wrote to /usr/local and nothing reached the workspace's prefix at %s: %v\n--- transcript ---\n%s", installed, readErr, transcript.String())
+			}
+			if !strings.Contains(string(payload), "from-the-prefix-bytes") {
+				t.Fatalf("the file in the prefix is not the one the tool wrote: %q", payload)
 			}
 			t.Logf("the workspace installed into its own prefix: %s", installed)
 			return
@@ -795,7 +809,7 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	// container's rootfs instead of the workspace.
 	second := filepath.Join(share, "workspaces", "second")
 	script := filepath.Join(share, "dev-script.json")
-	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; { echo '#!/bin/sh'; echo 'echo prefix-ok'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second)
+	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second)
 	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
 		t.Fatal(err)
 	}
