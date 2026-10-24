@@ -130,6 +130,10 @@ type CreatePayload struct {
 	// find out. Zero leaves the rootfs as the image made it.
 	RootfsOwner int `json:"rootfsOwner,omitempty"`
 	RootfsGroup int `json:"rootfsGroup,omitempty"`
+	// Home is the workspace, and becomes the home folder of the passwd entry the container is
+	// given for the share's owner. Empty is "/": an entry is needed for the uid, not for the
+	// folder, and a container with no home is worse than one with the wrong home.
+	Home string `json:"home,omitempty"`
 	// Network is the network this container joins, or nil for none at all. It is the engine's
 	// choice and the shim's to make real: the bridge, its address and its way out of the machine
 	// are made here, once, before the first container that wants them starts.

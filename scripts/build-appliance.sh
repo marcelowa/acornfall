@@ -58,7 +58,10 @@ cat >"$ROOTFS/tmp/appliance-install.sh" <<'INNER'
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq lxc skopeo umoci jq unzip curl iptables iproute2
+apt-get install -y -qq lxc skopeo umoci jq unzip curl iptables iproute2 ca-certificates
+# ca-certificates is named rather than inherited from curl: the shim hands this store to every
+# workspace container, because a workspace image has no roots of its own and the first https
+# request inside one fails with "Problem with the SSL CA cert" (acornfall#98).
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 INNER

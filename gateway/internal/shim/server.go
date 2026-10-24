@@ -506,6 +506,15 @@ func (t *session) create(message Message, payload CreatePayload) error {
 			return err
 		}
 	}
+	// What the image cannot have, because a container is not the machine it runs on: the machine's
+	// certificate authorities, and a name for the uid the tools run as. Both before the rootfs is
+	// handed over, so they are owned like the rest of it (acornfall#98).
+	if err := certsFor(rootfs); err != nil {
+		return err
+	}
+	if err := passwdFor(rootfs, payload.Home, payload.Owner, payload.Group); err != nil {
+		return err
+	}
 	// The rootfs belongs to the container's own root, not to the share's owner: a container whose
 	// filesystem is someone else's can start and then not write it.
 	if payload.RootfsOwner > 0 {
