@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { DirEntry } from "./files.ts";
 import {
@@ -63,13 +64,38 @@ export function lxcAttachArgs(
 	name: string,
 	argv: readonly string[],
 	owner?: { uid: number; gid: number } | undefined,
+	/** The home the container's own passwd names, from homeOf. Empty leaves the environment as it is. */
+	home?: string | undefined,
 ): string[] {
 	const args = ["lxc-attach", "-n", name];
 	if (owner !== undefined && owner.uid > 0) {
 		args.push("-u", String(owner.uid), "-g", String(owner.gid));
 	}
+	// The attach inherits this process's environment, and the appliance's HOME is "/" — so every
+	// `~` in a workspace would resolve to the root of the container's filesystem, where a tool's
+	// settings are thrown away with the rootfs (measured, beta 60 to 63: the home bind was mounted
+	// and ~/home-proof.txt landed in the rootfs).
+	if (home !== undefined && home !== "") args.push("-v", `HOME=${home}`);
 	args.push("--", ...argv);
 	return args;
+}
+
+/**
+ * homeOf is the home the container's own passwd names for uid, or "" when it cannot be read — a
+ * container made by a different layout, or a uid the image does not name. Empty leaves the
+ * caller's environment alone, because no answer is not better than a wrong one.
+ */
+export function homeOf(rootfs: string, uid: number): string {
+	try {
+		for (const line of readFileSync(join(rootfs, "etc", "passwd"), "utf8").split("\n")) {
+			const fields = line.split(":");
+			if (fields.length < 7) continue;
+			if (Number(fields[2]) === uid) return fields[5] ?? "";
+		}
+	} catch {
+		// No passwd to read: the caller's environment stands.
+	}
+	return "";
 }
 
 class LXCClient implements SandboxClient {
@@ -147,7 +173,9 @@ class LXCClient implements SandboxClient {
 						...inner,
 					];
 		const owner = await this.ownerOf();
-		const proc = Bun.spawn(lxcAttachArgs(this.name, argv, owner), {
+		// The container's home, not this process's: see lxcAttachArgs.
+		const home = owner === undefined ? "" : homeOf(this.rootfs, owner.uid);
+		const proc = Bun.spawn(lxcAttachArgs(this.name, argv, owner, home), {
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",

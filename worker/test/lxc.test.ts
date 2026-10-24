@@ -1,5 +1,8 @@
-import { expect, test } from "bun:test";
-import { engineName, isOngoingCreation, lxcAttachArgs, machinePath, rootfsOf } from "../src/lxc.ts";
+import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { engineName, homeOf, isOngoingCreation, lxcAttachArgs, machinePath, rootfsOf } from "../src/lxc.ts";
 
 // The name is the one control sends, so the two sides of one install cannot disagree about
 // which engine is in use.
@@ -66,4 +69,32 @@ test("a tool runs as the workspace's owner", () => {
 		"--",
 		"hostname",
 	]);
+});
+
+// The attach inherits this process's environment, and the appliance's HOME is "/", so every `~`
+// in a workspace resolved to the root of the container's filesystem. Beta 60 to 63 mounted the
+// home and wrote nothing into it (measured).
+describe("the home a command gets", () => {
+	test("is the container's, not the machine's", () => {
+		const args = lxcAttachArgs("acornfall-x", ["hostname"], { uid: 1001, gid: 1001 }, "/home/acornfall");
+		expect(args).toContain("-v");
+		expect(args[args.indexOf("-v") + 1]).toBe("HOME=/home/acornfall");
+	});
+
+	test("is left alone when the container cannot name the uid", () => {
+		expect(lxcAttachArgs("acornfall-x", ["hostname"], { uid: 1001, gid: 1001 }, "")).not.toContain("-v");
+	});
+
+	test("is read from the container's own passwd", async () => {
+		const rootfs = await mkdtemp(join(tmpdir(), "acornfall-home-"));
+		await mkdir(join(rootfs, "etc"), { recursive: true });
+		await writeFile(
+			join(rootfs, "etc", "passwd"),
+			"root:x:0:0:root:/root:/bin/sh\nacornfall:x:1001:1001:acornfall:/home/acornfall:/bin/sh\n",
+		);
+		expect(homeOf(rootfs, 1001)).toBe("/home/acornfall");
+		expect(homeOf(rootfs, 0)).toBe("/root");
+		expect(homeOf(rootfs, 4242)).toBe("");
+		expect(homeOf(join(rootfs, "nowhere"), 1001)).toBe("");
+	});
 });
