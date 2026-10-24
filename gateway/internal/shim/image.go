@@ -104,3 +104,30 @@ func appendIfMissing(path string, field, id int, line string) error {
 	}
 	return os.WriteFile(path, contents, 0o644)
 }
+
+// homeOf is the home the container's own passwd entry names for uid.
+//
+// The exec environment is cleared and then filled with what the caller asked for, and a caller
+// that passes the machine's own `HOME=/` makes every `~` in a workspace resolve to the root of the
+// container's filesystem. That is where a tool's settings are thrown away with the rootfs: beta 60
+// to 62 measured exactly this, a home bind mounted at /home/acornfall and `~/home-proof.txt`
+// landing in the rootfs instead, because the environment said HOME=/.
+//
+// An empty answer means the entry could not be read — a container made by a different runtime
+// layout, or a uid the image does not name — and the caller's environment is left as it was.
+func homeOf(containerDir string, uid int) string {
+	contents, err := os.ReadFile(filepath.Join(containerDir, "rootfs", "etc", "passwd"))
+	if err != nil {
+		return ""
+	}
+	for entry := range strings.SplitSeq(string(contents), "\n") {
+		fields := strings.Split(entry, ":")
+		if len(fields) < 6 {
+			continue
+		}
+		if value, convErr := strconv.Atoi(fields[2]); convErr == nil && value == uid {
+			return fields[5]
+		}
+	}
+	return ""
+}

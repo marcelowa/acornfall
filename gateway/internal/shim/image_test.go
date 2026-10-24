@@ -209,3 +209,28 @@ func TestCreatingAContainerGivesItANameAndTheMachinesRoots(t *testing.T) {
 		t.Errorf("the container's bundle is not the machine's: %q", roots)
 	}
 }
+
+// The container's home is the container's, whatever the caller's environment says. This is the
+// lookup the exec uses; the release proof is what shows it reaches the command.
+func TestTheHomeComesFromTheContainersOwnPasswd(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "rootfs", "etc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	passwd := "root:x:0:0:root:/root:/bin/sh\nacornfall:x:999:991:acornfall:/home/acornfall:/bin/sh\n"
+	if err := os.WriteFile(filepath.Join(dir, "rootfs", "etc", "passwd"), []byte(passwd), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := homeOf(dir, 999); got != "/home/acornfall" {
+		t.Errorf("home of 999 = %q, want /home/acornfall", got)
+	}
+	if got := homeOf(dir, 0); got != "/root" {
+		t.Errorf("home of 0 = %q, want /root", got)
+	}
+	if got := homeOf(dir, 4242); got != "" {
+		t.Errorf("an unnamed uid got a home: %q", got)
+	}
+	if got := homeOf(filepath.Join(dir, "nowhere"), 999); got != "" {
+		t.Errorf("a container whose passwd cannot be read got a home: %q", got)
+	}
+}

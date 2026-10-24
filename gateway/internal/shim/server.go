@@ -28,6 +28,19 @@ type Server struct {
 	Runner Runner
 	// Log reports what the shim does. Nil silences it.
 	Log func(string, ...any)
+	// Containers is where the runtime keeps its containers. Empty is the runtime's own default,
+	// which is also what the engine uses (`sandbox.InMachine`); it is a field so a test can point
+	// it at a rootfs it made, and so a machine with a different layout is a value and not a fork.
+	Containers string
+}
+
+// containers is where a container's folder is: the runtime's default unless the machine says
+// otherwise.
+func (s *Server) containers() string {
+	if strings.TrimSpace(s.Containers) != "" {
+		return s.Containers
+	}
+	return "/var/lib/lxc"
 }
 
 // Runner runs the container runtime's command line.
@@ -555,8 +568,19 @@ func (t *session) exec(message Message, payload ExecPayload) error {
 	// not the workspace's business: the attach is cleared and the caller's variables are set
 	// explicitly.
 	args = append(args, "-v", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	// HOME is the container's, not the caller's: the machine's own HOME=/ turns every `~` in a
+	// workspace into the root of the container's filesystem, and a tool's settings land in a rootfs
+	// that is thrown away (measured, beta 60 to 62). A container whose passwd cannot be read keeps
+	// whatever the caller sent, because no answer is worse than a wrong one only if it is acted on.
+	home := homeOf(filepath.Join(t.server.containers(), payload.Name), payload.UID)
 	for _, variable := range payload.Env {
+		if home != "" && strings.HasPrefix(variable, "HOME=") {
+			continue
+		}
 		args = append(args, "-v", variable)
+	}
+	if home != "" {
+		args = append(args, "-v", "HOME="+home)
 	}
 	if payload.UID > 0 {
 		args = append(args, "-u", fmt.Sprint(payload.UID))

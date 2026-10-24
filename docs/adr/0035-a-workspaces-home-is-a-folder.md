@@ -55,10 +55,12 @@ environment variables to correct one field, and every workspace would have neede
 - **Another folder in the workspace.** `<workspace>/.acornfall/home` sits beside
   `.acornfall/prefix`, and inherits ADR 0034's open question: it is only invisible to `git` in
   repositories that ignore `.acornfall/`.
-- **`$HOME` is still not set for tools.** The shim's exec clears the environment and sets only
-  `PATH`; `~` resolves through the passwd entry, which is what this ADR makes right, but a
-  script that reads `$HOME` literally gets nothing. Fixing that means putting `HOME` in the
-  environment the gateway hands the worker, which is a separate change with its own test.
+- **`HOME` is the container's, not the caller's.** The exec clears the environment and refills it,
+  and a caller that passes the machine's own `HOME=/` turns every `~` into the root of the
+  container's filesystem — measured on beta 60 to 62: the home bind was mounted and
+  `~/home-proof.txt` landed in the rootfs, because the environment said `/`. The shim now reads
+  the container's own passwd for the uid it is about to run as and sets `HOME` from it, dropping
+  any `HOME` the caller sent. A container whose passwd cannot be read keeps the caller's.
 - **An image that already has a home keeps it.** The entry is written only when the uid is
   unnamed (acornfall#98), so an image with `node:x:1000:1000:…:/home/node` keeps `/home/node`,
   and this bind is then a folder nothing points at.
