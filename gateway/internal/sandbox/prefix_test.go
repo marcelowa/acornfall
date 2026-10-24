@@ -123,4 +123,11 @@ func TestPrepareContainerMakesAPrefixSource(t *testing.T) {
 	if !strings.Contains(string(config), "usr/local") {
 		t.Error("the configuration does not mount the prefix at all")
 	}
+	// The mount replaces the directory, so the layout has to be there or the first install
+	// fails with "Directory nonexistent" — the bug the release proof found in beta 55 to 57.
+	for _, name := range prefixLayout {
+		if info, err := os.Stat(filepath.Join(source, name)); err != nil || !info.IsDir() {
+			t.Errorf("the prefix has no %s: the mount would hide the image's and nothing could be installed", name)
+		}
+	}
 }

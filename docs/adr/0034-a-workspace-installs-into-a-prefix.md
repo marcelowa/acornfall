@@ -83,14 +83,35 @@ Three answers were considered and two refused:
   Anything that must write `/usr/lib`, install init scripts, or register with `dpkg` stays out
   of reach. The tools that matter for development — Go, Rust, Node, Python, `bun`, `uv`, `mise`,
   `nix`, and every static release tarball — do not need it.
-- **`/usr/local` is shadowed.** In `debian:stable-slim` it holds 11 empty directories and no
-  files (measured), so nothing is lost. An image that ships something in `/usr/local` would have
-  it hidden.
+- **`/usr/local` is replaced, not merged.** In `debian:stable-slim` it holds 11 empty directories
+  and no files (measured), so no content is lost — but the bind is a mount, so the image's `bin/`
+  and the rest are hidden the moment it lands. The prefix is therefore created with the layout
+  the image had (`bin`, `etc`, `games`, `include`, `lib`, `libexec`, `man`, `sbin`, `share`,
+  `src`), and an image that ships *files* in `/usr/local` would still have them hidden. This is
+  the cost, and it is not zero: it is bounded to one directory a distribution keeps for exactly
+  this purpose.
 - **The prefix lives in the workspace, so it lands in the user's folder.** `<workspace>/.acornfall/`
   is ignored by this repository, and by convention in the ones that already use it — but a
   stranger's repository will show it as untracked, and a careless `git add -A` commits a
   toolchain. This is the open question below.
 - **Disk is the user's.** A prefix is inside the folder they back up.
+
+## What the release proof found
+
+The first three betas (55, 56, 57) failed, and the two failures were not the same failure:
+
+1. **The mount was never attempted.** `InMachine.Create` and `LXC.Create` were the same function
+   written twice, and the step that makes a bind's source went into one of them; the appliance
+   uses the other. An absent source with `optional` in the mount entry is skipped in silence.
+2. **The mount landed and installing was still impossible.** The proof's own diagnostics, printed
+   from inside the container, show `/usr/local` mounted from the share — and the install still
+   said `cannot create /usr/local/bin/proof: Directory nonexistent`, because the bind replaces
+   the directory and an empty folder has no `bin`. The mount was right; the folder it mounted
+   was not a usable `/usr/local`.
+
+Both are the same lesson from ADR 0021, one layer down: a mount that lands nowhere and a mount
+that lands on nothing both look like success from the outside. The second one is why the proof
+reads the bytes back from the share instead of trusting the command's exit status.
 
 ## Alternatives
 

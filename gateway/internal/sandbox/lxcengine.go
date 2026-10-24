@@ -470,9 +470,18 @@ func prepareContainer(container Container, settings LXCSettings, policyDir strin
 	return config, nil
 }
 
-// ensureBindSource makes a bind's source folder where it is missing, and gives it to the share's
-// owner. Only a folder that did not exist is touched: a workspace's own folder already belongs to
-// somebody, and this is not the place to say otherwise.
+// prefixLayout is what a prefix's folder holds the first time it is made: the layout the image's
+// own /usr/local has, because the bind replaces the folder wholesale. A mount over /usr/local
+// hides the image's bin along with everything else, and a toolchain that cannot write
+// /usr/local/bin has no prefix at all — which is how beta 55, 56 and 57 failed after the mount
+// had already landed: the first install said "cannot create /usr/local/bin/proof: Directory
+// nonexistent" (measured in the release proof).
+var prefixLayout = []string{"bin", "etc", "games", "include", "lib", "libexec", "man", "sbin", "share", "src"}
+
+// ensureBindSource makes a bind's source folder where it is missing, gives it the layout its
+// target needs, and hands it to the share's owner. Only a folder that did not exist is touched:
+// a workspace's own folder already belongs to somebody, and this is not the place to say
+// otherwise.
 func ensureBindSource(bind Bind, uid, gid int) error {
 	if bind.File || strings.TrimSpace(bind.Source) == "" {
 		return nil
@@ -480,13 +489,25 @@ func ensureBindSource(bind Bind, uid, gid int) error {
 	if _, err := os.Stat(bind.Source); err == nil {
 		return nil
 	}
+	made := []string{bind.Source}
 	if err := os.MkdirAll(bind.Source, 0o755); err != nil {
 		return fmt.Errorf("sandbox: making the prefix %s: %w", bind.Source, err)
+	}
+	if bind.Target == "/usr/local" {
+		for _, name := range prefixLayout {
+			path := filepath.Join(bind.Source, name)
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				return fmt.Errorf("sandbox: making %s in the prefix %s: %w", name, bind.Source, err)
+			}
+			made = append(made, path)
+		}
 	}
 	if uid > 0 {
 		// Best effort: the machine normalizes the share's owner (ADR 0021), so a chown the mount
 		// refuses is somebody else's rule doing its job, not a failure to report here.
-		_ = os.Chown(bind.Source, uid, gid)
+		for _, path := range made {
+			_ = os.Chown(path, uid, gid)
+		}
 	}
 	return nil
 }
