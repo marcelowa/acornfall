@@ -699,6 +699,23 @@ func proveASecondWorkspaceRunsTools(t *testing.T, ctx context.Context, url, shar
 			if !strings.Contains(string(payload), "from-the-prefix-bytes") {
 				t.Fatalf("the file in the prefix is not the one the tool wrote: %q", payload)
 			}
+			// The two things every image was missing (acornfall#98), read from the share rather
+			// than from the transcript: a command that echoes its own arguments would pass either
+			// way. `id -un` is the passwd entry, and a non-empty bundle is the trust store.
+			whoami, err := os.ReadFile(filepath.Join(share, "workspaces", "second", "whoami.txt"))
+			if err != nil {
+				t.Fatalf("the container could not name its own uid: %v", err)
+			}
+			if strings.TrimSpace(string(whoami)) != "acornfall" {
+				t.Errorf("the uid the tools run as has no name in the container: %q", whoami)
+			}
+			roots, err := os.ReadFile(filepath.Join(share, "workspaces", "second", "roots.txt"))
+			if err != nil {
+				t.Fatalf("the container did not report its trust store: %v", err)
+			}
+			if strings.TrimSpace(string(roots)) != "present" {
+				t.Errorf("the container has no certificate bundle, so its first https request fails on the CA: %q", roots)
+			}
 			t.Logf("the workspace installed into its own prefix: %s", installed)
 			return
 		}
@@ -809,7 +826,7 @@ func TestLiveTheApplianceBootsFromItsReleaseTarball(t *testing.T) {
 	// container's rootfs instead of the workspace.
 	second := filepath.Join(share, "workspaces", "second")
 	script := filepath.Join(share, "dev-script.json")
-	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second)
+	rules := fmt.Sprintf(`{"rules":[{"match":"prove the second workspace","tools":[{"name":"bash","args":{"command":"pwd; printf second > %s/tool-ran.txt; echo DIAG; id; ls -ld /usr/local /opt; grep -E ' /usr/local | /opt ' /proc/self/mountinfo; stat -c %%d:%%i:%%u /usr/local /opt; { echo '#!/bin/sh'; echo 'printf from-the-prefix-bytes'; } > /usr/local/bin/proof && chmod 755 /usr/local/bin/proof && proof; id -un > %s/whoami.txt; test -s /etc/ssl/certs/ca-certificates.crt && echo present > %s/roots.txt || echo missing > %s/roots.txt; ls -ld %s; ls -l %s; hostname"}}],"reply":"the second workspace ran it"}]}`, second, second, second, second, second, second)
 	if err := os.WriteFile(script, []byte(rules), 0o644); err != nil {
 		t.Fatal(err)
 	}
