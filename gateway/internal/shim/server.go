@@ -532,7 +532,12 @@ func (t *session) create(message Message, payload CreatePayload) error {
 	// 0600 root:root, so the bind and the cgroup rule are two thirds of it (ADR 0021).
 	if payload.KVM {
 		if err := makeKVMOpenable(); err != nil {
-			return err
+			// Not fatal: the container is usable, only nested virtual machines are not. A
+			// workspace that cannot open the device is a state doctor reports, not a workspace
+			// that refuses to start.
+			if t.server.Log != nil {
+				t.server.Log("shim: %v", err)
+			}
 		}
 	}
 	// The rootfs belongs to the container's own root, not to the share's owner: a container whose

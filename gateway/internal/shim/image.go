@@ -150,8 +150,29 @@ func makeKVMOpenable() error {
 	if err != nil {
 		return nil // no device to make readable: a machine without nesting is a supported state
 	}
-	if info.Mode().Perm() == 0o666 {
+	// Already openable by anyone: nothing to do.
+	if info.Mode().Perm()&0o006 == 0o006 {
 		return nil
 	}
-	return os.Chmod(kvmDevice, 0o666)
+	if err := os.Chmod(kvmDevice, 0o666); err != nil {
+		// Not root, and the node is not world-readable. A runner whose user is in the kvm group is
+		// this case: the device works for the install even though a workspace uid would not open
+		// it, and failing the create over that would take the workspace down for a machine whose
+		// containers cannot have a hypervisor anyway.
+		if canOpen(kvmDevice) {
+			return nil
+		}
+		return fmt.Errorf("shim: %s is there and cannot be opened: %w", kvmDevice, err)
+	}
+	return nil
+}
+
+// canOpen is whether this process can open the device, which is the only question that matters.
+func canOpen(path string) bool {
+	device, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	_ = device.Close()
+	return true
 }

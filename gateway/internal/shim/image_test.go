@@ -237,7 +237,7 @@ func TestTheHomeComesFromTheContainersOwnPasswd(t *testing.T) {
 
 // The third piece ADR 0021 names: a fresh machine's node is 0600 root:root, so a container given
 // the device is given one it cannot open. Measured on acornfall's own workspace.
-func TestTheKVMAWorskpaceIsGivenCanBeOpened(t *testing.T) {
+func TestTheKVMAWorkspaceIsGivenCanBeOpened(t *testing.T) {
 	device := filepath.Join(t.TempDir(), "kvm")
 	if err := os.WriteFile(device, nil, 0o600); err != nil {
 		t.Fatal(err)
