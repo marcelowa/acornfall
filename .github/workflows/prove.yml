@@ -1,0 +1,72 @@
+name: prove
+
+# The release's proof job takes ~11 minutes: build the appliance, publish a release, then boot
+# it. That is right for a release and wrong for everything else — three failures in a row were
+# in the test harness, and each cost half an hour to learn about. This is the same boot, on a
+# branch push, from the appliance the release already built: a few minutes, nothing published.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/one-vm-per-machine, main]
+    paths:
+      - "gateway/**"
+      - "worker/src/**"
+      - "scripts/build-appliance.sh"
+      - ".github/workflows/prove.yml"
+
+concurrency:
+  group: prove-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  boot:
+    # A machine inside a machine, so the runner needs /dev/kvm — the same label the sandbox tier uses.
+    runs-on: kvm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: gateway/go.sum
+      # actions/cache only writes on this runner ("Cache mode: write"), so every restore is a
+      # miss. The runner is one machine: keep the appliance on its disk, keyed by a hash of the
+      # inputs, and the proof becomes a file copy.
+      - name: Find the appliance this runner built last
+        id: appliance
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/acornfall-ci" dist
+          hash=$(find gateway worker/src worker/package.json worker/bun.lock scripts/build-appliance.sh \
+            -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+          if [ -f "$HOME/acornfall-ci/$hash.tar.gz" ]; then
+            cp "$HOME/acornfall-ci/$hash.tar.gz" dist/appliance-linux-amd64.tar.gz
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "the appliance for $hash is on this runner"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::no appliance on this runner for $hash; the next tag builds and proves it"
+          fi
+      # A proof that skips its subject is worse than a red one: it says the pipeline is green
+      # while nothing booted. A tree whose appliance this runner has not built is proved by the
+      # next tag's release job; until then, this job refuses to claim it.
+      - name: No appliance for this tree
+        if: steps.appliance.outputs.hit != 'true'
+        run: |
+          echo "::error::no appliance on this runner for ${{ steps.appliance.outputs.hash }}; tag a release to build and prove one"
+          exit 1
+      - name: Unpack the release's tarball and boot it
+        if: steps.appliance.outputs.hit == 'true'
+        env:
+          ACORNFALL_LXC: "1"
+          MSB_HOME: /tmp/msb-prove
+          TMPDIR: /tmp
+          # Absolute, because the test below runs from gateway/: a relative `dist/...` resolves to
+          # gateway/dist/..., and the copy above lands in the workspace root. Every run before
+          # this one skipped the step, so the first one to find its hash failed on the path
+          # ("open dist/appliance-linux-amd64.tar.gz: no such file or directory").
+          ACORNFALL_APPLIANCE_TARBALL: ${{ github.workspace }}/dist/appliance-linux-amd64.tar.gz
+        # The module is in gateway/, not at the root: go test from the root cannot find it.
+        working-directory: gateway
+        run: go test ./internal/sandbox -run TestLiveTheApplianceBootsFromItsReleaseTarball -v -timeout 25m

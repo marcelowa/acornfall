@@ -1,6 +1,7 @@
 package control
 
 import (
+	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -25,7 +26,7 @@ import (
 // asks the control's lock whether it is free, which is true exactly when the registry is
 // being read from outside it. No timing, no goroutines, no flakes.
 func TestStateDoesNotTakeTheRegistryLockInsideItsOwn(t *testing.T) {
-	workspaces := NewWorkspaces(WorkspacesOptions{Home: t.TempDir()})
+	workspaces := NewWorkspaces(WorkspacesOptions{Layout: layout.New(t.TempDir(), t.TempDir())})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}

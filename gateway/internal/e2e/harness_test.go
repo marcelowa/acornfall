@@ -176,7 +176,9 @@ type system struct {
 	t   *testing.T
 	cfg settings
 
-	Home          string
+	Home string
+	// Root is the folder the machine mounts: the bundle, the config, the state (ADR 0022).
+	Root          string
 	WorkspacesDir string
 	General       string
 	Addr          string
@@ -230,6 +232,9 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		os.RemoveAll(shortHome)
 	})
 	s.Home = shortHome
+	// The root, under a path of its own: it is where the harness writes the global resources a
+	// test is about, and where the product keeps its state.
+	s.Root = filepath.Join(t.TempDir(), "acornfall")
 	// A stable path, not a per-run one: it holds the image every sandbox boots from, and a
 	// fresh directory per run means a registry pull per run — which is how a suite runs into
 	// an anonymous pull limit. The sandboxes themselves are removed by the tests that made
@@ -237,7 +242,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	s.SandboxState = filepath.Join(os.TempDir(), "acornfall-e2e-sandboxes")
 	s.WorkspacesDir = filepath.Join(t.TempDir(), "workspaces")
 	s.General = filepath.Join(t.TempDir(), "general")
-	for _, dir := range []string{s.Home, s.WorkspacesDir, s.General} {
+	for _, dir := range []string{s.Home, s.Root, s.WorkspacesDir, s.General} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -259,7 +264,8 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	}
 
 	args := []string{
-		"--home", s.Home,
+		"--machinery", s.Home,
+		"--share", s.Root,
 		"--workspaces-dir", s.WorkspacesDir,
 		"--workspace", s.General,
 		"--worker-dir", workerDir,
@@ -285,7 +291,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// A curated environment: the test must not inherit a real install's home, token, or
 	// provider credentials, or it would be testing someone else's configuration. The
 	// switches that decide how this install behaves are forwarded explicitly.
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + s.Home, "ACORNFALL_HOME=" + s.Home}
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + s.Home, "ACORNFALL_MACHINERY=" + s.Home}
 	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
 		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
 	}
@@ -486,9 +492,20 @@ func (s *system) writeWorkspace(t *testing.T, rel, content string) {
 	writeFile(t, filepath.Join(s.General, rel), content)
 }
 
-func (s *system) writeHome(t *testing.T, rel, content string) {
+// writeRoot writes a global resource where the layout puts it: the resource folders live in the
+// bundle, and the files that are not resources live in the config folder beside it (ADR 0022).
+// The calls keep the names a person would say — "agents/x.md", "config.json" — so a test reads
+// as the thing it is about rather than as a path.
+func (s *system) writeRoot(t *testing.T, rel, content string) {
 	t.Helper()
-	writeFile(t, filepath.Join(s.Home, rel), content)
+	switch {
+	case strings.HasPrefix(rel, ".agents/"):
+		writeFile(t, filepath.Join(s.Root, rel), content)
+	case rel == "config.json" || rel == "settings.json" || rel == "credentials.json":
+		writeFile(t, filepath.Join(s.Root, "config", rel), content)
+	default:
+		writeFile(t, filepath.Join(s.Root, ".agents", rel), content)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {

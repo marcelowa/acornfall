@@ -11,7 +11,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Context } from "@earendil-works/chord";
 import type { Harness, Storage } from "@earendil-works/pi-durable";
-import { mayAddress, type StateDeps } from "../src/delegation.ts";
+import { mayAddress, policyFor, type StateDeps } from "../src/delegation.ts";
 
 const context = {} as Context;
 
@@ -48,5 +48,40 @@ describe("mayAddress", () => {
 		const verdict = await mayAddress(deps(), "7", "7", context);
 		expect(verdict.allowed).toBe(false);
 		expect(verdict.why).toBe("that is this conversation");
+	});
+});
+
+describe("policyFor", () => {
+	// A workspace with no conversation yet asked for the policy of the empty id. `conversationIdOf` threw
+	// while the array of reads was being built, so two reads had already started and were never awaited:
+	// their rejections were unhandled, Bun exits on an unhandled rejection, and the workspace said
+	// "harness down" with "invalid conversation id undefined" as the only clue.
+	test("an id that is not a conversation is refused before any read", async () => {
+		let reads = 0;
+		const counted: StateDeps = {
+			harness: {
+				snapshot: async () => {
+					reads += 1;
+					return undefined;
+				},
+			} as unknown as Harness,
+			storage: {
+				conversation: async () => {
+					reads += 1;
+					return undefined;
+				},
+				scanConversations: async () => ({ items: [], next: undefined }),
+			} as unknown as Storage,
+			catalog: () => ({ defaults: [], agents: [] }),
+		};
+		let rejected: unknown;
+		try {
+			await policyFor(counted, "", context);
+		} catch (error) {
+			rejected = error;
+		}
+		expect((rejected as Error).message).toContain("invalid conversation id");
+		// Nothing was read, so nothing can be left unawaited when the id turns out to be no id at all.
+		expect(reads).toBe(0);
 	});
 });

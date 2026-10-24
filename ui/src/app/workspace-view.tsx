@@ -26,6 +26,9 @@ import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesPanel } from "@/components/workspace/workspaces-panel";
+import { WorkspaceWakeNotice } from "@/components/workspace/workspace-wake-notice";
+import { WorkspacePreparationNotice } from "@/components/workspace/workspace-preparation";
+import { UpdateBanner } from "@/components/release/update-banner";
 import { WorkspaceButton } from "@/components/workspace/workspace-button";
 import { Transcript } from "@/components/transcript/transcript";
 import { Button } from "@/components/ui/button";
@@ -353,7 +356,12 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			list={
 				<WorkspacesPanel
 					workspaces={platform.workspaces}
+					preparations={platform.preparations}
+					paused={platform.updateBlocking}
 					onSelect={platform.selectWorkspace}
+					onOpenPrepared={platform.openPreparedWorkspace}
+					onDismissPrepared={platform.dismissPreparedWorkspace}
+					onRetryPrepared={platform.retryPreparedWorkspace}
 					onCreate={platform.createWorkspace}
 					onRename={platform.renameWorkspace}
 					onForget={platform.removeWorkspace}
@@ -366,7 +374,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		<Rail
 			head={
 				<WorkspaceButton
-					title={activeWorkspace?.title ?? "Workspaces"}
+					title={platform.wakingWorkspace ?? activeWorkspace?.title ?? "Workspaces"}
 					expanded={platform.workspacesOpen}
 					onClick={platform.openWorkspaces}
 				/>
@@ -377,14 +385,21 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					conversations={platform.conversations}
 					deleted={platform.deleted}
 					activeId={platform.active?.id}
-					onSelect={platform.select}
-					onRename={(id) =>
-						setRenaming(
-							platform.conversations.find((conversation) => conversation.id === id),
-						)
+					onSelect={platform.updateBlocking ? undefined : platform.select}
+					onRename={
+						platform.updateBlocking
+							? undefined
+							: (id) =>
+									setRenaming(
+										platform.conversations.find(
+											(conversation) => conversation.id === id,
+										),
+									)
 					}
-					onHide={(id) => platform.hide(id, true)}
-					onRestore={(id) => platform.hide(id, false)}
+					onHide={platform.updateBlocking ? undefined : (id) => platform.hide(id, true)}
+					onRestore={
+						platform.updateBlocking ? undefined : (id) => platform.hide(id, false)
+					}
 				/>
 			}
 			foot={
@@ -394,6 +409,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 						size="sm"
 						className="justify-start"
 						aria-label="New conversation"
+						title={platform.readiness}
+						disabled={!platform.workspaceReady || platform.updateBlocking}
 						onClick={platform.newConversation}
 					>
 						<Plus />
@@ -422,7 +439,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const now = useNow();
 	const run = runState(busy, platform.active?.updatedAt, now);
 	const topbarTitle =
-		platform.screen === "settings" ? "Settings" : (platform.active?.title ?? "Acornfall");
+		platform.screen === "settings"
+			? "Settings"
+			: (platform.wakingWorkspace ?? platform.active?.title ?? "Acornfall");
 	const barTitle = (
 		<span className="flex min-w-0 items-center gap-2">
 			{run !== "idle" && platform.screen === "conversation" ? (
@@ -573,6 +592,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			status={platform.update}
 			tag={platform.updateTag}
 			applying={platform.applyingUpdate}
+			connection={platform.connection}
 			onOpenTag={platform.showUpdate}
 			onClose={() => platform.showScreen("conversation")}
 			onCheck={platform.checkUpdateNow}
@@ -662,6 +682,14 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		</>
 	);
 
+	// The preparation the top strip speaks for: a ready one is the one worth opening; otherwise
+	// the newest failure or wait. The list is the fuller view when it is open, so the strip is
+	// for the person who went back to their conversation while the workspace started.
+	const preparation =
+		[...platform.preparations].reverse().find((item) => item.phase === "ready") ??
+		[...platform.preparations].reverse().find((item) => item.phase === "failed") ??
+		[...platform.preparations].reverse().find((item) => item.phase === "preparing");
+
 	return (
 		<>
 			<Shell
@@ -681,12 +709,36 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				railWidth={platform.railWidth}
 				onRailWidthChange={platform.setRailWidth}
 				notice={
-					platform.failure === undefined ? undefined : (
+					platform.update !== undefined &&
+					(platform.updateBlocking || platform.update.phase === "failed") ? (
+						<Measure size="wide" padding="md">
+							<UpdateBanner
+								status={platform.update}
+								connection={platform.connection}
+								onDetails={() => platform.showUpdate()}
+							/>
+						</Measure>
+					) : platform.wakingWorkspace !== undefined ? (
+						<Measure size="wide" padding="md">
+							<WorkspaceWakeNotice name={platform.wakingWorkspace} />
+						</Measure>
+					) : platform.failure !== undefined ? (
 						<Measure size="wide" padding="md">
 							<ErrorStrip
 								message={platform.failure}
 								onDismiss={platform.clearFailure}
 								onRetry={platform.reload}
+							/>
+						</Measure>
+					) : preparation === undefined || platform.workspacesOpen ? undefined : (
+						<Measure size="wide" padding="md">
+							<WorkspacePreparationNotice
+								preparation={preparation}
+								onOpen={() => platform.openPreparedWorkspace(preparation.name)}
+								onDismiss={() =>
+									platform.dismissPreparedWorkspace(preparation.name)
+								}
+								onRetry={() => platform.retryPreparedWorkspace(preparation.name)}
 							/>
 						</Measure>
 					)
@@ -725,13 +777,27 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							onCompact={platform.openCompactDialog}
 							onSteer={() => sendText("steer")}
 							onQueue={() => sendText("followUp")}
-							disabled={platform.active === undefined || !platform.workerUp}
+							disabled={
+								platform.active === undefined ||
+								!platform.workspaceReady ||
+								platform.updateBlocking
+							}
+							title={
+								platform.updateBlocking
+									? (platform.update?.phaseReason ?? "An update is in progress")
+									: platform.readiness
+							}
 							placeholder={
-								platform.active === undefined
-									? "Pick a conversation"
-									: platform.workerUp
-										? "Send a message"
-										: "The harness is down"
+								platform.updateBlocking
+									? "Updating — actions are paused"
+									: platform.wakingWorkspace !== undefined
+										? `Waking ${platform.wakingWorkspace}…`
+										: platform.active === undefined
+											? "Pick a conversation"
+											: platform.workspaceReady
+												? "Send a message"
+												: (platform.readiness ??
+													"This workspace is not ready")
 							}
 							above={
 								visibleSlash.length === 0 ? undefined : (
@@ -757,16 +823,21 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 									 * before choosing a model, and it stays in the folded row — a fold that hid
 									 * it would make a dead run look alive (step 06, J11). Nothing renders while
 									 * everything is well. */}
-									{platform.workerUp ? (
-										platform.connection === "reconnecting" ? (
-											<StatusPill state="reconnecting" />
-										) : null
-									) : (
+									{platform.lifecycle.phase === "failed" ? (
 										<StatusPill
 											state="harness-down"
-											detail={platform.workerError}
+											detail={
+												platform.lifecycle.reason ?? platform.workerError
+											}
 										/>
-									)}
+									) : platform.lifecycle.phase === "starting" ? (
+										<StatusPill
+											state="starting"
+											detail={platform.lifecycle.reason}
+										/>
+									) : platform.connection === "reconnecting" ? (
+										<StatusPill state="reconnecting" />
+									) : null}
 								</>
 							}
 							controls={

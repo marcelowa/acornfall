@@ -1,0 +1,48 @@
+# The runner is one long-lived container (ADR 0021), so nothing resets it between jobs and the
+# disk it fills is CI's own: an appliance per distinct build, a folder per tag, and a machine's
+# disk left by a cancelled run. A full disk fails every job at checkout, and the message is about
+# the checkout, so the sweep is its own job and its floor is the alert.
+#
+# The schedule deletes. A dispatch reports, and deletes only when `apply` is ticked: the numbers
+# are worth reading once on a runner nobody has measured.
+#
+# A scheduled workflow runs from the default branch only, so this fires once it is on main.
+name: cleanup
+
+on:
+  schedule:
+    # GitHub's cron is UTC. Half past four, after the idiom analyzer at 03:00, so a runner that
+    # takes one job at a time is not asked for two at once.
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Delete what the report names"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cleanup
+  cancel-in-progress: false
+
+jobs:
+  disk:
+    # The disk to clean is this runner's: a hosted runner's disk is thrown away after the job,
+    # so a sweep there would clean nothing.
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The script and nothing else: a full checkout is more disk to clean.
+          sparse-checkout: scripts
+      - name: Sweep the runner's disk
+        env:
+          APPLY: ${{ github.event_name == 'schedule' || inputs.apply }}
+        run: |
+          set -euo pipefail
+          flags=""
+          if [ "$APPLY" = "true" ]; then flags="--apply"; fi
+          sh scripts/cleanup-runner.sh $flags | tee -a "$GITHUB_STEP_SUMMARY"

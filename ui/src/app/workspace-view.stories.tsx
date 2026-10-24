@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { UpdateStatus } from "./client";
 import type { Platform } from "./use-platform";
 import type { ConversationSummary, TranscriptEntry } from "./view-models";
 import { WorkspaceView } from "./workspace-view";
@@ -108,6 +109,9 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		entries,
 		active: streamConversation,
 		workerUp: true,
+		lifecycle: { phase: "ready" },
+		workspaceReady: true,
+		wakingWorkspace: undefined,
 		connection: "live",
 		clearFailure: noop,
 		reload: noop,
@@ -278,6 +282,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		logoutProvider: noop,
 		refreshProviders: noop,
 		update: undefined,
+		updateBlocking: false,
 		restartUpdateNow: noop,
 		refreshUpdate: noop,
 		applyingUpdate: false,
@@ -285,6 +290,10 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		applyUpdateNow: noop,
 		rollbackUpdateNow: noop,
 		setUpdatePrefs: noop,
+		preparations: [],
+		openPreparedWorkspace: noop,
+		dismissPreparedWorkspace: noop,
+		retryPreparedWorkspace: noop,
 		...overrides,
 	};
 }
@@ -403,9 +412,118 @@ export const RefusedAction: Story = {
 	globals: { viewport: { value: "laptop" } },
 };
 
+/**
+ * An update is installing. The banner is install-wide; the composer and the workspace actions
+ * are disabled until the phase says ready or failed.
+ */
+const blockedUpdate: UpdateStatus = {
+	current: "v0.10.0-beta.46",
+	latest: "v0.10.0-beta.47",
+	notes: "",
+	channel: "releases",
+	autoCheck: true,
+	checking: false,
+	downloadSize: 0,
+	workerSize: 0,
+	available: true,
+	backups: [],
+	runsActive: false,
+	runs: [],
+	phase: "requested",
+	target: "v0.10.0-beta.47",
+	blocking: true,
+	phaseReason: "the host is preparing the machine",
+};
+
+export const Updating: Story = {
+	args: {
+		platform: makePlatform({
+			update: blockedUpdate,
+			updateBlocking: true,
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** Landing on a sleeping workspace: the state fetch is the wake, and the console says so. */
+export const Waking: Story = {
+	args: {
+		platform: makePlatform({
+			workspaceReady: false,
+			wakingWorkspace: "marc-02",
+			lifecycle: { phase: "starting", reason: "waking marc-02" },
+			active: undefined,
+			conversations: [],
+			entries: [],
+			workspaces: [
+				{
+					name: "marc-02",
+					title: "marc-02",
+					path: "/srv/acornfall/workspaces/marc-02",
+					general: false,
+					running: false,
+					active: true,
+				},
+			],
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
 /** The workspace list, as the layer it is now: over the conversation, no X of its own. */
 export const WorkspacesLayer: Story = {
 	args: { platform: makePlatform({ workspacesOpen: true }) },
+	globals: { viewport: { value: "laptop" } },
+};
+
+/**
+ * A workspace is being created. The person is still in the conversation they were in; the strip
+ * says the new one is starting, and the list holds the row with the wait.
+ */
+export const WorkspacePreparing: Story = {
+	args: {
+		platform: makePlatform({
+			preparations: [{ name: "new-one", phase: "preparing", startedAt: Date.now() - 12_000 }],
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** The wait is over: a ready workspace is offered, not opened under the person's hands. */
+export const WorkspaceReady: Story = {
+	args: {
+		platform: makePlatform({
+			preparations: [{ name: "new-one", phase: "ready", startedAt: Date.now() - 24_000 }],
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** The workspace could not start; the strip carries the gateway's own reason. */
+export const WorkspaceFailed: Story = {
+	args: {
+		platform: makePlatform({
+			preparations: [
+				{
+					name: "new-one",
+					phase: "failed",
+					startedAt: Date.now() - 31_000,
+					reason: "the harness process ended: signal: killed",
+				},
+			],
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
+};
+
+/** The same preparation in the list, where the person started it. */
+export const WorkspacesLayerPreparing: Story = {
+	args: {
+		platform: makePlatform({
+			workspacesOpen: true,
+			preparations: [{ name: "new-one", phase: "preparing", startedAt: Date.now() - 12_000 }],
+		}),
+	},
 	globals: { viewport: { value: "laptop" } },
 };
 

@@ -1,0 +1,866 @@
+package shim
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// Server answers the protocol by driving the container runtime. Every fact in its behaviour is
+// one the spike measured; docs/engineering/lxc-spike.md is the report.
+type Server struct {
+	// Version is the calling binary's own version, reported at the handshake so a gateway can
+	// tell an image's older shim from its own.
+	Version string
+	// Runner is the runtime's command line. Injected so the logic is tested without a runtime.
+	Runner Runner
+	// Log reports what the shim does. Nil silences it.
+	Log func(string, ...any)
+	// Containers is where the runtime keeps its containers. Empty is the runtime's own default,
+	// which is also what the engine uses (`sandbox.InMachine`); it is a field so a test can point
+	// it at a rootfs it made, and so a machine with a different layout is a value and not a fork.
+	Containers string
+}
+
+// containers is where a container's folder is: the runtime's default unless the machine says
+// otherwise.
+func (s *Server) containers() string {
+	if strings.TrimSpace(s.Containers) != "" {
+		return s.Containers
+	}
+	return "/var/lib/lxc"
+}
+
+// Runner runs the container runtime's command line.
+type Runner interface {
+	// Run runs to completion and returns its combined output.
+	Run(ctx context.Context, args ...string) (string, error)
+	// Start starts a command whose output arrives while it runs, and whose process group can be
+	// killed as one: the runtime's attach puts the command in the attach's process group, so
+	// killing the group is what kills the command inside the container. Killing the attach alone
+	// leaves the command running (measured).
+	Start(ctx context.Context, args ...string) (Handle, error)
+}
+
+// Handle is a running command.
+type Handle interface {
+	Stdout() io.ReadCloser
+	Stderr() io.ReadCloser
+	// Kill kills the whole process group: the attach and the command inside the container.
+	Kill() error
+	// Wait waits for it and reports the exit code. A command killed by a signal reports 137,
+	// which is what a shell says for SIGKILL.
+	Wait() (int, error)
+}
+
+// ExecRunner is the real one: the runtime's own commands, from PATH.
+type ExecRunner struct{}
+
+func (ExecRunner) Run(ctx context.Context, args ...string) (string, error) {
+	command := exec.CommandContext(ctx, args[0], args[1:]...)
+	output, err := command.CombinedOutput()
+	text := strings.TrimSpace(string(output))
+	if err != nil {
+		if text == "" {
+			text = err.Error()
+		}
+		return text, fmt.Errorf("%s: %s", strings.Join(args, " "), firstLine(text))
+	}
+	return text, nil
+}
+
+func (ExecRunner) Start(ctx context.Context, args ...string) (Handle, error) {
+	command := exec.CommandContext(ctx, args[0], args[1:]...)
+	// Its own process group, so a kill reaches the command the runtime attached and not only
+	// the attach: measured, killing the attach alone leaves the command running inside.
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := command.Start(); err != nil {
+		return nil, err
+	}
+	return &process{command: command, stdout: stdout, stderr: stderr}, nil
+}
+
+type process struct {
+	command *exec.Cmd
+	stdout  io.ReadCloser
+	stderr  io.ReadCloser
+}
+
+func (p *process) Stdout() io.ReadCloser { return p.stdout }
+func (p *process) Stderr() io.ReadCloser { return p.stderr }
+
+func (p *process) Kill() error {
+	if p.command.Process == nil {
+		return nil
+	}
+	// The negative pid is the process group; whether the attach has already gone is not an
+	// error, because the command inside is what the caller wants stopped.
+	err := syscall.Kill(-p.command.Process.Pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
+}
+
+func (p *process) Wait() (int, error) {
+	err := p.command.Wait()
+	if err == nil {
+		return 0, nil
+	}
+	if failure, ok := errors.AsType[*exec.ExitError](err); ok {
+		if status, ok := failure.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return 128 + int(status.Signal()), nil
+		}
+		return failure.ExitCode(), nil
+	}
+	return -1, err
+}
+
+// running is one exec in flight inside a session, so a kill can find it by the id the client
+// used for the request that started it.
+type running struct {
+	name    string
+	handle  Handle
+	stopped bool
+}
+
+// session is one connection: its calls, its execs, and its way of writing. Two gateways may
+// share a machine, so a session never touches another's commands: one install's workspace must
+// not be stopped by another's connection ending.
+type session struct {
+	server *Server
+	writer *syncWriter
+	mu     sync.Mutex
+	execs  map[uint64]*running
+	// inflight counts the calls being answered, so a connection that ends waits for the replies
+	// it asked for instead of dropping them on the floor: a pipe carrying three calls and then
+	// EOF is a client that wants three answers, not zero.
+	inflight sync.WaitGroup
+}
+
+// Serve answers one connection until it closes. Every exec still running when the connection
+// ends is killed: a workspace command that outlives the gateway that asked for it is a process
+// nobody can see or stop.
+func (s *Server) Serve(conn io.ReadWriteCloser) error {
+	defer conn.Close()
+	current := &session{server: s, writer: &syncWriter{conn: conn}, execs: map[uint64]*running{}}
+	defer func() {
+		// A connection that ends stops what it started, and only then: an exec still running when
+		// the gateway that asked for it is gone is a process nobody can see or stop.
+		current.killAll()
+		current.inflight.Wait()
+	}()
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			var message Message
+			if err := unmarshal(line, &message); err != nil {
+				return decodeError(err)
+			}
+			current.inflight.Go(func() { current.handle(message) })
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+func (s *Server) log(format string, args ...any) {
+	if s.Log != nil {
+		s.Log(format, args...)
+	}
+}
+
+func (s *Server) runner() Runner {
+	if s.Runner != nil {
+		return s.Runner
+	}
+	return ExecRunner{}
+}
+
+// run runs one of the runtime's quick commands. Bounded, because a wedged binary must not hold
+// a connection forever; creating a container takes as long as it takes and has its own path.
+func (s *Server) run(args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return s.runner().Run(ctx, args...)
+}
+
+func (t *session) handle(message Message) {
+	if err := t.dispatch(message); err != nil {
+		t.fail(message.ID, err)
+	}
+}
+
+func (t *session) dispatch(message Message) error {
+	switch message.Op {
+	case OpHello:
+		return t.hello(message)
+	case OpList:
+		return t.list(message)
+	case OpCreate:
+		payload, err := unmarshalPayload[CreatePayload](message)
+		if err != nil {
+			return err
+		}
+		return t.create(message, payload)
+	case OpStart, OpStop, OpRemove:
+		payload, err := unmarshalPayload[NamePayload](message)
+		if err != nil {
+			return err
+		}
+		return t.lifecycle(message, payload.Name)
+	case OpExec:
+		payload, err := unmarshalPayload[ExecPayload](message)
+		if err != nil {
+			return err
+		}
+		return t.exec(message, payload)
+	case OpKill:
+		payload, err := unmarshalPayload[KillPayload](message)
+		if err != nil {
+			return err
+		}
+		t.succeed(message.ID, KillResult{Killed: t.kill(payload.Target)})
+		return nil
+	default:
+		return fmt.Errorf("shim: unknown op %q (protocol %d)", message.Op, Protocol)
+	}
+}
+
+func (t *session) hello(message Message) error {
+	hello := Hello{Protocol: Protocol, Version: t.server.Version}
+	if out, err := t.server.run(HelloRuntimeCommand()...); err == nil {
+		hello.Runtime = strings.TrimSpace(out)
+	}
+	if ranges, err := subIDRanges(); err == nil {
+		hello.IDs = ranges
+	}
+	t.succeed(message.ID, hello)
+	return nil
+}
+
+// HelloRuntimeCommand is what the handshake asks the runtime for its version with. A machine
+// without the runtime answers nothing, which is how the gateway refuses with a sentence.
+func HelloRuntimeCommand() []string { return []string{"lxc-start", "--version"} }
+
+// subIDRanges is what this machine allows an unprivileged container to map, from /etc/subuid.
+// Without a range the container does not start, so the gateway can refuse with a sentence
+// instead of a failed create. Lines name a user either way — "root:100000:65536" and
+// "0:100000:65536" are both read by this — because a person writes what they are called and a
+// tool writes a number.
+func subIDRanges() (string, error) {
+	data, err := os.ReadFile("/etc/subuid")
+	if err != nil {
+		return "", err
+	}
+	names := map[string]bool{fmt.Sprint(os.Getuid()): true}
+	if os.Getenv("USER") != "" {
+		names[os.Getenv("USER")] = true
+	}
+	if current, err := user.Current(); err == nil {
+		names[current.Username] = true
+	}
+	var ranges []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		fields := strings.Split(strings.TrimSpace(line), ":")
+		if len(fields) != 3 {
+			continue
+		}
+		if names[fields[0]] {
+			ranges = append(ranges, strings.Join(fields, ":"))
+		}
+	}
+	sort.Strings(ranges)
+	return strings.Join(ranges, " "), nil
+}
+
+func (t *session) list(message Message) error {
+	names, err := t.names()
+	if err != nil {
+		return err
+	}
+	result := ListResult{Containers: make([]Instance, 0, len(names))}
+	for _, name := range names {
+		status, err := t.status(name)
+		if err != nil {
+			// One container the runtime cannot answer for is that container's problem, not a
+			// machine without a runtime: reporting it and carrying on is what keeps every other
+			// workspace's tools working. A container left in the image by an older machine did
+			// exactly this, and every workspace said "this workspace has no sandbox" while its
+			// own container was RUNNING (measured).
+			t.server.log("shim: %s is there and the runtime cannot read it: %v", name, err)
+			result.Containers = append(result.Containers, Instance{Name: name, Problem: err.Error()})
+			continue
+		}
+		result.Containers = append(result.Containers, Instance{Name: name, Status: status, Running: status == "RUNNING"})
+	}
+	t.succeed(message.ID, result)
+	return nil
+}
+
+func (t *session) names() ([]string, error) {
+	out, err := t.server.run("lxc-ls", "-1")
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+	return strings.Fields(out), nil
+}
+
+func (t *session) status(name string) (string, error) {
+	out, err := t.server.run("lxc-info", "-n", name, "-s")
+	if err != nil {
+		return "", err
+	}
+	_, state, found := strings.Cut(strings.TrimSpace(out), ":")
+	if !found {
+		return "", fmt.Errorf("shim: cannot read the state of %s from %q", name, out)
+	}
+	return strings.ToUpper(strings.TrimSpace(state)), nil
+}
+
+func (t *session) lifecycle(message Message, name string) error {
+	if name == "" {
+		return fmt.Errorf("shim: %s needs a container name", message.Op)
+	}
+	switch message.Op {
+	case OpStart:
+		if err := t.start(name); err != nil {
+			return err
+		}
+	case OpStop:
+		if _, err := t.server.run("lxc-stop", "-n", name, "-k"); err != nil && !alreadyThere(err) {
+			return err
+		}
+	case OpRemove:
+		// Destroying a running container is refused by the runtime, and "delete this workspace and
+		// everything in it" has to work whether or not anything is running: the kill comes first.
+		if _, err := t.server.run("lxc-stop", "-n", name, "-k"); err != nil && !alreadyThere(err) {
+			t.server.log("shim: stopping %s before removing it: %v", name, err)
+		}
+		if _, err := t.server.run("lxc-destroy", "-f", "-n", name); err != nil && !alreadyThere(err) {
+			// A create that was cut short leaves a rootfs.tmp, and the runtime's own recursive
+			// remove asks the filesystem for flags it does not carry on virtiofs: measured on the
+			// appliance, "Inappropriate ioctl for device - Failed to delete .../rootfs.tmp/...".
+			// The container never ran, so removing its folder is the same end the destroy wanted.
+			if cleanErr := t.removeLeftover(name); cleanErr != nil {
+				return fmt.Errorf("%w (and its folder could not be removed: %v)", err, cleanErr)
+			}
+			t.server.log("shim: %s was left behind by a cut-short create; removed its folder", name)
+		}
+	}
+	t.succeed(message.ID, NamePayload{Name: name})
+	return nil
+}
+
+// removeLeftover removes a container's own folder after the runtime refused to destroy it. It
+// asks the runtime for the rootfs path, refuses anything that is not this container's folder,
+// and never touches a container that is still running.
+func (t *session) removeLeftover(name string) error {
+	if status, err := t.status(name); err == nil && status == "RUNNING" {
+		return fmt.Errorf("%s is still running: a running container's folder is not removed", name)
+	}
+	out, err := t.server.run("lxc-info", "-n", name, "-c", "lxc.rootfs.path")
+	if err != nil {
+		return err
+	}
+	rootfs := strings.TrimSpace(out)
+	if _, after, ok := strings.Cut(rootfs, "="); ok {
+		rootfs = strings.TrimSpace(after)
+	}
+	rootfs = strings.TrimPrefix(rootfs, "dir:")
+	if rootfs == "" || !filepath.IsAbs(rootfs) {
+		return fmt.Errorf("the runtime did not name an absolute rootfs for %s: %q", name, out)
+	}
+	dir := filepath.Clean(filepath.Dir(rootfs))
+	if filepath.Base(dir) != name {
+		return fmt.Errorf("refusing to remove %s: it is not %s's own folder", dir, name)
+	}
+	return os.RemoveAll(dir)
+}
+
+// start boots a container and refuses to call it started when it is not: the runtime's start
+// returns success even when the container's init fails a moment later, and the state is what
+// says whether anything is running.
+func (t *session) start(name string) error {
+	// A container that is already up has been started. Asking lxc to start it again is not a
+	// no-op: it reports "ABORTING" and the caller concludes the sandbox is unusable, so every
+	// tool is disabled on a machine where the container is running (measured: a restart with
+	// the container left RUNNING did exactly that, on every boot, and the console said "this
+	// workspace has no sandbox" while lxc-ls said RUNNING).
+	if status, err := t.status(name); err == nil && status == "RUNNING" {
+		return nil
+	}
+	if _, err := t.server.run("lxc-start", "-n", name); err != nil {
+		// Two actors start one container: control makes it and the worker starts it when it is
+		// stopped, and both can be in lxc-start at the same moment. The runtime's second caller
+		// gets "Ongoing container creation detected", which is not a broken container — it is the
+		// first caller still working. Waiting for RUNNING is the repair; remaking it is not.
+		if ongoingCreation(err.Error()) && t.waitRunning(name, 2*time.Minute) {
+			return nil
+		}
+		return err
+	}
+	status, err := t.status(name)
+	if err != nil {
+		return err
+	}
+	if status != "RUNNING" {
+		return fmt.Errorf("shim: %s is %s after starting it: the image needs a program that stays alive as its init", name, status)
+	}
+	return nil
+}
+
+// ongoingCreation says whether the runtime refused a start because another start is still
+// creating the same container. The second caller has not found a fault; it has found a lock.
+func ongoingCreation(message string) bool {
+	return strings.Contains(message, "Ongoing container creation") || strings.Contains(message, "Ongoing container creation detected")
+}
+
+// waitRunning waits for a container another caller is starting. It asks the runtime, not a
+// timer: the container is running or it is not, and the wait ends on the answer.
+func (t *session) waitRunning(name string, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if status, err := t.status(name); err == nil && status == "RUNNING" {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return false
+}
+
+// create makes the container's rootfs from the image, writes the configuration the gateway
+// rendered, and prepares the paths the mounts need. Each of those steps is one the spike found
+// to be required, and skipping one is a container that starts and cannot work:
+//
+//   - the rootfs has to belong to the mapped uid of an unprivileged container, and its folder
+//     has to be traversable by it, or it does not start at all (measured);
+//   - a bind's parent folder has to exist in the image, because the runtime makes only the leaf
+//     and skips the mount silently when the parent is missing (measured);
+//   - a bind of a file needs an empty file where it lands, for the same reason.
+func (t *session) create(message Message, payload CreatePayload) error {
+	if payload.Name == "" || payload.Dir == "" || payload.Config == "" {
+		return errors.New("shim: create needs a name, a folder, and a configuration")
+	}
+	if payload.Image == "" {
+		return errors.New("shim: create needs the workspace's image: it becomes the container's rootfs")
+	}
+	known, err := t.names()
+	if err != nil {
+		return err
+	}
+	if slices.Contains(known, payload.Name) {
+		return fmt.Errorf("shim: %s already exists", payload.Name)
+	}
+	image := payload.Image
+	if !strings.Contains(image, "://") {
+		image = "docker://" + image
+	}
+	// An unprivileged container cannot start without the machine allowing it a range to map, and
+	// a fresh appliance image has none: the ranges are written here, once, for the share owner's
+	// uid and for the shifted root. Measured: without them newuidmap refuses and the container
+	// does not start at all.
+	if payload.RootfsOwner > 0 {
+		if err := ensureIDRanges(payload.RootfsOwner, payload.Owner); err != nil {
+			return err
+		}
+	}
+	// The network, before the container: a bridge that is not there yet is a container that
+	// starts and then cannot reach anything.
+	if payload.Network != nil {
+		if err := ensureBridge(t.server.runner(), payload.Network); err != nil {
+			return err
+		}
+	}
+	// Making a rootfs pulls an image, so it is the one call that is not bounded from here.
+	if _, err := t.server.runner().Run(context.Background(), "lxc-create", "-n", payload.Name, "-t", "oci", "--", "-u", image); err != nil {
+		return fmt.Errorf("shim: making the rootfs of %s: %w", payload.Name, err)
+	}
+	rootfs := filepath.Join(payload.Dir, "rootfs")
+	// The folder is made here as well as by the runtime: a fake runtime, and an image that ships
+	// a pre-made container, both leave it missing, and a configuration with nowhere to go is a
+	// create that fails after the work of pulling an image.
+	if err := os.MkdirAll(payload.Dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(payload.Dir, "config"), []byte(payload.Config), 0o644); err != nil {
+		return err
+	}
+	for _, bind := range payload.Binds {
+		if err := prepareTarget(rootfs, bind, payload.Owner, payload.Group); err != nil {
+			return err
+		}
+	}
+	// What the image cannot have, because a container is not the machine it runs on: the machine's
+	// certificate authorities, and a name for the uid the tools run as. Both before the rootfs is
+	// handed over, so they are owned like the rest of it (acornfall#98).
+	if err := certsFor(rootfs); err != nil {
+		return err
+	}
+	if err := passwdFor(rootfs, payload.Home, payload.Owner, payload.Group); err != nil {
+		return err
+	}
+	// The device this container was given has to be one it can open: a fresh machine's node is
+	// 0600 root:root, so the bind and the cgroup rule are two thirds of it (ADR 0021).
+	if payload.KVM {
+		if err := makeKVMOpenable(); err != nil {
+			// Not fatal: the container is usable, only nested virtual machines are not. A
+			// workspace that cannot open the device is a state doctor reports, not a workspace
+			// that refuses to start.
+			if t.server.Log != nil {
+				t.server.Log("shim: %v", err)
+			}
+		}
+	}
+	// The rootfs belongs to the container's own root, not to the share's owner: a container whose
+	// filesystem is someone else's can start and then not write it.
+	if payload.RootfsOwner > 0 {
+		if err := chownTree(rootfs, payload.RootfsOwner, payload.RootfsGroup); err != nil {
+			return err
+		}
+		if err := os.Chmod(payload.Dir, 0o755); err != nil {
+			return err
+		}
+	}
+	// Name resolution, after the rootfs exists and before anything runs in it: the machine's own
+	// resolver is the only one that knows the network the container is about to be on.
+	if payload.Network != nil {
+		if err := resolvFor(rootfs); err != nil {
+			return err
+		}
+	}
+	t.succeed(message.ID, NamePayload{Name: payload.Name})
+	return nil
+}
+
+// exec runs a command in a running container and reports its output as it arrives. The command
+// goes through a shell only when a working directory was asked for, and then the argv travels
+// as positional parameters, so nothing in it is parsed twice.
+func (t *session) exec(message Message, payload ExecPayload) error {
+	if len(payload.Argv) == 0 {
+		return errors.New("shim: exec needs a command")
+	}
+	status, err := t.status(payload.Name)
+	if err != nil {
+		return err
+	}
+	if status != "RUNNING" {
+		return fmt.Errorf("shim: %s is %s, not running", payload.Name, status)
+	}
+	args := []string{"lxc-attach", "-n", payload.Name, "--clear-env"}
+	// A command with no PATH finds nothing, and the environment the machine happens to have is
+	// not the workspace's business: the attach is cleared and the caller's variables are set
+	// explicitly.
+	args = append(args, "-v", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	// HOME is the container's, not the caller's: the machine's own HOME=/ turns every `~` in a
+	// workspace into the root of the container's filesystem, and a tool's settings land in a rootfs
+	// that is thrown away (measured, beta 60 to 62). A container whose passwd cannot be read keeps
+	// whatever the caller sent, because no answer is worse than a wrong one only if it is acted on.
+	home := homeOf(filepath.Join(t.server.containers(), payload.Name), payload.UID)
+	for _, variable := range payload.Env {
+		if home != "" && strings.HasPrefix(variable, "HOME=") {
+			continue
+		}
+		args = append(args, "-v", variable)
+	}
+	if home != "" {
+		args = append(args, "-v", "HOME="+home)
+	}
+	if payload.UID > 0 {
+		args = append(args, "-u", fmt.Sprint(payload.UID))
+	}
+	if payload.GID > 0 {
+		args = append(args, "-g", fmt.Sprint(payload.GID))
+	}
+	args = append(args, "--")
+	if payload.Cwd != "" {
+		args = append(args, "sh", "-c", `cd "$1" || exit 1; shift; exec "$@"`, "sh", payload.Cwd)
+	}
+	args = append(args, payload.Argv...)
+
+	handle, err := t.server.runner().Start(context.Background(), args...)
+	if err != nil {
+		return err
+	}
+	current := &running{name: payload.Name, handle: handle}
+	t.mu.Lock()
+	t.execs[message.ID] = current
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		delete(t.execs, message.ID)
+		t.mu.Unlock()
+	}()
+
+	chunks := make(chan Message, 64)
+	var streams sync.WaitGroup
+	streams.Add(2)
+	go func() { defer streams.Done(); copyOutput(handle.Stdout(), "stdout", message.ID, chunks) }()
+	go func() { defer streams.Done(); copyOutput(quietStderr(handle.Stderr()), "stderr", message.ID, chunks) }()
+	type outcome struct {
+		code int
+		err  error
+	}
+	finished := make(chan outcome, 1)
+	go func() {
+		code, err := handle.Wait()
+		finished <- outcome{code: code, err: err}
+		// The output still in the pipes belongs to this command: the channel closes only after
+		// both streams have drained, or the last chunk is a lost one.
+		streams.Wait()
+		close(chunks)
+	}()
+	for chunk := range chunks {
+		t.reply(chunk)
+	}
+	result := <-finished
+	if result.err != nil {
+		return fmt.Errorf("shim: running the command in %s: %w", payload.Name, result.err)
+	}
+	t.mu.Lock()
+	killed := current.stopped
+	t.mu.Unlock()
+	exit := Exit{Code: result.code}
+	if killed {
+		exit.Stopped = "killed"
+	}
+	t.reply(Message{ID: message.ID, Kind: KindEnd, Exit: &exit.Code, Stopped: exit.Stopped})
+	return nil
+}
+
+// kill stops one exec's process group. A target that has already finished is not an error: the
+// client cannot know the command ended while its kill was in flight.
+func (t *session) kill(target uint64) bool {
+	t.mu.Lock()
+	current, ok := t.execs[target]
+	if ok {
+		current.stopped = true
+	}
+	t.mu.Unlock()
+	if !ok {
+		return false
+	}
+	if err := current.handle.Kill(); err != nil {
+		t.server.log("shim: killing exec %d: %v", target, err)
+	}
+	return true
+}
+
+func (t *session) killAll() {
+	t.mu.Lock()
+	execs := make([]*running, 0, len(t.execs))
+	for _, current := range t.execs {
+		current.stopped = true
+		execs = append(execs, current)
+	}
+	t.mu.Unlock()
+	for _, current := range execs {
+		if err := current.handle.Kill(); err != nil {
+			t.server.log("shim: killing %s's command: %v", current.name, err)
+		}
+	}
+}
+
+func copyOutput(reader io.ReadCloser, name string, id uint64, chunks chan<- Message) {
+	defer reader.Close()
+	buffer := make([]byte, 32*1024)
+	for {
+		count, err := reader.Read(buffer)
+		if count > 0 {
+			data := make([]byte, count)
+			copy(data, buffer[:count])
+			chunks <- Message{ID: id, Kind: KindChunk, Stream: name, Data: data}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func prepareTarget(rootfs string, bind Bind, owner, group int) error {
+	target := filepath.Clean(strings.TrimPrefix(bind.Target, "/"))
+	if target == "." || target == "" {
+		return fmt.Errorf("shim: %s cannot be a mount target", bind.Target)
+	}
+	path := filepath.Join(rootfs, target)
+	if bind.File {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+	} else if err := os.MkdirAll(path, 0o755); err != nil {
+		return err
+	}
+	if owner > 0 {
+		// The target is the workspace; its ancestors are the image's. A tool runs as the bind's
+		// owner, not as the container's root, so a 700 parent (the image's /root, a user's home)
+		// would keep it out of a mount that exists. Execute permission on the chain is enough;
+		// read and list stay as the image made them.
+		root := filepath.Clean(rootfs)
+		for parent := filepath.Dir(path); parent != root && strings.HasPrefix(parent, root+string(os.PathSeparator)); parent = filepath.Dir(parent) {
+			info, statErr := os.Stat(parent)
+			if statErr != nil {
+				break
+			}
+			if mode := info.Mode().Perm(); mode&0o111 != 0o111 {
+				_ = os.Chmod(parent, mode|0o111)
+			}
+		}
+		return chownTree(path, owner, group)
+	}
+	return nil
+}
+
+// chownTree gives a whole tree to one user. Link-aware: an OCI rootfs holds links to files that
+// are not in it (broken man-page links, for one), and chowning through one of those is a failure
+// that stops a container being made (measured).
+func chownTree(path string, uid, gid int) error {
+	return filepath.Walk(path, func(inner string, _ os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Lchown(inner, uid, gid)
+	})
+}
+
+func (t *session) fail(id uint64, err error) {
+	t.reply(Message{ID: id, Kind: KindError, Error: err.Error()})
+}
+
+func (t *session) succeed(id uint64, result any) {
+	payload, err := marshal(result)
+	if err != nil {
+		t.fail(id, err)
+		return
+	}
+	t.reply(Message{ID: id, Kind: KindResult, Result: payload})
+}
+
+func (t *session) reply(message Message) {
+	if err := t.writer.write(message); err != nil {
+		t.server.log("shim: writing a reply failed: %v", err)
+	}
+}
+
+func firstLine(text string) string {
+	if before, _, ok := strings.Cut(text, "\n"); ok {
+		return before
+	}
+	return text
+}
+
+// syncWriter serializes replies: several requests are in flight at once, and two interleaved
+// half-written lines are a protocol nobody can read.
+type syncWriter struct {
+	mu   sync.Mutex
+	conn io.Writer
+}
+
+func (w *syncWriter) write(message Message) error {
+	line, err := encode(message)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, err = w.conn.Write(line)
+	return err
+}
+
+// ensureIDRanges makes sure this machine allows an unprivileged container to map what it needs:
+// the shifted root range, and the share owner's own uid as itself (which is how a container
+// writes files that belong to the user). Both files, both entries, written once — newuidmap and
+// newgidmap check exactly these.
+func ensureIDRanges(shift, owner int) error {
+	entries := []string{fmt.Sprintf("root:%d:65536", shift)}
+	if owner > 0 && owner < 65535 {
+		entries = append(entries, fmt.Sprintf("root:%d:1", owner))
+	}
+	for _, file := range []string{"/etc/subuid", "/etc/subgid"} {
+		present, err := os.ReadFile(file)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		text := string(present)
+		for _, entry := range entries {
+			if strings.Contains(text, entry+"\n") || strings.HasSuffix(text, entry) {
+				continue
+			}
+			text += entry + "\n"
+		}
+		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+			return fmt.Errorf("shim: allowing the id ranges an unprivileged container maps: %w", err)
+		}
+	}
+	return nil
+}
+
+// alreadyThere says whether a runtime failure means "it is not there", which is the wanted state
+// for stopping and removing: the caller asked for an end and the end is here. Measured, the
+// runtime says "is not running" for a stopped container and "is not defined" for one that is
+// gone, and both arrive as errors — a remove that failed because the container had already been
+// removed is a failure nobody can act on.
+func alreadyThere(err error) bool {
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "not running") || strings.Contains(text, "not defined") || strings.Contains(text, "not found")
+}
+
+// quietStderr drops lxc-attach's own noise from a command's stderr, and only that. The attach
+// opens /dev/null before it has entered the container's namespaces, fails on a machine where that
+// open is not permitted, and runs the command anyway — so every successful command arrived with a
+// line that reads like the reason it could not run. Three diagnoses on a real install went to that
+// line before anyone checked the container's /dev and found it correct.
+//
+// Everything else is left alone: when a command fails, its own words and lxc's are the reason.
+func quietStderr(r io.ReadCloser) io.ReadCloser {
+	out, in := io.Pipe()
+	go func() {
+		defer in.Close()
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.Contains(line, "open_devnull") {
+				continue
+			}
+			if _, err := io.WriteString(in, line+"\n"); err != nil {
+				return
+			}
+		}
+	}()
+	return out
+}

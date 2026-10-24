@@ -10,7 +10,7 @@ import (
 )
 
 func TestResolveWorkerPrefersExplicit(t *testing.T) {
-	manager := update.New(t.TempDir(), "", "")
+	manager := update.New(t.TempDir(), t.TempDir(), "", "")
 	got, _, managed := resolveWorker("bun run --bun src/main.ts", "", "", manager)
 	if !slices.Equal(got, []string{"bun", "run", "--bun", "src/main.ts"}) {
 		t.Fatalf("explicit command must win, got %q", got)
@@ -21,7 +21,7 @@ func TestResolveWorkerPrefersExplicit(t *testing.T) {
 }
 
 func TestResolveWorkerPrefersBinFlag(t *testing.T) {
-	manager := update.New(t.TempDir(), "", "")
+	manager := update.New(t.TempDir(), t.TempDir(), "", "")
 	got, dir, managed := resolveWorker("", "", "/bin/worker", manager)
 	if !slices.Equal(got, []string{"/bin/worker"}) || dir != "" || managed {
 		t.Fatalf("bin flag must win unmanaged: %q %q %v", got, dir, managed)
@@ -30,7 +30,7 @@ func TestResolveWorkerPrefersBinFlag(t *testing.T) {
 
 func TestResolveWorkerDirFlagUsesSystemBun(t *testing.T) {
 	home := t.TempDir()
-	manager := update.New(home, "", "")
+	manager := update.New(home, home, "", "")
 	sources := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(sources, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestResolveWorkerDirFlagUsesSystemBun(t *testing.T) {
 
 func TestResolveWorkerDefaultsToManaged(t *testing.T) {
 	home := t.TempDir()
-	manager := update.New(home, "", "")
+	manager := update.New(home, home, "", "")
 	got, dir, managed := resolveWorker("", "", "", manager)
 	if !managed {
 		t.Fatal("default worker must be managed")

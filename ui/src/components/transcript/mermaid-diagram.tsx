@@ -22,6 +22,11 @@ export interface MermaidDiagramProps {
  * size of the source is the only guard there is against a diagram that holds the pane. */
 const MAX_SOURCE = 8 * 1024;
 
+/** How long a render may hold the pane before the source is shown instead. Mermaid cannot be
+ * cancelled, so a source small enough to try and still slow to draw is the case the size guard
+ * cannot catch: the reader waits, then gets the thing they can at least read. */
+const DRAW_TIMEOUT_MS = 10_000;
+
 type Drawing = { state: "drawing" } | { state: "drawn" } | { state: "refused"; reason: string };
 
 function currentTheme(): Theme {
@@ -52,13 +57,25 @@ export function MermaidDiagram({ source }: MermaidDiagramProps) {
 
 		let current = true;
 		setDrawing({ state: "drawing" });
+		// A render that has not answered by now is one the pane will not wait for: the source is what
+		// a person can still use, and a late answer is ignored like one for another source.
+		const timer = setTimeout(() => {
+			if (!current) return;
+			current = false;
+			setDrawing({
+				state: "refused",
+				reason: `the drawing took longer than ${DRAW_TIMEOUT_MS / 1000} seconds`,
+			});
+		}, DRAW_TIMEOUT_MS);
 		void drawDiagram(source, theme)
 			.then((drawing) => {
+				clearTimeout(timer);
 				if (!current) return;
 				host.current?.replaceChildren(drawing);
 				setDrawing({ state: "drawn" });
 			})
 			.catch((error: unknown) => {
+				clearTimeout(timer);
 				if (!current) return;
 				setDrawing({
 					state: "refused",
@@ -70,6 +87,7 @@ export function MermaidDiagram({ source }: MermaidDiagramProps) {
 		// to the source it was asked about.
 		return () => {
 			current = false;
+			clearTimeout(timer);
 		};
 	}, [source, theme]);
 

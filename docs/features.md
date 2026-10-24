@@ -102,6 +102,9 @@ The chain is **conversation → its definition → this workspace → the instal
 | W7 | The tools can run on the host engine, chosen explicitly, and the state says it is not isolated. It is never selected by a missing hypervisor, and an unknown engine is refused with the list. | `TestWorkspaceRulesReachThePrompt`, `TestTheHostEngineNeedsNothing`, `TestIsolationSaysWhichEngineSeparatesFromTheHost`, `TestEngineRefusesANameItDoesNotImplement`, `worker/test/host.test.ts` |
 | W8 | A tool call against a sandbox the engine stopped for being idle wakes it and runs, instead of failing or reporting files as missing. | `worker/test/microsandbox.test.ts` + `worker/test/sandbox.integration.test.ts` (real stop under a live client) |
 | W9 | The worker refuses a loaded SDK that is not the pinned engine, and doctor reports a store the pinned engine cannot read — so no side migrates the shared catalog past the other. | `worker/test/microsandbox.test.ts` + `TestVerifyReadsTheStoreThroughThePinnedEngine` + house-rules pin check |
+| W10 | A workspace says whether it can be used: starting, ready, or failed with the harness's own reason. Every action that needs the harness is refused until ready, in the gateway; `GET /state` and `GET /stream` are the only requests that start one, and a draft never starts one. | `TestTheLifecycleSaysWhenAWorkspaceCanBeUsed`, `TestAConversationIsNotMadeBeforeTheWorkspaceIsReady`, `TestEveryHarnessActionIsRefusedBeforeTheWorkspaceIsReady`, `TestAHarnessActionDoesNotStartASleepingWorkspace` |
+| W11 | A workspace made after the first one runs tools: its own container, its own mount, and the machine's shared bridge and id ranges. A command that writes the workspace lands in the share, owned by the share's owner. A root install uses a fixed non-root owner and `/srv/acornfall`, so the container stays unprivileged; privileged is a separate workspace/engine choice. | `TestASecondWorkspaceRunsTools`, `TestLiveTheApplianceBootsFromItsReleaseTarball`, `TestANewWorkspaceBelongsToTheSharesOwner`, `TestAWorkspaceOrTheEngineCanAskForThePrivilegedProfile`, `TestTheMachineMountsTheShareAtItsOwner` |
+| W12 | Creating a workspace does not take the person out of the conversation they are in. The console shows a preparing row, asks for the first state in the background, and opens the first conversation when the workspace is ready; if they went back to their work, a ready notice offers it. | `ui/test/preparation.test.ts` |
 
 ## Resources: rules, agents, skills
 
@@ -116,15 +119,15 @@ The chain is **conversation → its definition → this workspace → the instal
 | R7 | Slash commands come from two layers, the workspace shadowing the install, and the listing says which file each came from. | `TestCommandsComeFromBothLayersAndTheWorkspaceWins` |
 | R8 | Expansion happens server-side, so the transcript records what the model saw; arguments are appended when there is no placeholder. | `TestCommandExpansionIsWhatTheModelSees`, `TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder` + `worker/test/commands.test.ts` |
 | R9 | A message that merely starts with a slash is not rewritten. | `TestAnUnknownCommandIsSentAsWritten` |
-| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
-| R11 | The global resource folders are mounted into every sandbox at their own paths, read-only, so a skill's instructions can name a script and have it run. The install folder itself — credentials, token, state — is never mounted. | `TestAGlobalSkillsScriptRunsInsideTheWorkspace`, `TestGlobalPathsAreTheResourceFoldersAndNeverTheInstall`, `TestRenderMountsTheGlobalsReadOnly` |
+| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the install level (`~/acornfall/.agents`, the one folder the machine mounts) as well as in the workspace. Ours wins when a folder has both. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
+| R11 | The global resource folders are mounted into every sandbox at their own paths, read-only, so a skill's instructions can name a script and have it run. The install folder itself — credentials, token, state — is never mounted. | `TestAGlobalSkillsScriptRunsInsideTheWorkspace`, `TestGlobalPathsAreTheBundleAndNeverTheRootsPrivateFiles`, `TestRenderMountsTheGlobalsReadOnly` |
 
 ## Guards
 
 | # | Feature | Test |
 |---|---|---|
-| G1 | A guard blocks a tool call and tells the model why; the transcript records the call and the refusal. | `TestTrustDecidesWhetherAWorkspaceIsRead`, `worker/test/hooks.test.ts` |
-| G2 | Guards accumulate across layers: one added anywhere holds everywhere. | `worker/test/config.test.ts`, `TestTrustDecidesWhetherAWorkspaceIsRead` |
+| G1 | A guard blocks a tool call and tells the model why; the transcript records the call and the refusal. | `TestAWorkspacesOwnResourcesAreRead`, `worker/test/hooks.test.ts` |
+| G2 | Guards accumulate across layers: one added anywhere holds everywhere. | `worker/test/config.test.ts`, `TestAWorkspacesOwnResourcesAreRead` |
 | G3 | A guard that cannot be understood is an error where it is written, not a rule that quietly does nothing. | `worker/test/config.test.ts`, `TestABrokenWorkspaceFileIsReportedAndHeals` |
 | G4 | Path confinement survives `..`, sibling prefixes, and the workspace directory itself. | `worker/test/hooks.test.ts` |
 
@@ -151,16 +154,18 @@ The chain is **conversation → its definition → this workspace → the instal
 
 | # | Feature | Test |
 |---|---|---|
-| P1 | Credentials live in the install folder (0600) and never inside a workspace. | `worker/test/skills.test.ts`, `TestWorkspacesAreIsolatedAndStartOnDemand` |
+| P1 | Credentials live in the mount, `config/credentials.json` (0600), and never inside a workspace. | `worker/test/skills.test.ts`, `TestWorkspacesAreIsolatedAndStartOnDemand` |
 | P2 | The provider list and each model's thinking levels come from the harness. | `worker/test/protocol.test.ts`, `TestAFreshInstallHasARootConversation` |
-| P3 | A non-loopback bind always ends up with a token; loopback needs none; `--insecure` is how you say otherwise. | `httpapi.TestResolveToken` |
+| P3 | The console asks for nothing by default, on loopback and on a network address alike: nothing is generated, and a `config/token` an older install left behind no longer turns authentication on. `--token` (or `ACORNFALL_TOKEN`) locks a listener, and the flag wins. | `httpapi.TestResolveToken`, `TestAnOldTokenFileIsNotPickedUp` |
 | P4 | The token is accepted as a bearer header or as a cookie set by a `?token=` link, and refused otherwise. | `httpapi.TestRequireToken` |
 | P5 | Credential reads hand back copies, `modify` returning nothing changes nothing, and `delete` is what removes. | `worker/test/skills.test.ts` |
+| P6 | The readiness list doctor and a fresh install print reads the paths this install actually uses: the credentials in the mount, and the engine it will run. | `TestDoctorReadsTheCredentialsFromTheMount` |
 
 ## The worker protocol
 
-The seam a second harness implements (`docs/adr/0002-layers-and-protocol.md`), tested without a
-gateway in the way: `worker/test/protocol.test.ts`.
+The seam a second harness implements (`docs/adr/0002-layers-and-protocol.md`) — an internal
+seam today, with no version negotiation ([ADR 0028](adr/0028-the-harness-protocol-is-internal.md)) —
+tested without a gateway in the way: `worker/test/protocol.test.ts`.
 
 | # | Feature |
 |---|---|
@@ -170,6 +175,20 @@ gateway in the way: `worker/test/protocol.test.ts`.
 | X4 | A prompt streams transcripts as whole views and reports submissions. |
 | X5 | `expand` rewrites a command into what the model will see. |
 | X6 | `policy`, `usage`, `commands`, and `agents` answer with what the interface explains. |
+
+## The machine and the appliance
+
+| # | Feature | Test |
+|---|---|---|
+| M1 | An appliance image is the release it says it is. An image from another release, or one that does not say which it is, is replaced before the machine boots, and the machine is made again — so an upgrade never boots the previous appliance or the containers it left behind. `--image` is the person's own tree and is not compared. | `TestTheImageIsTheReleaseThisBuildRuns`, `TestStampingAnImageNamesItsRelease`, `TestStampingAnImageWithNoMarkInventsNothing` |
+| M2 | One container the runtime cannot read is that container's problem: the workspace that owns it refuses with the runtime's words and a repair, and every other workspace keeps its tools. | `TestOneUnreadableContainerDoesNotFailTheList`, `TestAnUnreadableContainerIsItsOwnWorkspacesProblem` |
+| M3 | The appliance is an artifact and a disk, and they are two things. The release's tarball is kept verified at `appliance/<tag>.tar.gz`, and the machine boots a disk unpacked from it — so `machine down` costs a copy rather than a download, `machine up` needs no network when the artifact is here, and a previous machine's containers are in nobody's next image. An install from before this layout keeps booting `appliance/rootfs`, which is never deleted and never written into. | `TestTheApplianceIsKeptAsTheTarball`, `TestTheDiskIsUnpackedFromTheTarball`, `TestTheMachineBootsTheDiskItsTarballMade`, `TestTheImageAnInstallAlreadyHasIsNeverTouched`, `TestTakingTheMachineDownKeepsTheArtifact` |
+| M4 | The host supervises the machine — and only a machine a person declared `running` in `state/machine.json`. `acornfall machine serve` starts it at boot, restarts it when it exits with backoff and a cap, and stops after N with a line in the log instead of looping. `machine down`, `stop` and `restart` write that declaration before they act, so `down` stays down and a restart stays up. A missing, empty or unparsable file is a host where a person drives: nothing is started. | `TestTheServiceStartsTheMachineThatIsNotRunning`, `TestACrashComesBackWithBackoffAndThenTheServiceStops`, `TestAMachineThatStaysUpStartsItsCountAgain`, `TestTheRestartBackoffGrowsAndIsCapped`, `TestTheServiceStartsAMachineThatIsPinned`, `TestNoDeclarationStartsNothing`, `TestAnUnparseableDeclarationStartsNothing`, `TestDownIsNotUndoneByTheService`, `TestStopIsNotUndoneByTheService`, `TestRestartKeepsTheMachinePinned`, `TestAPersonAsksForOneOfThreeThings`, `TestADeclarationIsToleratedWhenItIsNotThere` |
+| M5 | An update is a declared intent, not a request. The product writes the release it wants in `state/host/want.json`; the service applies it once — and only for a machine a person declared running, because the service builds nothing for a machine nobody wants, so a request made while it is down waits in the mount and is picked up when someone says `up`. A failure is named in `state/host/is.json` and never takes a running machine down. The channel carries a release tag and nothing else — a path, a shell word or a command is refused by name. | `TestWhatCountsAsAReleaseTag`, `TestTheProductAsksWithAReleaseAndNothingElse`, `TestTheApplianceAsksInsteadOfApplying`, `TestTheReleaseTheProductAsksForIsAppliedOnce`, `TestAFailedApplyLeavesTheMachineAloneAndIsNotRetriedEverySecond`, `TestApplyingAReleaseMakesANewDiskAndKeepsTheArtifact`, `TestAnUpdateForAGoneMachineMakesNoDisk`, `TestAnUpdateHeldWhileDownIsAppliedWhenTheMachineIsUp` |
+| M6 | The console shows the gap: the release asked for, the release the host says is running, and the host's last error. A host install, where the product updates itself, carries none of it. | `TestTheConsoleSeesWhatTheHostSays`, `TestTheApplianceAsksTheHostToUpdate`, `ui/test/host.test.ts` |
+| M7 | The host updates itself too, second. A release the machine runs and whose state reports a worker ready — and that is not the version the service is — is taken on the first tick all three hold: verified against the release's checksum file, written under its own name, a boot marker, then the symlink, and the service exits so the supervisor starts it. No timer and nothing recorded: readiness is read from the machine. A start that finds its own marker goes back to the binary before it and exits 1, only a service started through `~/.acornfall/bin/acornfall` replaces itself, and one update runs at a time per host. `acornfall machine update` runs both steps now. | `TestABinaryThatDoesNotMatchTheReleaseIsRefused`, `TestTheMarkerIsWrittenBeforeTheSymlinkMoves`, `TestTheFirstStartClaimsTheBootMarker`, `TestALaterStartThatFindsItsMarkerGoesBack`, `TestABootMarkerFromAnotherVersionIsIgnored`, `TestStepTwoHappensOnTheFirstReadyTick`, `TestAMachineThatIsRunningButNotReadyDoesNotTakeTheHost`, `TestStepTwoDoesNotRepeatForTheVersionWeRun`, `TestAStepTwoThatFailsIsHeldAndSaid`, `TestTheServiceRefusesToReplaceABinaryItDidNotPutThere`, `TestTheUpdateStopsBetweenTheSteps`, `TestTheLockRefusesASecondUpdate`, `TestALockWhoseProcessIsGoneIsBroken`, `TestALockOlderThanAnyUpdateIsBroken` |
+| M8 | The release's own proof boots the published tarball, makes a second workspace, asks it for a tool, and checks the container's name and the file in that workspace's mount. A green proof now means the journey a person takes, not only that the console answered. | `TestLiveTheApplianceBootsFromItsReleaseTarball` |
+| M9 | An update pauses writes from `requested` until both the machine and the host service run the target, then lifts the block on `ready` or `failed`; the console shows the phase and refuses a second Install. | `TestTheUpdatePhaseFollowsWantAndTheHost`, `TestAnUpdateThatFailsLiftsTheBlock`, `TestAnUpdateThatStopsAnsweringStopsBlocking`, `TestAnUpdateBlocksWritesButNotStatus` |
 
 ## Fixed by writing these tests
 

@@ -96,7 +96,7 @@ func TestTheHostEngineProduceAndReport(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := Open(context.Background(), Options{Home: home, Driver: NewHost()})
+	manager, err := Open(context.Background(), Options{Machinery: home, Driver: NewHost()})
 	if err != nil {
 		t.Fatal(err)
 	}

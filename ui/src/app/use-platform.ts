@@ -50,6 +50,7 @@ import {
 	type AuthWaiting,
 } from "./auth-flow";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
+import { watchWorkspacePreparation } from "./preparation";
 import { trackBuild } from "./update";
 import {
 	contextWindowFor,
@@ -60,6 +61,9 @@ import {
 	toModelChoices,
 	toModelGroups,
 	toProviders,
+	isReady,
+	readinessSentence,
+	toLifecycle,
 	toSandbox,
 	toScopeDefaults,
 	toThinkingGroups,
@@ -73,8 +77,10 @@ import type {
 	PickerGroup,
 	ProviderSummary,
 	SandboxSummary,
+	WorkspaceLifecycle,
 	SlashCommand,
 	TranscriptEntry,
+	WorkspacePreparation,
 	WorkspaceSummary,
 } from "./view-models";
 import type { Draft, RoomDraft } from "./draft";
@@ -264,6 +270,17 @@ export interface Platform {
 	composerFocusToken: number;
 	/** Where the active workspace's tools actually run. */
 	sandbox?: SandboxSummary | undefined;
+	/** The active workspace's phase: starting, ready, or failed with a reason. */
+	lifecycle: WorkspaceLifecycle;
+	/** False until the workspace can make conversations and take prompts. The rail's "new
+	 * conversation" and the composer are off, and they say why. Not the page's own readiness,
+	 * which is above and about the first fetch having landed. */
+	workspaceReady: boolean;
+	/** The workspace whose state is being fetched after a switch or a landing: it is waking.
+	 * Undefined once the state in hand belongs to the workspace in the route. */
+	wakingWorkspace?: string | undefined;
+	/** The reason the workspace is not ready, in one sentence; undefined when it is. */
+	readiness?: string | undefined;
 	/** What each scope says, before resolution: one tab per scope in the settings screen. */
 	defaults: {
 		workspace: { model: string; thinking: string; agent: string };
@@ -278,7 +295,13 @@ export interface Platform {
 	/** Any workspace's image and network, by name: the workspaces screen's rows are not the one
 	 * in view, and its menu is where a sandbox is changed. */
 	setWorkspaceSandbox: (name: string, change: { image: string; network: string }) => void;
+	/** A new workspace is made and prepared while the person keeps working where they are. */
 	createWorkspace: (name: string) => void;
+	/** Workspaces whose folder exists but whose harness is still starting. */
+	preparations: WorkspacePreparation[];
+	openPreparedWorkspace: (name: string) => void;
+	dismissPreparedWorkspace: (name: string) => void;
+	retryPreparedWorkspace: (name: string) => void;
 	removeWorkspace: (name: string) => void;
 	renameWorkspace: (name: string, title: string) => void;
 	/** Every provider, connected first: the settings screen lists these. */
@@ -300,6 +323,8 @@ export interface Platform {
 	refreshProviders: () => void;
 	/** The self-update state, if the gateway answered yet. One dot, not a list. */
 	update?: UpdateStatus | undefined;
+	/** True while an update is installing or starting: writes are paused. */
+	updateBlocking: boolean;
 	/** Ask the gateway for the update state again; a success clears the last refusal. */
 	refreshUpdate: () => void;
 	/** An apply is in flight: the update button is disabled until it settles. */
@@ -402,6 +427,12 @@ export function usePlatform(): Platform {
 	const theme = choice === "system" ? system : choice;
 	const [connection, setConnection] = useState<"live" | "reconnecting">("live");
 	const [failure, setFailure] = useState<string | undefined>(undefined);
+	const [preparations, setPreparations] = useState<WorkspacePreparation[]>([]);
+	/**
+	 * One run per workspace name. A dismissed or opened preparation bumps or removes the id, and
+	 * the wait loop stops when it no longer owns the name; a retry starts a new one.
+	 */
+	const preparationRuns = useRef(new Map<string, number>());
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
 	const [ready, setReady] = useState(false);
 	const [authFlow, setAuthFlow] = useState<AuthFlow | undefined>(undefined);
@@ -428,6 +459,9 @@ export function usePlatform(): Platform {
 	// The view frame does not say which conversation it belongs to, so the claim in `onView`
 	// reads the one the stream is following from here.
 	const activeIdRef = useRef<string | undefined>(undefined);
+	// Whether the first fetch ever landed. A state frame clears a failure only while this is false: after
+	// that, `failure` is the app's own (a command that failed), and a state arriving must not wipe it.
+	const readyRef = useRef(false);
 	useEffect(() => {
 		activeIdRef.current = activeId;
 	}, [activeId]);
@@ -562,6 +596,7 @@ export function usePlatform(): Platform {
 				const next = await fetchState(workspace, route.conversation);
 				if (cancelled) return;
 				setState(next);
+				readyRef.current = true;
 				setReady(true);
 				setFailure(undefined);
 			} catch (cause) {
@@ -591,6 +626,16 @@ export function usePlatform(): Platform {
 					return;
 				}
 				setState(next);
+				// The first state is the console answering, which is what a failed first fetch was waiting for:
+				// without this, a page opened while the machine was being replaced keeps its "NetworkError when
+				// attempting to fetch resource" for ever, while the app behind it has recovered — the stream
+				// reconnects on its own, the sentence does not. Only the first: after that, a failure on screen
+				// is the app's own, and a state frame is not evidence about it.
+				if (!readyRef.current) {
+					readyRef.current = true;
+					setReady(true);
+					setFailure(undefined);
+				}
 			},
 			onView: (nextView, nextSenders) => {
 				if (cancelled) return;
@@ -680,8 +725,19 @@ export function usePlatform(): Platform {
 	}, [theme, choice]);
 
 	// The commands the server would expand. They are fetched per workspace, once: the list
-	// changes when the workspace's resources change, not when a conversation does.
+	// changes when the workspace's resources change, not when a conversation does. The
+	// endpoint needs the harness, so a workspace that is starting is not asked: the state is
+	// what starts it, and the fetch waits for that state to be the one in view.
+	const commandsReady =
+		state?.workspace?.name === workspace &&
+		(state?.lifecycle !== undefined
+			? state.lifecycle.phase === "ready"
+			: state?.workerUp === true);
 	useEffect(() => {
+		if (!commandsReady) {
+			setCommands([]);
+			return;
+		}
 		let cancelled = false;
 		const load = async (): Promise<void> => {
 			try {
@@ -695,7 +751,7 @@ export function usePlatform(): Platform {
 		return () => {
 			cancelled = true;
 		};
-	}, [workspace, reportError]);
+	}, [workspace, commandsReady, reportError]);
 
 	const conversations = useMemo(
 		() =>
@@ -710,14 +766,41 @@ export function usePlatform(): Platform {
 
 	const contextFold = useMemo(() => foldContext(view?.entries ?? []), [view]);
 
-	const workspaces = useMemo(
-		() => toWorkspaces(state?.workspaces ?? [], state?.workspace?.name ?? ""),
-		[state],
-	);
+	const workspaces = useMemo(() => {
+		// A workspace being prepared has its own row: the state stream may already list it, and
+		// two rows for one name would read as two workspaces.
+		const preparing = new Set(preparations.map((preparation) => preparation.name));
+		return toWorkspaces(
+			(state?.workspaces ?? []).filter((workspace) => !preparing.has(workspace.name)),
+			state?.workspace?.name ?? "",
+		);
+	}, [state, preparations]);
 	const sandbox = useMemo(
 		() => (state === undefined ? undefined : toSandbox(state.sandbox)),
 		[state],
 	);
+	// The state in hand belongs to the workspace in the route only after its own fetch lands.
+	// Until then a switch is a wake, not the previous workspace's readiness: keeping the old
+	// lifecycle let the composer offer a workspace whose harness had not started.
+	const stateForWorkspace = state !== undefined && state.workspace?.name === workspace;
+	const wakingWorkspace = stateForWorkspace ? undefined : workspace;
+	const lifecycle = useMemo<WorkspaceLifecycle>(
+		() =>
+			stateForWorkspace && state !== undefined
+				? toLifecycle(state)
+				: { phase: "starting", reason: `waking ${workspace}` },
+		[state, stateForWorkspace, workspace],
+	);
+	const workspaceReady = isReady(lifecycle);
+	const readiness = readinessSentence(lifecycle);
+	// A route change is a new workspace. Keeping the old state would show its conversations
+	// and its readiness under the new name until the fetch landed; clearing makes the wake
+	// explicit. The route effect fetches the new state and opens its stream next.
+	useEffect(() => {
+		if (state === undefined || state.workspace?.name === workspace) return;
+		setState(undefined);
+		setView(undefined);
+	}, [state, workspace]);
 	const deleted = useMemo(
 		() =>
 			(state?.conversations ?? [])
@@ -1033,6 +1116,8 @@ export function usePlatform(): Platform {
 		setRailOpen(false);
 		// Opening a workspace leaves the layer: the row is the layer's own action.
 		setWorkspacesOpen(false);
+		setFailure(undefined);
+		setState(undefined);
 		setView(undefined);
 		setRoute({
 			screen: "conversation",
@@ -1052,24 +1137,125 @@ export function usePlatform(): Platform {
 		[act, reload],
 	);
 
+	const updatePreparation = useCallback(
+		(name: string, change: Partial<Omit<WorkspacePreparation, "name">>): void => {
+			setPreparations((current) =>
+				current.map((preparation) =>
+					preparation.name === name ? { ...preparation, ...change } : preparation,
+				),
+			);
+		},
+		[],
+	);
+
+	/**
+	 * Watch a folder become a workspace. The first state fetch is the one that starts the
+	 * harness and its sandbox; until it answers, the person stays in the conversation they
+	 * were in. When the list they started from is still open, ready opens the workspace's
+	 * first conversation there and then; when they went back to their work, it becomes a
+	 * notice with an Open button instead of taking the screen from under them.
+	 */
+	const watchWorkspace = useCallback(
+		(name: string) => {
+			const run = (preparationRuns.current.get(name) ?? 0) + 1;
+			preparationRuns.current.set(name, run);
+			void (async () => {
+				const result = await watchWorkspacePreparation(name, {
+					fetch: (workspaceName, conversation) => fetchState(workspaceName, conversation),
+					isCurrent: () => preparationRuns.current.get(name) === run,
+				});
+				if (preparationRuns.current.get(name) !== run) return;
+				if (result.phase === "ready") {
+					if (workspacesOpenRef.current) {
+						preparationRuns.current.delete(name);
+						setPreparations((current) =>
+							current.filter((preparation) => preparation.name !== name),
+						);
+						selectWorkspace(name);
+						return;
+					}
+					updatePreparation(name, { phase: "ready", reason: undefined });
+					// The new workspace is now in the registry's list; the state the rail reads
+					// was fetched while it was still starting.
+					void reload();
+					return;
+				}
+				if (result.phase === "failed") {
+					updatePreparation(name, { phase: "failed", reason: result.reason });
+					void reload();
+				}
+			})();
+		},
+		[reload, selectWorkspace, updatePreparation],
+	);
+
 	const createWorkspace = useCallback(
 		(name: string) => {
-			act(createWorkspaceRequest(name), () => {
-				// The workspace opens on its first conversation, which the gateway makes for a
-				// workspace that has none — so there is nothing to create here, and creating one
-				// would leave the new workspace with two.
-				window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
-				setView(undefined);
-				setRoute({
-					screen: "conversation",
-					workspace: name,
-					conversation: "",
-					settingsTab: "general",
-					updateTag: "",
-				});
-			});
+			if (name.trim() === "" || preparationRuns.current.has(name)) return;
+			const startedAt = Date.now();
+			// A run id of zero means "created, waiting for the first state fetch". The watcher
+			// bumps it, so a late answer cannot match a run nobody is waiting for any more.
+			preparationRuns.current.set(name, 0);
+			setPreparations((current) => [
+				...current.filter((preparation) => preparation.name !== name),
+				{ name, phase: "preparing", startedAt },
+			]);
+			void (async () => {
+				try {
+					await createWorkspaceRequest(name);
+				} catch (cause) {
+					// The folder was never made, so there is nothing to prepare; the refusal is
+					// the form's answer, not a workspace row.
+					preparationRuns.current.delete(name);
+					setPreparations((current) =>
+						current.filter((preparation) => preparation.name !== name),
+					);
+					reportError(cause);
+					return;
+				}
+				if (!preparationRuns.current.has(name)) return;
+				// The gateway makes the first conversation when the workspace has none, so
+				// there is nothing to create here; the state fetch that prepares it attaches
+				// to that conversation and makes it the one `/w/<name>` opens.
+				watchWorkspace(name);
+			})();
 		},
-		[act],
+		[reportError, watchWorkspace],
+	);
+
+	const openPreparedWorkspace = useCallback(
+		(name: string) => {
+			preparationRuns.current.delete(name);
+			setPreparations((current) =>
+				current.filter((preparation) => preparation.name !== name),
+			);
+			selectWorkspace(name);
+		},
+		[selectWorkspace],
+	);
+
+	const dismissPreparedWorkspace = useCallback(
+		(name: string) => {
+			preparationRuns.current.delete(name);
+			setPreparations((current) =>
+				current.filter((preparation) => preparation.name !== name),
+			);
+			// The folder exists whether or not the person watched it; the list should show it.
+			void reload();
+		},
+		[reload],
+	);
+
+	const retryPreparedWorkspace = useCallback(
+		(name: string) => {
+			updatePreparation(name, {
+				phase: "preparing",
+				reason: undefined,
+				startedAt: Date.now(),
+			});
+			watchWorkspace(name);
+		},
+		[updatePreparation, watchWorkspace],
 	);
 
 	const removeWorkspace = useCallback(
@@ -1079,6 +1265,8 @@ export function usePlatform(): Platform {
 				// takes over rather than an error about a workspace that just went away.
 				if (name === workspace) {
 					window.history.pushState(null, "", "/w/general");
+					setFailure(undefined);
+					setState(undefined);
 					setView(undefined);
 					setRoute({
 						screen: "conversation",
@@ -1202,8 +1390,32 @@ export function usePlatform(): Platform {
 					// summary does not carry it: the page's fetch does.
 					runsActive: false,
 					runs: [],
+					wanted: state.update.wanted,
+					host: state.update.host,
+					phase: state.update.phase,
+					target: state.update.target,
+					blocking: state.update.blocking,
+					phaseReason: state.update.phaseReason,
 				};
-	const update = fetchedUpdate ?? updateFromState;
+	// The stream summary is the freshest sighting of the update phase: the host writes
+	// is.json and the state carries it. The fetched status fills the rest (notes, sizes).
+	const update =
+		fetchedUpdate === undefined
+			? updateFromState
+			: {
+					...fetchedUpdate,
+					current: updateFromState?.current ?? fetchedUpdate.current,
+					// The full status is the fresh read of the host's files; the state summary is
+					// the fallback when a fetch has not landed. The build itself comes from the
+					// stream, because the stream is what reloads this page after a swap.
+					wanted: fetchedUpdate.wanted ?? updateFromState?.wanted,
+					host: fetchedUpdate.host ?? updateFromState?.host,
+					phase: fetchedUpdate.phase ?? updateFromState?.phase,
+					target: fetchedUpdate.target ?? updateFromState?.target,
+					blocking: fetchedUpdate.blocking ?? updateFromState?.blocking,
+					phaseReason: fetchedUpdate.phaseReason ?? updateFromState?.phaseReason,
+				};
+	const updateBlocking = update?.blocking === true;
 	// The build this page first saw: an apply or rollback restarts the server
 	// under us, the stream's next state names the new build, and this bundle
 	// is old — reload to fetch the new one. The stream summary is the
@@ -1238,10 +1450,44 @@ export function usePlatform(): Platform {
 			window.clearInterval(timer);
 		};
 	}, []);
+	// While an update is blocking, follow its phase once a second. The state stream does not
+	// watch is.json, and the screen has to move from requested to starting to ready while the
+	// machine is replaced. A failed poll is expected while the console is down; the connection
+	// is what says so.
+	// A write refused because an update was running is not a failure once the update is
+	// ready: the red strip would still say "an update is in progress" over a working console.
+	useEffect(() => {
+		if (updateBlocking) return;
+		setFailure((current) =>
+			current !== undefined && current.startsWith("an update to ") ? undefined : current,
+		);
+	}, [updateBlocking]);
+	useEffect(() => {
+		if (!updateBlocking) return;
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const next = await fetchUpdateStatus();
+				if (!cancelled) setFetchedUpdate(next);
+			} catch {
+				// The machine is between consoles; keep the last phase and try again.
+			}
+		};
+		void load();
+		const timer = window.setInterval(() => {
+			void load();
+		}, 1000);
+		return () => {
+			cancelled = true;
+			window.clearInterval(timer);
+		};
+	}, [updateBlocking]);
 
 	const refreshUpdate = useCallback((): void => {
-		void fetchUpdateStatus().then(setFetchedUpdate, reportError);
-	}, [reportError]);
+		// During the machine restart the status is expected to fail for a while. The
+		// connection says that; a status poll is not an action to report as a failure.
+		void fetchUpdateStatus().then(setFetchedUpdate, () => undefined);
+	}, []);
 	const checkUpdateNow = useCallback((): void => {
 		act(checkUpdate().then(setFetchedUpdate));
 	}, [act]);
@@ -1361,7 +1607,15 @@ export function usePlatform(): Platform {
 		commands,
 		context: contextFold,
 		workspaces,
+		preparations,
+		openPreparedWorkspace,
+		dismissPreparedWorkspace,
+		retryPreparedWorkspace,
 		sandbox,
+		lifecycle,
+		workspaceReady,
+		wakingWorkspace,
+		readiness,
 		selectWorkspace,
 		defaults,
 		setDefault,
@@ -1419,6 +1673,7 @@ export function usePlatform(): Platform {
 		logoutProvider: logoutProviderById,
 		refreshProviders: refreshProvidersNow,
 		update,
+		updateBlocking,
 		refreshUpdate,
 		applyingUpdate,
 		checkUpdateNow,

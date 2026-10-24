@@ -29,9 +29,6 @@ import (
 	"time"
 )
 
-// LatestURL is the v1 release source: GitHub releases only.
-const LatestURL = "https://api.github.com/repos/marcelowa/acornfall/releases/latest"
-
 // CheckInterval is how often the gateway checks on its own.
 const CheckInterval = time.Hour
 
@@ -95,6 +92,28 @@ type Running struct {
 }
 
 // Status is what GET /api/update/status answers.
+// Phase is where an update is between "asked for" and "running". It is derived from the
+// product's want, the host's is.json, and the build this gateway runs: no third file, because
+// the two sides already write the two facts. `requested` and `starting` block writes; `ready`
+// and `failed` do not.
+type Phase string
+
+const (
+	PhaseIdle      Phase = "idle"
+	PhaseRequested Phase = "requested"
+	PhaseStarting  Phase = "starting"
+	PhaseReady     Phase = "ready"
+	PhaseFailed    Phase = "failed"
+)
+
+// updateBlockMax bounds a block. A host that stops answering must not lock the console for
+// ever; after this the phase becomes failed, the block lifts, and the screen says what happened.
+const updateBlockMax = 15 * time.Minute
+
+// hostCacheGrace is how long a missing is.json or want.json keeps the last good read. The
+// host writes is.json every second; a read that misses the rename is not the host stopping.
+const hostCacheGrace = 10 * time.Second
+
 type Status struct {
 	Current  string `json:"current"`
 	Latest   string `json:"latest"`
@@ -105,14 +124,27 @@ type Status struct {
 	// release names no file for this platform.
 	DownloadSize int64 `json:"downloadSize"`
 	WorkerSize   int64 `json:"workerSize"`
-	// Available means the newest production release is newer than the
-	// running build — newer, not merely different: an rc installed from the
-	// picker must not leave the bar pointing at an older GA.
+	// Available means the newest release is newer than the running build — newer, not merely
+	// different: an rc installed from the picker must not leave the bar pointing at an older GA.
+	// The source is the public feed, so pre-releases count; this project ships nothing else.
 	Available bool `json:"available"`
+	// CheckError is the last failed check, in the check's own words. It is a soft state: the last
+	// good release stays on screen, and the page says the newest release is unknown.
+	CheckError string `json:"checkError,omitempty"`
 	// Failed carries the last rollback cause, so the screen can say it.
 	Failed string `json:"failed,omitempty"`
 	// RestartRequired is set after files are swapped but the process is old.
 	RestartRequired bool `json:"restartRequired,omitempty"`
+	// Wanted is the release the product asked the host for, and Host is what the host service says
+	// it is running (ADR 0030). Both are empty on a host install, where the product updates itself.
+	Wanted string     `json:"wanted,omitempty"`
+	Host   *HostState `json:"host,omitempty"`
+	// Phase is the update lifecycle the console reads. Blocking is true while a write must be
+	// refused; Target is the release being installed; PhaseReason is the sentence to show.
+	Phase       Phase  `json:"phase,omitempty"`
+	Target      string `json:"target,omitempty"`
+	Blocking    bool   `json:"blocking,omitempty"`
+	PhaseReason string `json:"phaseReason,omitempty"`
 }
 
 // Preflight is doctor's update section: what runs, what the worker is,
@@ -171,6 +203,12 @@ type ApplyOptions struct {
 	Tag string
 }
 
+// ErrLauncherOwnsIt is the appliance's answer to anything that would change this process's own
+// image: inside the machine the version belongs to the host (ADR 0026, ADR 0029). Restarting and
+// rolling back are refused with it; an update is not refused but declared, over the channel the
+// host service reads (ADR 0030).
+var ErrLauncherOwnsIt = errors.New("this install is updated from the host: the update screen asks the host service to apply a release (ADR 0030), and `acornfall machine up` on the host is the deliberate path")
+
 // ErrRunsActive is the refusal when runs are active and drain is "wait".
 type ErrRunsActive struct{}
 
@@ -192,18 +230,33 @@ var ErrReleaseNotFound = errors.New("release not found")
 
 // Manager owns the update state for one install.
 type Manager struct {
-	home       string
+	machinery string
+	// share is the folder the machine mounts: the product's config and state live there, which
+	// is what a backup keeps a copy of (docs/adr/0022).
+	share      string
 	binPath    string
 	migrateDir string
 	latestURL  string
+	// feedURL is the releases feed the check reads. Empty means FeedURL. It is a field, like
+	// latestURL, so a test drives a local feed without touching the network.
+	feedURL string
+	// apiBaseURL overrides the API base. Empty derives it from latestURL, which is what every
+	// existing test does; the feed source has no /releases/ path to derive from, so a test that
+	// drives both sources sets this once.
+	apiBaseURL string
 	bunBaseURL string
 	client     *http.Client
+	// largeClient is for whole assets, where the 30-second metadata timeout is the wrong question.
+	largeClient *http.Client
 
 	mu       sync.Mutex
 	settings Settings
 	current  string
 	latest   Release
 	checking bool
+	// checkError is the last failed check's sentence. A failed check is a state the page shows,
+	// not an HTTP error: the newest release is unknown, and the last good answer still stands.
+	checkError string
 
 	// notesMu guards the notes cache: a tag's notes never change, so one read
 	// per process is enough, and the page's "what changed in between" asks
@@ -212,7 +265,24 @@ type Manager struct {
 	notesMu    sync.Mutex
 	notesCache map[string]string
 	failed     string
-	restart    bool
+
+	// launcherOwned is set when this process runs inside the machine: the launcher that replaced
+	// the image is the only thing that may change the version, and this process refuses to try.
+	launcherOwned bool
+	restart       bool
+	// blockingSince and blockingTarget are the clock and release of the current block, so a
+	// host that stops answering becomes a failure after updateBlockMax instead of a lock.
+	blockingSince  time.Time
+	blockingTarget string
+
+	// hostMu guards the last good channel read. is.json is replaced once a second on the
+	// machine's share; a reader can miss the file in that window, and a phase that flaps
+	// ready -> starting would block writes for no reason. A short cache bridges the window.
+	hostMu     sync.Mutex
+	lastHost   HostState
+	lastHostAt time.Time
+	lastWant   Want
+	lastWantAt time.Time
 
 	// RunsActive reports whether any conversation is running. Injected so
 	// tests need no control plane.
@@ -239,28 +309,41 @@ type Manager struct {
 // New builds a Manager. Empty binPath means the current executable.
 // Empty migrateDir means <repo>/scripts/migrate beside nothing: pass it
 // explicitly in production; empty disables the migrate step in tests.
-func New(home, binPath, migrateDir string) *Manager {
+func New(machinery, share, binPath, migrateDir string) *Manager {
 	if binPath == "" {
 		if executable, err := os.Executable(); err == nil {
 			binPath = executable
 		}
 	}
 	return &Manager{
-		home:       home,
+		machinery:  machinery,
+		share:      share,
 		binPath:    binPath,
 		migrateDir: migrateDir,
 		latestURL:  LatestURL,
+		feedURL:    FeedURL,
 		client:     &http.Client{Timeout: 30 * time.Second},
-		settings:   DefaultSettings(),
-		IsAdmin:    func(*http.Request) bool { return true },
+		// Assets are not metadata: the appliance image is hundreds of megabytes, and a timeout
+		// sized for a JSON answer killed a download that was working (measured: 223 MB, forty
+		// seconds, "context deadline exceeded while reading body"). The context still bounds it.
+		largeClient: &http.Client{},
+		settings:    DefaultSettings(),
+		IsAdmin:     func(*http.Request) bool { return true },
 	}
 }
 
-func (m *Manager) versionPath() string       { return filepath.Join(m.home, "version") }
-func (m *Manager) settingsPath() string      { return filepath.Join(m.home, "update.json") }
-func (m *Manager) backupsDir() string        { return filepath.Join(m.home, "backups") }
-func (m *Manager) pendingPath() string       { return filepath.Join(m.home, "update.pending") }
-func (m *Manager) failedPath() string        { return filepath.Join(m.home, "update.failed") }
+// WithLauncherOwner says this install's version belongs to a launcher on the host: the product
+// may tell a person a release exists, and may not apply it. It is the appliance's shape (ADR 0029).
+func (m *Manager) WithLauncherOwner() *Manager {
+	m.launcherOwned = true
+	return m
+}
+
+func (m *Manager) versionPath() string       { return filepath.Join(m.machinery, "version") }
+func (m *Manager) settingsPath() string      { return filepath.Join(m.machinery, "update.json") }
+func (m *Manager) backupsDir() string        { return filepath.Join(m.machinery, "backups") }
+func (m *Manager) pendingPath() string       { return filepath.Join(m.machinery, "update.pending") }
+func (m *Manager) failedPath() string        { return filepath.Join(m.machinery, "update.failed") }
 func (m *Manager) backupBinPath() string     { return m.binPath + ".bak" }
 func (m *Manager) backupVersionPath() string { return m.binPath + ".bak.version" }
 
@@ -380,8 +463,12 @@ func (m *Manager) SetCurrentVersion(tag string) error {
 
 // Status builds the screen's answer.
 func (m *Manager) Status() Status {
+	// The channel is read before the lock: G4 forbids I/O under it, and these are the two files the
+	// host writes while the console reads.
+	wanted, host := m.hostChannel()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	phase, target, blocking, reason := m.progressLocked(wanted, host)
 	return Status{
 		Current:         m.current,
 		Latest:          m.latest.Tag,
@@ -389,12 +476,129 @@ func (m *Manager) Status() Status {
 		Channel:         m.settings.Channel,
 		Checking:        m.checking,
 		Available:       newerThan(m.latest.Tag, m.current),
+		CheckError:      m.checkError,
 		Failed:          m.failed,
 		RestartRequired: m.restart,
 		DownloadSize:    AssetFor(m.latest).Size,
 		WorkerSize:      WorkerTarballAsset(m.latest).Size,
+		Wanted:          wanted,
+		Host:            host,
+		Phase:           phase,
+		Target:          target,
+		Blocking:        blocking,
+		PhaseReason:     reason,
 	}
 }
+
+// progressLocked is the one update lifecycle. It reads the two files before the lock (G4), so
+// this is called with the lock and only compares what it was handed.
+//
+// The old console sees requested: the product runs the old build while the host is preparing
+// the new machine. The new console sees starting until the host service is the target too;
+// only then is the update ready. A host error, or a block that outlives updateBlockMax, is
+// failed and does not block: the machine that is up is usable, and the update screen says why.
+func (m *Manager) progressLocked(wanted string, host *HostState) (Phase, string, bool, string) {
+	now := time.Now()
+	clear := func() {
+		m.blockingSince = time.Time{}
+		m.blockingTarget = ""
+	}
+	if !m.launcherOwned {
+		// A host install updates its own files and then restarts. Nothing moves the machine.
+		if !m.restart {
+			clear()
+			return PhaseIdle, "", false, ""
+		}
+		target := m.latest.Tag
+		if target == "" {
+			target = m.current
+		}
+		if m.blockingTarget != target {
+			m.blockingTarget, m.blockingSince = target, now
+		}
+		if now.Sub(m.blockingSince) > updateBlockMax {
+			clear()
+			return PhaseFailed, target, false, "the update did not finish within 15 minutes"
+		}
+		return PhaseRequested, target, true, "the update is ready; restart to finish"
+	}
+	if wanted == "" {
+		clear()
+		return PhaseIdle, "", false, ""
+	}
+	if host != nil && host.LastError != "" {
+		clear()
+		return PhaseFailed, wanted, false, host.LastError
+	}
+	phase := PhaseRequested
+	if wanted == m.current {
+		phase = PhaseStarting
+		if host != nil && (host.Service == wanted || (host.Service != "" && Newer(host.Service, wanted))) {
+			clear()
+			return PhaseReady, wanted, false, ""
+		}
+	}
+	if m.blockingTarget != wanted {
+		m.blockingTarget, m.blockingSince = wanted, now
+	}
+	if now.Sub(m.blockingSince) > updateBlockMax {
+		clear()
+		return PhaseFailed, wanted, false, "the update did not finish within 15 minutes"
+	}
+	reason := "the host is preparing the machine"
+	if phase == PhaseStarting {
+		reason = "the new machine is starting"
+	}
+	if host == nil {
+		reason = "the host has not answered yet"
+	}
+	return phase, wanted, true, reason
+}
+
+// hostChannel is the declared intent and the observed state, for an install a host supervises. A
+// want.json the service would refuse still shows its own words: the refusal is the host's sentence
+// in is.json.lastError, and hiding what was asked for would hide the reason it was refused.
+func (m *Manager) hostChannel() (string, *HostState) {
+	if !m.launcherOwned {
+		return "", nil
+	}
+	now := time.Now()
+	want, _ := ReadWant(m.share)
+	m.hostMu.Lock()
+	if want.Version != "" {
+		m.lastWant, m.lastWantAt = want, now
+	} else if !m.lastWantAt.IsZero() && now.Sub(m.lastWantAt) < hostCacheGrace {
+		want = m.lastWant
+	}
+	m.hostMu.Unlock()
+
+	state, ok := ReadIs(m.share)
+	m.hostMu.Lock()
+	defer m.hostMu.Unlock()
+	if ok {
+		// The host writes a newer state every second. The machine's share can still hand a
+		// reader the previous file after a rename; a read with an older timestamp must not
+		// undo a ready phase. Newest At wins; on the same second, the newer service wins.
+		fresher := m.lastHostAt.IsZero() ||
+			state.At == "" ||
+			state.At > m.lastHost.At ||
+			(state.At == m.lastHost.At && Newer(state.Service, m.lastHost.Service))
+		if fresher {
+			m.lastHost, m.lastHostAt = state, now
+			return want.Version, &state
+		}
+		cached := m.lastHost
+		return want.Version, &cached
+	}
+	if !m.lastHostAt.IsZero() && now.Sub(m.lastHostAt) < hostCacheGrace {
+		cached := m.lastHost
+		return want.Version, &cached
+	}
+	return want.Version, nil
+}
+
+// LauncherOwned says this process cannot change its own version: the host does (ADR 0029, ADR 0030).
+func (m *Manager) LauncherOwned() bool { return m.launcherOwned }
 
 // Check forces a release check now.
 func (m *Manager) Check(ctx context.Context) (Release, error) {
@@ -407,12 +611,20 @@ func (m *Manager) Check(ctx context.Context) (Release, error) {
 		m.mu.Unlock()
 	}()
 	release, err := m.fetch(ctx)
+	m.mu.Lock()
+	if err != nil {
+		// A check that failed is not a release that vanished: the last good answer stays on the
+		// screen, and the sentence says the newest release is unknown. Clearing latest here made
+		// the update bar disappear because the network blipped.
+		m.checkError = err.Error()
+	} else {
+		m.latest = release
+		m.checkError = ""
+	}
+	m.mu.Unlock()
 	if err != nil {
 		return Release{}, err
 	}
-	m.mu.Lock()
-	m.latest = release
-	m.mu.Unlock()
 	return release, nil
 }
 
@@ -443,7 +655,11 @@ func (m *Manager) get(ctx context.Context, url string) (*http.Response, error) {
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	request.Header.Set("Accept", "application/vnd.github+json")
+	if strings.HasSuffix(url, ".atom") {
+		request.Header.Set("Accept", "application/atom+xml")
+	} else {
+		request.Header.Set("Accept", "application/vnd.github+json")
+	}
 	return m.client.Do(request)
 }
 
@@ -459,6 +675,21 @@ func (m *Manager) fetch(ctx context.Context) (Release, error) {
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("releases: github answered %s", response.Status)
+	}
+	if strings.HasSuffix(url, ".atom") {
+		releases, err := parseAtomFeed(response.Body)
+		if err != nil {
+			return Release{}, err
+		}
+		// The feed lists recent releases newest first, but "first" is not the rule: the newest
+		// by version is, for the same reason UpdateTarget compares versions. A feed order we do
+		// not control must not decide which release is offered.
+		release, ok := NewestRelease(releases)
+		if !ok {
+			return Release{}, fmt.Errorf("releases: the feed at %s listed no release tag", url)
+		}
+		m.resolveNotes(ctx, &release)
+		return release, nil
 	}
 	release, err := parseRelease(response.Body)
 	if err != nil {
@@ -476,6 +707,12 @@ func (m *Manager) fetch(ctx context.Context) (Release, error) {
 func (m *Manager) Release(ctx context.Context, tag string) (Release, error) {
 	release, err := m.releaseFor(ctx, tag)
 	if err != nil {
+		// The picker and the target page must still say what changed when the API's quota is
+		// gone: the public feed carries the tag, the date and the notes. It carries no asset id,
+		// which is the apply's question and its own error.
+		if fromFeed, ok := m.feedRelease(ctx, tag); ok {
+			return fromFeed, nil
+		}
 		return Release{}, err
 	}
 	m.resolveNotes(ctx, &release)
@@ -696,15 +933,15 @@ func (m *Manager) List(ctx context.Context, limit int, includePrerelease bool) (
 	}
 	response, err := m.get(ctx, fmt.Sprintf("%s/releases?per_page=%d", m.apiBase(), limit))
 	if err != nil {
-		return nil, err
+		return m.feedList(ctx, limit, includePrerelease, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("releases: github answered %s", response.Status)
+		return m.feedList(ctx, limit, includePrerelease, fmt.Errorf("releases: github answered %s", response.Status))
 	}
 	releases, err := parseReleaseList(response.Body)
 	if err != nil {
-		return nil, err
+		return m.feedList(ctx, limit, includePrerelease, err)
 	}
 	visible := make([]Release, 0, len(releases))
 	for _, release := range releases {
@@ -729,6 +966,11 @@ func compareTags(a, b string) int {
 	}
 	return compareParsed(aNumbers, aPre, bNumbers, bPre)
 }
+
+// Newer reports whether a is a release newer than b. The host's own update uses it: a machine
+// that runs an older release than the service is not an update to take, it is an install that has
+// not finished.
+func Newer(a, b string) bool { return newerThan(a, b) }
 
 // newerThan reports whether a is a release newer than b. Two tags that do
 // not parse are never "newer": a mark that cannot say what it compares is a
@@ -856,10 +1098,10 @@ func assetNamed(release Release, name string) Asset {
 	return Asset{}
 }
 
-// Backup copies config, state DB, and workspace list into
-// <home>/backups/<timestamp>/ and keeps the last 3. Secrets are never
-// backed up: credentials.json stays out, and old copies are scrubbed.
-// Update stops when backup fails.
+// Backup copies the product's own files into <machinery>/backups/<timestamp>/ and keeps the last 3:
+// the install's config and settings and the workspace list, which live in the share the machine
+// mounts (ADR 0022), plus the machinery's version and update state. Secrets are never backed up:
+// credentials.json stays out, and old copies are scrubbed. Update stops when backup fails.
 func (m *Manager) Backup() (string, error) {
 	stamp := time.Now().UTC().Format("20060102-150405.000000000")
 	dir := filepath.Join(m.backupsDir(), stamp)
@@ -871,21 +1113,26 @@ func (m *Manager) Backup() (string, error) {
 		}
 		dir = filepath.Join(m.backupsDir(), fmt.Sprintf("%s-%d", stamp, i))
 	}
-	files := []string{"config.json", "settings.json", "workspaces.json", "version", "update.json"}
-	for _, name := range files {
-		source := filepath.Join(m.home, name)
-		payload, err := os.ReadFile(source)
+	files := []struct{ source, name string }{
+		{filepath.Join(m.share, "config", "config.json"), "config.json"},
+		{filepath.Join(m.share, "config", "settings.json"), "settings.json"},
+		{filepath.Join(m.share, "state", "workspaces.json"), "workspaces.json"},
+		{filepath.Join(m.machinery, "version"), "version"},
+		{filepath.Join(m.machinery, "update.json"), "update.json"},
+	}
+	for _, file := range files {
+		payload, err := os.ReadFile(file.source)
 		if err != nil {
 			continue
 		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), payload, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, file.name), payload, 0o600); err != nil {
 			return "", err
 		}
 	}
-	if err := copyDir(filepath.Join(m.home, "state"), filepath.Join(dir, "state")); err != nil {
+	if err := copyDir(filepath.Join(m.share, "state"), filepath.Join(dir, "state")); err != nil {
 		return "", err
 	}
 	if err := m.pruneBackups(); err != nil {
@@ -985,7 +1232,7 @@ func (m *Manager) Migrate(ctx context.Context, tag string) error {
 			}
 			return err
 		}
-		return runScript(ctx, script, m.home, tag)
+		return runScript(ctx, script, m.machinery, tag)
 	}
 	body, err := migrateFS.ReadFile("migrate/" + tag + ".sh")
 	if err != nil {
@@ -1010,11 +1257,11 @@ func (m *Manager) Migrate(ctx context.Context, tag string) error {
 	if err := os.Chmod(tempPath, 0o700); err != nil {
 		return err
 	}
-	return runScript(ctx, tempPath, m.home, tag)
+	return runScript(ctx, tempPath, m.machinery, tag)
 }
 
-func runScript(ctx context.Context, script, home, tag string) error {
-	command := exec.CommandContext(ctx, "sh", script, home)
+func runScript(ctx context.Context, script, machinery, tag string) error {
+	command := exec.CommandContext(ctx, "sh", script, machinery)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("migrate %s: %v: %s", tag, err, strings.TrimSpace(string(output)))
@@ -1027,6 +1274,12 @@ func runScript(ctx context.Context, script, home, tag string) error {
 // The process is still the old build when Apply returns: restart it, and
 // the new binary migrates at boot before serving.
 func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
+	if m.launcherOwned {
+		// Inside the machine the update is the host's (ADR 0029). What this process can do is say
+		// which release it wants to be, in the file the host service reads (ADR 0030); the drain
+		// options are the dialog's, and a replaced machine takes the runs with it either way.
+		return m.AskHost(options.Tag)
+	}
 	if options.Drain == "" {
 		options.Drain = "wait"
 	}
@@ -1061,6 +1314,16 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 			return err
 		}
 		release = fetched
+	}
+	// A release found by the check carries no asset ids: the feed has the tag and the notes, and
+	// the API has the files. Read the tag's own release before deciding there is no binary, or a
+	// check that worked would leave every install button failing on an empty asset.
+	if AssetFor(release).URL == "" && release.Tag != "" {
+		picked, err := m.releaseFromAPI(ctx, release.Tag)
+		if err != nil {
+			return fmt.Errorf("releases: cannot read the files of %s: %w", release.Tag, err)
+		}
+		release = picked
 	}
 	asset := AssetFor(release)
 	if asset.URL == "" {
@@ -1141,7 +1404,7 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 
 // checkExec proves a staged binary runs and names its tag: `version` is
 // pure Go with no flags, so this works on every platform the binary does.
-// It runs from a temp copy under an empty home, never the live path: the
+// It runs from a temp copy under an empty machinery folder, never the live path: the
 // version file would answer for the binary, and a failure must leave the
 // running build and its backup exactly alone.
 func checkExec(ctx context.Context, payload []byte, tag string) error {
@@ -1161,7 +1424,7 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	if err := os.Chmod(tempPath, 0o755); err != nil {
 		return err
 	}
-	emptyHome, err := os.MkdirTemp("", "acornfall-check-home-*")
+	emptyHome, err := os.MkdirTemp("", "acornfall-check-machinery-*")
 	if err != nil {
 		return err
 	}
@@ -1169,7 +1432,7 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, tempPath, "version")
-	command.Env = append(os.Environ(), "ACORNFALL_HOME="+emptyHome, "ACORNFALL_DATA="+emptyHome)
+	command.Env = append(os.Environ(), "ACORNFALL_MACHINERY="+emptyHome, "ACORNFALL_SHARE="+emptyHome)
 	output, err := command.Output()
 	if err != nil {
 		return fmt.Errorf("update: staged %s does not run: %w", tag, err)
@@ -1210,6 +1473,9 @@ func CleanSandboxes(ctx context.Context, names []string, remove func(context.Con
 const defaultAPIBase = "https://api.github.com/repos/marcelowa/acornfall"
 
 func (m *Manager) apiBase() string {
+	if m.apiBaseURL != "" {
+		return m.apiBaseURL
+	}
 	url := m.latestURL
 	if url == "" {
 		url = LatestURL
@@ -1237,7 +1503,7 @@ func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := m.client.Do(request)
+	response, err := m.largeClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -1245,7 +1511,16 @@ func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("releases: download answered %s", response.Status)
 	}
-	return io.ReadAll(io.LimitReader(response.Body, 256<<20))
+	payload, err := io.ReadAll(io.LimitReader(response.Body, 1024<<20))
+	if err != nil {
+		return nil, fmt.Errorf("update: downloading %s: %w", asset.Name, err)
+	}
+	// A body shorter than the release says is a download that stopped early, and unpacking it
+	// reported "invalid tar header" instead (measured on a 223 MB image behind a slow link).
+	if asset.Size > 0 && int64(len(payload)) < asset.Size {
+		return nil, fmt.Errorf("update: downloading %s: got %d of %d bytes", asset.Name, len(payload), asset.Size)
+	}
+	return payload, nil
 }
 
 // checksumList fetches the release's checksum file (sha256sums.txt or
@@ -1304,15 +1579,28 @@ func verify(list string, payload []byte, tag string) error {
 }
 
 func matchChecksum(payload []byte, list, tag string) error {
+	if !sumInList(list, payload, "") {
+		return fmt.Errorf("releases: checksum mismatch for %s", tag)
+	}
+	return nil
+}
+
+// sumInList answers whether the release's checksum file carries payload. name narrows it to one file
+// when the caller has to know *which* entry matched — a release has four binaries and a wrong one is
+// still a checksum that is in the list.
+func sumInList(list string, payload []byte, name string) bool {
 	sum := sha256.Sum256(payload)
 	want := hex.EncodeToString(sum[:])
 	for line := range strings.SplitSeq(list, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == want {
-			return nil
+		if len(fields) < 2 || fields[0] != want {
+			continue
+		}
+		if name == "" || fields[1] == name {
+			return true
 		}
 	}
-	return fmt.Errorf("releases: checksum mismatch for %s", tag)
+	return false
 }
 
 // swap keeps the last good binary as .bak, writes the new one, records the
@@ -1357,6 +1645,9 @@ func (m *Manager) swap(payload []byte, tag string) error {
 // Rename-based like the swap: the failed binary may still be running, and a
 // running binary cannot be overwritten, only moved aside.
 func (m *Manager) Rollback(cause error) error {
+	if m.launcherOwned {
+		return ErrLauncherOwnsIt
+	}
 	if m.binPath == "" {
 		return fmt.Errorf("rollback: no binary path")
 	}
@@ -1400,6 +1691,9 @@ func (m *Manager) Rollback(cause error) error {
 // its own. A failure keeps the old process: the screen still says
 // restartRequired and a human restarts instead.
 func (m *Manager) Restart() error {
+	if m.launcherOwned {
+		return ErrLauncherOwnsIt
+	}
 	// Workers die first: an orphan would keep serving old code past the
 	// exec, and resurrect sandboxes a clean update just wiped.
 	if m.StopWorkers != nil {

@@ -39,11 +39,20 @@ func (s *Server) updateStatus(w http.ResponseWriter, _ *http.Request) {
 		"downloadSize":    status.DownloadSize,
 		"workerSize":      status.WorkerSize,
 		"available":       status.Available,
+		"checkError":      status.CheckError,
 		"failed":          status.Failed,
 		"restartRequired": status.RestartRequired,
 		"backups":         s.update.Backups(),
 		"runsActive":      len(runs) > 0,
 		"runs":            runs,
+		// The host's side of an update (ADR 0030): what the product asked for, and what the host
+		// service says it is running. Absent on a host install, where the product updates itself.
+		"wanted":      status.Wanted,
+		"host":        status.Host,
+		"phase":       status.Phase,
+		"target":      status.Target,
+		"blocking":    status.Blocking,
+		"phaseReason": status.PhaseReason,
 	})
 }
 
@@ -52,9 +61,11 @@ func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "updates are not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// A failed check is not a failed request. The page wants the state it can show: the newest
+	// release is unknown, the last good one still stands, and the reason is a sentence beside
+	// the button. A 502 made the console paint a red error over a check that was only rate-limited.
 	if _, err := s.update.Check(r.Context()); err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
+		log.Printf("update check: %v", err)
 	}
 	s.updateStatus(w, r)
 }
@@ -184,8 +195,28 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `drain is "wait" or "stop"`, http.StatusBadRequest)
 		return
 	}
-	if err := s.update.Apply(r.Context(), update.ApplyOptions{CleanVMs: body.CleanVMs, Drain: body.Drain, Tag: strings.TrimSpace(body.Tag)}); err != nil {
-		if errors.As(err, &update.ErrRunsActive{}) || errors.As(err, &update.ErrRestartPending{}) {
+	tag := strings.TrimSpace(body.Tag)
+	if s.update.LauncherOwned() {
+		// The machine's channel carries only a release; there is no tag to look up. A host
+		// install keeps its picker's lookup, so a missing picked tag is still the source's 404.
+		if tag == "" {
+			http.Error(w, update.ErrNotARelease.Error()+": no version, and the channel carries the release to run", http.StatusBadRequest)
+			return
+		}
+		if !update.IsReleaseVersion(tag) {
+			http.Error(w, update.ErrNotARelease.Error()+": "+tag+" is not vX.Y.Z or vX.Y.Z-suffix", http.StatusBadRequest)
+			return
+		}
+	}
+	// A second apply while one is running is not a new request: the host is already replacing
+	// the machine, and the screen has the phase. The tag is validated first, so a client error
+	// stays a 400 even while an update runs.
+	if status := s.update.Status(); status.Blocking {
+		http.Error(w, "an update to "+status.Target+" is already in progress; actions are paused until it finishes", http.StatusConflict)
+		return
+	}
+	if err := s.update.Apply(r.Context(), update.ApplyOptions{CleanVMs: body.CleanVMs, Drain: body.Drain, Tag: tag}); err != nil {
+		if errors.Is(err, update.ErrLauncherOwnsIt) || errors.As(err, &update.ErrRunsActive{}) || errors.As(err, &update.ErrRestartPending{}) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -193,10 +224,20 @@ func (s *Server) updateApply(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, update.ErrNotARelease) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.updateStatus(w, r)
+	// In the appliance there is nothing to restart here: the request declared the release this
+	// install wants, and the host service replaces the machine (ADR 0030). The screen follows
+	// is.json, which the status above already carries.
+	if s.update.LauncherOwned() {
+		return
+	}
 	// One click finishes the job: the answer is on its way, then this
 	// process becomes the new binary with the same args and environment.
 	// The stream drops and the client reconnects on its own; an Exec
@@ -219,6 +260,10 @@ func (s *Server) updateRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.update.Rollback(errors.New("manual rollback from the update screen")); err != nil {
+		if errors.Is(err, update.ErrLauncherOwnsIt) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

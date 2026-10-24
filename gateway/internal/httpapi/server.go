@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,15 +30,109 @@ func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager) 
 // controlFor finds the workspace a request is about. The workspace-scoped routes name it;
 // the earlier paths do not, and mean the general workspace.
 func (s *Server) controlFor(r *http.Request) (*control.Control, error) {
-	name := r.PathValue("ws")
-	if name == "" {
-		name = r.URL.Query().Get("workspace")
+	// A handler behind ready or started already resolved the control without starting it.
+	if ctl, ok := r.Context().Value(controlContextKey{}).(*control.Control); ok {
+		return ctl, nil
 	}
-	_, ctl, err := s.workspaces.Route(r.Context(), name)
+	_, ctl, err := s.workspaces.Route(r.Context(), workspaceName(r))
 	if err != nil {
 		return nil, err
 	}
 	return ctl, nil
+}
+
+// controlContextKey carries a control that the readiness wrapper already resolved.
+type controlContextKey struct{}
+
+// workspaceName is the workspace a per-workspace route names: the path, or the query for the
+// older routes without one, or general.
+func workspaceName(r *http.Request) string {
+	name := r.PathValue("ws")
+	if name == "" {
+		name = r.URL.Query().Get("workspace")
+	}
+	if name == "" {
+		name = control.GeneralWorkspaceName
+	}
+	return name
+}
+
+// existingControl resolves a workspace that has already started. It never starts one: only
+// the state and stream requests are allowed to do that. A request for a sleeping workspace is
+// a sentence, not a boot.
+func (s *Server) existingControl(r *http.Request) (*control.Control, error) {
+	name := workspaceName(r)
+	if _, known := s.workspaces.Get(name); !known {
+		return nil, fmt.Errorf("no workspace %q", name)
+	}
+	ctl, started := s.workspaces.Control(name)
+	if !started {
+		return nil, fmt.Errorf("this workspace is not ready yet: it has not started; open it first")
+	}
+	return ctl, nil
+}
+
+// readyControl resolves a started workspace that can take a harness action. The phase is the
+// gateway's own, not a second reading of workerUp: a process that has not answered is starting.
+func (s *Server) readyControl(r *http.Request) (*control.Control, error) {
+	ctl, err := s.existingControl(r)
+	if err != nil {
+		return nil, err
+	}
+	if lifecycle := ctl.Lifecycle(); lifecycle.Phase != control.LifecycleReady {
+		return nil, fmt.Errorf("this workspace is not ready yet: %s", lifecycle.Reason)
+	}
+	return ctl, nil
+}
+
+// withControl resolves a control once and hands it to the handler through the context, so the
+// handler cannot start a second one or read a different phase.
+func (s *Server) withControl(next http.HandlerFunc, resolve func(*http.Request) (*control.Control, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctl, err := resolve(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), controlContextKey{}, ctl)))
+	}
+}
+
+// ready is every route that needs the harness: a workspace that is not ready gets the phase's
+// sentence instead of a write into a process that is not there.
+func (s *Server) ready(next http.HandlerFunc) http.HandlerFunc {
+	return s.withControl(next, s.readyControl)
+}
+
+// started is the draft route: it may use a control that is still starting, but it must never
+// start one. A draft is words, not a harness action.
+func (s *Server) started(next http.HandlerFunc) http.HandlerFunc {
+	return s.withControl(next, s.existingControl)
+}
+
+// updating refuses a write while an update is in progress. Reads, state, stream, drafts and the
+// update's own status stay open: the console has to be able to report what is happening.
+func (s *Server) updating(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.update == nil {
+			next(w, r)
+			return
+		}
+		status := s.update.Status()
+		if !status.Blocking {
+			next(w, r)
+			return
+		}
+		target := status.Target
+		if target == "" {
+			target = "a new release"
+		}
+		reason := status.PhaseReason
+		if reason != "" {
+			reason = ": " + reason
+		}
+		http.Error(w, fmt.Sprintf("an update to %s is in progress%s; actions are paused until it finishes", target, reason), http.StatusConflict)
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -49,40 +144,40 @@ func (s *Server) Handler() http.Handler {
 	for _, base := range []string{"/api/workspaces/{ws}", "/api"} {
 		mux.HandleFunc("GET "+base+"/state", s.state)
 		mux.HandleFunc("GET "+base+"/stream", s.stream)
-		mux.HandleFunc("GET "+base+"/conversations", s.conversations)
-		mux.HandleFunc("POST "+base+"/conversations", s.createConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/select", s.selectConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/rename", s.renameConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/hide", s.hideConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/fork", s.forkConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.compactConversation)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/compact-preview", s.compactPreview)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.messages)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/draft", s.draft)
-		mux.HandleFunc("POST "+base+"/attachments", s.attachments)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.abort)
-		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.agent)
-		mux.HandleFunc("GET "+base+"/conversations/{id}/policy", s.policy)
-		mux.HandleFunc("GET "+base+"/conversations/{id}/messages", s.messagesDoc)
-		mux.HandleFunc("GET "+base+"/agents", s.agents)
-		mux.HandleFunc("GET "+base+"/commands", s.commands)
-		mux.HandleFunc("POST "+base+"/agents/reload", s.reload)
-		mux.HandleFunc("GET "+base+"/usage", s.usage)
-		mux.HandleFunc("POST "+base+"/providers/login", s.login)
-		mux.HandleFunc("POST "+base+"/providers/logout", s.logout)
-		mux.HandleFunc("POST "+base+"/providers/refresh", s.refresh)
-		mux.HandleFunc("POST "+base+"/auth/answer", s.authAnswer)
-		mux.HandleFunc("POST "+base+"/auth/cancel", s.authCancel)
-		mux.HandleFunc("POST "+base+"/default-model", s.setDefaultModel)
-		mux.HandleFunc("POST "+base+"/default-thinking", s.setDefaultThinking)
-		mux.HandleFunc("POST "+base+"/default-agent", s.setDefaultAgent)
+		mux.HandleFunc("GET "+base+"/conversations", s.ready(s.conversations))
+		mux.HandleFunc("POST "+base+"/conversations", s.updating(s.ready(s.createConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/select", s.updating(s.ready(s.selectConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/rename", s.updating(s.ready(s.renameConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/hide", s.updating(s.ready(s.hideConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/fork", s.updating(s.ready(s.forkConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/compact", s.updating(s.ready(s.compactConversation)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/compact-preview", s.updating(s.ready(s.compactPreview)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/messages", s.updating(s.ready(s.messages)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/draft", s.started(s.draft))
+		mux.HandleFunc("POST "+base+"/attachments", s.updating(s.ready(s.attachments)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/abort", s.updating(s.ready(s.abort)))
+		mux.HandleFunc("POST "+base+"/conversations/{id}/agent", s.updating(s.ready(s.agent)))
+		mux.HandleFunc("GET "+base+"/conversations/{id}/policy", s.ready(s.policy))
+		mux.HandleFunc("GET "+base+"/conversations/{id}/messages", s.ready(s.messagesDoc))
+		mux.HandleFunc("GET "+base+"/agents", s.ready(s.agents))
+		mux.HandleFunc("GET "+base+"/commands", s.ready(s.commands))
+		mux.HandleFunc("POST "+base+"/agents/reload", s.updating(s.ready(s.reload)))
+		mux.HandleFunc("GET "+base+"/usage", s.ready(s.usage))
+		mux.HandleFunc("POST "+base+"/providers/login", s.updating(s.ready(s.login)))
+		mux.HandleFunc("POST "+base+"/providers/logout", s.updating(s.ready(s.logout)))
+		mux.HandleFunc("POST "+base+"/providers/refresh", s.updating(s.ready(s.refresh)))
+		mux.HandleFunc("POST "+base+"/auth/answer", s.updating(s.ready(s.authAnswer)))
+		mux.HandleFunc("POST "+base+"/auth/cancel", s.updating(s.ready(s.authCancel)))
+		mux.HandleFunc("POST "+base+"/default-model", s.updating(s.ready(s.setDefaultModel)))
+		mux.HandleFunc("POST "+base+"/default-thinking", s.updating(s.ready(s.setDefaultThinking)))
+		mux.HandleFunc("POST "+base+"/default-agent", s.updating(s.ready(s.setDefaultAgent)))
 	}
 
 	// Install-wide defaults: no workspace in the path, because the point of them is that
 	// they are not any one workspace's.
-	mux.HandleFunc("POST /api/defaults/model", s.setInstallDefaultModel)
-	mux.HandleFunc("POST /api/defaults/thinking", s.setInstallDefaultThinking)
-	mux.HandleFunc("POST /api/defaults/agent", s.setInstallDefaultAgent)
+	mux.HandleFunc("POST /api/defaults/model", s.updating(s.setInstallDefaultModel))
+	mux.HandleFunc("POST /api/defaults/thinking", s.updating(s.setInstallDefaultThinking))
+	mux.HandleFunc("POST /api/defaults/agent", s.updating(s.setInstallDefaultAgent))
 
 	mux.HandleFunc("GET /healthz", s.health)
 
@@ -92,14 +187,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/update/notes", s.updateNotes)
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
-	mux.HandleFunc("POST /api/update/restart", s.updateRestart)
-	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
-	mux.HandleFunc("POST /api/update/settings", s.updateSettings)
+	mux.HandleFunc("POST /api/update/restart", s.updating(s.updateRestart))
+	mux.HandleFunc("POST /api/update/rollback", s.updating(s.updateRollback))
+	mux.HandleFunc("POST /api/update/settings", s.updating(s.updateSettings))
 
 	mux.HandleFunc("GET /api/workspaces", s.workspaceList)
-	mux.HandleFunc("POST /api/workspaces", s.workspaceCreate)
-	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.workspaceUpdate)
-	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.workspaceRemove)
+	mux.HandleFunc("POST /api/workspaces", s.updating(s.workspaceCreate))
+	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.updating(s.workspaceUpdate))
+	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.updating(s.workspaceRemove))
 
 	// /c/<workspace>/<conversation> is a conversation, /w/<workspace> is a workspace with
 	// whichever conversation it lands on, and the interface's own screens are routes too so a
@@ -143,6 +238,10 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		Network *string `json:"network"`
 		// DisableVMNesting, when true, keeps this workspace's sandbox from nesting;
 		// absent or false follows the install's --disable-vm-nesting.
+		// Privileged, when true, runs this workspace's sandbox as root in the machine instead of
+		// inside a user namespace (ADR 0021's open question); absent is the default, which is
+		// unprivileged.
+		Privileged       *bool `json:"privileged"`
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
 		Trusted          *bool `json:"trusted"`
 	}
@@ -178,8 +277,9 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	if body.Network != nil {
 		workspace.Network = *body.Network
 	}
-	if body.DisableVMNesting != nil {
-		workspace.DisableVMNesting = body.DisableVMNesting
+
+	if body.Privileged != nil {
+		workspace.Privileged = *body.Privileged
 	}
 	if err := s.workspaces.Update(workspace); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -206,6 +306,9 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		// DisableVMNesting, when present, keeps this workspace's sandbox from nesting;
 		// absent leaves the workspace's own setting alone.
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
+		// Privileged, when present, changes whether this workspace's sandbox runs as root in the
+		// machine; absent leaves the workspace's own setting alone.
+		Privileged *bool `json:"privileged"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -229,8 +332,9 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.Network != nil {
 		existing.Network = *body.Network
 	}
-	if body.DisableVMNesting != nil {
-		existing.DisableVMNesting = body.DisableVMNesting
+
+	if body.Privileged != nil {
+		existing.Privileged = *body.Privileged
 	}
 	if err := s.workspaces.Update(existing); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)

@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -23,8 +25,8 @@ import (
 // lifecycle and an SDK for execution. It is one implementation of Driver; the package
 // comment explains what that buys.
 type Microsandbox struct {
-	home string
-	// state is where the sandboxes live, when it is not the default under the home. Sockets
+	machinery string
+	// state is where the sandboxes live, when it is not the default under the machinery folder. Sockets
 	// need a short path and images take a while to fetch, so both are reasons to point it
 	// somewhere deliberate.
 	state     string
@@ -37,6 +39,12 @@ type Microsandbox struct {
 	// hostNested is the machine half of Nesting: what this computer can grant. It is a field
 	// so that tests can answer for a machine that is not this one.
 	hostNested func() NestingSupport
+	// engineUID/GID are the fixed owner the engine runs as, when the install has one. The
+	// engine writes the machine's disk and serves the share; running it as the share owner is
+	// what makes the host files belong to the container's uid instead of root.
+	engineUID    int
+	engineGID    int
+	engineGroups []uint32
 	// nestingMu guards the answer below, which is taken once: a running gateway does not
 	// swap engine builds under itself.
 	nestingMu sync.Mutex
@@ -71,8 +79,26 @@ const releaseBase = "https://github.com/microsandbox/microsandbox/releases/downl
 const statePathLimit = 50
 
 // NewMicrosandbox builds the driver. The engine is installed on first use.
-func NewMicrosandbox(home string) *Microsandbox {
-	return &Microsandbox{home: home, base: releaseBase + "/v" + Version, hostNested: hostNestedSupport}
+func NewMicrosandbox(machinery string) *Microsandbox {
+	m := &Microsandbox{machinery: machinery, base: releaseBase + "/v" + Version, hostNested: hostNestedSupport}
+	if os.Geteuid() == 0 {
+		if uid, gid, ok := ShareOwner(machinery); ok && uid > 0 {
+			m.engineUID, m.engineGID = uid, gid
+			// The engine needs the kvm group to open /dev/kvm, and any other group the owner
+			// has. A credential with only the primary gid is a user with no supplementary
+			// groups, which reads as permission denied on a 0660 device (measured on acornd).
+			if account, lookupErr := user.LookupId(strconv.Itoa(uid)); lookupErr == nil {
+				if groupIDs, groupErr := account.GroupIds(); groupErr == nil {
+					for _, groupID := range groupIDs {
+						if parsed, parseErr := strconv.Atoi(groupID); parseErr == nil {
+							m.engineGroups = append(m.engineGroups, uint32(parsed))
+						}
+					}
+				}
+			}
+		}
+	}
+	return m
 }
 
 // WithRunner replaces the engine binary, which is how the driver is tested without one.
@@ -88,7 +114,7 @@ func (m *Microsandbox) Version() string { return Version }
 func (m *Microsandbox) Isolated() bool { return true }
 
 func (m *Microsandbox) InstallDir() string {
-	return filepath.Join(m.home, "tools", "microsandbox", Version)
+	return filepath.Join(m.machinery, "tools", "microsandbox", Version)
 }
 
 // StateDir is the engine's own store: images, sandbox disks, snapshots. It is inside the
@@ -98,7 +124,7 @@ func (m *Microsandbox) StateDir() string {
 	if m.state != "" {
 		return m.state
 	}
-	return filepath.Join(m.home, "sandboxes")
+	return filepath.Join(m.machinery, "sandboxes")
 }
 
 // WithStateDir moves the engine's store — images, sandbox disks, snapshots — somewhere else.
@@ -239,17 +265,28 @@ func (p Policy) render(o owner) []byte {
 	fmt.Fprintf(&b, "image: %s\n", yamlString(p.Image))
 	fmt.Fprintf(&b, "cpus: %d\n", p.CPUs)
 	fmt.Fprintf(&b, "memory: %s\n", yamlString(p.Memory))
-	fmt.Fprintf(&b, "idle_timeout: %s\n", yamlString(p.IdleTimeout))
+	if p.IdleTimeout != NoIdleStop {
+		// Naming nothing is how a sandbox is told never to stop: measured on the pin, an omitted
+		// idle_timeout leaves it running and `0s` stops it at once.
+		fmt.Fprintf(&b, "idle_timeout: %s\n", yamlString(p.IdleTimeout))
+	}
 	if !p.Egress {
 		// The engine's default is an open network, so saying nothing would say yes.
 		b.WriteString("network: none\n")
 	}
-	b.WriteString("mounts:\n")
-	b.WriteString("  - " + yamlString(p.mount(o)) + "\n")
-	for _, path := range p.Global {
-		// `ro` is the decision, not a detail: the agent reads its instructions and runs their
-		// scripts, and editing them from inside would be self-modification.
-		b.WriteString("  - " + yamlString(path+":"+path+":ro") + "\n")
+	// A policy with nothing to mount writes no mounts at all: an empty path is not a mount, and
+	// the key is left to the engine's own default. The machine of an install that has not chosen
+	// a share root yet is the case (ADR 0021 leaves that choice open).
+	if p.Workspace != "" || len(p.Global) > 0 {
+		b.WriteString("mounts:\n")
+		if p.Workspace != "" {
+			b.WriteString("  - " + yamlString(p.mount(o)) + "\n")
+		}
+		for _, path := range p.Global {
+			// `ro` is the decision, not a detail: the agent reads its instructions and runs their
+			// scripts, and editing them from inside would be self-modification.
+			b.WriteString("  - " + yamlString(path+":"+path+":ro") + "\n")
+		}
 	}
 	return []byte(b.String())
 }
@@ -257,6 +294,9 @@ func (p Policy) render(o owner) []byte {
 // mount is the workspace mount: the folder at its own path, so that a path in the model's
 // world and in the user's world are the same string.
 func (p Policy) mount(o owner) string {
+	if p.mountOwner.mapFiles {
+		o = p.mountOwner
+	}
 	spec := p.Workspace + ":" + p.Workspace
 	if o.mapFiles {
 		spec += fmt.Sprintf(":uid=%d,gid=%d", o.uid, o.gid)
@@ -346,7 +386,7 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	}
 	if len(m.StateDir()) > statePathLimit {
 		return fmt.Errorf(
-			"%w: the sandbox state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornfall cannot be installed this deep: use a shorter --home",
+			"%w: the sandbox state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornfall cannot be installed this deep: use a shorter --machinery",
 			ErrUnavailable, len(m.StateDir()), m.StateDir(), statePathLimit,
 		)
 	}
@@ -380,8 +420,12 @@ func (m *Microsandbox) Start(ctx context.Context, name string) error {
 	return err
 }
 
+// Stop asks the sandbox to shut down, and gives it a budget: the engine's own default is to wait
+// indefinitely, and a machine whose init does not treat SIGTERM as shutdown waits forever — which
+// a person reads as "it does not stop" (measured). The timeout fails without killing, so a
+// workload that is writing is not interrupted here.
 func (m *Microsandbox) Stop(ctx context.Context, name string) error {
-	_, err := m.run(ctx, "stop", name)
+	_, err := m.run(ctx, "stop", "--timeout", "20", name)
 	return err
 }
 
@@ -423,7 +467,13 @@ func (m *Microsandbox) run(ctx context.Context, args ...string) (string, error) 
 	if err := os.MkdirAll(m.StateDir(), 0o755); err != nil {
 		return "", err
 	}
+	if m.engineUID > 0 {
+		if err := os.Chown(m.StateDir(), m.engineUID, m.engineGID); err != nil {
+			return "", err
+		}
+	}
 	command := exec.CommandContext(ctx, m.binary(), args...)
+	runAsEngineOwner(command, m.engineUID, m.engineGID, m.engineGroups)
 	command.Env = append(os.Environ(), m.Env()...)
 	output, commandErr := command.CombinedOutput()
 	text := strings.TrimSpace(string(output))

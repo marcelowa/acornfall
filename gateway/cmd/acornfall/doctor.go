@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"github.com/acornfall/acornfall/gateway/internal/ready"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
@@ -19,13 +20,14 @@ import (
 func doctorCommand(argv []string) {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "data directory")
-	home := flags.String("home", "", "the acornfall folder (default: ~/.acornfall)")
-	sandboxEngine := flags.String("sandbox-engine", "", "which engine to report: microsandbox (default) or host")
+	machinery := flags.String("machinery", "", "the machinery folder (default: /var/lib/acornfall as root, ~/.acornfall otherwise)")
+	share := flags.String("share", "", "the folder the machine mounts: the product (default: /srv/acornfall as root, ~/acornfall otherwise)")
+	sandboxEngine := flags.String("sandbox-engine", "", "which engine to report: microsandbox (default), lxc (containers in one machine), or host")
 	asJSON := flags.Bool("json", false, "print the report as JSON")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
-	dir := *home
+	dir := *machinery
 	if dir == "" {
 		dir = *dataDir
 	}
@@ -33,6 +35,11 @@ func doctorCommand(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
+	resolvedShare, err := resolveShare(*share, "")
+	if err != nil {
+		log.Fatalf("acornfall doctor: %v", err)
+	}
+	where := layout.New(resolvedShare, resolved)
 
 	engineName := *sandboxEngine
 	if engineName == "" {
@@ -47,7 +54,7 @@ func doctorCommand(argv []string) {
 	manager.Verify(context.Background())
 	report := manager.Report()
 	nesting := manager.Nesting(context.Background())
-	updater := update.New(resolved, "", "")
+	updater := update.New(resolved, where.Share, "", "")
 	if err := updater.Open(); err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
@@ -56,7 +63,7 @@ func doctorCommand(argv []string) {
 	checkCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	health := updater.Preflight(checkCtx)
-	requirements := ready.Check(readyInput(resolved, updater, health, report, engineName))
+	requirements := ready.Check(readyInput(where, updater, health, report, engineName))
 	if *asJSON {
 		// The report plus what the engine and the machine say about nesting: two answers,
 		// because either half can refuse and the reason is worth reading.
@@ -125,10 +132,10 @@ func doctorCommand(argv []string) {
 
 // readyInput gathers what the readiness list reads from the managers
 // doctor already owns. Report-only where possible: doctor changes nothing.
-func readyInput(home string, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
+func readyInput(where layout.Layout, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
 	_, bunOK := updater.BunInstalled()
 	return ready.Input{
-		Home:            home,
+		Machinery:       where.Machinery,
 		Current:         health.Version,
 		RuntimeTag:      updater.RuntimeTag(),
 		Worker:          updater.WorkerVersion(),
@@ -142,7 +149,10 @@ func readyInput(home string, updater *update.Manager, health update.Preflight, r
 		EngineDisabled:  disabledReason(),
 		Latest:          health.Latest,
 		ReleasesNote:    health.Releases,
-		HasCredential:   ready.HasCredential(home),
+		// The file, not the folder: the install's credentials moved into the mount, and a
+		// readiness list that reads ~/.acornfall/credentials.json says "no provider stored"
+		// over an install that has one.
+		HasCredential: ready.HasCredential(where.Credentials()),
 	}
 }
 
@@ -157,17 +167,17 @@ func disabledReason() string {
 
 // readyInputForBoot gathers the boot-time readiness list. The engine may
 // be nil (refused tier): that is a stated answer, not a missing one.
-func readyInputForBoot(home string, updates *update.Manager, engine *sandbox.Manager) ready.Input {
+func readyInputForBoot(where layout.Layout, updates *update.Manager, engine *sandbox.Manager) ready.Input {
 	_, bunOK := updates.BunInstalled()
 	status := updates.Status()
 	input := ready.Input{
-		Home:          home,
+		Machinery:     where.Machinery,
 		Current:       status.Current,
 		RuntimeTag:    updates.RuntimeTag(),
 		Worker:        updates.WorkerVersion(),
 		BunPath:       updates.BunPath(),
 		BunOK:         bunOK,
-		HasCredential: ready.HasCredential(home),
+		HasCredential: ready.HasCredential(where.Credentials()),
 		Latest:        status.Latest,
 	}
 	if engine == nil {
@@ -191,13 +201,13 @@ func readyInputForBoot(home string, updates *update.Manager, engine *sandbox.Man
 // reportManager builds the report-only manager doctor describes. It has to name an engine:
 // without a driver, Open refuses ("sandbox: Driver is required") and doctor can only report
 // that failure, never the tier it exists to diagnose.
-func reportManager(home, engineName string) (*sandbox.Manager, error) {
-	driver, err := sandbox.Engine(home, "", engineName)
+func reportManager(machinery, engineName string) (*sandbox.Manager, error) {
+	driver, err := sandbox.Engine(machinery, "", engineName)
 	if err != nil {
 		return nil, err
 	}
 	return sandbox.Open(context.Background(), sandbox.Options{
-		Home:       home,
+		Machinery:  machinery,
 		Driver:     driver,
 		ReportOnly: true,
 	})

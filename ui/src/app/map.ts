@@ -6,6 +6,7 @@ import type {
 	ProviderSummary,
 	SandboxSummary,
 	TranscriptEntry,
+	WorkspaceLifecycle,
 	WorkspaceSummary,
 } from "./view-models";
 import type {
@@ -13,6 +14,7 @@ import type {
 	WireContentBlock,
 	WireConversation,
 	WireEntry,
+	WireLifecycle,
 	WireMessage,
 	WireProvider,
 	WireSandbox,
@@ -171,6 +173,41 @@ export function toWorkspaces(workspaces: WireWorkspace[], activeName: string): W
 		image: workspace.image,
 		network: workspace.network,
 	}));
+}
+
+/**
+ * toLifecycle is what the interface acts on. A gateway that does not report one yet is read the
+ * old way — the harness is up or it is not — so an older install is not left with no opinion.
+ */
+export function toLifecycle(state: {
+	lifecycle?: WireLifecycle | undefined;
+	workerUp: boolean;
+}): WorkspaceLifecycle {
+	if (state.lifecycle !== undefined) {
+		return { phase: state.lifecycle.phase, reason: state.lifecycle.reason };
+	}
+	return state.workerUp
+		? { phase: "ready" }
+		: { phase: "starting", reason: "the harness is starting" };
+}
+
+/** Whether a workspace can do the things a harness does: make a conversation, take a prompt. */
+export function isReady(lifecycle: WorkspaceLifecycle): boolean {
+	return lifecycle.phase === "ready";
+}
+
+/** What to say when it cannot, in one sentence short enough for a disabled control's title. */
+export function readinessSentence(lifecycle: WorkspaceLifecycle): string | undefined {
+	if (lifecycle.phase === "ready") return undefined;
+	const reason = lifecycle.reason ?? "";
+	if (lifecycle.phase === "starting") {
+		return reason === ""
+			? "This workspace is starting."
+			: `This workspace is starting: ${reason}`;
+	}
+	return reason === ""
+		? "This workspace's harness is down."
+		: `This workspace's harness is down: ${reason}`;
 }
 
 export function toSandbox(sandbox: WireSandbox): SandboxSummary {

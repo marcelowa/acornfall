@@ -22,6 +22,3 @@ export const paddingScale = {
 	lg: "p-6",
 	xl: "p-8",
 } as const;
-
-export type GapName = keyof typeof gapScale;
-export type PaddingName = keyof typeof paddingScale;

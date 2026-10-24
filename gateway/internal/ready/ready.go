@@ -31,7 +31,7 @@ type Requirement struct {
 // Input is everything the checks read. The caller gathers it from the
 // managers it already owns; this package decides nothing it cannot see.
 type Input struct {
-	Home string
+	Machinery string
 	// Current is the running tag ("dev" for source builds).
 	Current string
 	// RuntimeTag is the binary's own stamp when it has one: execution
@@ -66,36 +66,36 @@ func Satisfied(requirements []Requirement) bool {
 	return true
 }
 
-// Check builds the list. Filesystem reads stay under Home so tests run
+// Check builds the list. Filesystem reads stay under the machinery folder so tests run
 // anywhere; /dev/kvm and disk space read the machine, which is the point.
 func Check(input Input) []Requirement {
 	return []Requirement{
-		homeWritable(input.Home),
+		machineryWritable(input.Machinery),
 		bun(input),
 		worker(input),
 		engine(input),
 		hypervisor(),
 		credentials(input),
-		disk(input.Home),
+		disk(input.Machinery),
 		releases(input),
 	}
 }
 
-func homeWritable(home string) Requirement {
-	dir := home
+func machineryWritable(machinery string) Requirement {
+	dir := machinery
 	created := "is writable"
-	// Doctor must not create anything: a home that does not exist yet is
+	// Doctor must not create anything: a machinery folder that does not exist yet is
 	// judged by its parent, which is where creation would happen.
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		dir = filepath.Dir(home)
+		dir = filepath.Dir(machinery)
 		created = "will be created inside writable " + dir
 	}
 	probe := dir + "/.acornfall-writable"
 	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
-		return Requirement{"home", false, "cannot write " + dir + ": " + err.Error(), "run with a writable --home"}
+		return Requirement{"machinery", false, "cannot write " + dir + ": " + err.Error(), "run with a writable --machinery"}
 	}
 	_ = os.Remove(probe)
-	return Requirement{"home", true, home + " " + created, ""}
+	return Requirement{"machinery", true, machinery + " " + created, ""}
 }
 
 func bun(input Input) Requirement {
@@ -144,14 +144,26 @@ func engine(input Input) Requirement {
 	return Requirement{"engine", true, name + " installed", ""}
 }
 
+// devKVM is the device a hypervisor would open. A variable so a test can point at a file it owns.
+var devKVM = "/dev/kvm"
+
 func hypervisor() Requirement {
 	if runtime.GOOS != "linux" {
 		return Requirement{"hypervisor", true, "not applicable on " + runtime.GOOS, ""}
 	}
-	if _, err := os.Stat("/dev/kvm"); err != nil {
-		return Requirement{"hypervisor", false, "no /dev/kvm", "run where KVM exists, or --sandbox-engine host (unconfined)"}
+	// Stat is not enough: a node that exists and cannot be opened is a real state, and this
+	// check used to call it "present". The install this was found on had /dev/kvm, a container
+	// that could not open it, and a green doctor line (sandbox.kvmHint says the same thing from
+	// the other side). Open it the way a hypervisor would.
+	device, err := os.OpenFile(devKVM, os.O_RDWR, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Requirement{"hypervisor", false, "no /dev/kvm", "run where KVM exists, or --sandbox-engine host (unconfined)"}
+		}
+		return Requirement{"hypervisor", false, "/dev/kvm present but not openable", "make /dev/kvm readable by this user: the appliance does it for a workspace, a host needs the user in the kvm group"}
 	}
-	return Requirement{"hypervisor", true, "/dev/kvm present", ""}
+	_ = device.Close()
+	return Requirement{"hypervisor", true, "/dev/kvm openable", ""}
 }
 
 func credentials(input Input) Requirement {
@@ -161,10 +173,10 @@ func credentials(input Input) Requirement {
 	return Requirement{"credentials", false, "no provider stored", "acornfall provider add <provider> <key> (the dev provider needs none)"}
 }
 
-func disk(home string) Requirement {
+func disk(machinery string) Requirement {
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(home, &stat); err != nil {
-		if err := syscall.Statfs(filepath.Dir(home), &stat); err != nil {
+	if err := syscall.Statfs(machinery, &stat); err != nil {
+		if err := syscall.Statfs(filepath.Dir(machinery), &stat); err != nil {
 			return Requirement{"disk", true, "free space unreadable, assuming room", ""}
 		}
 	}
@@ -187,13 +199,15 @@ func releases(input Input) Requirement {
 	return Requirement{"releases", true, "not checked yet", ""}
 }
 
-// HasCredential reports whether the credentials file names a provider.
-func HasCredential(home string) bool {
-	return credentialCount(home) > 0
+// HasCredential reports whether the credentials file names a provider. It takes the file, not the
+// folder: the credential lives in the root's config folder (ADR 0022), beside the token and the
+// install's config, and only one of the three is a secret.
+func HasCredential(path string) bool {
+	return credentialCount(path) > 0
 }
 
-func credentialCount(home string) int {
-	payload, err := os.ReadFile(home + "/credentials.json")
+func credentialCount(path string) int {
+	payload, err := os.ReadFile(path)
 	if err != nil {
 		return 0
 	}

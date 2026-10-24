@@ -78,7 +78,13 @@ import {
 } from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
 import { routingFiles } from "./files.ts";
-import { refusedSandbox, type SandboxClient, type SandboxEngine } from "./sandbox.ts";
+import {
+	noSandboxReason,
+	refusedSandbox,
+	type SandboxClient,
+	type SandboxEngine,
+	retryingSandbox,
+} from "./sandbox.ts";
 import { SandboxExecutionEnv } from "./sandbox-env.ts";
 import {
 	expandCommand,
@@ -95,14 +101,16 @@ const TITLE_MAX = 64;
 
 interface Args {
 	workspace: string;
-	/** The installation folder: global resources and shared state. */
-	home: string;
+	/** The folder the machine mounts: the bundle, the config, the state, the workspaces. */
+	share: string;
 	storage: string;
 	credentials: string;
 	/** The sandbox this workspace runs in, as control named it. Empty means none: tools refuse. */
 	sandbox: string;
 	/** Which engine that sandbox belongs to. The name is control's, and the two must agree. */
 	sandboxEngine: string;
+	/** Why there is no sandbox, when control knows: the reason the tools refuse, in its words. */
+	sandboxProblem: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -122,14 +130,17 @@ function parseArgs(argv: readonly string[]): Args {
 	const workspace = resolve(values.get("workspace") ?? process.cwd());
 	const defaults = (name: string) => join(workspace, ".acornfall", name);
 	const credentials = resolve(values.get("credentials") ?? defaults("credentials.json"));
-	const home = resolve(values.get("home") ?? dirname(credentials));
+	// The share holds the credentials under `config/`, so an install that names only a credential
+	// still gets one: two folders up from the file.
+	const share = resolve(values.get("share") ?? dirname(dirname(credentials)));
 	return {
 		workspace,
-		home,
+		share,
 		storage: resolve(values.get("storage") ?? defaults("session.sqlite")),
 		credentials,
 		sandbox: values.get("sandbox") ?? "",
 		sandboxEngine: values.get("sandbox-engine") ?? "microsandbox",
+		sandboxProblem: values.get("sandbox-problem") ?? "",
 	};
 }
 
@@ -147,11 +158,11 @@ const models = builtinModels({ credentials });
  * cannot be read simply has fewer of them. Running unconfined must be a decision somebody
  * made, never a state the system drifted into.
  */
-const sandbox: SandboxClient = await openSandboxForWorkspace(args);
+const sandbox: SandboxClient = retryingSandbox(() => openSandboxForWorkspace(args));
 
 async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 	if (options.sandbox === "") {
-		return refusedSandbox("this workspace has no sandbox: tool execution is disabled");
+		return refusedSandbox(noSandboxReason(options.sandboxProblem));
 	}
 	const engine = await sandboxEngine(options.sandboxEngine);
 	if (engine === undefined) {
@@ -159,11 +170,9 @@ async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 			`this workspace's sandbox belongs to engine ${options.sandboxEngine}, which this build does not support`,
 		);
 	}
-	return await engine.openSandbox(options.sandbox, options.workspace).catch((error: unknown) => {
-		return refusedSandbox(
-			`cannot attach to the sandbox ${options.sandbox}: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	});
+	// A failure here is thrown, not frozen into a refused client: the sandbox may still be
+	// being created, and the wrapper tries again on the next use.
+	return await engine.openSandbox(options.sandbox, options.workspace);
 }
 
 /** The engine modules this build implements, by the name control sends. */
@@ -173,6 +182,10 @@ async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
 			return await import("./microsandbox.ts");
 		case "host":
 			return await import("./host.ts");
+		case "lxc":
+			// Containers in the machine the worker itself is in (ADR 0022): the gateway made the
+			// container, and this runs things in it with the runtime.s own attach.
+			return await import("./lxc.ts");
 		default:
 			return undefined;
 	}
@@ -183,7 +196,7 @@ async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
 //
 // The workspace's own files live inside the sandbox and the user's live on the host, so reads
 // are routed per path: there is one door to the workspace, and this is it.
-const roots = layerRoots({ home: args.home, workspace: args.workspace });
+const roots = layerRoots({ share: args.share, workspace: args.workspace });
 const files = routingFiles(args.workspace, sandbox);
 const discoveredSkills = await loadSkills(resourceFolders(roots, ["skills"]), files);
 
@@ -519,6 +532,7 @@ async function listConversations(): Promise<ConversationInfo[]> {
 				title,
 				hidden,
 				root: record.id === ROOT_CONVERSATION_ID,
+
 				// Read from committed state, so a run that survived a restart still
 				// shows as running, and a background run is never invisible.
 				running: live?.run !== undefined,
@@ -593,7 +607,11 @@ async function describe(): Promise<DescribeData> {
 		workdir: args.workspace,
 		providers,
 		// subagents: the delegation tools are installed below, so the interface may offer them.
-		capabilities: { steer: true, subagents: true, sandbox: "local-process" },
+		// sandbox: the engine control gave this workspace. It was the string "local-process"
+		// unconditionally, while the appliance was running every tool in a container — and the
+		// interface, reading it, disabled tool execution on a working install (measured: beta 10,
+		// engine lxc, container RUNNING, "this workspace has no sandbox").
+		capabilities: { steer: true, subagents: true, sandbox: args.sandboxEngine },
 	};
 }
 
@@ -1162,7 +1180,7 @@ async function handle(command: HandledCommand): Promise<unknown> {
 				command.authId,
 				command.providerId,
 				command.authType,
-				await installId(args.home),
+				await installId(join(args.share, "config")),
 			);
 		case "logout":
 			// Removes the stored credential for this provider only.

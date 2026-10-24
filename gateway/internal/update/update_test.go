@@ -55,7 +55,7 @@ func testManager(t *testing.T) (*Manager, string) {
 		t.Fatal(err)
 	}
 	migrate := t.TempDir()
-	manager := New(home, bin, migrate)
+	manager := New(home, filepath.Join(home, "root"), bin, migrate)
 	manager.client = &http.Client{}
 	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
 		t.Fatal(err)
@@ -336,7 +336,7 @@ func TestBuildVersionStampsFreshInstall(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := New(home, bin, "")
+	manager := New(home, filepath.Join(home, "root"), bin, "")
 	if err := manager.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestDevBuildNeverPrompts(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := New(home, bin, "")
+	manager := New(home, filepath.Join(home, "root"), bin, "")
 	manager.client = &http.Client{}
 	// No version file: current stays "dev".
 	if err := manager.Open(); err != nil {
@@ -1180,5 +1180,86 @@ func TestNotesResolvesSeveralTagsAndCachesThem(t *testing.T) {
 	tags := manager.Notes(context.Background(), []string{"vnope"})
 	if _, ok := tags["vnope"]; ok {
 		t.Fatalf("an unread tag must be absent, got %v", tags)
+	}
+}
+
+// An image is not a pile of regular files: /bin/sh is a symlink on Debian, and an unpacker that
+// drops it produces a machine whose init cannot start. Measured, on the release's own tarball.
+func TestTheImageKeepsItsSymlinksAndItsLinks(t *testing.T) {
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	write := func(header *tar.Header, body string) {
+		t.Helper()
+		if err := writer.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if body != "" {
+			if _, err := writer.Write([]byte(body)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	write(&tar.Header{Name: "usr/bin/dash", Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len("#!/bin/sh\n"))}, "#!/bin/sh\n")
+	write(&tar.Header{Name: "bin", Typeflag: tar.TypeDir, Mode: 0o755}, "")
+	write(&tar.Header{Name: "bin/sh", Typeflag: tar.TypeSymlink, Linkname: "/usr/bin/dash", Mode: 0o777}, "")
+	write(&tar.Header{Name: "usr/bin/sh-copy", Typeflag: tar.TypeLink, Linkname: "usr/bin/dash", Mode: 0o755}, "")
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := untarImage(buffer.Bytes(), dir); err != nil {
+		t.Fatal(err)
+	}
+	link, err := os.Readlink(filepath.Join(dir, "bin", "sh"))
+	if err != nil {
+		t.Fatalf("the shell is a symlink and has to survive as one: %v", err)
+	}
+	if link != "/usr/bin/dash" {
+		t.Errorf("the symlink points at %q", link)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "usr", "bin", "dash")); err != nil {
+		t.Fatalf("the file the link points at is there: %v", err)
+	}
+	// A hard link is the same file, not a copy the image cannot afford.
+	first, err := os.Stat(filepath.Join(dir, "usr", "bin", "dash"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.Stat(filepath.Join(dir, "usr", "bin", "sh-copy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(first, second) {
+		t.Error("a hard link should be the same file")
+	}
+}
+
+// The appliance does not change its own image: restarting and rolling back rewrite the binary the
+// machine is running, and the next `machine up` would take both away with nothing said. An update
+// is not refused — it is declared in the mount for the host service to act on (ADR 0030) — and
+// every other way to change the version refuses, naming where the update happens.
+func TestTheApplianceDoesNotChangeItsOwnImage(t *testing.T) {
+	root := t.TempDir()
+	manager := New(t.TempDir(), root, "", "").WithLauncherOwner()
+	for _, c := range []struct {
+		what string
+		call func() error
+	}{
+		{"restart", manager.Restart},
+		{"rollback", func() error { return manager.Rollback(errors.New("test")) }},
+	} {
+		err := c.call()
+		if !errors.Is(err, ErrLauncherOwnsIt) {
+			t.Errorf("%s: %v, want the launcher-owns-it refusal", c.what, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "host") {
+			t.Errorf("%s: the refusal should say where the update happens: %v", c.what, err)
+		}
+	}
+	if err := manager.Apply(context.Background(), ApplyOptions{Tag: "v0.10.0-beta.14"}); err != nil {
+		t.Fatalf("an update in the appliance is a declaration: %v", err)
+	}
+	if want, err := ReadWant(root); err != nil || want.Version != "v0.10.0-beta.14" {
+		t.Errorf("the intent is in the mount: %+v, %v", want, err)
 	}
 }

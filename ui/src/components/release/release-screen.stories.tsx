@@ -222,6 +222,44 @@ export const RunsAreLive: Story = {
 	),
 };
 
+/** The machine is being replaced: the page says so and the Install button waits. */
+export const Updating: Story = {
+	render: () => (
+		<Frame
+			label="Updating — the machine is restarting"
+			note="The status phase is blocking; the page reads the connection to say restarting, and the Install control has nothing to press."
+		>
+			<ReleaseScreen
+				status={status({
+					phase: "starting",
+					target: "v0.9.33",
+					blocking: true,
+					phaseReason: "the new machine is starting",
+					wanted: "v0.9.33",
+					host: {
+						running: true,
+						version: "v0.9.28",
+						service: "v0.9.28",
+						lastError: "",
+						at: "2026-10-23T16:00:00Z",
+					},
+				})}
+				tag=""
+				applying={false}
+				connection="reconnecting"
+				onOpenTag={noop}
+				onClose={noop}
+				onCheck={noop}
+				onRefresh={noop}
+				onApply={noop}
+				onRestart={noop}
+				onRollback={noop}
+				{...fixtureFor("v0.9.28")}
+			/>
+		</Frame>
+	),
+};
+
 /** The notes read in flight: the rows are already there, and say so. */
 export const NotesLoading: Story = {
 	render: () => (
@@ -317,6 +355,71 @@ export const UpToDate: Story = {
 	),
 };
 
+export const OnAHostAskedForARelease: Story = {
+	render: () => (
+		<Frame
+			label="In the appliance: the release asked for, and what the host says"
+			note="ADR 0030. The console writes the release it wants and then shows the gap: what the host service says is running, what was asked for, and what failed. The host fetches it and makes a new machine, so a run is lost either way."
+		>
+			<ReleaseScreen
+				status={status({
+					wanted: "v0.10.0-beta.14",
+					host: {
+						running: true,
+						version: "v0.10.0-beta.13",
+						service: "v0.10.0-beta.13",
+						lastError: "",
+						at: "2026-10-22T09:41:00Z",
+					},
+				})}
+				tag=""
+				applying={false}
+				onOpenTag={noop}
+				onClose={noop}
+				onCheck={noop}
+				onRefresh={noop}
+				onApply={noop}
+				onRestart={noop}
+				onRollback={noop}
+				{...fixtureFor("v0.10.0-beta.13")}
+			/>
+		</Frame>
+	),
+};
+
+export const OnAHostThatCouldNotApply: Story = {
+	render: () => (
+		<Frame
+			label="In the appliance: the host could not apply it, and the machine that is running stays"
+			note="ADR 0030. The failure is the host's sentence, the running release is still running, and the page offers no control that pretends otherwise."
+		>
+			<ReleaseScreen
+				status={status({
+					current: "v0.10.0-beta.13",
+					wanted: "v0.10.0-beta.14",
+					host: {
+						running: true,
+						version: "v0.10.0-beta.13",
+						service: "v0.10.0-beta.13",
+						lastError: "applying v0.10.0-beta.14: no route to the release",
+						at: "2026-10-22T09:41:00Z",
+					},
+				})}
+				tag=""
+				applying={false}
+				onOpenTag={noop}
+				onClose={noop}
+				onCheck={noop}
+				onRefresh={noop}
+				onApply={noop}
+				onRestart={noop}
+				onRollback={noop}
+				{...fixtureFor("v0.10.0-beta.13")}
+			/>
+		</Frame>
+	),
+};
+
 export const RestartPending: Story = {
 	render: () => (
 		<Frame
@@ -372,6 +475,33 @@ export const RolledBack: Story = {
 			<ReleaseScreen
 				status={status({
 					failed: "migrate failed, rolled back: migrate v0.9.33: exit 1: cannot open state/state.db",
+				})}
+				tag=""
+				applying={false}
+				onOpenTag={noop}
+				onClose={noop}
+				onCheck={noop}
+				onRefresh={noop}
+				onApply={noop}
+				onRestart={noop}
+				onRollback={noop}
+				{...fixtureFor("v0.9.28")}
+			/>
+		</Frame>
+	),
+};
+
+export const CheckFailed: Story = {
+	render: () => (
+		<Frame
+			label="The check failed, and the page does not pretend nothing happened"
+			note="The check is a soft state: the newest release is unknown and the sentence says so. The last good answer stays on screen, and the page is still usable."
+		>
+			<ReleaseScreen
+				status={status({
+					checkError: "releases: github answered 403 Forbidden",
+					available: false,
+					latest: "v0.9.28",
 				})}
 				tag=""
 				applying={false}

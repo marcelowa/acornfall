@@ -20,7 +20,37 @@ export interface WorkspaceSummary {
 	network?: string | undefined;
 }
 
+/**
+ * A workspace being created: the folder exists, and the harness behind it is starting. It is
+ * separate from `WorkspaceSummary` because it does not come from the state stream yet — the
+ * console is the one waiting for the first answer, and the row has to stay where the person
+ * can see it while that happens.
+ */
+export type WorkspacePreparationPhase = "preparing" | "ready" | "failed";
+
+export interface WorkspacePreparation {
+	name: string;
+	phase: WorkspacePreparationPhase;
+	/** The gateway's words when it failed, or the reason the console stopped waiting. */
+	reason?: string | undefined;
+	/** When this preparation began, Unix milliseconds: the row shows how long it has been. */
+	startedAt: number;
+}
+
 /** What the agent's tools can reach, as the interface has to be able to say. */
+/**
+ * A workspace's phase, as the interface needs it: what to say, and whether to offer an action yet.
+ *
+ * The three phases are the gateway's (`control.Lifecycle`): starting, ready, failed. A workspace that is
+ * ready with an unusable sandbox is ready — it can be talked to, and the sandbox panel says why tools
+ * refuse — so the phase never stands in for "the tools are off".
+ */
+export interface WorkspaceLifecycle {
+	phase: "starting" | "ready" | "failed";
+	/** Why it is not ready, in the gateway's words. */
+	reason?: string | undefined;
+}
+
 export interface SandboxSummary {
 	engine: string;
 	version: string;

@@ -232,10 +232,16 @@ export async function policyFor(
 	conversationId: string,
 	context: Context,
 ): Promise<PolicyView> {
+	// The id is checked before a single read is started. `conversationIdOf` throws for an id that is not
+	// a conversation, and calling it inside the array below threw after two reads had begun — the two
+	// promises were never awaited, their rejections were unhandled, and Bun exits on that: a workspace
+	// with no conversation yet asked for a policy and the harness died saying only "invalid conversation
+	// id undefined".
+	const id = conversationIdOf(conversationId);
 	const [definition, depth, meta, peersTotal] = await Promise.all([
 		definitionOf(deps, conversationId, context),
 		depthOf(deps, conversationId, context),
-		deps.harness.snapshot(ConversationMetaDoc, conversationIdOf(conversationId), context),
+		deps.harness.snapshot(ConversationMetaDoc, id, context),
 		agentCreatedCount(deps, context),
 	]);
 	const resolved: ResolvedAgent = resolveAgent(deps.catalog(), definition);

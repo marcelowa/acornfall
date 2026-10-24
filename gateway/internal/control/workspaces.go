@@ -8,6 +8,7 @@
 package control
 
 import (
+	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 
 	"context"
@@ -31,6 +32,16 @@ import (
 // in every install.
 const GeneralWorkspaceName = "general"
 
+// inside says whether a folder is the root itself or below it.
+func inside(path, share string) bool {
+	clean, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	share = filepath.Clean(share)
+	return clean == share || strings.HasPrefix(clean, share+string(os.PathSeparator))
+}
+
 // DefaultWorkspacesDir is where workspaces are created. It is deliberately outside the
 // hidden installation folder: this is the reader's own content, and it should be somewhere
 // they would look.
@@ -39,11 +50,11 @@ const GeneralWorkspaceName = "general"
 // would otherwise land wherever the process happened to start, which is not a place anyone
 // chose and is how a folder of them appears in a container's working directory.
 func DefaultWorkspacesDir() (string, error) {
-	home, err := os.UserHomeDir()
+	machinery, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot tell where to create workspaces: %w (pass --workspaces-dir)", err)
 	}
-	return filepath.Join(home, "acornfall", "workspaces"), nil
+	return filepath.Join(machinery, "acornfall", "workspaces"), nil
 }
 
 // Workspace is a folder the agent works in, plus the decisions that belong to it.
@@ -66,6 +77,11 @@ type Workspace struct {
 	// --disable-vm-nesting; a pointer because true is a choice and absent is not. Like Image,
 	// it takes effect at the next sandbox, because nesting is decided when one is created.
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
+	// Privileged runs this workspace's container as root in the machine instead of inside a user
+	// namespace. ADR 0021 leaves the choice open and gives the unprivileged profile as the
+	// default; false is that default, and true is a workspace saying it needs what only root in
+	// the machine can reach.
+	Privileged bool `json:"privileged,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
@@ -80,7 +96,7 @@ const NetworkOff = "off"
 // places and the worker reads both: the sandbox mounts the same paths at the same strings.
 // `disableVMNesting` is the install's own answer, --disable-vm-nesting, and a workspace's
 // own setting wins over it.
-func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) sandbox.Policy {
+func (w Workspace) SandboxPolicy(share string, disableVMNesting bool) sandbox.Policy {
 	if w.DisableVMNesting != nil {
 		disableVMNesting = *w.DisableVMNesting
 	}
@@ -88,8 +104,16 @@ func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) s
 		Image:            w.Image,
 		Workspace:        w.Path,
 		Egress:           w.Network != NetworkOff,
+		Privileged:       w.Privileged,
 		DisableVMNesting: disableVMNesting,
-		Global:           sandbox.GlobalPaths(home, userHome),
+		Global:           sandbox.GlobalPaths(share),
+		// Every workspace gets a writable prefix, because the alternative is a workspace whose
+		// tools cannot be installed at all: the container is unprivileged (ADR 0021) and a bigger
+		// image only moves the list of tools somebody guessed (ADR 0034).
+		Prefixes: sandbox.DefaultPrefixes(w.Path),
+		// The home is the workspace's own folder too, for the same reason: it must outlive the
+		// container, and it must not be the repository (ADR 0035).
+		Home: sandbox.DefaultHome(w.Path),
 	}
 }
 
@@ -101,25 +125,34 @@ func ValidNetwork(value string) bool {
 
 // Views renders workspaces for the interface, which is the only place `running` belongs.
 //
-// A conversion rather than a field-by-field copy, because the two shapes are the same shape:
-// a field added to one and not the other is then a compile error instead of a value that
-// quietly stops reaching the interface.
+// Field by field rather than a conversion, because the two shapes are the same shape except for
+// the one field that means something different: "running" is runtime state for the interface and
+// never stored. The copy is the price of that difference, and its test is what keeps a new field
+// from quietly stopping here.
 func Views(list []Workspace) []WorkspaceState {
 	views := make([]WorkspaceState, 0, len(list))
 	for _, workspace := range list {
-		views = append(views, WorkspaceState(workspace))
+		views = append(views, WorkspaceState{
+			Name:             workspace.Name,
+			Path:             workspace.Path,
+			Title:            workspace.Title,
+			General:          workspace.General,
+			Image:            workspace.Image,
+			Network:          workspace.Network,
+			Privileged:       workspace.Privileged,
+			DisableVMNesting: workspace.DisableVMNesting,
+			Running:          workspace.Running,
+		})
 	}
 	return views
 }
 
 // WorkspacesOptions configures the workspace layer.
 type WorkspacesOptions struct {
-	// Home is the installation folder: global resources, credentials, and state.
-	Home string
-	// UserHome is the user's home folder, where `~/.agents` lives. It is resolved at the
-	// entry point so that the sandbox mount list and the worker's reads are built from the
-	// same answer.
-	UserHome string
+	// Layout is the install.s two folders: the root the machine mounts, where the product.s
+	// files live, and the home, where the machinery does (docs/adr/0022). Every path this
+	// layer writes comes from it, so the two cannot drift apart.
+	Layout layout.Layout
 	// GeneralPath is the general workspace's folder, from --workspace.
 	GeneralPath string
 	// WorkspacesDir is where workspaces are created, from --workspaces-dir. Empty means
@@ -188,9 +221,10 @@ func (w *Workspaces) Open(ctx context.Context) error {
 	if err := w.loadRegistry(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(w.Dir(), 0o755); err != nil {
+	if err := makeOwnedDir(w.Dir(), w.opts.Layout.Share, 0o755); err != nil {
 		return err
 	}
+	w.adoptOwnership()
 	if err := w.migrate(); err != nil {
 		return err
 	}
@@ -218,7 +252,6 @@ func (w *Workspaces) Close() {
 }
 
 const (
-	registryFile = "workspaces.json"
 	// A warm worker costs a process. Keeping every workspace the reader has visited alive
 	// forever would turn a few visits into a few hundred megabytes, so an idle one that
 	// nobody is watching is stopped and started again from its own storage.
@@ -256,6 +289,16 @@ func (w *Workspaces) Get(name string) (Workspace, bool) {
 	return workspace, ok
 }
 
+// Control returns a workspace's started control, and whether there is one. It never starts a
+// workspace: only the state and stream requests do that. A caller that needs the harness asks
+// this first, so a request for a sleeping workspace is a sentence rather than a boot.
+func (w *Workspaces) Control(name string) (*Control, bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	control, started := w.controls[name]
+	return control, started
+}
+
 // Create makes a workspace inside the workspaces folder. This is the only way the API
 // creates one, which is what keeps the interface inside a single directory: a folder
 // anywhere else on the machine is an operator's decision, not a form field.
@@ -270,7 +313,7 @@ func (w *Workspaces) Create(name string) (Workspace, error) {
 		return Workspace{}, fmt.Errorf("a workspace name cannot contain a slash or a space: %q", name)
 	}
 	path := filepath.Join(w.Dir(), name)
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := makeOwnedDir(path, w.opts.Layout.Share, 0o755); err != nil {
 		return Workspace{}, err
 	}
 	workspace := Workspace{Name: name, Path: path, Title: name}
@@ -406,14 +449,14 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 
 	control = New(Options{
 		Workspace:        workspace,
-		Credentials:      filepath.Join(w.opts.Home, "credentials.json"),
+		Credentials:      w.opts.Layout.Credentials(),
 		Registry:         w.List,
 		WorkspacesDir:    w.Dir(),
-		Home:             w.opts.Home,
-		UserHome:         w.opts.UserHome,
-		StoragePath:      filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
-		SettingsPath:     filepath.Join(w.opts.Home, "state", name, "settings.json"),
-		DraftsPath:       filepath.Join(w.opts.Home, "state", name, "drafts.json"),
+		Root:             w.opts.Layout.Share,
+		InstallSettings:  w.opts.Layout.SettingsFile(),
+		StoragePath:      filepath.Join(w.opts.Layout.WorkspaceState(name), "session.sqlite"),
+		SettingsPath:     filepath.Join(w.opts.Layout.WorkspaceState(name), "settings.json"),
+		DraftsPath:       filepath.Join(w.opts.Layout.WorkspaceState(name), "drafts.json"),
 		Sandbox:          w.opts.Sandbox,
 		WorkerCommand:    w.opts.WorkerCommand,
 		WorkerDir:        w.opts.WorkerDir,
@@ -421,7 +464,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		Model:            w.opts.Model,
 		DisableVMNesting: w.opts.DisableVMNesting,
 	})
-	if err := os.MkdirAll(filepath.Join(w.opts.Home, "state", name), 0o700); err != nil {
+	if err := os.MkdirAll(w.opts.Layout.WorkspaceState(name), 0o700); err != nil {
 		return nil, err
 	}
 	control.Open(ctx)
@@ -433,10 +476,10 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	return control, nil
 }
 
-// The install-wide defaults file: <home>/settings.json. The layer that owns the file owns
+// The install-wide defaults file: <root>/config/settings.json. The layer that owns the file owns
 // writing it, so every workspace sees one value rather than a copy each.
 func (w *Workspaces) installDefaultsPath() string {
-	return filepath.Join(w.opts.Home, "settings.json")
+	return w.opts.Layout.SettingsFile()
 }
 
 // SetInstallModel changes the model every workspace falls back to, below its own default
@@ -716,7 +759,7 @@ func validateWorkspace(workspace Workspace) error {
 }
 
 func (w *Workspaces) registryPath() string {
-	return filepath.Join(w.opts.Home, registryFile)
+	return w.opts.Layout.Registry()
 }
 
 // RegistryFile is the workspaces registry as it exists on disk. It has one owner so the
@@ -813,11 +856,27 @@ func (w *Workspaces) loadRegistry() error {
 	dir := w.opts.WorkspacesDir
 	if dir == "" {
 		dir = recorded
+		// A recorded folder outside the mount is the same bug as a default taken from a home: the machine
+		// cannot see it, so every workspace made there is a workspace with no sandbox. The registry remembers
+		// where workspaces live, which is how one bad run keeps making bad ones.
+		if share := w.opts.Layout.Share; dir != "" && share != "" && !inside(dir, share) {
+			workerpool.Log("workspaces folder %s is outside the mount %s: creating them inside it", dir, share)
+			dir = ""
+		}
 	}
 	if dir == "" {
-		dir, err = DefaultWorkspacesDir()
-		if err != nil {
-			return err
+		// The workspaces folder belongs inside the mount, because that is the only place the machine can see:
+		// the appliance runs with no home of its own, and $HOME/acornfall/workspaces there is
+		// /acornfall/workspaces — outside the share root, so every workspace created in it was a workspace with
+		// no sandbox, and the sentence said only that tools were off. An explicit --root settles it; only an
+		// install that names neither falls back to a home.
+		if share := w.opts.Layout.Share; share != "" {
+			dir = filepath.Join(share, "workspaces")
+		} else {
+			dir, err = DefaultWorkspacesDir()
+			if err != nil {
+				return err
+			}
 		}
 	}
 	absolute, err := filepath.Abs(dir)
@@ -840,7 +899,7 @@ func (w *Workspaces) loadRegistry() error {
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(absolute, 0o755); err != nil {
+		if err := makeOwnedDir(absolute, w.opts.Layout.Share, 0o755); err != nil {
 			return err
 		}
 		w.registry[GeneralWorkspaceName] = Workspace{
@@ -870,6 +929,44 @@ func (w *Workspaces) loadRegistry() error {
 	return nil
 }
 
+// adoptOwnership gives every workspace directory to the share's owner. The gateway inside the
+// machine runs as root; a workspace directory copied in from an older root install was created
+// before the machine's mount and maps to uid 0 inside it, so the container sees nobody and the
+// shell cannot write. The gateway's own new directories already have this owner; this is the
+// repair for the ones that came from the host.
+func (w *Workspaces) adoptOwnership() {
+	uid, gid, ok := sandbox.ShareOwner(w.opts.Layout.Share)
+	if !ok || uid == 0 {
+		return
+	}
+	for _, workspace := range w.List() {
+		if err := os.Chown(workspace.Path, uid, gid); err != nil {
+			workerpool.Log("workspace %s: giving %s to the share owner: %v", workspace.Name, workspace.Path, err)
+		}
+	}
+}
+
+// makeOwnedDir makes a folder the gateway owns and gives it to the share's owner. The gateway
+// inside the machine runs as root, so without this every workspace the console creates is
+// root-owned, and the person's own tools run as the share owner and cannot write it. A folder
+// that was already there is the person's and is left as it is.
+func makeOwnedDir(path, share string, mode os.FileMode) error {
+	_, statErr := os.Stat(path)
+	created := os.IsNotExist(statErr)
+	if err := os.MkdirAll(path, mode); err != nil {
+		return err
+	}
+	if !created {
+		return nil
+	}
+	if uid, gid, ok := sandbox.ShareOwner(share); ok {
+		if err := os.Chown(path, uid, gid); err != nil {
+			return fmt.Errorf("giving %s to the share's owner: %w", path, err)
+		}
+	}
+	return nil
+}
+
 func (w *Workspaces) persist() error {
 	w.mu.RLock()
 	file := RegistryFile{Path: w.registryPath(), WorkspacesDir: w.dir, Workspaces: make([]Workspace, 0, len(w.registry))}
@@ -884,14 +981,13 @@ func (w *Workspaces) persist() error {
 // settings file, moved into the general workspace's state directory. Nothing is rewritten
 // inside them, so every conversation appears exactly where it was.
 func (w *Workspaces) migrate() error {
-	state := filepath.Join(w.opts.Home, "state", GeneralWorkspaceName)
+	state := w.opts.Layout.WorkspaceState(GeneralWorkspaceName)
 	// The write-ahead log travels with its database. Moving one without the other loses
 	// every commit that had not been checkpointed and leaves megabytes behind.
 	moves := []struct{ from, to string }{
-		{filepath.Join(w.opts.Home, "session.sqlite"), filepath.Join(state, "session.sqlite")},
-		{filepath.Join(w.opts.Home, "session.sqlite-wal"), filepath.Join(state, "session.sqlite-wal")},
-		{filepath.Join(w.opts.Home, "session.sqlite-shm"), filepath.Join(state, "session.sqlite-shm")},
-		{filepath.Join(w.opts.Home, "settings.json"), filepath.Join(state, "settings.json")},
+		{filepath.Join(w.opts.Layout.Share, "session.sqlite"), filepath.Join(state, "session.sqlite")},
+		{filepath.Join(w.opts.Layout.Share, "session.sqlite-wal"), filepath.Join(state, "session.sqlite-wal")},
+		{filepath.Join(w.opts.Layout.Share, "session.sqlite-shm"), filepath.Join(state, "session.sqlite-shm")},
 	}
 	for _, move := range moves {
 		if _, err := os.Stat(move.from); err != nil {
@@ -912,7 +1008,7 @@ func (w *Workspaces) migrate() error {
 	// leaving them would both waste space and invite the next reader to use the wrong one.
 	if _, err := os.Stat(filepath.Join(state, "session.sqlite")); err == nil {
 		for _, orphan := range []string{"session.sqlite-wal", "session.sqlite-shm"} {
-			path := filepath.Join(w.opts.Home, orphan)
+			path := filepath.Join(w.opts.Layout.Share, orphan)
 			if _, err := os.Stat(path); err == nil {
 				workerpool.Log("removing orphaned %s", path)
 				_ = os.Remove(path)

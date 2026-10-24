@@ -1,6 +1,7 @@
 package control
 
 import (
+	"github.com/acornfall/acornfall/gateway/internal/layout"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,12 @@ func TestNoHomeDirectoryIsAnErrorNotAGuess(t *testing.T) {
 // value that nothing reads is a value something can read again by accident.
 func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "workspaces.json")
+	// The registry lives in the root's state folder (ADR 0022).
+	where := layout.New(dir, dir)
+	path := where.Registry()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	legacy := `{
   "workspacesDir": "` + dir + `/workspaces",
   "workspaces": [
@@ -43,7 +49,7 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	workspaces := NewWorkspaces(WorkspacesOptions{Home: dir})
+	workspaces := NewWorkspaces(WorkspacesOptions{Layout: where})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
@@ -88,10 +94,48 @@ func TestNestingFollowsTheInstallUnlessTheWorkspaceChooses(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			workspace := Workspace{DisableVMNesting: test.workspace}
-			got := workspace.SandboxPolicy(home, userHome, test.install).DisableVMNesting
+			got := workspace.SandboxPolicy(home, test.install).DisableVMNesting
 			if got != test.want {
 				t.Errorf("DisableVMNesting = %t, want %t", got, test.want)
 			}
 		})
+	}
+}
+
+// The policy is derived so a new field cannot be forgotten in one of the two places. The prefix
+// is the newest example: every workspace gets one, and it has to survive the derivation intact
+// (ADR 0034).
+func TestAWorkspacesPolicyCarriesItsWritablePrefix(t *testing.T) {
+	const share = "/home/me/acornfall"
+	workspace := Workspace{Path: share + "/workspaces/app"}
+	policy := workspace.SandboxPolicy(share, false)
+	if len(policy.Prefixes) == 0 {
+		t.Fatal("no prefixes in the policy: a workspace could not install a tool into itself")
+	}
+	container, err := policy.Container(share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, bind := range container.Binds {
+		if bind.Target != "/usr/local" {
+			continue
+		}
+		found = true
+		if bind.ReadOnly {
+			t.Error("/usr/local is read-only: nothing could be installed")
+		}
+		if bind.Source == bind.Target {
+			t.Error("source and target are the same path: the bind would shadow nothing")
+		}
+		if !strings.HasPrefix(bind.Source, share) {
+			t.Errorf("prefix source %s is outside the share: the machine cannot see it", bind.Source)
+		}
+	}
+	if !found {
+		t.Fatalf("the container has no /usr/local bind: %+v", container.Binds)
+	}
+	if policy.Home == "" {
+		t.Error("the derived policy names no home: ~ would be inside the rootfs")
 	}
 }

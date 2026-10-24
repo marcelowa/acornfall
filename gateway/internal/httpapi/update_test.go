@@ -19,7 +19,7 @@ func updateServer(t *testing.T) (*Server, *update.Manager) {
 	if err := os.WriteFile(bin, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := update.New(home, bin, t.TempDir())
+	manager := update.New(home, home, bin, t.TempDir())
 	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestUpdateStatusNamesCurrentAndLatest(t *testing.T) {
 	if body["current"] != "v0.8.0" {
 		t.Fatalf("current = %v", body["current"])
 	}
-	for _, field := range []string{"available", "latest", "notes", "checking", "backups", "runsActive", "runs"} {
+	for _, field := range []string{"available", "latest", "notes", "checking", "checkError", "backups", "runsActive", "runs"} {
 		if _, ok := body[field]; !ok {
 			t.Fatalf("status must carry %q", field)
 		}
@@ -55,10 +55,18 @@ func TestUpdateCheckNeedsUpstream(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/update/check", strings.NewReader("{}"))
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
-	// No network in tests worth trusting: the point is the endpoint exists
-	// and answers JSON either way, never a panic or a redirect.
-	if recorder.Code != http.StatusOK && recorder.Code != http.StatusBadGateway {
-		t.Fatalf("check = %d", recorder.Code)
+	// A failed check is a soft state, not a failed request: the endpoint answers the state the
+	// page can show, with the reason beside it. A 502 made the console paint a red error over a
+	// check that was only rate-limited.
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("check = %d, want 200 with a checkError", recorder.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["checkError"]; !ok {
+		t.Fatal("the status must carry checkError, even when the check worked")
 	}
 }
 
@@ -206,5 +214,45 @@ func TestHealthNamesVersion(t *testing.T) {
 	}
 	if body["ok"] != true || body["version"] != "v0.8.0" {
 		t.Fatalf("bad health body %v", body)
+	}
+}
+
+// The screen's "update now" in the appliance is a declaration, not a swap (ADR 0029, ADR 0030): the
+// answer carries what was asked for, the file is in the mount, and a value the channel does not
+// carry is refused as a client error instead of a server one.
+func TestTheApplianceAsksTheHostToUpdate(t *testing.T) {
+	server, manager := updateServer(t)
+	manager.WithLauncherOwner()
+	request := httptest.NewRequest(http.MethodPost, "/api/update/apply", strings.NewReader(`{"drain":"wait","tag":"v0.9.0"}`))
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["wanted"] != "v0.9.0" {
+		t.Errorf("the answer does not carry what was asked for: %v", body["wanted"])
+	}
+	for _, refused := range []string{`{"tag":""}`, `{"tag":"../../etc/passwd"}`, `{"tag":"v1.2.3; rm -rf /"}`} {
+		request := httptest.NewRequest(http.MethodPost, "/api/update/apply", strings.NewReader(refused))
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", refused, recorder.Code)
+		}
+		if !strings.Contains(recorder.Body.String(), "not a release tag") {
+			t.Errorf("%s: the refusal should name the channel's vocabulary: %q", refused, recorder.Body.String())
+		}
+	}
+
+	// Restarting and rolling back rewrite the image this process runs, so they stay refusals.
+	rollback := httptest.NewRequest(http.MethodPost, "/api/update/rollback", strings.NewReader(`{}`))
+	recorder = httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, rollback)
+	if recorder.Code != http.StatusConflict {
+		t.Errorf("rollback status = %d, want 409", recorder.Code)
 	}
 }

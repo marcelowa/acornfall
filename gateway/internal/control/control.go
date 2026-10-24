@@ -32,12 +32,12 @@ var ErrNoProvider = errors.New("no authenticated provider")
 type Options struct {
 	// Workspace is the folder and name this Control serves.
 	Workspace Workspace
-	// Home is the installation folder: global resources and shared credentials.
-	Home string
-	// UserHome is the user's home folder, for `~/.agents`, which a sandbox mounts read-only
-	// beside the install's own resource folders. The entry point resolves it and fails when it
-	// cannot, so a control always has one.
-	UserHome string
+	// Root is the folder the machine mounts: the bundle, the config, the state and the
+	// workspaces (docs/adr/0022). The install.s own folder is not passed here: a control writes
+	// nothing to the machinery, and the paths it needs are spelled out below.
+	Root string
+	// InstallSettings is the install-wide defaults file, which every workspace falls back to.
+	InstallSettings string
 	// StoragePath is this workspace's durable storage. One storage per workspace, because
 	// conversation ids are only unique inside one.
 	StoragePath string
@@ -81,6 +81,27 @@ type UpdateSummary struct {
 	Available       bool   `json:"available"`
 	Failed          string `json:"failed,omitempty"`
 	RestartRequired bool   `json:"restartRequired,omitempty"`
+	// Wanted is the release the product asked the host for, and Host is what the host service says
+	// it is running (ADR 0030). Both are absent on a host install, where the product updates itself.
+	Wanted string     `json:"wanted,omitempty"`
+	Host   *HostState `json:"host,omitempty"`
+	// The update lifecycle, as the console reads it. Blocking is true while a write must be
+	// refused; Target is the release being installed; PhaseReason is the sentence to show.
+	Phase       string `json:"phase,omitempty"`
+	Target      string `json:"target,omitempty"`
+	Blocking    bool   `json:"blocking,omitempty"`
+	PhaseReason string `json:"phaseReason,omitempty"`
+}
+
+// HostState is what the host service says about the machine (ADR 0030), as the stream carries it:
+// whether it runs, which release it is, and the last thing that went wrong. It is a copy of a file,
+// so a console that cannot see the host draws what it knows instead of failing.
+type HostState struct {
+	Running   bool   `json:"running"`
+	Version   string `json:"version"`
+	Service   string `json:"service"`
+	LastError string `json:"lastError"`
+	At        string `json:"at"`
 }
 
 // SandboxState says what the agent's tools can reach here. When Tools is false the tools
@@ -114,9 +135,37 @@ type WorkspaceState struct {
 	// DisableVMNesting is nil when this workspace follows the install's --disable-vm-nesting,
 	// and a choice of its own otherwise. True refuses nesting; absent or false allows it
 	// wherever the engine and the machine can.
+	// Privileged runs this workspace's container as root in the machine instead of inside a user
+	// namespace (ADR 0021's open question). False is the default, and the default is the
+	// mitigation.
+	Privileged       bool  `json:"privileged,omitempty"`
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
 	Running          bool  `json:"running"`
 }
+
+// Lifecycle is where a workspace is between "asked for" and "can be used", in one field the console
+// does not have to assemble from three.
+//
+// The phases are the three states a person can act on:
+//
+//	starting  the harness has not answered yet: wait
+//	ready     the harness is up: conversations, prompts and tools work
+//	failed    the harness went down and has not come back: the reason says why
+//
+// A workspace that is ready with an unusable sandbox is ready: it can be talked to, and the sandbox
+// panel says in its own words why tools refuse. That is a different problem from "nothing works yet",
+// and folding the two together is how a person is told to wait for something that will never change.
+type Lifecycle struct {
+	Phase  string `json:"phase"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// The three phases. Strings, because they cross the wire and a reader of the JSON should see words.
+const (
+	LifecycleStarting = "starting"
+	LifecycleReady    = "ready"
+	LifecycleFailed   = "failed"
+)
 
 // Inherited reports which fields the active conversation left to the defaults.
 type Inherited struct {
@@ -189,6 +238,9 @@ type State struct {
 	WorkerError string `json:"workerError,omitempty"`
 	// Sandbox is where this workspace's commands and file reads actually happen.
 	Sandbox SandboxState `json:"sandbox"`
+	// Lifecycle says whether the workspace can be used yet, and why not. A client that creates a
+	// conversation before this is ready is a client that writes into a harness that is not there.
+	Lifecycle Lifecycle `json:"lifecycle"`
 	// Update is the self-update summary: the header dot without fetching.
 	Update    UpdateSummary           `json:"update"`
 	Agents    []protocol.AgentSummary `json:"agents"`
@@ -239,7 +291,11 @@ type Control struct {
 	conversations []protocol.ConversationInfo
 	active        string
 	workerUp      bool
-	workerError   string
+	// workerReady is whether the harness has answered a command, not merely whether its process
+	// exists. `workerUp` is process liveness (the rail's "running", the start guard); this is the
+	// promise the lifecycle makes: conversations, prompts and tools are served.
+	workerReady bool
+	workerError string
 	// sandbox is what the agent's tools can reach, refreshed when the worker starts. It is
 	// nil-free on purpose: "no sandbox" is a state the interface has to be able to show.
 	sandbox SandboxState
@@ -260,7 +316,7 @@ type Control struct {
 	defaultAgent    string
 	/** Whether the conversations that predate naming an agent have been given the general one. */
 	generalPinned bool
-	// install is the install-wide layer, from <home>/settings.json. Read-only for a
+	// install is the install-wide layer, from <machinery>/settings.json. Read-only for a
 	// workspace: it is changed through the workspace layer, which writes the file once for
 	// every workspace to see.
 	install Defaults
@@ -346,10 +402,11 @@ func (c *Control) Open(ctx context.Context) {
 	// anything, so a state is complete from the first client that asks.
 	c.loadDrafts()
 	if err := c.attachToWorker(ctx); err != nil {
-		c.mu.Lock()
-		c.workerUp = false
-		c.workerError = err.Error()
-		c.mu.Unlock()
+		// A worker that spawned but could not answer is still a live process. Marking it down
+		// without closing it was a second worker over one storage: the supervisor saw "down" and
+		// started another, while the first was still there. failWorker closes it and keeps the
+		// harness's own last words, which are the part a person can act on.
+		c.failWorker(err)
 		workerpool.Log("workspace %s: %v", c.opts.Workspace.Name, err)
 		go c.supervise(c.lifetime)
 		// Something for the supervisor to react to: it retries on a death, and this is the
@@ -372,9 +429,13 @@ func (c *Control) attachToWorker(ctx context.Context) error {
 	if err := c.startWorker(ctx); err != nil {
 		return err
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return fmt.Errorf("describe worker: %w", err)
 	}
+	// The harness answered. Adoption creates the root conversation through the same external
+	// gate, so the gate has to be open by the time it is asked; a later failure marks the
+	// workspace failed and stops this worker.
+	c.markWorkerReady()
 	c.applyDescribe(describe)
 
 	if _, err := c.Agents(ctx); err != nil {
@@ -436,6 +497,30 @@ func (c *Control) adoptConversation(ctx context.Context, persistedActive string)
 	return nil
 }
 
+// sandboxArgs tells the worker which sandbox to attach to, or why it has none. It is split from startWorker so
+// the sentence a refused tool prints can be read without starting a process.
+func (c *Control) sandboxArgs(sandboxState SandboxState) []string {
+	if sandboxState.Tools {
+		args := []string{"--sandbox", sandbox.Name(c.opts.Workspace.Path)}
+		// The worker attaches with this engine's SDK: naming it here is how the two sides of one
+		// install cannot disagree about which engine is in use. The name comes from the report the
+		// manager just produced — Driver() can be nil on a manager that has not resolved one, and
+		// the worker then fell back to its own default, which read as "microsandbox" on an lxc
+		// install (measured).
+		if sandboxState.Engine != "" {
+			args = append(args, "--sandbox-engine", sandboxState.Engine)
+		}
+		return args
+	}
+	if sandboxState.Problem == "" {
+		return nil
+	}
+	// The refusal a person reads is the worker's, and on its own it says only that tools are off. The reason
+	// the sandbox was not made stayed in the log, which is the one place somebody looking at a transcript does
+	// not look: a workspace created at a path the machine cannot see said "no sandbox" and nothing else.
+	return []string{"--sandbox-problem", sandboxState.Problem}
+}
+
 // startWorker launches the harness process and arranges for its death to be noticed.
 //
 // It refuses to start a second one. A death is announced twice — the process's own exit, and
@@ -454,20 +539,13 @@ func (c *Control) startWorker(ctx context.Context) error {
 		"--workspace", c.opts.Workspace.Path,
 		"--storage", c.opts.StoragePath,
 		"--credentials", c.opts.Credentials,
-		"--home", c.opts.Home,
+		"--share", c.opts.Root,
 	)
 	// The sandbox is made first, because the worker is told to use it and refuses to run
 	// anything without it. A failure is a state, not a stop: the workspace opens, the tools
 	// say what is missing, and the rest of the product works.
 	sandboxState := c.provisionSandbox(ctx)
-	if sandboxState.Tools {
-		args = append(args, "--sandbox", sandbox.Name(c.opts.Workspace.Path))
-		if driver := c.opts.Sandbox.Driver(); driver != nil {
-			// The worker attaches with this engine's SDK: naming it here is how the two sides
-			// of one install cannot disagree about which engine is in use.
-			args = append(args, "--sandbox-engine", driver.Name())
-		}
-	}
+	args = append(args, c.sandboxArgs(sandboxState)...)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -494,6 +572,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 	c.mu.Lock()
 	c.worker = worker
 	c.workerUp = true
+	c.workerReady = false
 	c.workerError = ""
 	c.sandbox = sandboxState
 	c.mu.Unlock()
@@ -550,6 +629,16 @@ func (c *Control) supervise(ctx context.Context) {
 		}
 		if err := c.recoverWithWorker(ctx); err != nil {
 			workerpool.Log("worker restart %d could not be resumed: %v", failures, err)
+			// The process exists but cannot serve, and nothing else will announce its end. Leaving
+			// it here made the supervisor wait for a death that never came, while the workspace
+			// said "ready" (before the readiness split) or "starting" for ever. End it and ask for
+			// the next attempt.
+			c.failWorker(err)
+			c.publish(protocol.Frame{Type: "state"})
+			select {
+			case c.workerExited <- struct{}{}:
+			default:
+			}
 			continue
 		}
 		workerpool.Log("worker restarted and resumed")
@@ -581,6 +670,7 @@ func (c *Control) workerFailed(worker *workerpool.Worker, err error) {
 		reason = fmt.Sprintf("%s — %s", reason, words)
 	}
 	c.workerUp = false
+	c.workerReady = false
 	c.workerError = reason
 	c.mu.Unlock()
 	workerpool.Log("worker died: %s", reason)
@@ -597,9 +687,10 @@ func (c *Control) workerFailed(worker *workerpool.Worker, err error) {
 // a client is looking at, so a restart is invisible apart from the pause.
 func (c *Control) recoverWithWorker(ctx context.Context) error {
 	var describe protocol.Describe
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
 		return err
 	}
+	c.markWorkerReady()
 	c.applyDescribe(describe)
 	if _, err := c.Agents(ctx); err != nil {
 		return err
@@ -653,7 +744,11 @@ func (c *Control) watchedConversations() []string {
 	seen := map[string]bool{}
 	list := make([]string, 0, len(c.attachments))
 	for id, count := range c.attachments {
-		if count > 0 && !seen[id] {
+		// A client that lands before the workspace has a conversation subscribes to nothing, and
+		// "nothing" is not a conversation to ask the worker about: a policy for the empty id made it
+		// throw, and the throw left two of its reads unawaited — the harness died, and the workspace
+		// said only "harness down".
+		if id != "" && count > 0 && !seen[id] {
 			seen[id] = true
 			list = append(list, id)
 		}
@@ -693,10 +788,39 @@ func (c *Control) conversationSignature() string {
 	return builder.String()
 }
 
+// call is the one way a control asks its harness something. A control whose harness never
+// started has no worker, and calling through the nil pointer was a panic in the HTTP server:
+// the console asked for its commands while the workspace was still starting, and the answer
+// was a closed connection instead of the sentence the page could show.
+func (c *Control) call(ctx context.Context, command protocol.Command) (json.RawMessage, error) {
+	c.mu.RLock()
+	worker := c.worker
+	c.mu.RUnlock()
+	if worker == nil {
+		return nil, errors.New("this workspace's harness is not running")
+	}
+	return worker.Call(ctx, command)
+}
+
+// callInto is call with the response decoded, matching workerpool.Worker.CallInto.
+func (c *Control) callInto(ctx context.Context, command protocol.Command, out any) error {
+	data, err := c.call(ctx, command)
+	if err != nil {
+		return err
+	}
+	if out == nil || len(data) == 0 {
+		return nil
+	}
+	return json.Unmarshal(data, out)
+}
+
 // WorkerCall is an escape hatch for small read-only commands, so a diagnostic does
 // not need a method and an endpoint of its own.
 func (c *Control) WorkerCall(ctx context.Context, kind, conversationID string) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
+	if err := c.requireReady(); err != nil {
+		return nil, err
+	}
+	return c.call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
 }
 
 func (c *Control) workspaceList() []WorkspaceState {
@@ -742,13 +866,25 @@ func (c *Control) SetWorkspace(workspace Workspace) {
 
 // Commands lists this workspace's slash commands, global first and workspace shadowing.
 func (c *Control) Commands(ctx context.Context) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: "commands"})
+	if err := c.requireReady(); err != nil {
+		return nil, err
+	}
+	return c.call(ctx, protocol.Command{Type: "commands"})
 }
 
 // Policy reports what a conversation may do with other conversations, resolved
 // the same way its agent is.
 func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
+	if err := c.requireReady(); err != nil {
+		return nil, err
+	}
+	if conversationID == "" {
+		// No id is not a policy to compute: it is a workspace with no conversation yet. Asking the
+		// worker made it throw, and a throw on a command with an id that is not one is how a harness
+		// went down over a client that had simply landed early.
+		return nil, errors.New("this workspace has no conversation yet")
+	}
+	return c.call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 }
 
 // stopWorker terminates the worker process and leaves everything else:
@@ -761,6 +897,30 @@ func (c *Control) stopWorker() {
 	worker := c.worker
 	c.worker = nil
 	c.workerUp = false
+	c.workerReady = false
+	c.mu.Unlock()
+	if worker != nil {
+		worker.Close()
+	}
+}
+
+// failWorker marks the current worker down, keeps its own last words for the state, and closes
+// the process. It leaves the worker in place until the close so the exit notification can still
+// be matched: clearing it first made every message say "already replaced", and the state lost
+// the one line that named the broken file. Nothing starts a second worker over this one: the
+// close happens before startWorker is asked again, and WorkerUp is already false.
+func (c *Control) failWorker(err error) {
+	c.mu.Lock()
+	worker := c.worker
+	reason := err.Error()
+	if worker != nil {
+		if words := worker.LastWords(); words != "" && !strings.Contains(reason, words) {
+			reason = reason + " — " + words
+		}
+	}
+	c.workerUp = false
+	c.workerReady = false
+	c.workerError = reason
 	c.mu.Unlock()
 	if worker != nil {
 		worker.Close()
@@ -813,7 +973,7 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 		state.Problem = problem.Error()
 		return state
 	}
-	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome, c.opts.DisableVMNesting)
+	policy := c.opts.Workspace.SandboxPolicy(c.opts.Root, c.opts.DisableVMNesting)
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()
 		workerpool.Log("sandbox for %s: %v", c.opts.Workspace.Name, err)
@@ -919,7 +1079,8 @@ func (c *Control) StateFor(conversationID string) State {
 		},
 		WorkerUp:    c.workerUp,
 		WorkerError: c.workerError,
-		Sandbox:     c.sandbox,
+		Sandbox:     c.sandboxStatus(),
+		Lifecycle:   c.lifecycleLocked(),
 		Update:      c.updateSummary(),
 		Inherited: Inherited{
 			Model:    c.bindings[active].Provider == "",
@@ -957,6 +1118,9 @@ func (c *Control) StateFor(conversationID string) State {
 // Select attaches to one conversation, detaching the previous one so frames
 // describe a single transcript.
 func (c *Control) Select(ctx context.Context, conversationID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if conversationID == "" {
 		return errors.New("conversation id is required")
 	}
@@ -967,11 +1131,11 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 		return nil
 	}
 	if previous != "" {
-		if _, err := c.worker.Call(ctx, protocol.Command{Type: "detach", ConversationID: previous}); err != nil {
+		if _, err := c.call(ctx, protocol.Command{Type: "detach", ConversationID: previous}); err != nil {
 			workerpool.Log("detach %s: %v", previous, err)
 		}
 	}
-	if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
+	if _, err := c.call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 		return err
 	}
 	c.mu.Lock()
@@ -997,10 +1161,13 @@ func (c *Control) Select(ctx context.Context, conversationID string) error {
 // Rename gives a conversation a name. The name is committed into the
 // conversation itself, so it is durable and travels with the transcript.
 func (c *Control) Rename(ctx context.Context, conversationID, title string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(title) == "" {
 		return errors.New("title is required")
 	}
-	if _, err := c.worker.Call(ctx, protocol.Command{
+	if _, err := c.call(ctx, protocol.Command{
 		Type:           "rename",
 		ConversationID: conversationID,
 		Title:          title,
@@ -1017,7 +1184,10 @@ func (c *Control) Rename(ctx context.Context, conversationID, title string) erro
 // Hide tombstones a conversation. Nothing is removed: storage is append-only, so
 // a hidden conversation keeps its transcript and can be restored.
 func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) error {
-	if _, err := c.worker.Call(ctx, protocol.Command{
+	if err := c.requireReady(); err != nil {
+		return err
+	}
+	if _, err := c.call(ctx, protocol.Command{
 		Type:           "hide",
 		ConversationID: conversationID,
 		Hidden:         hidden,
@@ -1045,10 +1215,13 @@ func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) 
 // Fork branches a conversation at an entry. The fork inherits the transcript up
 // to that entry and the agent in effect at that point.
 func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "fork",
 		ConversationID: conversationID,
 		At:             at,
@@ -1089,10 +1262,13 @@ func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
 // the old prefix while the conversation keeps working, and the transcript
 // keeps a notice where the cut was.
 func (c *Control) Compact(ctx context.Context, conversationID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "compact",
 		ConversationID: conversationID,
 	}, &response); err != nil {
@@ -1108,8 +1284,11 @@ func (c *Control) Compact(ctx context.Context, conversationID string) error {
 // CompactPreview says what a manual compaction would fold: entry and turn counts,
 // so the dialog states the scope. The cut itself stays the harness's call.
 func (c *Control) CompactPreview(ctx context.Context, conversationID string) (CompactPreview, error) {
+	if err := c.requireReady(); err != nil {
+		return CompactPreview{}, err
+	}
 	var response CompactPreview
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "compact_preview",
 		ConversationID: conversationID,
 	}, &response); err != nil {
@@ -1122,10 +1301,16 @@ func (c *Control) CompactPreview(ctx context.Context, conversationID string) (Co
 // transcript keeps a notice where it was.
 // Create makes a new conversation and selects it.
 func (c *Control) Create(ctx context.Context) error {
+	// Conversations are made by the harness, so a harness that is not up cannot make one: the write
+	// went to a process that was not there, and the console said "harness down" over an action it had
+	// offered a second earlier. A workspace says when it is ready, and this is the gate that honours it.
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "create"}, &response); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "create"}, &response); err != nil {
 		return err
 	}
 	if response.ConversationID == "" {
@@ -1281,6 +1466,9 @@ type AgentChange struct {
 // SetAgent applies a change to one conversation. Only fields the caller sets
 // become explicit: anything left alone keeps inheriting.
 func (c *Control) SetAgent(ctx context.Context, conversationID string, change AgentChange) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	c.mu.RLock()
 	explicit := c.bindings[conversationID]
 	c.mu.RUnlock()
@@ -1340,7 +1528,7 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, change Ag
 	var response struct {
 		Agent protocol.ResolvedAgent `json:"agent"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "open",
 		ConversationID: conversationID,
 		Agent:          &effective,
@@ -1649,6 +1837,9 @@ func (c *Control) supportedThinking(provider, modelID string) []string {
 // definition names one. It is validated against the scale, not against one model:
 // control clamps per model when it applies.
 func (c *Control) SetDefaultThinking(ctx context.Context, level string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if err := validateThinkingLevel(level); err != nil {
 		return err
 	}
@@ -1661,6 +1852,9 @@ func (c *Control) SetDefaultThinking(ctx context.Context, level string) error {
 // SetDefaultAgent changes which definition conversations run when they have none
 // of their own. An empty name means the layered defaults only.
 func (c *Control) SetDefaultAgent(ctx context.Context, name string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if name != "" {
 		c.mu.RLock()
 		found := false
@@ -1704,7 +1898,7 @@ func (c *Control) reapplyInheriting(ctx context.Context) error {
 
 // loadInstallDefaults reads the install-wide layer.
 func (c *Control) loadInstallDefaults() {
-	install, err := LoadDefaults(filepath.Join(c.opts.Home, "settings.json"))
+	install, err := LoadDefaults(c.opts.InstallSettings)
 	if err != nil {
 		workerpool.Log("install defaults unreadable, using this workspace's: %v", err)
 		return
@@ -1758,6 +1952,9 @@ func SaveDefaults(path string, defaults Defaults) error {
 
 // SetDefaultModel changes what conversations without an explicit model run.
 func (c *Control) SetDefaultModel(ctx context.Context, provider, modelID string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	if (provider == "") != (modelID == "") {
 		return errors.New("a model default needs both a provider and a model id")
 	}
@@ -1869,7 +2066,7 @@ func (c *Control) reapply(ctx context.Context, conversationID string) error {
 	var response struct {
 		Agent protocol.ResolvedAgent `json:"agent"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "open",
 		ConversationID: conversationID,
 		Agent:          &effective,
@@ -1885,8 +2082,11 @@ func (c *Control) reapply(ctx context.Context, conversationID string) error {
 
 // Agents returns the overlay catalog: every definition and what it resolves to.
 func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
+	if err := c.requireReady(); err != nil {
+		return protocol.AgentsData{}, err
+	}
 	var data protocol.AgentsData
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "agents"}, &data); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "agents"}, &data); err != nil {
 		return protocol.AgentsData{}, err
 	}
 	c.mu.Lock()
@@ -1898,7 +2098,10 @@ func (c *Control) Agents(ctx context.Context) (protocol.AgentsData, error) {
 // Reload re-reads definitions and config from disk, then re-applies every
 // conversation's binding so an edited file takes effect without a restart.
 func (c *Control) Reload(ctx context.Context) error {
-	if _, err := c.worker.Call(ctx, protocol.Command{Type: "reload"}); err != nil {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
+	if _, err := c.call(ctx, protocol.Command{Type: "reload"}); err != nil {
 		return err
 	}
 	if _, err := c.Agents(ctx); err != nil {
@@ -1919,10 +2122,14 @@ func (c *Control) Reload(ctx context.Context) error {
 // Refresh re-reads the worker's provider catalog and adopt a usable agent
 // binding for the active conversation when the current one is unusable.
 func (c *Control) Refresh(ctx context.Context) error {
-	var describe protocol.Describe
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+	if err := c.requireReady(); err != nil {
 		return err
 	}
+	var describe protocol.Describe
+	if err := c.callInto(ctx, protocol.Command{Type: "describe"}, &describe); err != nil {
+		return err
+	}
+	c.markWorkerReady()
 	c.applyDescribe(describe)
 	if err := c.ensureLastResort(); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
@@ -1937,13 +2144,16 @@ func (c *Control) Refresh(ctx context.Context) error {
 // flow starts: the interaction arrives as `auth` frames, and a device flow can
 // take minutes.
 func (c *Control) Login(ctx context.Context, providerID, authType string) (string, error) {
+	if err := c.requireReady(); err != nil {
+		return "", err
+	}
 	c.mu.Lock()
 	c.nextSub++
 	authID := fmt.Sprintf("auth-%d", c.nextSub)
 	c.mu.Unlock()
 
 	go func() {
-		_, err := c.worker.Call(context.WithoutCancel(ctx), protocol.Command{
+		_, err := c.call(context.WithoutCancel(ctx), protocol.Command{
 			Type:       "login",
 			AuthID:     authID,
 			ProviderID: providerID,
@@ -1963,7 +2173,10 @@ func (c *Control) Login(ctx context.Context, providerID, authType string) (strin
 // Logout forgets one provider's stored credential and re-adopts bindings, so a
 // revoked key cannot keep spending and the picker cannot keep offering it.
 func (c *Control) Logout(ctx context.Context, providerID string) error {
-	if _, err := c.worker.Call(ctx, protocol.Command{Type: "logout", ProviderID: providerID}); err != nil {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
+	if _, err := c.call(ctx, protocol.Command{Type: "logout", ProviderID: providerID}); err != nil {
 		return err
 	}
 	c.mu.Lock()
@@ -1984,7 +2197,10 @@ func (c *Control) Logout(ctx context.Context, providerID string) error {
 
 // AnswerAuth answers one login prompt. Cancelled rejects it.
 func (c *Control) AnswerAuth(ctx context.Context, authID, promptID, value string, cancelled bool) error {
-	return c.worker.CallInto(ctx, protocol.Command{
+	if err := c.requireReady(); err != nil {
+		return err
+	}
+	return c.callInto(ctx, protocol.Command{
 		Type:      "auth_answer",
 		AuthID:    authID,
 		PromptID:  promptID,
@@ -1995,10 +2211,16 @@ func (c *Control) AnswerAuth(ctx context.Context, authID, promptID, value string
 
 // CancelAuth aborts a running login flow.
 func (c *Control) CancelAuth(ctx context.Context, authID string) error {
-	return c.worker.CallInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
+	if err := c.requireReady(); err != nil {
+		return err
+	}
+	return c.callInto(ctx, protocol.Command{Type: "auth_cancel", AuthID: authID}, nil)
 }
 
 func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy, attachments []string) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	// Files may ride alone: a screenshot with no words is still a message.
 	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return errors.New("empty message")
@@ -2017,7 +2239,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 			Command string `json:"command"`
 			Action  string `json:"action"`
 		}
-		if err := c.worker.CallInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
+		if err := c.callInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
 			workerpool.Log("expanding %q: %v", text, err)
 		} else if expanded.Action == "compact" || expanded.Action == "reset" {
 			// A builtin is an action, not a turn: the worker runs it, then records
@@ -2033,7 +2255,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 			var response struct {
 				ConversationID string `json:"conversationId"`
 			}
-			err := c.worker.CallInto(ctx, protocol.Command{
+			err := c.callInto(ctx, protocol.Command{
 				Type:           "action",
 				ConversationID: conversationID,
 				Text:           strings.TrimSpace(text),
@@ -2055,7 +2277,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 			text = expanded.Text
 		}
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:           "prompt",
 		ConversationID: conversationID,
 		Text:           text,
@@ -2078,11 +2300,17 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 }
 
 func (c *Control) Abort(ctx context.Context, conversationID string) error {
-	return c.worker.CallInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
+	if err := c.requireReady(); err != nil {
+		return err
+	}
+	return c.callInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
 }
 
 func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: "usage"})
+	if err := c.requireReady(); err != nil {
+		return nil, err
+	}
+	return c.call(ctx, protocol.Command{Type: "usage"})
 }
 
 // Attachment is one stored file, answered with the id messages carry.
@@ -2096,10 +2324,13 @@ type Attachment struct {
 // UploadAttachment stores staged bytes under the workspace's hidden folder.
 // The temp file stays the caller's to remove; the worker only reads it.
 func (c *Control) UploadAttachment(ctx context.Context, tempPath, name, mime string, size int64) (Attachment, error) {
+	if err := c.requireReady(); err != nil {
+		return Attachment{}, err
+	}
 	var response struct {
 		Attachment Attachment `json:"attachment"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{
+	if err := c.callInto(ctx, protocol.Command{
 		Type:     "attachment",
 		TempPath: tempPath,
 		FileName: name,
@@ -2137,13 +2368,13 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 
 	// The worker subscribes per conversation, so the first watcher is what asks for it.
 	if first && conversationID != "" {
-		if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
+		if _, err := c.call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
 			c.Unsubscribe(id)
 			return 0, nil, nil, nil, err
 		}
 		// Fetch its policy now rather than leaving a client to see state without one until
 		// the next refresh tick, which reads as a broken inspector for a few seconds.
-		if policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID}); err == nil {
+		if policy, err := c.call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID}); err == nil {
 			c.mu.Lock()
 			c.policies[conversationID] = policy
 			c.mu.Unlock()
@@ -2191,7 +2422,7 @@ func (c *Control) Unsubscribe(id int) {
 	c.mu.Unlock()
 
 	if last {
-		if _, err := c.worker.Call(context.Background(), protocol.Command{
+		if _, err := c.call(context.Background(), protocol.Command{
 			Type:           "detach",
 			ConversationID: conversationID,
 		}); err != nil {
@@ -2314,6 +2545,9 @@ func queueFrame(channel chan protocol.Frame, frame protocol.Frame) {
 // RefreshConversations re-reads the list on demand, for callers that are not holding
 // an event stream open.
 func (c *Control) RefreshConversations(ctx context.Context) error {
+	if err := c.requireReady(); err != nil {
+		return err
+	}
 	_, err := c.listConversations(ctx)
 	return err
 }
@@ -2322,7 +2556,7 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 	var data struct {
 		Conversations []protocol.ConversationInfo `json:"conversations"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "conversations"}, &data); err != nil {
+	if err := c.callInto(ctx, protocol.Command{Type: "conversations"}, &data); err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
@@ -2336,7 +2570,7 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 	// Policy for every conversation a client is watching, so an inspector is correct in
 	// whichever tab it happens to be open.
 	for _, conversationID := range c.watchedConversations() {
-		policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
+		policy, err := c.call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 		if err != nil {
 			continue
 		}
@@ -2345,6 +2579,48 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 		c.mu.Unlock()
 	}
 	return data.Conversations, nil
+}
+
+// lifecycleLocked is the workspace's phase, for a caller already holding the lock for reading.
+func (c *Control) lifecycleLocked() Lifecycle {
+	switch {
+	case c.workerReady:
+		return Lifecycle{Phase: LifecycleReady}
+	case c.workerError != "":
+		return Lifecycle{Phase: LifecycleFailed, Reason: c.workerError}
+	case c.workerUp:
+		return Lifecycle{Phase: LifecycleStarting, Reason: "the harness is starting"}
+	default:
+		return Lifecycle{Phase: LifecycleStarting, Reason: "the harness is starting"}
+	}
+}
+
+// markWorkerReady records that the harness answered a command. The lifecycle's ready is this,
+// not the process's existence: a process that has not answered is a workspace that cannot yet
+// make a conversation, which is the exact action the console used to offer and then fail.
+func (c *Control) markWorkerReady() {
+	c.mu.Lock()
+	c.workerReady = true
+	c.workerError = ""
+	c.mu.Unlock()
+}
+
+// Lifecycle is the workspace's phase for a caller that is not holding the lock.
+func (c *Control) Lifecycle() Lifecycle {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lifecycleLocked()
+}
+
+// requireReady is the one gate for an action that needs the harness. It is here, in the
+// control, and not only at the HTTP edge: the command line and a test are callers too, and a
+// workspace that is starting must refuse them with the phase's own sentence.
+func (c *Control) requireReady() error {
+	lifecycle := c.Lifecycle()
+	if lifecycle.Phase != LifecycleReady {
+		return fmt.Errorf("this workspace is not ready yet: %s", lifecycle.Reason)
+	}
+	return nil
 }
 
 func (c *Control) activeConversation() string {
@@ -2636,4 +2912,22 @@ func defaultConversation(infos []protocol.ConversationInfo) string {
 		}
 	}
 	return firstVisible(infos)
+}
+
+// sandboxStatus is the cached sandbox with its status asked again. The container's own state is
+// the one thing in this report that changes without this process doing anything — control makes
+// the container when a workspace starts, and the worker's first use of its engine is what starts
+// it — so a console that showed a running workspace's container as stopped would be reporting a
+// snapshot as if it were the world.
+func (c *Control) sandboxStatus() SandboxState {
+	state := c.sandbox
+	if !state.Tools || c.opts.Sandbox == nil {
+		return state
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if status, err := c.opts.Sandbox.Status(ctx, c.opts.Workspace.Path); err == nil && status != "" {
+		state.Status = status
+	}
+	return state
 }

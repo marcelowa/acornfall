@@ -1,6 +1,18 @@
 # A tag `v*` ships the self-update binaries: one per OS/arch, named the
 # way the gateway's update check picks them (`acornfall-<goos>-<goarch>`),
 # plus the checksum file the gateway verifies against. See ADR 0019.
+#
+# The tag's release is the hand-off between jobs: each job uploads what it built straight to it,
+# as a draft, and the last job makes the draft public. The hand-off used to be the run's
+# artifacts, and pulling 272 MB of them back onto the runner that had just made them took 15m57
+# of a 27m43 run (measured, v0.10.0-beta.13). `prove` still downloads from the release, because
+# downloading the published bytes is its whole point (ADR 0024).
+#
+# This runner has no `gh` and no `jq` (measured: exit 127 for both, HOME=/home/runner), so the
+# release is written and read with curl plus python3 — the two tools the proof job has used all
+# along — and everything goes through the release id rather than the tag: `releases/tags/<tag>`
+# answers 404 while the release is a draft (measured on this pipeline's first tag), which is the
+# whole lifetime of every job before `publish`.
 name: release
 
 on:
@@ -12,7 +24,56 @@ permissions:
   contents: write
 
 jobs:
+  draft:
+    # Opened once, before the producers, so no two jobs race to create it and none of them has to
+    # know whether it exists. The body is the tag message — what the update page reads as "what
+    # changed" — written here rather than in `publish`, which needed a checkout only for this.
+    runs-on: [self-hosted, linux, x64]
+    outputs:
+      release_id: ${{ steps.open.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          fetch-tags: true
+          sparse-checkout: .github
+      - name: Read the tag message
+        run: git tag -l --format='%(contents)' "${{ github.ref_name }}" > release-notes.md
+      - name: Open the tag's draft release
+        id: open
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A re-run of a tag finds the release the first attempt opened and uploads over it, which
+          # is what re-running after a fix needs. The list is scanned because a draft is not
+          # reachable by tag, and the id it yields is what every later job uses.
+          id=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            python3 -c 'import json, sys
+          print(next((str(r["id"]) for r in json.load(sys.stdin) if r["tag_name"] == sys.argv[1]), ""))' \
+            "$GITHUB_REF_NAME")
+          if [ -z "$id" ]; then
+            # python3 writes the body: quoting a tag message into JSON by hand is how a release
+            # body becomes invalid on the first apostrophe.
+            python3 - "$GITHUB_REF_NAME" release-notes.md > release.json <<'PYEOF'
+          import json, sys
+          tag, path = sys.argv[1], sys.argv[2]
+          with open(path, encoding="utf-8") as f:
+              body = f.read()
+          print(json.dumps({"tag_name": tag, "name": tag, "body": body, "draft": True}))
+          PYEOF
+            id=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" --data-binary @release.json \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases" |
+              python3 -c 'import json, sys
+          print(json.load(sys.stdin)["id"])')
+          fi
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+          echo "$GITHUB_REF_NAME's draft release is $id"
+
   binaries:
+    needs: draft
     # All four legs cross-build on the self-hosted runner, which is Linux. The gateway has no
     # cgo, so a darwin binary built here is the same program the macOS runners built — and a
     # macOS runner bills at ten times a Linux one. CGO_ENABLED=0 is written out because it is
@@ -51,12 +112,40 @@ jobs:
           -ldflags "-X github.com/acornfall/acornfall/gateway/internal/update.BuildVersion=${{ github.ref_name }}"
           -o ../acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
           ./cmd/acornfall
-      - uses: actions/upload-artifact@v4
-        with:
-          name: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
+      # The checksum line goes to a file of its own on the runner, which `publish` concatenates:
+      # the matrix legs can overlap, and two appends to one file would interleave.
+      - name: Leave the checksum line on the runner
+        run: |
+          set -euo pipefail
+          file="acornfall-${{ matrix.goos }}-${{ matrix.goarch }}"
+          sums="$HOME/acornfall-release/$GITHUB_REF_NAME/sums"
+          mkdir -p "$sums"
+          sha256sum "$file" > "$sums/$file.sums"
+      - name: Upload the binary to the draft release
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          file="acornfall-${{ matrix.goos }}-${{ matrix.goarch }}"
+          # The API answers 422 for a name it already holds, so a re-run deletes its previous
+          # upload first: this is the `--clobber` the artifacts used to give for free.
+          old=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == sys.argv[1]))' "$file")
+          for a in $old; do
+            curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$a"
+          done
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" --data-binary @"$file" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$file" \
+            > /dev/null
+          echo "uploaded $file"
 
   worker-sources:
+    needs: draft
     # Platform-independent: one tarball for every leg. Sources only, never
     # node_modules — the gateway installs those once, under the install
     # folder, so no release bytes are spent on them and no host is touched.
@@ -64,39 +153,292 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: tar -czf worker.tar.gz -C worker package.json bun.lock src
-      - uses: actions/upload-artifact@v4
+      - name: Leave the checksum line on the runner
+        run: |
+          set -euo pipefail
+          sums="$HOME/acornfall-release/$GITHUB_REF_NAME/sums"
+          mkdir -p "$sums"
+          sha256sum worker.tar.gz > "$sums/worker-sources.sums"
+      - name: Upload the worker sources to the draft release
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          file=worker.tar.gz
+          old=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == sys.argv[1]))' "$file")
+          for a in $old; do
+            curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$a"
+          done
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" --data-binary @"$file" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$file" \
+            > /dev/null
+          echo "uploaded $file"
+
+  appliance:
+    # The image the machine boots (ADR 0022) — built inside a machine of its own. The runner stays
+    # unprivileged: the build needs root (lxc-create, chroot, the id ranges), and root belongs in a
+    # guest that is thrown away, not on the runner. This is the product's own trick, applied to
+    # building it. It needs /dev/kvm, which this runner already has for the sandbox tests.
+    runs-on: [self-hosted, linux, x64]
+    needs: [draft, binaries]
+    steps:
+      - uses: actions/checkout@v7
+      # The image runs the release binary, not a fresh build: it is the same product the host
+      # ships, with the same version stamped into it. It comes from the draft release — the one
+      # hand-off every job uses — so this job pulls 19 MB instead of every artifact of the run.
+      # `-L` is safe: curl drops the Authorization header when the redirect changes host, and the
+      # storage URL it lands on is already signed.
+      - name: Take the release binary the image runs
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p bin dist
+          id=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(next(a["id"] for a in json.load(sys.stdin) if a["name"] == "acornfall-linux-amd64"))')
+          curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: application/octet-stream" \
+            -o dist/acornfall-linux-amd64 \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$id"
+          cp dist/acornfall-linux-amd64 bin/acornfall
+          chmod +x bin/acornfall
+          sha256sum bin/acornfall
+      # The engine is the worker's own dependency, and the builder's door: installed the way the
+      # product installs it, from the lockfile, so the job boots the same engine the release ships.
+      - uses: oven-sh/setup-bun@v2
         with:
-          name: worker-sources
-          path: worker.tar.gz
+          bun-version: latest
+      - run: cd worker && bun install --frozen-lockfile
+      # The builder is a Debian machine, the same base the appliance carries, so the build runs in
+      # a known system rather than whatever the runner host is. The workspace is mounted at its own
+      # path, so everything below is written where the next step can collect it.
+      # The appliance depends on three inputs: the gateway, the worker sources, and the script
+      # that assembles them. Nothing else in a release changes a byte of it, so a version bump
+      # or a workflow edit should cost a cache restore, not seven minutes in a builder.
+      - uses: actions/cache@v4
+        id: appliance
+        with:
+          path: dist/appliance-linux-amd64.tar.gz
+          key: appliance-${{ hashFiles('gateway/**', 'worker/src/**', 'worker/package.json', 'worker/bun.lock', 'scripts/build-appliance.sh') }}
+      - name: build the appliance inside a machine
+        if: steps.appliance.outputs.cache-hit != 'true'
+        # The tag, so the image names the release it is: the launcher compares that with its own
+        # before it boots anything.
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          MSB=$(echo "$PWD"/worker/node_modules/@superradcompany/microsandbox-linux-*/bin/msb)
+          # The engine's sockets need a short path: the workspace one is over the limit (113 of 108
+          # bytes, measured on the first run of this job).
+          export MSB_HOME="/tmp/msb-appliance"
+          mkdir -p "$MSB_HOME" dist
+          cat > builder.yaml <<EOF
+          image: debian:stable-slim
+          memory: 4G
+          cpus: 4
+          mounts:
+            - $PWD:$PWD
+          EOF
+          # The state folder lives on the runner, so the last run's builder is still recorded:
+          # creating over it fails with "sandbox already exists" (measured on the second run).
+          "$MSB" stop --force appliance-builder >/dev/null 2>&1 || true
+          "$MSB" remove appliance-builder >/dev/null 2>&1 || true
+          "$MSB" create --conf builder.yaml --name appliance-builder
+          trap '"$MSB" stop --force appliance-builder >/dev/null 2>&1 || true' EXIT
+          "$MSB" exec appliance-builder -- sh -c \
+            'apt-get update -qq && apt-get install -y -qq lxc skopeo umoci jq unzip curl'
+          # VERSION is passed inside the exec, not in the step's env: the build runs in a machine of
+          # its own, and `msb exec` carries the command, not this shell's environment.
+          "$MSB" exec appliance-builder -- sh -c \
+            "cd '$PWD' && BINARY='$PWD/bin/acornfall' WORKER='$PWD/worker' VERSION='$VERSION' \
+             sh scripts/build-appliance.sh '$PWD/dist/appliance-linux-amd64.tar.gz'"
+      - name: Leave the checksum line on the runner
+        run: |
+          set -euo pipefail
+          sums="$HOME/acornfall-release/$GITHUB_REF_NAME/sums"
+          mkdir -p "$sums"
+          # From inside dist, so the line names the file the way the release does, with no path.
+          ( cd dist && sha256sum appliance-linux-amd64.tar.gz ) > "$sums/appliance.sums"
+      - name: Upload the appliance to the draft release
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          file=appliance-linux-amd64.tar.gz
+          # 193 MiB, so this is the one upload that matters: streamed from disk by curl, with a
+          # Content-Length the runner has already paid to compute.
+          old=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == sys.argv[1]))' "$file")
+          for a in $old; do
+            curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$a"
+          done
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" --data-binary @"dist/$file" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$file" \
+            > /dev/null
+          echo "uploaded $file"
+      # Leave the appliance where the next push's proof can copy it: this runner's disk, named
+      # by the hash prove.yml computes. Seconds here buy minutes there.
+      - name: Keep the appliance on the runner
+        run: |
+          set -euo pipefail
+          hash=$(find gateway worker/src worker/package.json worker/bun.lock scripts/build-appliance.sh \
+            -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          mkdir -p "$HOME/acornfall-ci"
+          cp dist/appliance-linux-amd64.tar.gz "$HOME/acornfall-ci/$hash.tar.gz"
+          ls -la "$HOME/acornfall-ci"
 
   publish:
-    needs: binaries
+    # The appliance joins the release for the same reason the worker does: the launcher fetches
+    # it on a fresh install (ADR 0022), and a release without one cannot boot a machine.
+    # It waits for every producer: the checksum file it assembles has a line per producer, and a
+    # release missing one is worse than a release that is late.
+    needs: [draft, binaries, worker-sources, appliance]
     runs-on: [self-hosted, linux, x64]
     steps:
-      # The tag message is read from the repository, so the job needs the tag:
-      # a shallow checkout with tags, nothing else. It runs first because the
-      # checkout cleans the workspace, and the artifacts land in `dist` after it.
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-          fetch-tags: true
-          sparse-checkout: .github
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
       # The checksum file is what the gateway verifies downloads against
       # before swapping or staging. No checksum file, no verify — see ADR 0019.
-      - run: cd dist && sha256sum acornfall-* worker.tar.gz > sha256sums.txt && ls -la
-      # The release body is the tag message, which is what the update page
-      # reads as "what changed". Every release before this step shipped a null
-      # body, so the gateway falls back to the tag annotation for those.
-      - run: git tag -l --format='%(contents)' "${{ github.ref_name }}" > release-notes.md
-      # A hyphen tag (`v0.9.35-rc.1`) is a pre-release: GitHub's own flag,
-      # which the update page's picker reads, and which keeps the newest-GA
-      # mark pointed at production.
-      - uses: softprops/action-gh-release@v2
+      # Each producer left its line on this runner as it uploaded, so this assembles what is
+      # already here instead of pulling the release back down onto the disk that wrote it.
+      - name: Assemble the checksum file
+        run: |
+          set -euo pipefail
+          sums="$HOME/acornfall-release/$GITHUB_REF_NAME/sums"
+          if [ ! -d "$sums" ]; then
+            echo "::error::no checksums for $GITHUB_REF_NAME: $sums does not exist, so a job that should have uploaded never ran"
+            exit 1
+          fi
+          cat "$sums"/*.sums > sha256sums.txt
+          # A producer that died before writing its line would otherwise publish a release whose
+          # checksum file quietly leaves out a file it ships.
+          for name in acornfall-linux-amd64 acornfall-linux-arm64 acornfall-darwin-amd64 \
+            acornfall-darwin-arm64 worker.tar.gz appliance-linux-amd64.tar.gz; do
+            if ! grep -q " $name\$" sha256sums.txt; then
+              echo "::error::sha256sums.txt has no line for $name: the job that builds it did not upload"
+              exit 1
+            fi
+          done
+          cat sha256sums.txt
+      # Public only once the release holds exactly the files the checksum list names: a release
+      # missing an asset is worse than one that stays a draft. This reads the draft, so it costs
+      # one API call and no download.
+      - name: The draft holds what the checksum list names
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print("\n".join(a["name"] for a in json.load(sys.stdin)))' |
+            grep -vx sha256sums.txt | sort > assets.txt
+          awk '{print $2}' sha256sums.txt | sort > listed.txt
+          if ! diff -u listed.txt assets.txt; then
+            echo "::error::$GITHUB_REF_NAME holds assets its checksum list does not name, or is missing one it names"
+            exit 1
+          fi
+      - name: Add the checksum file and publish the draft
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+          # A hyphen tag (`v0.9.35-rc.1`) is a pre-release: GitHub's own flag, which the update
+          # page's picker reads, and which keeps the newest-GA mark pointed at production.
+          PRERELEASE: ${{ contains(github.ref_name, '-') }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = "true" ]; then pre=true; else pre=false; fi
+          old=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" |
+            python3 -c 'import json, sys
+          print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == "sha256sums.txt"))')
+          for a in $old; do
+            curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/assets/$a"
+          done
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" --data-binary @sha256sums.txt \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=sha256sums.txt" \
+            > /dev/null
+          # `draft` false is the only field that changes: the body is the tag message the draft
+          # job wrote, and the checksum file is already on the release, so the update page never
+          # sees a public release whose sums are not there yet.
+          curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"draft\": false, \"prerelease\": $pre}" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" |
+            python3 -c 'import json, sys
+          d = json.load(sys.stdin)
+          print(d["tag_name"], "is public: draft=" + str(d["draft"]), "prerelease=" + str(d["prerelease"]))'
+
+  # A release has to prove its own artifact boots. Two betas did not, and both were found by a
+  # person installing it: the tests boot a directory, releases ship a tarball, and what tar
+  # carries — symlinks, hard links, device nodes — is exactly what broke. This job unpacks the
+  # published tarball with the install's own code, boots it, and starts a machine with the
+  # published binary as the runner user: the unprivileged install the docs promise, executed.
+  prove:
+    needs: publish
+    runs-on: kvm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          files: dist/*
-          body_path: release-notes.md
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          go-version: "1.27.1"
+          cache-dependency-path: gateway/go.sum
+      # Deliberately the published release, not the runner's disk: what a person downloads is the
+      # thing to boot. Reading the tarball the appliance job left in $HOME would prove the build.
+      - name: Download the release's own artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # jq is not on this runner (measured: exit 127), so parse with python3, which is.
+          python3 - "$GH_TOKEN" "$TAG" <<'PYEOF'
+          import json, os, sys, urllib.request
+          token, tag = sys.argv[1], sys.argv[2]
+          api = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/{tag}"
+          request = urllib.request.Request(api, headers={"Authorization": f"Bearer {token}"})
+          assets = json.load(urllib.request.urlopen(request))["assets"]
+          for name in ("acornfall-linux-amd64", "appliance-linux-amd64.tar.gz"):
+              url = next(a["url"] for a in assets if a["name"] == name)
+              request = urllib.request.Request(url, headers={
+                  "Authorization": f"Bearer {token}", "Accept": "application/octet-stream"})
+              with open(f"/tmp/{name}", "wb") as f:
+                  f.write(urllib.request.urlopen(request).read())
+          PYEOF
+          chmod +x /tmp/acornfall-linux-amd64
+          ls -la /tmp/acornfall-linux-amd64 /tmp/appliance-linux-amd64.tar.gz
+      - name: machine up as an ordinary user
+        env:
+          MSB_HOME: /tmp/msb-prove
+          ACORNFALL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          /tmp/acornfall-linux-amd64 machine up
+          /tmp/acornfall-linux-amd64 machine status
+          curl -fsS --retry 30 --retry-delay 5 --retry-all-errors http://127.0.0.1:7777/api/state | head -c 400
+      - name: The release's tarball boots from a clean unpack
+        env:
+          ACORNFALL_LXC: "1"
+          MSB_HOME: /tmp/msb-prove
+          ACORNFALL_APPLIANCE_TARBALL: /tmp/appliance-linux-amd64.tar.gz
+        # The module is in gateway/, not at the root: go test from the root cannot find it.
+        working-directory: gateway
+        run: go test ./internal/sandbox -run TestLiveTheApplianceBootsFromItsReleaseTarball -v -timeout 25m
+      - name: Take the machine down
+        if: always()
+        run: /tmp/acornfall-linux-amd64 machine down || true

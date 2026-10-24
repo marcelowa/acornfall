@@ -1,16 +1,24 @@
 import { useState } from "react";
-import type { WorkspaceSummary } from "@/app/view-models";
+import type { WorkspacePreparation, WorkspaceSummary } from "@/app/view-models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Text } from "@/components/typography/text";
 import { SandboxDialog } from "./sandbox-dialog";
+import { WorkspacePreparationRow } from "./workspace-preparation";
 import { WorkspaceRow } from "./workspace-row";
 
 export interface WorkspacesPanelProps {
 	/** Every workspace, with the one in view marked. */
 	workspaces: WorkspaceSummary[];
+	/** Workspaces whose folder exists but whose harness is still starting. */
+	preparations: WorkspacePreparation[];
+	/** An update is installing: creating, opening, renaming and forgetting wait. */
+	paused?: boolean | undefined;
 	onSelect: (name: string) => void;
+	onOpenPrepared: (name: string) => void;
+	onDismissPrepared: (name: string) => void;
+	onRetryPrepared: (name: string) => void;
 	onCreate: (name: string) => void;
 	onRename: (name: string, title: string) => void;
 	onForget: (name: string) => void;
@@ -29,12 +37,19 @@ export interface WorkspacesPanelProps {
  * changes and no second layer opens over it.
  *
  * Creating one is a name, not a path: the folder is made inside the workspaces folder, and the
- * server refuses a name that would escape it. A new workspace opens with an empty conversation,
- * which is the app's doing — this content only reports the name.
+ * server refuses a name that would escape it. The first state fetch starts its harness and
+ * sandbox, which is why a new row says "preparing" and the person keeps the conversation they
+ * were in until it is ready. The first conversation is the gateway's doing — this content only
+ * reports the name.
  */
 export function WorkspacesPanel({
 	workspaces,
+	preparations,
+	paused = false,
 	onSelect,
+	onOpenPrepared,
+	onDismissPrepared,
+	onRetryPrepared,
 	onCreate,
 	onRename,
 	onForget,
@@ -58,16 +73,34 @@ export function WorkspacesPanel({
 				data-slot="workspaces-list"
 				className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
 			>
-				{workspaces.map((workspace) => (
-					<WorkspaceRow
-						key={workspace.name}
-						workspace={workspace}
-						onSelect={onSelect}
-						onRename={setRenaming}
-						onSandbox={setSandboxFor}
-						onForget={onForget}
+				{[...preparations].reverse().map((preparation) => (
+					<WorkspacePreparationRow
+						key={preparation.name}
+						preparation={preparation}
+						paused={paused}
+						onOpen={() => onOpenPrepared(preparation.name)}
+						onDismiss={() => onDismissPrepared(preparation.name)}
+						onRetry={() => onRetryPrepared(preparation.name)}
 					/>
 				))}
+				{workspaces
+					.filter(
+						(workspace) =>
+							!preparations.some(
+								(preparation) => preparation.name === workspace.name,
+							),
+					)
+					.map((workspace) => (
+						<WorkspaceRow
+							key={workspace.name}
+							workspace={workspace}
+							paused={paused}
+							onSelect={onSelect}
+							onRename={setRenaming}
+							onSandbox={setSandboxFor}
+							onForget={onForget}
+						/>
+					))}
 			</div>
 
 			{/* The rail is narrow and the list scrolls: the form stays at the bottom, in reach
@@ -79,6 +112,7 @@ export function WorkspacesPanel({
 						value={name}
 						placeholder="a folder name"
 						aria-label="New workspace name"
+						disabled={paused}
 						onChange={(event) => setName(event.target.value)}
 						onKeyDown={(event) => {
 							if (event.key !== "Enter") return;
@@ -89,15 +123,15 @@ export function WorkspacesPanel({
 					<Button
 						size="sm"
 						variant="outline"
-						disabled={name.trim() === ""}
+						disabled={paused || name.trim() === ""}
 						onClick={create}
 					>
 						Create
 					</Button>
 				</div>
 				<Text size="2xs" tone="muted">
-					The folder is created inside the workspaces folder, and the new workspace opens
-					with an empty conversation.
+					The folder is created inside the workspaces folder. The new workspace is
+					prepared while you keep working here; open it when it is ready.
 				</Text>
 			</div>
 

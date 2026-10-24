@@ -34,7 +34,7 @@ class Worker {
 	#waiters: { predicate: (frame: Frame) => boolean; resolve: (frame: Frame) => void }[] = [];
 	#nextId = 0;
 
-	constructor(directory: string, home: string, script: string) {
+	constructor(directory: string, root: string, script: string) {
 		this.#process = Bun.spawn(
 			[
 				"bun",
@@ -43,11 +43,11 @@ class Worker {
 				"--workspace",
 				directory,
 				"--storage",
-				join(home, "session.sqlite"),
+				join(root, "state", "session.sqlite"),
 				"--credentials",
-				join(home, "credentials.json"),
-				"--home",
-				home,
+				join(root, "config", "credentials.json"),
+				"--share",
+				root,
 			],
 			{
 				cwd: workerDir,
@@ -159,7 +159,9 @@ function authFrame(authId: string, kind: string): (candidate: Frame) => boolean 
 
 beforeAll(async () => {
 	home = await tempDir("acornfall-protocol-");
+	// The root is the folder the machine mounts (ADR 0022): the bundle, the config, the state.
 	const workspace = join(home, "workspace");
+	await mkdir(join(home, "config"), { recursive: true });
 	await mkdir(workspace, { recursive: true });
 	const script = join(home, "script.json");
 	await writeFile(
@@ -290,9 +292,9 @@ describe("the worker protocol", () => {
 		// The install's own commands folder, not the workspace's: this worker runs without a
 		// sandbox, so the workspace has no readable files at all — which is the point of the
 		// refusal, and is asserted in sandbox.test.ts.
-		await mkdir(join(home, "commands"), { recursive: true });
+		await mkdir(join(home, ".agents", "commands"), { recursive: true });
 		await writeFile(
-			join(home, "commands", "protocol.md"),
+			join(home, ".agents", "commands", "protocol.md"),
 			"---\nname: protocol-command\ndescription: for the test\n---\nIt says $ARGUMENTS.",
 		);
 		await worker.call({ type: "reload" });

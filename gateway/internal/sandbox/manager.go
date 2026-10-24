@@ -80,15 +80,19 @@ type Instance struct {
 	Name   string `json:"name"`
 	Image  string `json:"image"`
 	Status string `json:"status"`
+	// Problem is why this container's state could not be read. It is that container's problem:
+	// the sandbox for the workspace that owns it refuses with this sentence, and every other
+	// workspace keeps working.
+	Problem string `json:"problem,omitempty"`
 }
 
 // Running is the engine's word for a sandbox that can take a command.
 func (i Instance) Running() bool { return strings.EqualFold(i.Status, "running") }
 
-// Options configures a manager. Home and Driver are required.
+// Options configures a manager. Machinery and Driver are required.
 type Options struct {
-	// Home is the acornfall installation folder.
-	Home string
+	// Machinery is the install's own folder: the engine, its store, the machine's disk.
+	Machinery string
 	// Driver is the engine in use.
 	Driver Driver
 	// Log reports what the manager does, one line at a time. Nil silences it.
@@ -103,10 +107,10 @@ type Options struct {
 // to decide whether a sandbox can be made and when to ask the driver for one, and nothing
 // about how that happens.
 type Manager struct {
-	home   string
-	driver Driver
-	log    func(string, ...any)
-	report bool
+	machinery string
+	driver    Driver
+	log       func(string, ...any)
+	report    bool
 	// mu guards the problem below: several workspaces can start at once, and two of them
 	// must not install the engine at the same time.
 	mu sync.Mutex
@@ -116,19 +120,19 @@ type Manager struct {
 	problem error
 }
 
-// Open wires up the engine. It fails only on a mistake the caller can fix (no home
-// directory, no driver) and it installs nothing: fetching 26MB is first use's business, not
+// Open wires up the engine. It fails only on a mistake the caller can fix (no machinery folder,
+// no driver) and it installs nothing: fetching 26MB is first use's business, not
 // a gateway start's. An unusable sandbox is reported through Problem and enforced by
 // Produce, so that a machine without a hypervisor can still run everything else.
 func Open(ctx context.Context, opts Options) (*Manager, error) {
-	if strings.TrimSpace(opts.Home) == "" {
-		return nil, errors.New("sandbox: Home is required")
+	if strings.TrimSpace(opts.Machinery) == "" {
+		return nil, errors.New("sandbox: Machinery is required")
 	}
 	if opts.Driver == nil {
 		return nil, errors.New("sandbox: Driver is required")
 	}
 	_ = ctx
-	manager := &Manager{home: opts.Home, driver: opts.Driver, log: opts.Log, report: opts.ReportOnly}
+	manager := &Manager{machinery: opts.Machinery, driver: opts.Driver, log: opts.Log, report: opts.ReportOnly}
 	// A report has to answer "can this machine sandbox?" now, so a missing engine is its
 	// problem to state. Nothing is installed on its behalf.
 	if opts.ReportOnly && !opts.Driver.Installed() {
@@ -251,6 +255,14 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 	if err := m.ensure(ctx); err != nil {
 		return "", err
 	}
+	// The machine layer, where the engine has one: a container cannot start inside a VM that is
+	// not there. The VM is the install's, so this is idempotent and repeated on every start
+	// rather than remembered — an idle policy may have stopped it since.
+	if layer, ok := m.driver.(MachineLayer); ok {
+		if err := layer.EnsureMachine(ctx); err != nil {
+			return "", err
+		}
+	}
 	if strings.TrimSpace(policy.Workspace) == "" {
 		return "", errors.New("sandbox: policy has no workspace")
 	}
@@ -261,13 +273,33 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 	}
 	for _, instance := range instances {
 		if instance.Name != name {
+			// Someone else's container that the runtime cannot read is worth a line in the log
+			// and nothing more: it used to fail the list call, which disabled the tools of every
+			// workspace on a machine where the containers were fine.
+			if instance.Problem != "" {
+				m.say("sandbox: %s is there and the runtime cannot read it (%s); it is not this workspace's", instance.Name, instance.Problem)
+			}
 			continue
+		}
+		if instance.Problem != "" {
+			return "", fmt.Errorf("sandbox: this workspace's container %s is there and the runtime cannot read it (%s): `acornfall machine down` and `machine up` make a new one", instance.Name, instance.Problem)
 		}
 		if instance.Running() {
 			return name, nil
 		}
 		if err := m.driver.Start(ctx, name); err != nil {
-			return "", err
+			// A container that will not start is not repaired by asking again: its creation can have
+			// been cut short — a cancelled install, a machine stopped mid-pull — and the runtime then
+			// refuses it for ever with "Ongoing container creation detected". Nothing ever ran in it,
+			// so remaking it costs the workspace nothing it had.
+			m.say("sandbox: %s would not start (%v): remaking it", name, err)
+			if removeErr := m.driver.Remove(ctx, name); removeErr != nil {
+				return "", fmt.Errorf("%w (and it could not be removed: %v)", err, removeErr)
+			}
+			if createErr := m.driver.Create(ctx, policy, dir); createErr != nil {
+				return "", fmt.Errorf("%w (and remaking it: %v)", err, createErr)
+			}
+			return name, nil
 		}
 		return name, nil
 	}
@@ -275,6 +307,13 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 		return "", err
 	}
 	return name, nil
+}
+
+// say logs when a caller asked for one: a manager built without a Log still works.
+func (m *Manager) say(format string, args ...any) {
+	if m.log != nil {
+		m.log(format, args...)
+	}
 }
 
 // Stop shuts a workspace's sandbox down, keeping everything it accumulated. The engine also

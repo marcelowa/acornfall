@@ -61,6 +61,26 @@ export interface WireUpdateSummary {
 	available: boolean;
 	failed?: string | undefined;
 	restartRequired?: boolean | undefined;
+	wanted?: string | undefined;
+	host?:
+		| {
+				running: boolean;
+				version: string;
+				service: string;
+				lastError: string;
+				at: string;
+		  }
+		| undefined;
+	phase?: "idle" | "requested" | "starting" | "ready" | "failed" | undefined;
+	target?: string | undefined;
+	blocking?: boolean | undefined;
+	phaseReason?: string | undefined;
+}
+
+/** Where a workspace is between "asked for" and "can be used", reported by the gateway. */
+export interface WireLifecycle {
+	phase: "starting" | "ready" | "failed";
+	reason?: string | undefined;
 }
 
 export interface WireSandbox {
@@ -120,12 +140,6 @@ export type WireAuthEvent =
 	| { kind: "prompt_cancelled"; promptId: string }
 	| { kind: "done"; providerId: string }
 	| { kind: "error"; message: string };
-
-export interface WireAuthFrame {
-	type: "auth";
-	authId: string;
-	event: WireAuthEvent;
-}
 
 /** The events a dialog renders as steps: prompts and outcomes are not notices. */
 export type WireAuthNotice = Extract<
@@ -191,6 +205,8 @@ export interface WireState {
 	workerUp: boolean;
 	workerError?: string | undefined;
 	sandbox: WireSandbox;
+	/** Absent from a gateway older than the field: a client then falls back to its own reading. */
+	lifecycle?: WireLifecycle | undefined;
 	/** The self-update summary: the header dot without fetching. */
 	update: WireUpdateSummary;
 	capabilities: WireCapabilities;

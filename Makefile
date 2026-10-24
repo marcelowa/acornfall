@@ -109,6 +109,8 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# The interface's unit tests are milliseconds and its bundle has to build, or CI's word
 	# about the interface means nothing.
 	cd ui && bun test
+	# The runner's sweep deletes files, so what it keeps is a rule that needs a test (S2).
+	sh scripts/cleanup-runner.test.sh
 	$(MAKE) ui-build
 	# ACORNFALL_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
 	# the same command behaves the same on a machine with /dev/kvm and in CI. -short skips the
@@ -117,7 +119,9 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel $(TEST_PARALLEL) ./...
 
-test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
+# ui-build because the gateway embeds the interface: without it the package does not compile, and
+# the failure names a missing file rather than the step nobody ran (measured in CI).
+test-sandbox: sandbox-preflight ui-build ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a
 	# suite of skips. -race stays here: the sandbox's start, attach, and mount path is only
 	# taken in this tier, and the four tests plus the live driver are ~35s instrumented.

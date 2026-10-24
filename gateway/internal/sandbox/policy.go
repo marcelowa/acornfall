@@ -35,6 +35,22 @@ type Policy struct {
 	// it has the switch. A sandbox on a machine that cannot nest still boots. See
 	// docs/adr/0018-disable-vm-nesting.md.
 	DisableVMNesting bool
+	// Privileged runs this workspace's container as root in the machine instead of inside a user
+	// namespace. It is the sharpest trade ADR 0021 names: the unprivileged profile is the default
+	// because a user namespace is the mitigation, and a workspace that asks for more unreachable
+	// things (its own mounts, its own devices) is asking for this. A workspace that does not ask
+	// gets the default.
+	Privileged bool
+	// Prefixes are folders of the share the container sees at fixed system paths, read-write, so
+	// a workspace can install tools without root. It is the answer to the one cost of the
+	// unprivileged profile that a bigger image cannot pay (ADR 0034): `apt` needs root, and the
+	// tools that do not still install into a folder the image owns.
+	Prefixes []Prefix
+	// Home is the folder of the share that becomes the container's `/home/acornfall`: `~` is where
+	// a tool writes its own settings, and the workspace is a repository whose `git status` is
+	// somebody else's (ADR 0035). Empty means the container keeps the image's home, which is
+	// inside the rootfs and is thrown away with it.
+	Home string
 	// Egress allows the sandbox to reach the network. On by default for new workspaces;
 	// ADR 0012 records what that exposes.
 	Egress bool
@@ -47,12 +63,17 @@ type Policy struct {
 	// works. Read-only because editing them is self-modification, which belongs behind review
 	// (issue #17). GlobalPaths builds it.
 	Global []string
-	// IdleTimeout stops a sandbox nobody is using. Empty takes the default.
+	// IdleTimeout stops a sandbox nobody is using. Empty takes the default. NoIdleStop says
+	// the sandbox must never be stopped for being idle, which is what the machine uses.
 	IdleTimeout string
 	// Owned lists paths inside the workspace that belong to the sandbox rather than to the
 	// user's folder, so that build artifacts cannot fight between host and guest. Not used
 	// yet, deliberately: see ADR 0012, "Not doing now, on purpose".
 	Owned []string
+	// mountOwner is the uid/gid the engine reports for the workspace mount, when the caller
+	// wants a fixed identity. The machine sets it to the share's owner; a per-workspace VM
+	// leaves it zero and uses the process owner. It never decides the container profile.
+	mountOwner owner
 }
 
 // Defaults, chosen to be unremarkable. The image matches this host's libc family so that
@@ -63,7 +84,55 @@ const (
 	DefaultCPUs        = 2
 	DefaultMemory      = "2G"
 	DefaultIdleTimeout = "30m"
+	// NoIdleStop is a policy's way of saying "never stop this sandbox for being idle". The
+	// engine has no value for it — measured on the pin: an omitted idle_timeout is what it
+	// reads as no idle stop, while `0s` stops the sandbox at once — so the renderer writes no
+	// key at all. A long duration would be a number nobody chose, and one that eventually
+	// stops the machine out from under every workspace at once.
+	NoIdleStop = "never"
 )
+
+// Prefix is a folder in the share that the container sees at a fixed system path, read-write.
+// It is how a workspace installs its own tools without root: the unprivileged profile cannot
+// write the image's `/usr/local`, and `apt` is not the only way to get a toolchain — the one
+// that works everywhere is "put the binary where the shell already looks". See ADR 0034.
+type Prefix struct {
+	// Source is the folder in the share, which must be under the share root like every bind.
+	Source string
+	// Target is where the container sees it, from PrefixTargets and nothing else.
+	Target string
+}
+
+// PrefixTargets is the closed set of paths a prefix may be mounted at. `/usr/local` is where a
+// toolchain looks by default; `/opt` is where a self-contained install goes. Everything else —
+// `/usr`, `/etc`, `/bin`, `/lib` — would let a workspace replace the image's own programs or its
+// resolver configuration, which is a different threat from installing tools, so the set is
+// short and named rather than a rule about paths in general.
+var PrefixTargets = []string{"/usr/local", "/opt"}
+
+// DefaultPrefixes is where a workspace's own tools live: inside the workspace, under the dot
+// folder it already uses for local resources (the repository's own .gitignore covers
+// `.acornfall/`), so the toolchain is part of the folder the user backs up and never part of
+// what they commit.
+func DefaultPrefixes(workspace string) []Prefix {
+	return []Prefix{
+		{Source: filepath.Join(workspace, ".acornfall", "prefix", "usr"), Target: "/usr/local"},
+		{Source: filepath.Join(workspace, ".acornfall", "prefix", "opt"), Target: "/opt"},
+	}
+}
+
+// ContainerHome is where a workspace's home is inside the container. It is a fixed path, not the
+// workspace: `~` is where a tool writes its own settings, and a workspace is a repository whose
+// `git status` belongs to whoever owns it (ADR 0035). The folder behind it is the workspace's,
+// so it outlives the container.
+const ContainerHome = "/home/acornfall"
+
+// DefaultHome is the folder in the share that becomes ContainerHome: inside the workspace, under
+// the dot folder it already uses for local resources, so it is backed up with the workspace and
+// never part of what a user commits.
+func DefaultHome(workspace string) string {
+	return filepath.Join(workspace, ".acornfall", "home")
+}
 
 func (p Policy) withDefaults() Policy {
 	if strings.TrimSpace(p.Image) == "" {
@@ -81,32 +150,25 @@ func (p Policy) withDefaults() Policy {
 	return p
 }
 
-// ecosystemDir is the rest of the ecosystem's name for a resource bundle. The worker reads
-// it as well as the install's own folders, so a bundle written for another harness works
-// here, and the sandbox has to see the same paths the worker read the instructions from.
+// The bundle is one tree: the global skills, agents, prompts and commands, in the folder the
+// machine mounts (ADR 0022). It used to be two layers — the user's `~/.agents` and the install's
+// own four folders — and one tree is what the one-bundle shape buys: a skill's own directory is
+// the same string for the worker, for the model, and for a container's bind.
 const ecosystemDir = ".agents"
 
-// globalFolders are the install's resource folders, which exist in every install so that a
-// sandbox's mount always resolves: the user's bundle in full, then the install's own. The
-// prompt-template folder has two names because both are read.
-func globalFolders(home, userHome string) []string {
-	folders := []string{filepath.Join(userHome, ecosystemDir)}
-	for _, name := range []string{"agents", "skills", "prompts", "commands"} {
-		folders = append(folders, filepath.Join(home, name))
-	}
-	return folders
-}
-
-// GlobalPaths is what a workspace's sandbox mounts read-only at the same paths. A file is
-// only mountable if it is there when the sandbox is created, so `<home>/config.json` is
-// included when it exists and not otherwise; adding one later needs the sandbox recreated.
+// GlobalPaths is what a workspace's sandbox mounts read-only at the same paths: the bundle in
+// full, and the install's config file when it exists. A file is only mountable if it is there
+// when the sandbox is created, so config.json is included when it exists and not otherwise;
+// adding one later needs the sandbox recreated.
 //
-// `<home>` itself is deliberately absent: it holds credentials.json, token, and state/, and
-// the agent has no business reading any of them. That is the whole reason the list is
-// explicit. See docs/adr/0014-global-resources-in-the-sandbox.md.
-func GlobalPaths(home, userHome string) []string {
-	paths := globalFolders(home, userHome)
-	config := filepath.Join(home, "config.json")
+// The install's own folder is deliberately absent, and so is everything else in the root that a
+// container has no business reading: `config/` holds the provider credential and the token, and
+// `state/` holds every workspace's conversations. The mapping refuses those paths in both
+// directions (see bindPath). docs/adr/0014-global-resources-in-the-sandbox.md,
+// docs/adr/0022-the-appliance-runs-in-the-machine.md.
+func GlobalPaths(share string) []string {
+	paths := []string{filepath.Join(share, ecosystemDir)}
+	config := filepath.Join(share, "config", "config.json")
 	if info, err := os.Stat(config); err == nil && !info.IsDir() {
 		paths = append(paths, config)
 	}
@@ -114,13 +176,12 @@ func GlobalPaths(home, userHome string) []string {
 }
 
 // EnsureGlobal creates the folders GlobalPaths names, so a fresh install has somewhere to
-// mount from. It does not create config.json: an empty one would be a decision about
-// defaults nobody made, and the mount is skipped while the file is absent.
-func EnsureGlobal(home, userHome string) error {
-	for _, folder := range globalFolders(home, userHome) {
-		if err := os.MkdirAll(folder, 0o700); err != nil {
-			return fmt.Errorf("create %s: %w", folder, err)
-		}
+// mount from. It does not create config.json: an empty one would be a decision about defaults
+// nobody made, and the mount is skipped while the file is absent.
+func EnsureGlobal(share string) error {
+	folder := filepath.Join(share, ecosystemDir)
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", folder, err)
 	}
 	return nil
 }

@@ -58,34 +58,38 @@ make build                     # go build -> ./bin/acornfall
 
 ### Install from a release (one binary, no toolchain)
 
-One line (the token rides along while the repo is private):
+The repository is public, so no token is needed:
 
 ```bash
-export ACORNFALL_GITHUB_TOKEN='...'   # fine-grained, read-only, this repo
-curl -fsSL -H "Authorization: Bearer $ACORNFALL_GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/marcelowa/acornfall/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/marcelowa/acornfall/main/scripts/install.sh | sh
 # or with wget:
-wget -qO- --header="Authorization: Bearer $ACORNFALL_GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/marcelowa/acornfall/main/scripts/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/marcelowa/acornfall/main/scripts/install.sh | sh
 ```
 
-By hand (same token header while private):
+By hand:
 
 ```bash
 mkdir -p ~/acornfall/release && cd ~/acornfall/release
-export ACORNFALL_GITHUB_TOKEN='...'
-AUTH="Authorization: Bearer $ACORNFALL_GITHUB_TOKEN"
-curl -sL -H "$AUTH" -o acornfall https://github.com/marcelowa/acornfall/releases/download/v0.9.5/acornfall-linux-amd64
-curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornfall/releases/download/v0.9.5/sha256sums.txt
+VERSION=v0.10.0-beta.33   # the newest tag on the releases page
+curl -fsSL -O https://github.com/marcelowa/acornfall/releases/download/$VERSION/acornfall-linux-amd64
+curl -fsSL -O https://github.com/marcelowa/acornfall/releases/download/$VERSION/sha256sums.txt
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
-chmod +x acornfall
-./acornfall provider add opencode-go "$OPENCODE_API_KEY"
-./acornfall --workspace ~/acornfall/workspaces
+chmod +x acornfall-linux-amd64
+./acornfall-linux-amd64 machine up             # 0.10: boots the appliance machine
 ```
 
-### Token (while the repo is private)
+A root install keeps the mount at `/srv/acornfall`, owned by a fixed `acornfall` user; a normal-user install keeps it at `~/acornfall`. Both present the containers with a non-root workspace, so the container profile is a separate choice.
 
-Releases are readable with a fine-grained token and nothing else:
+0.10 runs the whole product inside one machine per install, and the host is a launcher:
+`machine up`, `status`, `stop`, `down`, `restart`. What lives inside the mount, what a
+fresh install fetches, and how to read a failure are in
+[docs/installing.md](docs/installing.md); the architecture is
+[docs/engineering/the-appliance.md](docs/engineering/the-appliance.md).
+
+### Token (optional: the repository is public)
+
+Releases and the update check are readable without a token now. A token still helps on a
+host that shares an IP and gets rate-limited by GitHub, or against a private mirror:
 
 1. GitHub → Settings → Developer settings → Personal access tokens →
    Fine-grained tokens → Generate new token.
@@ -95,29 +99,29 @@ Releases are readable with a fine-grained token and nothing else:
 4. `export ACORNFALL_GITHUB_TOKEN='...'` where the gateway runs. The
    gateway reads it on every check, download, and checksum fetch.
 
-Use ends when releases go public: unset the variable and the same
-commands work without it. A token that was ever pasted into chat
-should be rotated afterwards under the token's own settings.
+A token that was ever pasted into chat should be rotated afterwards under the
+token's own settings.
 
-First boot downloads a pinned bun once and the worker sources for its
-tag, then installs dependencies — all under `~/.acornfall`, nothing on
-the host. After that it self-updates from Settings > Updates: one
-click, it restarts itself.
+`machine install` puts the binary under the machinery (`/var/lib/acornfall/bin/` as root, `~/.acornfall/bin/` otherwise), writes the service,
+and starts it. From then on the product runs inside the machine. The console's
+Updates page asks the host service to apply a release: the machine first, then
+the host, and only when the machine reports ready (ADR 0030, ADR 0031).
 
-Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
+Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `/var/lib/acornfall` as root, `~/.acornfall` otherwise),
 `--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
-`--token <secret>`, `--worker-dir <dir>` (development: system bun over these
+`--token <secret>` (optional: the console asks for nothing by default), `--worker-dir <dir>` (development: system bun over these
 sources, no ensure), `--worker-bin <path>` (single compiled worker binary,
 explicit opt-in),
 `--migrate-dir <dir>` (default: scripts baked into the binary), `--workspaces-dir <dir>` (default
-`~/acornfall/workspaces`), `--sandbox-engine <microsandbox|host>` (default: microsandbox;
-`host` runs the tools on this machine with no isolation — see
+`~/acornfall/workspaces`), `--sandbox-engine <microsandbox|lxc|host>` (default: microsandbox;
+`lxc` is the appliance's — containers inside one machine, chosen by `machine up`; `host` runs
+the tools on this machine with no isolation — see
 [ADR 0015](docs/adr/0015-host-engine.md)), `--disable-vm-nesting` (default: false;
 a workspace's sandbox nests virtual machines when the engine and the machine can unless
 refused — see [ADR 0018](docs/adr/0018-disable-vm-nesting.md)).
 
 Each of those has an environment variable, for a service manager or a container that should
-not carry flags: `ACORNFALL_HOME` or `ACORNFALL_DATA` for the install folder,
+not carry flags: `ACORNFALL_MACHINERY` or `ACORNFALL_SHARE`,
 `ACORNFALL_TOKEN` for the token, and `ACORNFALL_WORKER` for the worker's directory. A flag
 wins over the variable.
 
@@ -127,17 +131,13 @@ wins over the variable.
 make dev                        # binds the tailnet address, no token
 ```
 
-A non-loopback bind requires a token. When none is given with `--token` or
-`ACORNFALL_TOKEN`, one is generated into `<data-dir>/token` (0600) and the startup line
-prints the URL to open once:
-
-```
-guard: token required; open http://desktop:7777/?token=e62b…
-```
-
-That query parameter sets an HttpOnly cookie and redirects to `/`, so it does not linger
-in the address bar. `Authorization: Bearer <token>` also works. EventSource cannot set
-headers, which is why the cookie exists.
+The console asks for no token by default, including on a network bind. That is a beta
+decision, not a promise of safety: a listener on a network address is reachable by
+whoever can route to it, and the launcher prints one line saying so. `--token <secret>`
+(or `ACORNFALL_TOKEN`) still locks it; the startup line then prints the URL with the
+token once, and that query parameter sets an HttpOnly cookie and redirects to `/`, so
+it does not linger in the address bar. `Authorization: Bearer <token>` also works.
+EventSource cannot set headers, which is why the cookie exists.
 
 The more secure alternative when you already have SSH access — and the one to prefer if
 the machine is on a network you do not control:
@@ -193,7 +193,7 @@ make dev
   `.acornfall/`, which wins when a folder has both. Each workspace runs its own
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
 - **Sandboxed execution**: what the agent *runs* runs in a microVM — one per workspace, the
-  workspace mounted read-write at its own path and the global resource folders (`~/.agents`,
+  workspace mounted read-write at its own path and the global resource folders (`~/acornfall/.agents`,
   the install's agents/skills/prompts/commands) read-only at theirs, nothing else, no network —
   and so does every file the agent reads or writes. The worker stays outside it, next to the
   provider key. A skill's script therefore runs where its instructions say it lives, while the
@@ -206,9 +206,9 @@ make dev
   disabled; when it cannot, the sandbox boots without it and doctor and the state say why. See `docs/adr/0012-sandbox.md`,
   `docs/adr/0014-global-resources-in-the-sandbox.md`, `docs/adr/0015-host-engine.md`, and
   `docs/adr/0018-disable-vm-nesting.md`.
-- **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
-  `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
-  name, `prompts/` — expanded server-side so the transcript records what the model saw.
+- **Slash commands** from `~/acornfall/.agents/commands/` (or `prompts/`, the ecosystem's name
+  for the same thing) and the workspace's `.agents/` or `.acornfall/` — expanded server-side so
+  the transcript records what the model saw.
 - **Guards**: declarative rules that block a tool call and say why — a command pattern, or a
   path outside the workspace — accumulating across layers and visible in the inspector.
 - **Workspaces are managed from the interface**: create by name inside the workspaces folder
@@ -228,7 +228,8 @@ make dev
   reason), restarts it with backoff, and resumes every run from its last commit — about
   two seconds. The stream sends a keepalive and the client reconnects on its own.
   See [ADR 0009](docs/adr/0009-liveness-and-recovery.md).
-- Credentials live in `~/.acornfall/credentials.json` (0600), never in the worker's home.
+- Credentials live in `~/acornfall/config/credentials.json` (0600, inside the mount), never in
+  the worker's home.
 - **Self-update**: the gateway checks GitHub releases hourly (plus a Refresh button).
   A header dot (count 1) leads to Settings > Updates: current tag, new tag, notes,
   backup note, Update now / Later. Backup (config, state DB, workspace list, last 3)
@@ -237,17 +238,20 @@ make dev
   with a choice: wait for drain, stop runs and update, or cancel. The new binary
   migrates at boot (`scripts/migrate/<tag>.sh`, non-zero stops boot) and `GET /healthz`
   must pass for 30s; failure restores `acornfall.bak` and names the cause on the screen.
-  Pin a tag for no prompts. While the repo is private, set `ACORNFALL_GITHUB_TOKEN`
-  (read-only, one repo) so the check, download, and checksum fetch can read releases;
-  drop it when releases go public. See [ADR 0019](docs/adr/0019-self-update.md).
+  Pin a tag for no prompts. The repository is public, so the check, download, and checksum
+  fetch need no token; `ACORNFALL_GITHUB_TOKEN` is read when set, for a host that shares an IP
+  and gets rate-limited. See [ADR 0019](docs/adr/0019-self-update.md).
 
 ## Write an agent
 
-`~/.acornfall/agents/<name>.md` (global) or `<workspace>/.agents/agents/<name>.md`
+`~/acornfall/.agents/agents/<name>.md` (global) or `<workspace>/.agents/agents/<name>.md`
 (workspace, shadows a global definition of the same name). The workspace bundle may also be
 `<workspace>/.acornfall/`, and that one wins when both exist: `.agents` is the ecosystem's
-name — a bundle written for another harness works here, and `~/.agents/skills/` is read too —
-while `.acornfall` is where you keep what is yours alone:
+name — a bundle written for another harness works here — while `.acornfall` is where you keep
+what is yours alone. The global bundle is the one folder the machine mounts, so there is no
+second layer to shadow: the files are the user's own (ADR 0022).
+
+A definition is frontmatter and a body:
 
 ```markdown
 ---

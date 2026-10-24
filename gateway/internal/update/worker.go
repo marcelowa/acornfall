@@ -37,9 +37,9 @@ const WorkerTarball = "worker.tar.gz"
 // bunDownloadBase is where bun releases live. A test points elsewhere.
 const bunDownloadBase = "https://github.com/oven-sh/bun/releases/download"
 
-func (m *Manager) toolsDir() string   { return filepath.Join(m.home, "tools") }
+func (m *Manager) toolsDir() string   { return filepath.Join(m.machinery, "tools") }
 func (m *Manager) bunDir() string     { return filepath.Join(m.toolsDir(), "bun-"+BunVersion) }
-func (m *Manager) workerDir() string  { return filepath.Join(m.home, "worker") }
+func (m *Manager) workerDir() string  { return filepath.Join(m.machinery, "worker") }
 func (m *Manager) workerBak() string  { return m.workerDir() + ".bak" }
 func (m *Manager) workerBad() string  { return m.workerDir() + ".bad" }
 func (m *Manager) workerTag() string  { return filepath.Join(m.workerDir(), "VERSION") }
@@ -47,7 +47,7 @@ func (m *Manager) workerLock() string { return filepath.Join(m.workerDir(), "bun
 func (m *Manager) workerMark() string {
 	return filepath.Join(m.workerDir(), "node_modules", ".acornfall-installed")
 }
-func (m *Manager) workerPending() string { return filepath.Join(m.home, "worker.pending.tgz") }
+func (m *Manager) workerPending() string { return filepath.Join(m.machinery, "worker.pending.tgz") }
 
 // BunPath is where the pinned bun lives. It may not exist yet: EnsureBun
 // downloads it, and a missing one with no network is a refusal, not a guess.
@@ -273,6 +273,12 @@ func (m *Manager) releaseFor(ctx context.Context, tag string) (Release, error) {
 	if cached.Tag == tag {
 		return cached, nil
 	}
+	return m.releaseFromAPI(ctx, tag)
+}
+
+// releaseFromAPI reads one release by tag, including its asset ids. It never answers from the
+// check's cache: the cache may hold a feed entry with no files, and an apply needs the files.
+func (m *Manager) releaseFromAPI(ctx context.Context, tag string) (Release, error) {
 	url := m.apiBase() + "/releases/tags/" + tag
 	response, err := m.get(ctx, url)
 	if err != nil {
@@ -282,7 +288,6 @@ func (m *Manager) releaseFor(ctx context.Context, tag string) (Release, error) {
 	if response.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("releases: no release %s (%s): %w", tag, response.Status, ErrReleaseNotFound)
 	}
-	// Never cached: latest stays what the check found, or the dot lies.
 	return parseRelease(response.Body)
 }
 
@@ -405,3 +410,100 @@ func untarWorker(tarball []byte, dir string) error {
 		}
 	}
 }
+
+// The appliance is one image per architecture, and its asset name says which: an arm64 host that
+// fetched an amd64 rootfs would install a machine that cannot boot, and the failure would look
+// like a broken image rather than the wrong one.
+func applianceTarballName(arch string) string { return "appliance-linux-" + arch + ".tar.gz" }
+
+// untarImage unpacks a rootfs tarball: every kind of entry a filesystem has, not just regular
+// files. A symlink is not a detail here — /bin/sh on Debian is one, and an image whose shell is
+// missing is a machine whose init cannot start (measured: "handoff init binary not found at
+// /bin/sh", which says nothing about the unpacker that dropped it).
+func untarImage(tarball []byte, dir string) error {
+	return untarImageStream(bytes.NewReader(tarball), dir)
+}
+
+func untarImageStream(r io.Reader, dir string) error {
+	reader := tar.NewReader(r)
+	share := filepath.Clean(dir)
+	inside := func(name string) (string, error) {
+		clean := filepath.Clean("/" + name)
+		target := filepath.Join(share, clean)
+		if target != share && !strings.HasPrefix(target, share+string(os.PathSeparator)) {
+			return "", fmt.Errorf("update: image tarball escapes: %q", name)
+		}
+		return target, nil
+	}
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("update: image tarball unreadable: %w", err)
+		}
+		target, err := inside(header.Name)
+		if err != nil {
+			return err
+		}
+		mode := os.FileMode(header.Mode) &^ 0o022
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, mode|0o700); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(out, reader); err != nil {
+				out.Close()
+				return err
+			}
+			if err := out.Close(); err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			_ = os.Remove(target)
+			if err := os.Symlink(header.Linkname, target); err != nil {
+				return err
+			}
+		case tar.TypeLink:
+			source, err := inside(header.Linkname)
+			if err != nil {
+				return err
+			}
+			_ = os.Remove(target)
+			if err := os.Link(source, target); err != nil {
+				return err
+			}
+		}
+		// Devices and fifos are skipped on purpose: a rootfs image is a tree of files, links and
+		// directories, and a device node is something the machine's kernel makes for itself.
+	}
+}
+
+// UnpackAppliance is the whole of what installing an appliance image does to a tarball: gunzip,
+// then every kind of entry a filesystem has. It is exported because the test that guards the
+// release's own artifact has to unpack it exactly as an install does.
+func UnpackAppliance(tarball []byte, dir string) error {
+	// Streaming on purpose: the image is 575 MB unpacked, and reading the stream whole
+	// and then gunzipping it whole is another 575 MB of memory for no reason.
+	gzip, err := gzip.NewReader(bytes.NewReader(tarball))
+	if err != nil {
+		return fmt.Errorf("update: the appliance is not a gzip stream: %w", err)
+	}
+	return UntarImage(gzip, dir)
+}
+
+// UntarImage is the appliance's entry rules without the []byte in the way: the caller
+// streams, so a 575 MB image costs 575 MB of disk and almost nothing of memory.
+func UntarImage(r io.Reader, dir string) error { return untarImageStream(r, dir) }

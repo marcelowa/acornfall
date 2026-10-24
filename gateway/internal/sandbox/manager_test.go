@@ -18,6 +18,11 @@ type fakeDriver struct {
 	// nesting is what this engine says about nesting here; the zero value is a refusal
 	// with no reason, which is what a test that never asks about it wants.
 	nesting NestingSupport
+	// startErr fails Start alone, so "a container that will not start is remade" can be staged
+	// without failing the calls that do the remaking.
+	startErr error
+	// removeErr fails Remove alone: a leftover the runtime will not let go is its own failure.
+	removeErr error
 	// installed flips to true after Install, so "installs once" can be asserted.
 	installed   bool
 	installErrs []error
@@ -56,6 +61,9 @@ func (f *fakeDriver) Create(_ context.Context, policy Policy, _ string) error {
 }
 func (f *fakeDriver) Start(context.Context, string) error {
 	f.calls = append(f.calls, "start")
+	if f.startErr != nil {
+		return f.startErr
+	}
 	return f.err
 }
 func (f *fakeDriver) Stop(context.Context, string) error {
@@ -64,6 +72,9 @@ func (f *fakeDriver) Stop(context.Context, string) error {
 }
 func (f *fakeDriver) Remove(context.Context, string) error {
 	f.calls = append(f.calls, "rm")
+	if f.removeErr != nil {
+		return f.removeErr
+	}
 	return f.err
 }
 
@@ -73,7 +84,7 @@ func (f *fakeDriver) ran(call string) bool {
 
 func openWith(t *testing.T, driver Driver) *Manager {
 	t.Helper()
-	manager, err := Open(context.Background(), Options{Home: t.TempDir(), Driver: driver})
+	manager, err := Open(context.Background(), Options{Machinery: t.TempDir(), Driver: driver})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +211,7 @@ func TestStatusFindsTheSandboxByName(t *testing.T) {
 // between a report and an install — and it must not install later either.
 func TestReportOnlyDescribesWithoutChangingAnything(t *testing.T) {
 	driver := &fakeDriver{}
-	manager, err := Open(context.Background(), Options{Home: t.TempDir(), Driver: driver, ReportOnly: true})
+	manager, err := Open(context.Background(), Options{Machinery: t.TempDir(), Driver: driver, ReportOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +235,7 @@ func TestReportOnlyDescribesWithoutChangingAnything(t *testing.T) {
 func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
 	ctx := context.Background()
 
-	readable, err := Open(ctx, Options{Home: t.TempDir(), Driver: &fakeDriver{installed: true}, ReportOnly: true})
+	readable, err := Open(ctx, Options{Machinery: t.TempDir(), Driver: &fakeDriver{installed: true}, ReportOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +245,7 @@ func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
 	}
 
 	skewed, err := Open(ctx, Options{
-		Home:       t.TempDir(),
+		Machinery:  t.TempDir(),
 		Driver:     &fakeDriver{installed: true, err: errors.New("database schema is newer than this msb binary")},
 		ReportOnly: true,
 	})
@@ -251,7 +262,7 @@ func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
 	}
 
 	// Report-only still changes nothing: verify is a read, not an install.
-	missing, err := Open(ctx, Options{Home: t.TempDir(), Driver: &fakeDriver{}, ReportOnly: true})
+	missing, err := Open(ctx, Options{Machinery: t.TempDir(), Driver: &fakeDriver{}, ReportOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,10 +273,149 @@ func TestVerifyReadsTheStoreThroughThePinnedEngine(t *testing.T) {
 }
 
 func TestOpenRefusesWithoutADriverOrHome(t *testing.T) {
-	if _, err := Open(context.Background(), Options{Home: t.TempDir()}); err == nil {
+	if _, err := Open(context.Background(), Options{Machinery: t.TempDir()}); err == nil {
 		t.Error("a manager with no engine is a mistake, not a state")
 	}
 	if _, err := Open(context.Background(), Options{Driver: &fakeDriver{}}); err == nil {
 		t.Error("a manager with no home has nowhere to install anything")
+	}
+}
+
+// layeredDriver is an engine with a machine: one VM for the install, containers inside it.
+// The manager must ensure the VM before it asks for a container, and must not create the
+// container when the VM cannot boot.
+type layeredDriver struct {
+	fakeDriver
+	ensured int
+	bootErr error
+}
+
+func (l *layeredDriver) EnsureMachine(context.Context) error {
+	l.calls = append(l.calls, "ensure-machine")
+	l.ensured++
+	return l.bootErr
+}
+
+func TestTheMachineIsEnsuredBeforeASandboxIsCreated(t *testing.T) {
+	driver := &layeredDriver{}
+	if _, err := openWith(t, driver).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if driver.ensured == 0 {
+		t.Fatal("a container needs the machine it lives in")
+	}
+	ensure, create := -1, -1
+	for index, call := range driver.calls {
+		switch call {
+		case "ensure-machine":
+			ensure = index
+		case "create":
+			create = index
+		}
+	}
+	if ensure > create {
+		t.Errorf("the machine has to be ensured first, got %v", driver.calls)
+	}
+}
+
+func TestASandboxIsNotCreatedWhenTheMachineCannotBoot(t *testing.T) {
+	driver := &layeredDriver{bootErr: errors.New("the VM disk is full")}
+	_, err := openWith(t, driver).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "disk is full") {
+		t.Fatalf("want the boot failure, got %v", err)
+	}
+	if driver.ran("create") || driver.ran("start") {
+		t.Errorf("nothing should be asked of a machine that is not up: %v", driver.calls)
+	}
+}
+
+// An engine without a machine layer keeps working exactly as before: today's engines have no
+// VM of their own to ensure, and asking them for one would be a method they do not have.
+func TestAnEngineWithoutAMachineNeedsNoEnsuring(t *testing.T) {
+	driver := &fakeDriver{}
+	if _, err := openWith(t, driver).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if !driver.ran("create") {
+		t.Errorf("a flat engine still creates its sandbox: %v", driver.calls)
+	}
+}
+
+// One container the runtime cannot read is that container's problem. It used to fail the list
+// call, so every workspace on the machine lost its tools while the containers themselves were
+// fine — and the only cure was a clean install, because the unreadable container lived in the
+// image the next machine booted from.
+func TestAnUnreadableContainerIsItsOwnWorkspacesProblem(t *testing.T) {
+	broken := Instance{Name: Name("/home/me/other"), Problem: "container has no configuration file"}
+
+	// Another workspace's: this one is made as usual.
+	other := &fakeDriver{listed: []Instance{broken}}
+	name, err := openWith(t, other).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("a stranger's unreadable container is not this workspace's problem: %v", err)
+	}
+	if name != Name("/home/me/work") || !other.ran("create") {
+		t.Errorf("this workspace's sandbox should be created, got %q and %v", name, other.calls)
+	}
+
+	// This workspace's own: the refusal names the container and says what to do.
+	own := &fakeDriver{listed: []Instance{{Name: Name("/home/me/work"), Problem: broken.Problem}}}
+	_, err = openWith(t, own).Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
+	if err == nil {
+		t.Fatal("this workspace's container cannot be read, so its sandbox is not usable")
+	}
+	for _, want := range []string{Name("/home/me/work"), broken.Problem, "machine down"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal should name %q: %v", want, err)
+		}
+	}
+	if own.ran("create") || own.ran("start") {
+		t.Errorf("an unreadable container is not silently replaced: %v", own.calls)
+	}
+}
+
+// A container that will not start is remade, not started again.
+//
+// Measured on a real host: an install was cancelled while the container was being made, the
+// runtime kept the leftover ("Ongoing container creation detected"), and every later start
+// failed — the workspace said "this workspace has no sandbox: lxc-start … Ongoing container
+// creation detected" for ever. Nothing ever ran in it, so the repair costs nothing.
+func TestAWorkspaceWhoseContainerWillNotStartIsRemade(t *testing.T) {
+	driver := &fakeDriver{
+		listed:   []Instance{{Name: Name("/home/me/work"), Status: "STOPPED"}},
+		startErr: errors.New("lxc-start: Ongoing container creation detected"),
+	}
+	manager := openWith(t, driver)
+	name, err := manager.Produce(context.Background(), Policy{Workspace: "/home/me/work", Image: "golang:1.24"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != Name("/home/me/work") {
+		t.Errorf("the workspace's container is %q, want %q", name, Name("/home/me/work"))
+	}
+	for _, want := range []string{"list", "start", "rm", "create"} {
+		if !driver.ran(want) {
+			t.Errorf("want %q to have run, got %v", want, driver.calls)
+		}
+	}
+}
+
+// And when the leftover cannot be removed, the sentence carries both halves: the reason it would
+// not start, and why it could not be taken away.
+func TestAFailedRemakeSaysBothReasons(t *testing.T) {
+	driver := &fakeDriver{
+		listed:    []Instance{{Name: Name("/home/me/work"), Status: "STOPPED"}},
+		startErr:  errors.New("Ongoing container creation detected"),
+		removeErr: errors.New("the runtime is gone"),
+	}
+	manager := openWith(t, driver)
+	_, err := manager.Produce(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir())
+	if err == nil {
+		t.Fatal("a remake that cannot remove the leftover is a failure")
+	}
+	for _, want := range []string{"Ongoing container creation", "the runtime is gone"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error should carry %q:\n%v", want, err)
+		}
 	}
 }

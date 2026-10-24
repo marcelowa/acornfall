@@ -23,19 +23,25 @@ Every sandbox mounts, **read-only, at the same path**:
 
 | Path | Why |
 |---|---|
-| `~/.agents` (in full) | the ecosystem's bundle: `config.json`, `agents/`, `skills/`, `prompts/`, `commands/` |
-| `<home>/agents`, `<home>/skills` | the install's definition and skill folders |
-| `<home>/prompts`, `<home>/commands` | the template folder under both names, because both are read |
-| `<home>/config.json` | the install's config file, when it exists |
+| `<root>/.agents` (in full) | the bundle: `agents/`, `skills/`, `prompts/`, `commands/` — one tree, the user's own |
+| `<root>/config/config.json` | the install's config file, when it exists |
+
+`<root>` is the folder the machine mounts ([ADR 0022](0022-the-appliance-runs-in-the-machine.md)),
+which is where this list moved to when the two-folder layout landed: the bundle used to be two
+layers — the user's `~/.agents` and the install's own four folders — and one tree is what the new
+shape buys, because the files are the user's and there is nothing left to shadow. The mounts keep
+the same rule: the *paths inside* the sandbox are the paths the instructions name.
 
 **Read-only is the decision, not a detail.** The agent may read its instructions and run their
 scripts; editing them from inside the sandbox would be self-modification — a way to persist a
 change to every future conversation's instructions — and that belongs behind review
 (issue #17).
 
-**The list is explicit, and `<home>` is not on it.** `credentials.json`, `token`, and `state/`
-are the reason: the install is never mounted, the named resource folders are. A test pins
-that the install folder, its credentials file, and its state are never in the list.
+**The list is explicit, and the root is not on it.** `config/credentials.json`,
+`config/token`, and `state/` are the reason: the root is never mounted, the bundle and the one
+config file are. A test pins that the root, its credentials file, and its state are never in the
+list — and the mapping refuses them in both directions, because a bind of the root would be every
+workspace at once ([ADR 0022](0022-the-appliance-runs-in-the-machine.md)).
 
 **The folders are created at install; the file is conditional.** `serve` creates the five
 folders before any worker can start, so the mounts always resolve, including on a fresh
